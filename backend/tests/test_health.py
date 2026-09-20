@@ -79,3 +79,12 @@ def test_kraken_readiness_reports_unconfigured_without_read_only_key():
     body = response.json()
     assert body["configured"] is False
     assert body["ready"] is False
+
+
+def test_kraken_reconcile_requires_read_only_credentials():
+    response = client.post("/api/v1/venue/kraken/reconcile", headers=AUTH)
+    assert response.status_code == 200
+    assert response.json() == {
+        "ok": False,
+        "error": "read_only_credentials_not_configured",
+    }
