@@ -21,6 +21,7 @@ from app.portfolio import PaperPortfolio
 from app.profitability import ProfitabilityDecision, ProfitabilityGate, StaticCostModel
 from app.risk import deny_entry
 from app.services import EntryDecisionService
+from app.state import BotState, transition
 from app.strategy import crossover_signal, sma
 
 STARTING_USD = 10_000.0
@@ -51,7 +52,7 @@ class PaperEngine:
     ) -> None:
         self.paper_mode = True
         self.live_blocked = True
-        self.state = "OFFLINE"
+        self.state = BotState.OFFLINE.value
         self.flatten_lock = False
         self.symbol = SYMBOL
 
@@ -104,6 +105,9 @@ class PaperEngine:
     @property
     def audit(self):
         return self.audit_sink.events
+
+    def _set_state(self, target: BotState | str) -> None:
+        self.state = transition(self.state, target).value
 
     def _log(
         self,
@@ -303,7 +307,7 @@ class PaperEngine:
             )
 
         # Restores always fail closed. The operator must arm explicitly.
-        self.state = "OFFLINE"
+        self._set_state(BotState.OFFLINE)
         self._log(
             "INFO",
             "Persisted paper ledger restored; bot remains OFFLINE.",
@@ -357,9 +361,11 @@ class PaperEngine:
             return False
 
         if fill.side == "buy":
-            self.state = "IN_POSITION"
+            self._set_state(BotState.IN_POSITION)
         elif self.portfolio.btc <= 0:
-            self.state = "IDLE" if self.state != "OFFLINE" else "OFFLINE"
+            self._set_state(
+                BotState.IDLE if self.state != BotState.OFFLINE.value else BotState.OFFLINE
+            )
 
         fill_record = {
             "ts_utc": datetime.now(timezone.utc).isoformat(),
@@ -505,7 +511,7 @@ class PaperEngine:
         return True
 
     async def evaluate_and_maybe_trade(self) -> None:
-        if self.state not in ("IDLE", "IN_POSITION") or not self.mark:
+        if self.state not in (BotState.IDLE.value, BotState.IN_POSITION.value) or not self.mark:
             return
 
         if self.btc > 0 and self.avg_entry > 0:
@@ -597,7 +603,11 @@ class PaperEngine:
         async with self._lock:
             if self.flatten_lock:
                 return {"ok": False, "error": "flatten_lock"}
-            self.state = "IN_POSITION" if self.btc > 0 else "IDLE"
+            if self.state == BotState.FAULT.value:
+                return {"ok": False, "error": "fault_requires_reset"}
+            self._set_state(
+                BotState.IN_POSITION if self.btc > 0 else BotState.IDLE
+            )
             self._log(
                 "INFO",
                 f"Bot armed ({self.state}).",
@@ -609,7 +619,7 @@ class PaperEngine:
 
     async def stop_bot(self) -> dict[str, Any]:
         async with self._lock:
-            self.state = "OFFLINE"
+            self._set_state(BotState.OFFLINE)
             self._log(
                 "INFO",
                 "Bot disarmed. Position left untouched.",
@@ -650,7 +660,7 @@ class PaperEngine:
             self.flatten_lock = True
             if self.btc > 0 and self.mark:
                 await self._execute("sell", self.btc, "flatten")
-            self.state = "OFFLINE"
+            self._set_state(BotState.OFFLINE)
             self._log(
                 "INFO",
                 "Emergency flatten complete. Entries locked.",
