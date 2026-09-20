@@ -4,15 +4,30 @@ import { useCallback, useEffect, useState } from "react";
 
 const apiBase = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
 
-async function getJson(path) {
-  const res = await fetch(`${apiBase}${path}`, { cache: "no-store" });
-  if (!res.ok) throw new Error(path);
+function authHeaders(token, stepUp = "") {
+  const headers = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (stepUp) headers["X-Aether-Step-Up"] = stepUp;
+  return headers;
+}
+
+async function getJson(path, token = "") {
+  const res = await fetch(`${apiBase}${path}`, {
+    cache: "no-store",
+    headers: authHeaders(token),
+  });
+  if (!res.ok) throw new Error(`${res.status}:${path}`);
   return res.json();
 }
 
-async function post(path) {
-  const res = await fetch(`${apiBase}${path}`, { method: "POST" });
-  return res.json();
+async function post(path, token = "", stepUp = "") {
+  const res = await fetch(`${apiBase}${path}`, {
+    method: "POST",
+    headers: authHeaders(token, stepUp),
+  });
+  const body = await res.json();
+  if (!res.ok) throw new Error(body?.detail || `${res.status}:${path}`);
+  return body;
 }
 
 function fmt(value, digits = 2) {
@@ -25,28 +40,41 @@ export default function DashboardPage() {
   const [bot, setBot] = useState(null);
   const [performance, setPerformance] = useState(null);
   const [audit, setAudit] = useState([]);
+  const [operatorToken, setOperatorToken] = useState("");
+  const [stepUpToken, setStepUpToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   const refresh = useCallback(async () => {
     try {
-      const [h, a, b, p, log] = await Promise.all([
-        getJson("/api/v1/health"),
-        getJson("/api/v1/account"),
-        getJson("/api/v1/bot"),
-        getJson("/api/v1/performance"),
-        getJson("/api/v1/audit"),
-      ]);
+      const h = await getJson("/api/v1/health");
       setHealth(h);
+
+      if (!operatorToken) {
+        setError("Operator authentication required for trading data and controls.");
+        return;
+      }
+
+      const [a, b, p, log] = await Promise.all([
+        getJson("/api/v1/account", operatorToken),
+        getJson("/api/v1/bot", operatorToken),
+        getJson("/api/v1/performance", operatorToken),
+        getJson("/api/v1/audit", operatorToken),
+      ]);
       setAccount(a);
       setBot(b);
       setPerformance(p);
       setAudit(log.events || []);
       setError("");
-    } catch {
-      setError("API unreachable. Start the backend on port 8000.");
+    } catch (err) {
+      const message = String(err?.message || err);
+      setError(
+        message.startsWith("401")
+          ? "Operator authentication failed."
+          : "API request failed. Verify backend and operator credentials."
+      );
     }
-  }, []);
+  }, [operatorToken]);
 
   useEffect(() => {
     refresh();
@@ -60,12 +88,16 @@ export default function DashboardPage() {
       const result = await fn();
       if (result && result.ok === false) setError(result.error || "denied");
       await refresh();
+    } catch (err) {
+      setError(String(err?.message || err));
     } finally {
       setBusy(false);
     }
   };
 
   const pnlClass = (n) => (n > 0 ? "up" : n < 0 ? "down" : "");
+  const authenticated = Boolean(operatorToken);
+  const steppedUp = Boolean(operatorToken && stepUpToken);
 
   return (
     <main className="shell">
@@ -74,11 +106,43 @@ export default function DashboardPage() {
         <span className="badge">PAPER</span>
       </header>
 
+      <section className="card" style={{ marginTop: 10 }}>
+        <h2>[0] OPERATOR SECURITY</h2>
+        <div className="auth-grid">
+          <label>
+            <span>Operator token</span>
+            <input
+              type="password"
+              autoComplete="off"
+              value={operatorToken}
+              onChange={(e) => setOperatorToken(e.target.value)}
+              placeholder="Bearer token"
+            />
+          </label>
+          <label>
+            <span>Step-up token</span>
+            <input
+              type="password"
+              autoComplete="off"
+              value={stepUpToken}
+              onChange={(e) => setStepUpToken(e.target.value)}
+              placeholder="Required to arm, trade, or unlock"
+            />
+          </label>
+        </div>
+        <p className="muted">
+          Credentials stay in this browser tab state and are not bundled into the frontend.
+        </p>
+      </section>
+
       {error ? <p className="down">{error}</p> : null}
 
       <div className="grid grid-2">
         <section className="card">
           <h2>[1] SYSTEM STATE</h2>
+          <div className="row"><span>API</span><span>{health?.ok ? "ONLINE" : "UNKNOWN"}</span></div>
+          <div className="row"><span>Operator auth</span><span>{authenticated ? "PRESENT" : "REQUIRED"}</span></div>
+          <div className="row"><span>Step-up</span><span>{steppedUp ? "PRESENT" : "NOT PRESENT"}</span></div>
           <div className="row"><span>State</span><span>{bot?.state || "UNKNOWN"}</span></div>
           <div className="row"><span>Data source</span><span>{account?.mark_source || "-"}</span></div>
           <div className="row"><span>Tick age</span><span>{health?.last_tick_age_ms ?? "-"} ms</span></div>
@@ -100,7 +164,7 @@ export default function DashboardPage() {
       <div className="grid grid-2">
         <section className="card">
           <h2>[3] STRATEGY — SMA {bot?.short_ma}/{bot?.long_ma}</h2>
-          <p>Public BTC/USD poll every 15s. Bars: {bot?.bars ?? 0}/{bot?.warm_up_needed ?? 22}.</p>
+          <p>Public BTC/USD feed. Bars: {bot?.bars ?? 0}/{bot?.warm_up_needed ?? 22}.</p>
           <div className="row"><span>SMA short</span><span>{bot?.short_value ? Number(bot.short_value).toFixed(2) : "-"}</span></div>
           <div className="row"><span>SMA long</span><span>{bot?.long_value ? Number(bot.long_value).toFixed(2) : "-"}</span></div>
           <div className="row"><span>Profitability gate</span><span>{bot?.profitability_enforced ? "ENFORCED" : "ADVISORY"}</span></div>
@@ -130,24 +194,24 @@ export default function DashboardPage() {
       <section className="card" style={{ marginTop: 10 }}>
         <h2>[6] BOT CONTROLS</h2>
         <div className="actions">
-          <button type="button" disabled={busy} onClick={() => act(() => post("/api/v1/bot/start"))}>Start</button>
-          <button type="button" disabled={busy} onClick={() => act(() => post("/api/v1/bot/stop"))}>Stop</button>
-          <button type="button" disabled={busy} onClick={() => act(() => post("/api/v1/risk/unlock"))}>Unlock</button>
+          <button type="button" disabled={busy || !steppedUp} onClick={() => act(() => post("/api/v1/bot/start", operatorToken, stepUpToken))}>Start</button>
+          <button type="button" disabled={busy || !authenticated} onClick={() => act(() => post("/api/v1/bot/stop", operatorToken))}>Stop</button>
+          <button type="button" disabled={busy || !steppedUp} onClick={() => act(() => post("/api/v1/risk/unlock", operatorToken, stepUpToken))}>Unlock</button>
         </div>
       </section>
 
       <section className="card" style={{ marginTop: 10 }}>
         <h2>[7] MANUAL PAPER TICKETS</h2>
         <div className="actions">
-          <button type="button" disabled={busy} onClick={() => act(() => post("/api/v1/orders/market?side=buy"))}>Buy market</button>
-          <button type="button" disabled={busy} onClick={() => act(() => post("/api/v1/orders/market?side=sell"))}>Sell market</button>
+          <button type="button" disabled={busy || !steppedUp} onClick={() => act(() => post("/api/v1/orders/market?side=buy", operatorToken, stepUpToken))}>Buy market</button>
+          <button type="button" disabled={busy || !steppedUp} onClick={() => act(() => post("/api/v1/orders/market?side=sell", operatorToken, stepUpToken))}>Sell market</button>
         </div>
       </section>
 
       <section className="card" style={{ marginTop: 10 }}>
         <h2>[8] AUDIT</h2>
         <div className="log">
-          {(audit.length ? audit : [{ ts: "", level: "INFO", message: "Waiting for engine" }])
+          {(audit.length ? audit : [{ ts: "", level: "INFO", message: "Waiting for authenticated engine data" }])
             .slice(0, 25)
             .map((e) => {
               const t = e.ts ? e.ts.slice(11, 19) : "";
@@ -159,7 +223,12 @@ export default function DashboardPage() {
       </section>
 
       <div className="dock">
-        <button type="button" className="danger" disabled={busy} onClick={() => act(() => post("/api/v1/orders/flatten"))}>
+        <button
+          type="button"
+          className="danger"
+          disabled={busy || !authenticated}
+          onClick={() => act(() => post("/api/v1/orders/flatten", operatorToken))}
+        >
           Emergency flatten
         </button>
       </div>
