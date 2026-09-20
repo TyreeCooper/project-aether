@@ -27,7 +27,9 @@ button:disabled{opacity:.4}
   <div class="bar"><b>AETHER PAPER</b><span class="warn">PAPER</span></div>
   <div class="card">
     <h2>ACCOUNT</h2>
-    <div class="row"><span>Mark</span><span id="mark">-</span></div>
+    <div class="row"><span>Source</span><span id="src">-</span></div>
+    <div class="row"><span>Last</span><span id="mark">-</span></div>
+    <div class="row"><span>Bid / Ask</span><span id="ba">-</span></div>
     <div class="row"><span>Mark age</span><span id="age">-</span></div>
     <div class="row"><span>USD</span><span id="usd">-</span></div>
     <div class="row"><span>BTC</span><span id="btc">-</span></div>
@@ -58,7 +60,9 @@ async function load(){
       fetch('/api/v1/bot').then(r=>r.json()),
       fetch('/api/v1/audit').then(r=>r.json())
     ]);
+    src.textContent=a.mark_source??'-';
     mark.textContent=a.mark??'-';
+    ba.textContent=(a.bid??'-')+' / '+(a.ask??'-');
     usd.textContent=a.usd_free??'-';
     btc.textContent=a.btc_total??'-';
     eq.textContent=a.equity_usd??'-';

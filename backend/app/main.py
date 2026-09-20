@@ -17,7 +17,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="Project Aether API", version="0.3.1", lifespan=lifespan)
+app = FastAPI(title="Project Aether API", version="0.4.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -42,11 +42,12 @@ async def health():
     return {
         "ok": True,
         "env": "paper",
-        "venue": "paper-coingecko",
+        "venue": snap.get("mark_source"),
         "symbol": "BTC/USD",
         "last_tick_age_ms": snap["last_tick_age_ms"],
         "stale": snap.get("stale"),
         "paper_mode": True,
+        "live_blocked": True,
     }
 
 
@@ -69,6 +70,8 @@ async def account():
         "margin_utilized_pct": 0.0,
         "mark_source": snap["mark_source"],
         "mark": snap["mark"],
+        "bid": snap.get("bid"),
+        "ask": snap.get("ask"),
         "stale": snap.get("stale"),
     }
 
