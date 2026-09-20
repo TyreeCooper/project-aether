@@ -12,12 +12,14 @@ body{margin:0;font-family:system-ui;background:#071422;color:#e8eef4}
 h2{margin:0 0 8px;font-size:11px;color:#8aa0b5;letter-spacing:.08em}
 .row{display:flex;justify-content:space-between;margin:8px 0;font-size:16px}
 button{min-height:44px;flex:1;margin:4px;background:#12314a;color:#fff;border:1px solid #1c3a55}
-.rowbtns{display:flex}
+button:disabled{opacity:.4}
+.rowbtns{display:flex;flex-wrap:wrap}
 .bad{background:#3a1515;border-color:#e05b5b}
 .dock{position:fixed;left:0;right:0;bottom:0;padding:10px;background:#061018}
 .dock button{width:100%;margin:0}
 .log{font:12px monospace;color:#8aa0b5;white-space:pre-wrap;max-height:180px;overflow:auto}
 .warn{color:#e0a24b}
+.err{color:#e05b5b}
 </style>
 </head>
 <body>
@@ -26,19 +28,23 @@ button{min-height:44px;flex:1;margin:4px;background:#12314a;color:#fff;border:1p
   <div class="card">
     <h2>ACCOUNT</h2>
     <div class="row"><span>Mark</span><span id="mark">-</span></div>
+    <div class="row"><span>Mark age</span><span id="age">-</span></div>
     <div class="row"><span>USD</span><span id="usd">-</span></div>
     <div class="row"><span>BTC</span><span id="btc">-</span></div>
     <div class="row"><span>Equity</span><span id="eq">-</span></div>
     <div class="row"><span>Open P/L</span><span id="pnl">-</span></div>
+    <div id="note" class="warn"></div>
   </div>
   <div class="card">
     <h2>BOT</h2>
     <div class="row"><span>State</span><span id="st">-</span></div>
+    <div class="row"><span>Flatten lock</span><span id="lock">-</span></div>
     <div class="rowbtns">
-      <button onclick="p('/api/v1/bot/start')">Start</button>
+      <button id="bStart" onclick="p('/api/v1/bot/start')">Start</button>
       <button onclick="p('/api/v1/bot/stop')">Stop</button>
-      <button onclick="p('/api/v1/orders/market?side=buy')">Buy</button>
+      <button id="bBuy" onclick="p('/api/v1/orders/market?side=buy')">Buy</button>
       <button onclick="p('/api/v1/orders/market?side=sell')">Sell</button>
+      <button onclick="p('/api/v1/risk/unlock')">Unlock</button>
     </div>
   </div>
   <div class="card"><h2>AUDIT</h2><div class="log" id="log"></div></div>
@@ -52,9 +58,21 @@ async function load(){
       fetch('/api/v1/bot').then(r=>r.json()),
       fetch('/api/v1/audit').then(r=>r.json())
     ]);
-    mark.textContent=a.mark??'-'; usd.textContent=a.usd_free??'-';
-    btc.textContent=a.btc_total??'-'; eq.textContent=a.equity_usd??'-';
-    pnl.textContent=a.open_pnl??'-'; st.textContent=b.state??'-';
+    mark.textContent=a.mark??'-';
+    usd.textContent=a.usd_free??'-';
+    btc.textContent=a.btc_total??'-';
+    eq.textContent=a.equity_usd??'-';
+    pnl.textContent=a.open_pnl??'-';
+    st.textContent=b.state??'-';
+    lock.textContent=String(b.flatten_lock);
+    const ageMs=b.last_tick_age_ms;
+    document.getElementById('age').textContent=ageMs==null?'no tick':(ageMs+' ms');
+    const stale=!!b.stale;
+    const locked=!!b.flatten_lock;
+    note.textContent=locked?'Entries locked after flatten. Tap Unlock.':(stale?'Mark stale or missing.':'');
+    note.className=locked||stale?'err':'warn';
+    bStart.disabled=locked;
+    bBuy.disabled=locked||stale;
     log.textContent=(l.events||[]).slice(0,20).map(e=>(e.ts||'').slice(11,19)+' '+e.level+' '+e.message).join('\n');
   }catch(e){log.textContent='Cannot reach API';}
 }

@@ -1,4 +1,3 @@
-import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -18,7 +17,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="Project Aether API", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="Project Aether API", version="0.3.1", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -46,6 +45,7 @@ async def health():
         "venue": "paper-coingecko",
         "symbol": "BTC/USD",
         "last_tick_age_ms": snap["last_tick_age_ms"],
+        "stale": snap.get("stale"),
         "paper_mode": True,
     }
 
@@ -69,6 +69,7 @@ async def account():
         "margin_utilized_pct": 0.0,
         "mark_source": snap["mark_source"],
         "mark": snap["mark"],
+        "stale": snap.get("stale"),
     }
 
 
