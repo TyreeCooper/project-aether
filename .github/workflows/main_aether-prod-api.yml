@@ -34,7 +34,9 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run backend tests
-        run: pytest -q
+        env:
+          PYTHONPATH: .
+        run: python -m pytest -q
 
       - name: Upload backend artifact for deployment
         uses: actions/upload-artifact@v4
