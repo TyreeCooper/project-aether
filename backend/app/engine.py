@@ -98,6 +98,8 @@ class PaperEngine:
         self.last_tick_age_ms: int | None = None
         self._last_tick_mono: float | None = None
         self._consecutive_mark_failures = 0
+        self._last_reconcile_mono: float | None = None
+        self._last_reconcile_ok: bool | None = None
         self.closes: deque[float] = deque(maxlen=300)
         self.orders: deque[dict[str, Any]] = deque(maxlen=500)
         self.fills: deque[dict[str, Any]] = deque(maxlen=500)
@@ -229,6 +231,13 @@ class PaperEngine:
             "last_tick_age_ms": age,
             "consecutive_mark_failures": self._consecutive_mark_failures,
             "max_mark_age_ms": MAX_MARK_AGE_MS,
+            "venue_reconciliation_required": settings.venue_reconciliation_required,
+            "last_reconciliation_ok": self._last_reconcile_ok,
+            "last_reconciliation_age_ms": (
+                int((time.monotonic() - self._last_reconcile_mono) * 1000)
+                if self._last_reconcile_mono is not None
+                else None
+            ),
             "usd": p.usd,
             "btc": p.btc,
             "equity": p.equity,
@@ -669,6 +678,26 @@ class PaperEngine:
                     )
                     return {"ok": False, "error": "persistence_unhealthy"}
 
+            if settings.venue_reconciliation_required:
+                reconcile_age = (
+                    time.monotonic() - self._last_reconcile_mono
+                    if self._last_reconcile_mono is not None
+                    else None
+                )
+                if (
+                    self._last_reconcile_ok is not True
+                    or reconcile_age is None
+                    or reconcile_age > settings.venue_reconciliation_max_age_seconds
+                ):
+                    self._log(
+                        "ERROR",
+                        "Bot arm denied because venue reconciliation is not current.",
+                        actor="operator",
+                        component="reconciliation",
+                        event="arm_denied_reconciliation_required",
+                    )
+                    return {"ok": False, "error": "reconciliation_required"}
+
             self._set_state(
                 BotState.IN_POSITION if self.btc > 0 else BotState.IDLE
             )
@@ -790,6 +819,9 @@ class PaperEngine:
                     note=source,
                     payload=payload,
                 )
+
+            self._last_reconcile_ok = decision.ok
+            self._last_reconcile_mono = time.monotonic()
 
             if not decision.ok:
                 self.flatten_lock = True
