@@ -1,8 +1,7 @@
 """In-process paper trading orchestrator.
 
-Market-data transport and order execution are delegated to interfaces so the
-same engine can later run against venue adapters without embedding HTTP or
-fill mechanics here. Live execution remains blocked.
+Market data, execution, portfolio accounting, and profitability checks are
+separate concerns. Live execution remains blocked.
 """
 
 from __future__ import annotations
@@ -13,13 +12,18 @@ from collections import deque
 from datetime import datetime, timezone
 from typing import Any
 
-from app.execution import ExecutionResult, OrderRequest, PaperExecutionGateway
+from app.execution import ExecutionGateway, ExecutionResult, OrderRequest, PaperExecutionGateway
 from app.market_data import CoinGeckoMarketDataProvider, MarketDataProvider
+from app.portfolio import PaperPortfolio
+from app.profitability import ProfitabilityDecision, ProfitabilityGate, StaticCostModel
 from app.risk import deny_entry
 from app.strategy import crossover_signal, sma
 
 STARTING_USD = 10_000.0
 TAKER_FEE = 0.0026
+PAPER_SPREAD_BPS = 0.0
+PAPER_SLIPPAGE_BPS = 0.0
+MIN_EDGE_MULTIPLE = 1.25
 POLL_SECONDS = 15
 SHORT_MA = 8
 LONG_MA = 21
@@ -39,25 +43,33 @@ class PaperEngine:
     def __init__(
         self,
         market_data: MarketDataProvider | None = None,
-        execution: PaperExecutionGateway | None = None,
+        execution: ExecutionGateway | None = None,
+        portfolio: PaperPortfolio | None = None,
+        profitability_gate: ProfitabilityGate | None = None,
     ) -> None:
         self.paper_mode = True
         self.live_blocked = True
         self.state = "OFFLINE"
         self.flatten_lock = False
-
-        # Portfolio remains in-process for this milestone. It moves to the
-        # dedicated portfolio/persistence layer in the next milestone.
-        self.usd = STARTING_USD
-        self.btc = 0.0
-        self.avg_entry = 0.0
-        self.realized_session = 0.0
-        self.daily_realized = 0.0
-        self.peak_equity = STARTING_USD
-
         self.symbol = SYMBOL
+
         self.market_data = market_data or CoinGeckoMarketDataProvider()
-        self.execution = execution or PaperExecutionGateway(taker_fee_rate=TAKER_FEE)
+        self.execution = execution or PaperExecutionGateway(
+            taker_fee_rate=TAKER_FEE,
+            spread_bps=PAPER_SPREAD_BPS,
+            slippage_bps=PAPER_SLIPPAGE_BPS,
+        )
+        self.portfolio = portfolio or PaperPortfolio(starting_usd=STARTING_USD)
+        self.profitability_gate = profitability_gate or ProfitabilityGate(
+            StaticCostModel(
+                taker_fee_rate=TAKER_FEE,
+                spread_bps=PAPER_SPREAD_BPS,
+                slippage_bps=PAPER_SLIPPAGE_BPS,
+            ),
+            minimum_edge_multiple=MIN_EDGE_MULTIPLE,
+            enforce=False,
+        )
+        self.last_profitability: ProfitabilityDecision | None = None
 
         self.mark: float | None = None
         self.mark_source = "unavailable"
@@ -80,23 +92,48 @@ class PaperEngine:
         self.audit.appendleft({"ts": _now(), "level": level, "message": message})
 
     @property
+    def usd(self) -> float:
+        return self.portfolio.usd
+
+    @property
+    def btc(self) -> float:
+        return self.portfolio.btc
+
+    @property
+    def avg_entry(self) -> float:
+        return self.portfolio.avg_entry
+
+    @property
+    def realized_session(self) -> float:
+        return self.portfolio.realized_session
+
+    @property
+    def daily_realized(self) -> float:
+        return self.portfolio.daily_realized
+
+    @property
+    def peak_equity(self) -> float:
+        return self.portfolio.peak_equity
+
+    @property
     def equity(self) -> float:
-        mark = self.mark or 0.0
-        return self.usd + self.btc * mark
+        return self.portfolio.equity(self.mark)
 
     @property
     def open_pnl(self) -> float:
-        if self.btc <= 0 or not self.mark:
-            return 0.0
-        return (self.mark - self.avg_entry) * self.btc
+        return self.portfolio.open_pnl(self.mark)
 
     def snapshot(self) -> dict[str, Any]:
         age = None
         if self._last_tick_mono is not None:
             age = int((time.monotonic() - self._last_tick_mono) * 1000)
             self.last_tick_age_ms = age
+
         short = sma(list(self.closes), self.short_ma)
         long = sma(list(self.closes), self.long_ma)
+        p = self.portfolio.snapshot(self.mark)
+        profitability = self.last_profitability
+
         return {
             "state": self.state,
             "paper_mode": self.paper_mode,
@@ -114,14 +151,24 @@ class PaperEngine:
             "mark": self.mark,
             "mark_source": self.mark_source,
             "last_tick_age_ms": age,
-            "usd": round(self.usd, 2),
-            "btc": self.btc,
-            "equity": round(self.equity, 2),
-            "avg_entry": self.avg_entry,
-            "open_pnl": round(self.open_pnl, 2),
-            "realized_session": round(self.realized_session, 2),
-            "daily_realized": round(self.daily_realized, 2),
-            "peak_equity": round(self.peak_equity, 2),
+            "usd": p.usd,
+            "btc": p.btc,
+            "equity": p.equity,
+            "avg_entry": p.avg_entry,
+            "open_pnl": p.open_pnl,
+            "realized_session": p.realized_session,
+            "daily_realized": p.daily_realized,
+            "gross_realized": p.gross_realized,
+            "total_fees": p.total_fees,
+            "total_spread_cost": p.total_spread_cost,
+            "total_slippage_cost": p.total_slippage_cost,
+            "peak_equity": p.peak_equity,
+            "profitability_enforced": self.profitability_gate.enforce,
+            "last_profitability_reason": profitability.reason if profitability else None,
+            "last_expected_move_bps": profitability.expected_move_bps if profitability else None,
+            "last_minimum_required_bps": (
+                profitability.minimum_required_bps if profitability else None
+            ),
             "reason": "Paper machine. Public SMA rule. Live execution blocked.",
         }
 
@@ -134,51 +181,30 @@ class PaperEngine:
                 self.mark = self.closes[-1]
                 self.mark_source = getattr(self.market_data, "source", "provider")
                 self._last_tick_mono = time.monotonic()
+                self.portfolio.mark_to_market(self.mark)
             self._log("INFO", f"Seeded {len(self.closes)} public BTC marks for SMA warm-up.")
         except Exception as exc:
             self._log("WARN", f"History seed failed: {exc}")
 
     def _apply_execution(self, fill: ExecutionResult, actor: str) -> bool:
-        side = fill.side
-        qty = fill.qty
-        price = fill.execution_price
-        fee = fill.fee_usd
+        applied, error = self.portfolio.apply_fill(fill, self.mark)
+        if not applied:
+            self._log("WARN", f"Paper fill rejected by portfolio: {error}")
+            return False
 
-        if side == "buy":
-            cost = price * qty + fee
-            if cost > self.usd:
-                self._log("WARN", "Insufficient paper USD for buy.")
-                return False
-            new_qty = self.btc + qty
-            self.avg_entry = (
-                (self.avg_entry * self.btc + price * qty) / new_qty if new_qty else 0.0
-            )
-            self.usd -= cost
-            self.btc = new_qty
+        if fill.side == "buy":
             self.state = "IN_POSITION"
-        else:
-            qty = min(qty, self.btc)
-            if qty <= 0:
-                return False
-            # The request is normalized to available inventory before execution,
-            # so fill.fee_usd is already based on this quantity.
-            proceeds = price * qty - fee
-            pnl = (price - self.avg_entry) * qty - fee
-            self.usd += proceeds
-            self.btc -= qty
-            self.realized_session += pnl
-            self.daily_realized += pnl
-            if self.btc <= 1e-12:
-                self.btc = 0.0
-                self.avg_entry = 0.0
-                self.state = "IDLE" if self.state != "OFFLINE" else "OFFLINE"
+        elif self.portfolio.btc <= 0:
+            self.state = "IDLE" if self.state != "OFFLINE" else "OFFLINE"
 
-        self.peak_equity = max(self.peak_equity, self.equity)
         self._log(
             "FILL",
             (
-                f"{actor} {side.upper()} {qty} BTC @ {price:.2f} "
-                f"fee {fee:.2f} client_order_id={fill.client_order_id}"
+                f"{actor} {fill.side.upper()} {fill.qty} BTC @ "
+                f"{fill.execution_price:.2f} fee {fill.fee_usd:.2f} "
+                f"spread_cost {fill.spread_cost_usd:.2f} "
+                f"slippage_cost {fill.slippage_cost_usd:.2f} "
+                f"client_order_id={fill.client_order_id}"
             ),
         )
         return True
@@ -190,6 +216,7 @@ class PaperEngine:
             qty = min(qty, self.btc)
             if qty <= 0:
                 return False
+
         request = OrderRequest.market(
             side=side,  # type: ignore[arg-type]
             qty=qty,
@@ -198,6 +225,40 @@ class PaperEngine:
         )
         fill = await self.execution.execute_market(request)
         return self._apply_execution(fill, actor)
+
+    def _profitability_allows_entry(self, qty: float) -> bool:
+        if not self.mark:
+            return False
+
+        # The reference SMA rule does not yet estimate forward move in bps.
+        # In paper mode the gate is advisory until a strategy supplies that
+        # estimate; the missing estimate is surfaced explicitly, not guessed.
+        decision = self.profitability_gate.evaluate(
+            qty=qty,
+            reference_price=self.mark,
+            expected_move_bps=None,
+        )
+        self.last_profitability = decision
+
+        if not decision.allowed:
+            self._log(
+                "WARN",
+                (
+                    "Buy denied by profitability gate: "
+                    f"{decision.reason}; required={decision.minimum_required_bps:.2f}bps"
+                ),
+            )
+            return False
+
+        if decision.reason == "expected_edge_unavailable":
+            self._log(
+                "INFO",
+                (
+                    "Profitability gate advisory only: expected edge unavailable; "
+                    f"estimated one-way cost={decision.costs.total_cost_bps:.2f}bps"
+                ),
+            )
+        return True
 
     async def evaluate_and_maybe_trade(self) -> None:
         if self.state not in ("IDLE", "IN_POSITION") or not self.mark:
@@ -216,7 +277,11 @@ class PaperEngine:
             self.long_ma,
             in_position=self.btc > 0,
         )
+
         if signal == "buy":
+            if not self._profitability_allows_entry(self.position_size):
+                return
+
             reason = deny_entry(
                 flatten_lock=self.flatten_lock,
                 paper_mode=self.paper_mode,
@@ -233,8 +298,10 @@ class PaperEngine:
             if reason:
                 self._log("WARN", f"Buy denied: {reason}")
                 return
+
             self._log("BOT", f"SMA cross-up. Paper BUY {self.position_size} BTC")
             await self._execute("buy", self.position_size, "bot")
+
         elif signal == "sell" and self.btc > 0:
             self._log("BOT", "SMA cross-down. Paper SELL inventory")
             await self._execute("sell", self.btc, "bot")
@@ -245,6 +312,7 @@ class PaperEngine:
         except Exception as exc:
             self._log("WARN", f"Mark fetch failed: {exc}")
             return
+
         if snapshot is None:
             return
 
@@ -253,7 +321,7 @@ class PaperEngine:
             self.mark_source = snapshot.source
             self.closes.append(snapshot.price)
             self._last_tick_mono = time.monotonic()
-            self.peak_equity = max(self.peak_equity, self.equity)
+            self.portfolio.mark_to_market(self.mark)
             await self.evaluate_and_maybe_trade()
 
     async def loop(self) -> None:
@@ -287,8 +355,8 @@ class PaperEngine:
         async with self._lock:
             if not self.mark:
                 return {"ok": False, "error": "no_mark"}
-            qty = qty or self.position_size
 
+            qty = qty or self.position_size
             if side == "buy":
                 reason = deny_entry(
                     flatten_lock=self.flatten_lock,
