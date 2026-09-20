@@ -3,119 +3,174 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
-<meta name="theme-color" content="#08111d"/>
-<title>Aether</title>
+<meta name="theme-color" content="#08070d"/>
+<title>Aether Pro</title>
 <style>
 :root{
   color-scheme:dark;
-  --bg:#08111d;--panel:#0e1a2a;--panel2:#132338;--line:#203a56;
-  --text:#f6f8fb;--muted:#8fa2b7;--blue:#397ff6;--blue2:#6aa7ff;
-  --green:#42d47d;--red:#ff6672;--amber:#f0b65a;
-  --shadow:0 18px 45px rgba(0,0,0,.28)
+  --bg:#08070d;
+  --bg2:#0d0b14;
+  --panel:#11101a;
+  --panel2:#171522;
+  --line:#28243a;
+  --line2:#35304a;
+  --text:#f5f3fb;
+  --muted:#9992ab;
+  --muted2:#716b80;
+  --accent:#7b61ff;
+  --accent2:#9f8cff;
+  --blue:#4f8cff;
+  --green:#28c77b;
+  --red:#ff5f6d;
+  --amber:#f0b85b;
+  --shadow:0 18px 48px rgba(0,0,0,.34);
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+html,body{margin:0;min-height:100%;background:
+  radial-gradient(circle at 85% -10%,rgba(123,97,255,.16),transparent 32%),
+  linear-gradient(180deg,#08070d 0%,#0a0910 100%);
+  color:var(--text);
+  font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 body{overscroll-behavior-y:none}
 button,input{font:inherit}
 button{cursor:pointer}
-.app{max-width:980px;margin:auto;padding:10px 12px calc(92px + env(safe-area-inset-bottom))}
-.topbar{position:sticky;top:0;z-index:30;display:flex;justify-content:space-between;align-items:center;padding:11px 12px;background:rgba(8,17,29,.91);backdrop-filter:blur(18px);border:1px solid var(--line);border-radius:15px;box-shadow:var(--shadow)}
-.brand{display:flex;gap:10px;align-items:center}
-.logo{width:36px;height:36px;border-radius:11px;display:grid;place-items:center;font-weight:900;background:linear-gradient(145deg,#387ff6,#6757ff);box-shadow:0 8px 22px rgba(57,127,246,.32)}
-.brand-title{font-weight:900;letter-spacing:.08em;font-size:14px}
-.brand-sub{font-size:10px;color:var(--muted);margin-top:2px}
-.header-state{display:flex;gap:6px;align-items:center}
-.pill{display:inline-flex;align-items:center;gap:5px;padding:6px 8px;border-radius:999px;border:1px solid var(--line);background:#0b1624;color:var(--muted);font-size:10px;font-weight:850;letter-spacing:.04em}
-.pill.good{color:var(--green);border-color:rgba(66,212,125,.36);background:rgba(66,212,125,.08)}
-.pill.bad{color:var(--red);border-color:rgba(255,102,114,.36);background:rgba(255,102,114,.08)}
-.pill.warn{color:var(--amber);border-color:rgba(240,182,90,.36);background:rgba(240,182,90,.08)}
-.page{display:none;animation:pageIn .24s ease}
+.app{max-width:1080px;margin:auto;padding:8px 12px calc(90px + env(safe-area-inset-bottom))}
+.topbar{
+  position:sticky;top:0;z-index:40;display:flex;align-items:center;justify-content:space-between;gap:10px;
+  min-height:58px;padding:10px 2px;background:rgba(8,7,13,.86);backdrop-filter:blur(18px)
+}
+.brand{display:flex;align-items:center;gap:10px}
+.logo{
+  width:38px;height:38px;border-radius:12px;display:grid;place-items:center;font-weight:950;
+  background:linear-gradient(145deg,#8b72ff,#5d42df);box-shadow:0 8px 24px rgba(123,97,255,.35)
+}
+.brand-title{font-size:15px;font-weight:900;letter-spacing:.08em}
+.brand-sub{font-size:10px;color:var(--muted);margin-top:1px}
+.topstate{display:flex;gap:6px;align-items:center}
+.pill{
+  display:inline-flex;align-items:center;justify-content:center;gap:5px;
+  min-height:27px;padding:0 9px;border-radius:999px;border:1px solid var(--line);
+  background:#0f0d17;color:var(--muted);font-size:10px;font-weight:850;letter-spacing:.04em
+}
+.pill.good{color:var(--green);border-color:rgba(40,199,123,.3);background:rgba(40,199,123,.07)}
+.pill.bad{color:var(--red);border-color:rgba(255,95,109,.3);background:rgba(255,95,109,.07)}
+.pill.warn{color:var(--amber);border-color:rgba(240,184,91,.3);background:rgba(240,184,91,.07)}
+.page{display:none;animation:pageIn .22s ease}
 .page.active{display:block}
-@keyframes pageIn{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
-.page-head{padding:18px 3px 4px}
-.page-head h1{font-size:24px;line-height:1.05;margin:0;font-weight:900;letter-spacing:-.03em}
+@keyframes pageIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.page-head{padding:14px 2px 8px}
+.page-head h1{margin:0;font-size:24px;line-height:1;font-weight:900;letter-spacing:-.035em}
 .page-head p{margin:6px 0 0;color:var(--muted);font-size:12px}
-.hero{margin-top:10px;padding:18px;border-radius:20px;border:1px solid var(--line);background:radial-gradient(circle at top right,rgba(57,127,246,.18),transparent 35%),linear-gradient(150deg,#122640,#0b1727);box-shadow:var(--shadow)}
-.eyebrow{font-size:10px;font-weight:850;letter-spacing:.13em;color:var(--muted)}
-.equity{font-size:40px;line-height:1;font-weight:950;letter-spacing:-.045em;margin-top:8px}
-.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:17px}
-.metric{padding:11px;border-radius:13px;background:rgba(3,9,16,.38);border:1px solid rgba(255,255,255,.06)}
-.metric .k{font-size:9px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase}
-.metric .v{font-size:16px;font-weight:800;margin-top:4px;overflow-wrap:anywhere}
-.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px;margin-top:11px}
-.card{min-width:0;padding:15px;border-radius:17px;background:var(--panel);border:1px solid var(--line);box-shadow:0 10px 28px rgba(0,0,0,.16)}
+.market-hero{
+  border:1px solid var(--line);border-radius:22px;background:
+  radial-gradient(circle at 86% 7%,rgba(123,97,255,.18),transparent 28%),
+  linear-gradient(155deg,#161321 0%,#0e0c15 68%);
+  padding:17px;box-shadow:var(--shadow);overflow:hidden
+}
+.market-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.symbol{display:flex;gap:10px;align-items:center}
+.coin{
+  width:38px;height:38px;border-radius:50%;display:grid;place-items:center;background:linear-gradient(145deg,#f3a437,#d57a00);
+  color:#fff;font-weight:950;box-shadow:0 8px 20px rgba(222,136,19,.2)
+}
+.symbol-title{font-size:15px;font-weight:850}
+.symbol-sub{font-size:10px;color:var(--muted);margin-top:2px}
+.price{font-size:39px;line-height:1;font-weight:950;letter-spacing:-.045em;margin-top:15px}
+.price-sub{display:flex;align-items:center;gap:8px;margin-top:7px;font-size:12px;color:var(--muted)}
+.chart-shell{height:148px;margin:14px -5px 0}
+#priceChart{width:100%;height:100%;overflow:visible}
+.chart-grid{stroke:rgba(255,255,255,.05);stroke-width:1}
+.chart-line{fill:none;stroke:url(#lineGrad);stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+.chart-area{fill:url(#areaGrad)}
+.quick-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin-top:10px}
+.quick{padding:10px;border:1px solid rgba(255,255,255,.06);background:rgba(4,3,8,.35);border-radius:12px}
+.quick .k,.metric .k,.box .k{font-size:9px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase}
+.quick .v,.metric .v,.box .v{font-size:15px;font-weight:800;margin-top:4px;overflow-wrap:anywhere}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:10px}
+.card{min-width:0;border:1px solid var(--line);border-radius:17px;background:rgba(17,16,26,.96);padding:14px;box-shadow:0 10px 28px rgba(0,0,0,.16)}
 .card.full{grid-column:1/-1}
 .card-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px}
-.card-head h2{margin:0;font-size:11px;color:var(--muted);letter-spacing:.1em}
-.row{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:9px 0;border-bottom:1px solid rgba(143,162,183,.09);font-size:14px}
+.card-head h2{margin:0;font-size:10px;font-weight:850;letter-spacing:.11em;color:var(--muted)}
+.row{display:flex;justify-content:space-between;gap:16px;align-items:center;padding:9px 0;border-bottom:1px solid rgba(153,146,171,.08);font-size:13px}
 .row:last-child{border-bottom:0}
 .row span:last-child{text-align:right;font-weight:700}
+.portfolio-balance{font-size:31px;font-weight:950;letter-spacing:-.04em;margin:4px 0 10px}
 .summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
-.box{padding:11px;border-radius:13px;background:#0a1624;border:1px solid rgba(143,162,183,.12)}
-.box .k{font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
-.box .v{font-size:17px;font-weight:850;margin-top:5px}
-.goodText{color:var(--green)!important}.badText{color:var(--red)!important}.warnText{color:var(--amber)!important}
-.helper{font-size:12px;line-height:1.45;color:var(--muted);margin-top:9px}
+.box,.metric{padding:11px;border-radius:12px;border:1px solid rgba(153,146,171,.11);background:#0c0a12}
+.box .v{font-size:16px}
+.helper{font-size:11px;line-height:1.5;color:var(--muted);margin-top:8px}
 .helper.good{color:var(--green)}.helper.bad{color:var(--red)}.helper.warn{color:var(--amber)}
-.action-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.goodText{color:var(--green)!important}.badText{color:var(--red)!important}.warnText{color:var(--amber)!important}
+.trade-ticket{display:grid;gap:10px}
+.trade-price{padding:14px;border:1px solid var(--line);border-radius:15px;background:#0d0b13}
+.trade-price .big{font-size:30px;font-weight:950;letter-spacing:-.04em}
+.trade-price .small{font-size:11px;color:var(--muted);margin-top:4px}
+.action-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
 .btn{
-  position:relative;overflow:hidden;min-height:54px;border:1px solid var(--line);border-radius:14px;
-  padding:0 16px;color:#fff;background:linear-gradient(180deg,#18304b,#11243a);
-  font-weight:850;letter-spacing:.01em;box-shadow:0 10px 24px rgba(0,0,0,.18);
+  position:relative;overflow:hidden;min-height:56px;border:1px solid var(--line2);border-radius:14px;padding:0 15px;color:#fff;
+  background:linear-gradient(180deg,#242032,#191625);font-weight:850;letter-spacing:.01em;
+  box-shadow:0 10px 24px rgba(0,0,0,.18);
   transition:transform .12s ease,box-shadow .18s ease,filter .18s ease,background .18s ease,border-color .18s ease
 }
-.btn::after{content:"";position:absolute;inset:0;background:rgba(255,255,255,.11);opacity:0;transition:.15s}
-.btn:not(:disabled):active{transform:scale(.965);box-shadow:0 4px 10px rgba(0,0,0,.18)}
+.btn::after{content:"";position:absolute;inset:0;background:rgba(255,255,255,.11);opacity:0;transition:.14s}
+.btn:not(:disabled):active{transform:scale(.962);box-shadow:0 4px 10px rgba(0,0,0,.16)}
 .btn:not(:disabled):active::after{opacity:1}
-.btn:disabled{opacity:.4;cursor:not-allowed}
-.btn.primary{background:linear-gradient(180deg,#408dff,#286edc);border-color:#5598ff;box-shadow:0 10px 24px rgba(57,127,246,.24)}
-.btn.success{background:linear-gradient(180deg,#22965a,#197241);border-color:#32aa6b}
-.btn.danger{background:linear-gradient(180deg,#be3748,#922532);border-color:#dc5060}
-.btn.secondary{background:linear-gradient(180deg,#1a3048,#112337)}
+.btn:disabled{opacity:.38;cursor:not-allowed}
+.btn.primary{background:linear-gradient(180deg,#8b72ff,#6548e6);border-color:#9f8cff;box-shadow:0 10px 24px rgba(123,97,255,.23)}
+.btn.buy{background:linear-gradient(180deg,#23a969,#19784b);border-color:#35bf7d}
+.btn.sell{background:linear-gradient(180deg,#b53b49,#852a35);border-color:#d25260}
+.btn.secondary{background:linear-gradient(180deg,#252131,#181520)}
 .btn.wide{grid-column:1/-1}
-.btn.loading{filter:saturate(.8);pointer-events:none}
-.btn.state-success{animation:successPulse .7s ease;background:linear-gradient(180deg,#2fbf70,#1d874f);border-color:#57df91}
-.btn.state-error{animation:errorShake .32s ease;background:linear-gradient(180deg,#cf4352,#9d2935);border-color:#ff7180}
-@keyframes successPulse{0%{transform:scale(.97)}45%{transform:scale(1.025);box-shadow:0 0 0 7px rgba(66,212,125,.12)}100%{transform:none}}
+.btn.loading{pointer-events:none;filter:saturate(.75)}
+.btn.state-success{animation:successPulse .65s ease;background:linear-gradient(180deg,#2fc879,#1b8852);border-color:#58de96}
+.btn.state-error{animation:errorShake .32s ease;background:linear-gradient(180deg,#cf4251,#962a35);border-color:#ff7380}
+@keyframes successPulse{0%{transform:scale(.97)}45%{transform:scale(1.02);box-shadow:0 0 0 7px rgba(40,199,123,.1)}100%{transform:none}}
 @keyframes errorShake{0%,100%{transform:none}25%{transform:translateX(-4px)}50%{transform:translateX(4px)}75%{transform:translateX(-2px)}}
-.spinner{display:inline-block;width:15px;height:15px;margin-right:8px;vertical-align:-2px;border:2px solid rgba(255,255,255,.28);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite}
+.spinner{display:inline-block;width:15px;height:15px;margin-right:8px;vertical-align:-2px;border:2px solid rgba(255,255,255,.25);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
-.input{width:100%;min-height:50px;border:1px solid var(--line);border-radius:12px;background:#08111d;color:var(--text);padding:0 13px;outline:none}
-.input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(57,127,246,.15)}
+.input{width:100%;min-height:50px;border:1px solid var(--line);border-radius:12px;background:#0a0810;color:var(--text);padding:0 13px;outline:none}
+.input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(123,97,255,.13)}
 .access-line{display:flex;gap:8px}
-.configgrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}
+.configgrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
 .field label{display:block;margin:0 0 5px 2px;font-size:9px;letter-spacing:.07em;color:var(--muted)}
-.field input{width:100%;min-height:45px;border:1px solid var(--line);border-radius:11px;background:#08111d;color:var(--text);padding:0 10px}
+.field input{width:100%;min-height:45px;border:1px solid var(--line);border-radius:11px;background:#0a0810;color:var(--text);padding:0 10px}
 .tabs{display:flex;gap:7px;overflow-x:auto;padding:2px 0 9px;scrollbar-width:none}
 .tabs::-webkit-scrollbar{display:none}
-.tab{min-width:max-content;min-height:39px;padding:0 13px;border-radius:999px;border:1px solid var(--line);background:#0a1624;color:var(--muted);font-weight:800}
-.tab.active{color:#cbe0ff;border-color:var(--blue);background:rgba(57,127,246,.15)}
-.tablewrap{overflow:auto;border:1px solid var(--line);border-radius:13px;background:#091522}
-table{width:100%;border-collapse:collapse;font-size:12px;min-width:740px}
-th,td{padding:10px 9px;border-bottom:1px solid rgba(143,162,183,.1);text-align:left;white-space:nowrap}
-th{position:sticky;top:0;background:#0b1827;color:var(--muted);font-weight:750}
-.log{font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;color:#a8b7c8;white-space:pre-wrap;max-height:300px;overflow:auto;background:#091522;border:1px solid rgba(143,162,183,.1);border-radius:13px;padding:11px}
-.bottom-nav{position:fixed;left:0;right:0;bottom:0;z-index:50;padding:8px 10px calc(8px + env(safe-area-inset-bottom));background:rgba(6,14,24,.94);backdrop-filter:blur(20px);border-top:1px solid var(--line)}
-.nav-inner{max-width:620px;margin:auto;display:grid;grid-template-columns:repeat(4,1fr);gap:5px}
-.nav-btn{min-height:56px;border:0;border-radius:13px;background:transparent;color:#778da4;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:3px;font-size:10px;font-weight:800;transition:.16s ease}
-.nav-btn .ico{font-size:20px;line-height:1}
-.nav-btn.active{color:#eaf2ff;background:rgba(57,127,246,.12)}
-.nav-btn:active{transform:scale(.94)}
-.toast{position:fixed;left:50%;bottom:calc(79px + env(safe-area-inset-bottom));transform:translate(-50%,18px);z-index:100;width:min(92vw,440px);padding:12px 14px;border-radius:13px;background:#14263c;border:1px solid var(--line);box-shadow:var(--shadow);opacity:0;pointer-events:none;transition:.2s;font-size:13px;font-weight:800}
-.toast.show{opacity:1;transform:translate(-50%,0)}
-.toast.good{border-color:rgba(66,212,125,.45)}.toast.bad{border-color:rgba(255,102,114,.5)}
+.tab{min-width:max-content;min-height:38px;padding:0 13px;border-radius:999px;border:1px solid var(--line);background:#0c0a12;color:var(--muted);font-weight:800}
+.tab.active{color:#e7e0ff;border-color:var(--accent);background:rgba(123,97,255,.13)}
+.tablewrap{overflow:auto;border:1px solid var(--line);border-radius:13px;background:#0a0810}
+table{width:100%;border-collapse:collapse;font-size:11px;min-width:720px}
+th,td{padding:10px 9px;border-bottom:1px solid rgba(153,146,171,.09);text-align:left;white-space:nowrap}
+th{position:sticky;top:0;background:#100e17;color:var(--muted);font-weight:800}
+.log{font:11px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;color:#aaa3b9;white-space:pre-wrap;max-height:300px;overflow:auto;background:#0a0810;border:1px solid rgba(153,146,171,.1);border-radius:13px;padding:11px}
 .system-list{display:grid;gap:8px}
-.system-item{display:flex;justify-content:space-between;gap:12px;padding:11px;border-radius:12px;background:#0a1624;border:1px solid rgba(143,162,183,.1);font-size:13px}
-@media(max-width:720px){
-  .app{padding-left:10px;padding-right:10px}
-  .header-state .pill:first-child{display:none}
-  .grid{grid-template-columns:1fr}.card.full{grid-column:1}
-  .metrics,.summary{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .configgrid{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .equity{font-size:36px}
-  .page-head h1{font-size:22px}
+.system-item{display:flex;justify-content:space-between;gap:12px;padding:11px;border-radius:12px;background:#0c0a12;border:1px solid rgba(153,146,171,.1);font-size:12px}
+.bottom-nav{
+  position:fixed;left:0;right:0;bottom:0;z-index:60;padding:7px 8px calc(7px + env(safe-area-inset-bottom));
+  background:rgba(10,8,15,.94);backdrop-filter:blur(20px);border-top:1px solid var(--line)
 }
-@media(min-width:721px){.bottom-nav{left:50%;right:auto;transform:translateX(-50%);width:620px;border:1px solid var(--line);border-bottom:0;border-radius:18px 18px 0 0}}
+.nav-inner{max-width:620px;margin:auto;display:grid;grid-template-columns:repeat(5,1fr);gap:2px}
+.nav-btn{
+  min-height:58px;border:0;border-radius:13px;background:transparent;color:#777083;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:4px;font-size:9px;font-weight:800;transition:.15s ease
+}
+.nav-btn svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.nav-btn.active{color:#e8e1ff;background:rgba(123,97,255,.11)}
+.nav-btn:active{transform:scale(.94)}
+.toast{position:fixed;left:50%;bottom:calc(80px + env(safe-area-inset-bottom));transform:translate(-50%,18px);z-index:100;width:min(92vw,440px);padding:12px 14px;border-radius:13px;background:#1b1727;border:1px solid var(--line2);box-shadow:var(--shadow);opacity:0;pointer-events:none;transition:.2s;font-size:12px;font-weight:800}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.toast.good{border-color:rgba(40,199,123,.4)}.toast.bad{border-color:rgba(255,95,109,.45)}
+@media(max-width:720px){
+  .app{padding-left:9px;padding-right:9px}
+  .topstate .pill:first-child{display:none}
+  .grid{grid-template-columns:1fr}.card.full{grid-column:1}
+  .summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .configgrid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .price{font-size:35px}.portfolio-balance{font-size:28px}
+}
+@media(min-width:721px){
+  .bottom-nav{left:50%;right:auto;transform:translateX(-50%);width:620px;border:1px solid var(--line);border-bottom:0;border-radius:20px 20px 0 0}
+}
 </style>
 </head>
 <body>
@@ -123,9 +178,9 @@ th{position:sticky;top:0;background:#0b1827;color:var(--muted);font-weight:750}
 <header class="topbar">
   <div class="brand">
     <div class="logo">A</div>
-    <div><div class="brand-title">AETHER</div><div class="brand-sub">Paper trading operator</div></div>
+    <div><div class="brand-title">AETHER</div><div class="brand-sub">Autonomous trading operations</div></div>
   </div>
-  <div class="header-state">
+  <div class="topstate">
     <span id="dbBadge" class="pill">DB</span>
     <span id="botBadge" class="pill">OFFLINE</span>
     <span class="pill warn">PAPER</span>
@@ -133,78 +188,108 @@ th{position:sticky;top:0;background:#0b1827;color:var(--muted);font-weight:750}
 </header>
 
 <main>
-<section id="page-dashboard" class="page active">
-  <div class="page-head"><h1>Dashboard</h1><p>Portfolio, market and performance at a glance.</p></div>
-  <div class="hero">
-    <div class="eyebrow">PORTFOLIO EQUITY</div>
-    <div id="eq" class="equity">—</div>
-    <div class="metrics">
-      <div class="metric"><div class="k">USD</div><div id="usd" class="v">—</div></div>
-      <div class="metric"><div class="k">BTC</div><div id="btc" class="v">—</div></div>
-      <div class="metric"><div class="k">Open P/L</div><div id="pnl" class="v">—</div></div>
-      <div class="metric"><div class="k">Realized P/L</div><div id="rpnl" class="v">—</div></div>
+<section id="page-home" class="page active">
+  <div class="page-head"><h1>Overview</h1><p>Market, portfolio and autonomous engine status.</p></div>
+
+  <section class="market-hero">
+    <div class="market-top">
+      <div class="symbol">
+        <div class="coin">₿</div>
+        <div><div class="symbol-title">BTC / USD</div><div class="symbol-sub">Kraken execution tape</div></div>
+      </div>
+      <span id="freshBadge" class="pill">CHECKING</span>
     </div>
-  </div>
+    <div id="mark" class="price">—</div>
+    <div class="price-sub"><span id="basis">—</span><span>vs Binance.US</span></div>
+    <div class="chart-shell">
+      <svg id="priceChart" viewBox="0 0 600 140" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="lineGrad" x1="0" x2="1"><stop stop-color="#8b72ff"/><stop offset="1" stop-color="#4f8cff"/></linearGradient>
+          <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#7b61ff" stop-opacity=".24"/><stop offset="1" stop-color="#7b61ff" stop-opacity="0"/></linearGradient>
+        </defs>
+        <line class="chart-grid" x1="0" x2="600" y1="35" y2="35"/>
+        <line class="chart-grid" x1="0" x2="600" y1="70" y2="70"/>
+        <line class="chart-grid" x1="0" x2="600" y1="105" y2="105"/>
+        <path id="chartArea" class="chart-area" d=""/>
+        <path id="chartLine" class="chart-line" d=""/>
+      </svg>
+    </div>
+    <div class="quick-metrics">
+      <div class="quick"><div class="k">Bid</div><div id="homeBid" class="v">—</div></div>
+      <div class="quick"><div class="k">Ask</div><div id="homeAsk" class="v">—</div></div>
+      <div class="quick"><div class="k">Watch</div><div id="watch" class="v">—</div></div>
+    </div>
+  </section>
+
   <div class="grid">
     <section class="card">
-      <div class="card-head"><h2>MARKET</h2><span id="freshBadge" class="pill">CHECKING</span></div>
-      <div class="row"><span>Kraken</span><span id="mark">—</span></div>
-      <div class="row"><span>Bid / Ask</span><span id="ba">—</span></div>
-      <div class="row"><span>Binance.US</span><span id="watch">—</span></div>
-      <div class="row"><span>Basis</span><span id="basis">—</span></div>
+      <div class="card-head"><h2>PORTFOLIO</h2><span class="pill">PAPER</span></div>
+      <div id="eq" class="portfolio-balance">—</div>
+      <div class="row"><span>Cash</span><span id="usd">—</span></div>
+      <div class="row"><span>BTC</span><span id="btc">—</span></div>
+      <div class="row"><span>Open P/L</span><span id="pnl">—</span></div>
+      <div class="row"><span>Realized P/L</span><span id="rpnl">—</span></div>
     </section>
+
     <section class="card">
-      <div class="card-head"><h2>BOT</h2><span id="stateText" class="pill">—</span></div>
+      <div class="card-head"><h2>AUTONOMOUS ENGINE</h2><span id="stateText" class="pill">—</span></div>
       <div class="row"><span>Strategy</span><span id="strategy">—</span></div>
-      <div class="row"><span>Position</span><span id="psz">—</span></div>
+      <div class="row"><span>Position size</span><span id="psz">—</span></div>
       <div class="row"><span>Max position</span><span id="mpsz">—</span></div>
       <div class="row"><span>Entry lock</span><span id="lock">—</span></div>
       <div id="note" class="helper"></div>
     </section>
+
     <section class="card full">
-      <div class="card-head"><h2>PERFORMANCE</h2><span class="pill">LIVE LEDGER</span></div>
+      <div class="card-head"><h2>PERFORMANCE SNAPSHOT</h2><span class="pill">LIVE LEDGER</span></div>
       <div class="summary">
         <div class="box"><div class="k">Today P/L</div><div id="aDaily" class="v">—</div></div>
         <div class="box"><div class="k">Week P/L</div><div id="aWeekly" class="v">—</div></div>
         <div class="box"><div class="k">Win Rate</div><div id="aWinRate" class="v">—</div></div>
-        <div class="box"><div class="k">Max Drawdown</div><div id="aDrawdown" class="v">—</div></div>
+        <div class="box"><div class="k">Drawdown</div><div id="aDrawdown" class="v">—</div></div>
       </div>
     </section>
   </div>
 </section>
 
 <section id="page-trade" class="page">
-  <div class="page-head"><h1>Trade</h1><p>Arm, stop and manage the paper engine.</p></div>
+  <div class="page-head"><h1>Trade</h1><p>Execution controls for the paper engine.</p></div>
   <div class="grid">
-    <section class="card full">
-      <div class="card-head"><h2>CONTROL PANEL</h2><span id="tradeAuthBadge" class="pill bad">LOCKED</span></div>
-      <div class="action-grid">
-        <button id="startBtn" class="btn success control" type="button">Start Bot</button>
-        <button id="stopBtn" class="btn secondary control" type="button">Stop Bot</button>
-        <button id="buyBtn" class="btn primary control" type="button">Buy 0.01 BTC</button>
-        <button id="sellBtn" class="btn secondary control" type="button">Sell Position</button>
-        <button id="unlockBtn" class="btn secondary wide control" type="button">Clear Flatten Lock</button>
-        <button id="flattenBtn" class="btn danger wide control" type="button">Emergency Flatten & Lock Entries</button>
+    <section class="card full trade-ticket">
+      <div class="card-head"><h2>BTC / USD</h2><span id="tradeAuthBadge" class="pill bad">LOCKED</span></div>
+      <div class="trade-price">
+        <div id="tradeMark" class="big">—</div>
+        <div id="tradeBa" class="small">Bid / Ask —</div>
       </div>
-      <div id="controlNote" class="helper">Connect your operator token in Settings.</div>
+      <div class="action-grid">
+        <button id="buyBtn" class="btn buy control" type="button">Buy 0.01 BTC</button>
+        <button id="sellBtn" class="btn sell control" type="button">Sell Position</button>
+      </div>
+      <div class="action-grid">
+        <button id="startBtn" class="btn primary control" type="button">Start Bot</button>
+        <button id="stopBtn" class="btn secondary control" type="button">Stop Bot</button>
+      </div>
+      <button id="unlockBtn" class="btn secondary control" type="button">Clear Flatten Lock</button>
+      <button id="flattenBtn" class="btn danger control" type="button">Emergency Flatten & Lock</button>
+      <div id="controlNote" class="helper">Connect operator access in Settings.</div>
     </section>
-    <section class="card">
-      <div class="card-head"><h2>EXECUTION TAPE</h2><span id="tradeFreshBadge" class="pill">—</span></div>
-      <div class="row"><span>Last</span><span id="tradeMark">—</span></div>
-      <div class="row"><span>Bid / Ask</span><span id="tradeBa">—</span></div>
-      <div class="row"><span>Mark age</span><span id="age">—</span></div>
-    </section>
+
     <section class="card">
       <div class="card-head"><h2>POSITION</h2><span id="tradeState" class="pill">—</span></div>
-      <div class="row"><span>BTC</span><span id="tradeBtc">—</span></div>
+      <div class="row"><span>BTC held</span><span id="tradeBtc">—</span></div>
       <div class="row"><span>Open P/L</span><span id="tradePnl">—</span></div>
       <div class="row"><span>Realized</span><span id="tradeRpnl">—</span></div>
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>MARKET QUALITY</h2><span id="tradeFreshBadge" class="pill">—</span></div>
+      <div class="row"><span>Mark age</span><span id="age">—</span></div>
+      <div class="row"><span>Binance basis</span><span id="tradeBasis">—</span></div>
     </section>
   </div>
 </section>
 
 <section id="page-activity" class="page">
-  <div class="page-head"><h1>Activity</h1><p>Orders, fills, positions, risk events and audit history.</p></div>
+  <div class="page-head"><h1>Activity</h1><p>Orders, fills, positions and risk events.</p></div>
   <div class="grid">
     <section class="card full">
       <div class="card-head"><h2>TRADE LEDGER</h2><span id="ledgerCount" class="pill">0 FILLS</span></div>
@@ -225,17 +310,38 @@ th{position:sticky;top:0;background:#0b1827;color:var(--muted);font-weight:750}
   </div>
 </section>
 
+<section id="page-analytics" class="page">
+  <div class="page-head"><h1>Analytics</h1><p>Performance and execution quality.</p></div>
+  <div class="grid">
+    <section class="card full">
+      <div class="card-head"><h2>PERFORMANCE</h2><span class="pill">POSTGRES</span></div>
+      <div class="summary">
+        <div class="box"><div class="k">Today P/L</div><div id="xDaily" class="v">—</div></div>
+        <div class="box"><div class="k">Week P/L</div><div id="xWeekly" class="v">—</div></div>
+        <div class="box"><div class="k">Win Rate</div><div id="xWinRate" class="v">—</div></div>
+        <div class="box"><div class="k">Wins / Losses</div><div id="xWL" class="v">—</div></div>
+        <div class="box"><div class="k">Avg Duration</div><div id="xDuration" class="v">—</div></div>
+        <div class="box"><div class="k">Fees</div><div id="xFees" class="v">—</div></div>
+        <div class="box"><div class="k">BTC Volume</div><div id="xVolume" class="v">—</div></div>
+        <div class="box"><div class="k">Max Drawdown</div><div id="xDrawdown" class="v">—</div></div>
+      </div>
+      <div id="actorStats" class="helper"></div>
+    </section>
+  </div>
+</section>
+
 <section id="page-settings" class="page">
-  <div class="page-head"><h1>Settings</h1><p>Operator access, strategy, risk and system information.</p></div>
+  <div class="page-head"><h1>Settings</h1><p>Security, strategy, risk and system configuration.</p></div>
   <div class="grid">
     <section class="card full">
       <div class="card-head"><h2>OPERATOR ACCESS</h2><span id="authBadge" class="pill bad">LOCKED</span></div>
       <div class="access-line">
-        <input id="opToken" class="input" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Enter operator token"/>
-        <button id="connectBtn" class="btn primary" type="button">Connect</button>
+        <input id="opToken" class="input" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Operator token"/>
+        <button id="connectBtn" class="btn primary" style="min-width:112px" type="button">Connect</button>
       </div>
-      <div id="authNote" class="helper">Enter the operator token saved in Azure.</div>
+      <div id="authNote" class="helper">Enter the operator token stored in Azure.</div>
     </section>
+
     <section class="card full">
       <div class="card-head"><h2>STRATEGY & RISK</h2><span id="configBadge" class="pill">READ ONLY</span></div>
       <div class="configgrid">
@@ -250,16 +356,16 @@ th{position:sticky;top:0;background:#0b1827;color:var(--muted);font-weight:750}
       <button id="saveCfgBtn" class="btn primary" style="margin-top:10px;width:100%" type="button">Save Configuration</button>
       <div id="configNote" class="helper"></div>
     </section>
+
     <section class="card full">
-      <div class="card-head"><h2>SYSTEM</h2><span class="pill">AETHER 0.9.0</span></div>
+      <div class="card-head"><h2>SYSTEM</h2><span class="pill">AETHER 1.0</span></div>
       <div class="system-list">
         <div class="system-item"><span>Persistence</span><strong id="sysDb">—</strong></div>
         <div class="system-item"><span>Execution tape</span><strong>Kraken</strong></div>
         <div class="system-item"><span>Watch tape</span><strong>Binance.US</strong></div>
-        <div class="system-item"><span>Mode</span><strong class="warnText">Paper / Live blocked</strong></div>
-        <div class="system-item"><span>Authentication</span><strong id="sysAuth">—</strong></div>
+        <div class="system-item"><span>Trading mode</span><strong class="warnText">Paper · Live blocked</strong></div>
+        <div class="system-item"><span>Operator auth</span><strong id="sysAuth">—</strong></div>
       </div>
-      <div id="actorStats" class="helper"></div>
     </section>
   </div>
 </section>
@@ -268,10 +374,21 @@ th{position:sticky;top:0;background:#0b1827;color:var(--muted);font-weight:750}
 
 <nav class="bottom-nav" aria-label="Primary">
   <div class="nav-inner">
-    <button class="nav-btn active" data-page="dashboard"><span class="ico">⌂</span><span>Home</span></button>
-    <button class="nav-btn" data-page="trade"><span class="ico">↗</span><span>Trade</span></button>
-    <button class="nav-btn" data-page="activity"><span class="ico">≡</span><span>Activity</span></button>
-    <button class="nav-btn" data-page="settings"><span class="ico">⚙</span><span>Settings</span></button>
+    <button class="nav-btn active" data-page="home" aria-label="Overview">
+      <svg viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10.5V20h13v-9.5"/></svg><span>Home</span>
+    </button>
+    <button class="nav-btn" data-page="trade" aria-label="Trade">
+      <svg viewBox="0 0 24 24"><path d="M5 17 17 5"/><path d="M9 5h8v8"/></svg><span>Trade</span>
+    </button>
+    <button class="nav-btn" data-page="activity" aria-label="Activity">
+      <svg viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h14"/></svg><span>Activity</span>
+    </button>
+    <button class="nav-btn" data-page="analytics" aria-label="Analytics">
+      <svg viewBox="0 0 24 24"><path d="M5 19V9M12 19V5M19 19v-7"/></svg><span>Analytics</span>
+    </button>
+    <button class="nav-btn" data-page="settings" aria-label="Settings">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.5 1A7 7 0 0 0 14.7 6L14.4 3h-4.8l-.3 3A7 7 0 0 0 7.6 7.1l-2.5-1-2 3.4 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.5-1A7 7 0 0 0 9.3 18l.3 3h4.8l.3-3a7 7 0 0 0 1.7-1.1l2.5 1 2-3.4-2-1.5c.1-.3.1-.7.1-1z"/></svg><span>Settings</span>
+    </button>
   </div>
 </nav>
 <div id="toast" class="toast"></div>
@@ -279,11 +396,10 @@ th{position:sticky;top:0;background:#0b1827;color:var(--muted);font-weight:750}
 <script>
 "use strict";
 const $=id=>document.getElementById(id);
-const ids=["dbBadge","botBadge","eq","usd","btc","pnl","rpnl","freshBadge","mark","ba","watch","basis","stateText","strategy","psz","mpsz","lock","note","aDaily","aWeekly","aWinRate","aDrawdown","startBtn","stopBtn","buyBtn","sellBtn","unlockBtn","flattenBtn","tradeAuthBadge","controlNote","tradeFreshBadge","tradeMark","tradeBa","age","tradeState","tradeBtc","tradePnl","tradeRpnl","tabs","ledger","ledgerCount","log","authBadge","opToken","connectBtn","authNote","configBadge","cShort","cLong","cStop","cSize","cMax","cDD","cLoss","saveCfgBtn","configNote","sysDb","sysAuth","actorStats","toast"];
+const ids=["dbBadge","botBadge","freshBadge","mark","basis","homeBid","homeAsk","watch","eq","usd","btc","pnl","rpnl","stateText","strategy","psz","mpsz","lock","note","aDaily","aWeekly","aWinRate","aDrawdown","buyBtn","sellBtn","startBtn","stopBtn","unlockBtn","flattenBtn","tradeAuthBadge","tradeMark","tradeBa","controlNote","tradeState","tradeBtc","tradePnl","tradeRpnl","tradeFreshBadge","age","tradeBasis","tabs","ledger","ledgerCount","log","xDaily","xWeekly","xWinRate","xWL","xDuration","xFees","xVolume","xDrawdown","actorStats","authBadge","opToken","connectBtn","authNote","configBadge","cShort","cLong","cStop","cSize","cMax","cDD","cLoss","saveCfgBtn","configNote","sysDb","sysAuth","toast","chartLine","chartArea"];
 const els={};ids.forEach(id=>els[id]=$(id));
 
-let activeLedger="fills", authenticated=false, authConfigured=false;
-let botSnapshot=null, configSnapshot=null, initialAuthChecked=false;
+let activeLedger="fills",authenticated=false,authConfigured=false,botSnapshot=null,configSnapshot=null,initialAuthChecked=false;
 const historyCache={};
 
 function token(){return sessionStorage.getItem("aether_operator_token")||""}
@@ -297,66 +413,62 @@ function pnlClass(v){return Number(v)>0?"goodText":Number(v)<0?"badText":""}
 
 function toast(message,type=""){
   els.toast.textContent=message;els.toast.className="toast show "+type;
-  clearTimeout(toast.timer);toast.timer=setTimeout(()=>els.toast.className="toast",2400);
+  clearTimeout(toast.timer);toast.timer=setTimeout(()=>els.toast.className="toast",2400)
 }
 async function api(url,options={}){
   const r=await fetch(url,{cache:"no-store",...options});let body={};
   try{body=await r.json()}catch{}
   if(!r.ok){const e=new Error(body.detail||body.error||("Request failed ("+r.status+")"));e.status=r.status;throw e}
-  return body;
+  return body
 }
 
 function setPage(name){
   document.querySelectorAll(".page").forEach(p=>p.classList.toggle("active",p.id==="page-"+name));
   document.querySelectorAll(".nav-btn").forEach(b=>b.classList.toggle("active",b.dataset.page===name));
   sessionStorage.setItem("aether_page",name);
-  window.scrollTo({top:0,behavior:"smooth"});
+  window.scrollTo({top:0,behavior:"smooth"})
 }
 document.querySelector(".nav-inner").addEventListener("click",e=>{const b=e.target.closest(".nav-btn");if(b)setPage(b.dataset.page)});
 
-function resetButton(btn,label){
-  if(!btn)return;
-  btn.classList.remove("loading","state-success","state-error");
-  btn.innerHTML=label;
-  refreshControlState();
-}
 function loadingButton(btn,label){
-  btn.classList.remove("state-success","state-error");btn.classList.add("loading");
-  btn.disabled=true;btn.innerHTML='<span class="spinner"></span>'+label;
+  btn.classList.remove("state-success","state-error");btn.classList.add("loading");btn.disabled=true;btn.innerHTML='<span class="spinner"></span>'+label
 }
-function successButton(btn,label,idleLabel,stay=false){
+function resetButton(btn,label){
+  btn.classList.remove("loading","state-success","state-error");btn.textContent=label;refreshControlState()
+}
+function successButton(btn,label,idle,stay=false){
   btn.classList.remove("loading","state-error");btn.classList.add("state-success");btn.disabled=true;btn.textContent=label;
-  if(!stay)setTimeout(()=>resetButton(btn,idleLabel),850);
+  if(!stay)setTimeout(()=>resetButton(btn,idle),900)
 }
-function errorButton(btn,label,idleLabel){
+function errorButton(btn,label,idle){
   btn.classList.remove("loading","state-success");btn.classList.add("state-error");btn.disabled=true;btn.textContent=label;
-  setTimeout(()=>resetButton(btn,idleLabel),1000);
+  setTimeout(()=>resetButton(btn,idle),1000)
 }
 
 function refreshAuthUI(){
-  const connected=!authConfigured||authenticated;
   if(!authConfigured){
+    authenticated=true;
     els.authBadge.textContent="OPEN";els.authBadge.className="pill warn";
     els.authNote.textContent="Authentication is not configured on the server.";els.authNote.className="helper warn";
-    els.tradeAuthBadge.textContent="OPEN";els.tradeAuthBadge.className="pill warn";
+    els.tradeAuthBadge.textContent="OPEN";els.tradeAuthBadge.className="pill warn"
   }else if(authenticated){
     els.authBadge.textContent="VERIFIED";els.authBadge.className="pill good";
     els.authNote.textContent="Operator access verified on this device.";els.authNote.className="helper good";
     els.tradeAuthBadge.textContent="VERIFIED";els.tradeAuthBadge.className="pill good";
-    if(!els.connectBtn.classList.contains("loading")){els.connectBtn.classList.add("state-success");els.connectBtn.textContent="Connected ✓"}
+    if(!els.connectBtn.classList.contains("loading")){els.connectBtn.classList.add("state-success");els.connectBtn.textContent="Connected ✓";els.connectBtn.disabled=true}
   }else{
     els.authBadge.textContent="LOCKED";els.authBadge.className="pill bad";
-    els.authNote.textContent="Enter the operator token saved in Azure, then tap Connect.";els.authNote.className="helper";
+    els.authNote.textContent="Enter the operator token stored in Azure, then tap Connect.";els.authNote.className="helper";
     els.tradeAuthBadge.textContent="LOCKED";els.tradeAuthBadge.className="pill bad";
-    if(!els.connectBtn.classList.contains("loading")){els.connectBtn.classList.remove("state-success");els.connectBtn.textContent="Connect"}
+    if(!els.connectBtn.classList.contains("loading")){els.connectBtn.classList.remove("state-success");els.connectBtn.textContent="Connect";els.connectBtn.disabled=false}
   }
   els.sysAuth.textContent=authConfigured?(authenticated?"Verified":"Token enforced"):"Not configured";
   els.sysAuth.className=authenticated?"goodText":authConfigured?"warnText":"badText";
-  refreshControlState();
+  refreshControlState()
 }
 
 function refreshControlState(){
-  const can=!authConfigured||authenticated, locked=!!botSnapshot?.flatten_lock, stale=!!botSnapshot?.stale;
+  const can=!authConfigured||authenticated,locked=!!botSnapshot?.flatten_lock,stale=!!botSnapshot?.stale;
   document.querySelectorAll(".control").forEach(b=>{if(!b.classList.contains("loading")&&!b.classList.contains("state-success")&&!b.classList.contains("state-error"))b.disabled=!can});
   if(!els.startBtn.classList.contains("loading"))els.startBtn.disabled=!can||locked||botSnapshot?.state!=="OFFLINE";
   if(!els.stopBtn.classList.contains("loading"))els.stopBtn.disabled=!can||botSnapshot?.state==="OFFLINE";
@@ -366,7 +478,7 @@ function refreshControlState(){
   if(!els.flattenBtn.classList.contains("loading"))els.flattenBtn.disabled=!can;
   if(!els.saveCfgBtn.classList.contains("loading"))els.saveCfgBtn.disabled=!can||!configSnapshot?.editable;
   els.controlNote.textContent=!can?"Operator locked. Connect in Settings.":locked?"Entries locked after emergency flatten.":"Operator controls ready.";
-  els.controlNote.className="helper "+(!can||locked?"warn":"good");
+  els.controlNote.className="helper "+(!can||locked?"warn":"good")
 }
 
 async function verifyToken(showToast=true){
@@ -376,12 +488,32 @@ async function verifyToken(showToast=true){
   loadingButton(els.connectBtn,"Verifying…");
   try{
     await api("/api/v1/auth/verify",{method:"POST",headers:authHeaders()});
-    authenticated=true;refreshAuthUI();successButton(els.connectBtn,"Verified ✓","Connected ✓",true);
-    if(showToast)toast("Operator connected","good");return true;
+    authenticated=true;
+    successButton(els.connectBtn,"Verified ✓","Connected ✓",true);
+    refreshAuthUI();
+    if(showToast)toast("Operator connected","good");
+    return true
   }catch(e){
-    authenticated=false;sessionStorage.removeItem("aether_operator_token");els.opToken.value="";refreshAuthUI();
-    errorButton(els.connectBtn,"Invalid token","Connect");if(showToast)toast(e.message,"bad");return false;
+    authenticated=false;sessionStorage.removeItem("aether_operator_token");els.opToken.value="";
+    errorButton(els.connectBtn,"Invalid token","Connect");refreshAuthUI();
+    if(showToast)toast(e.message,"bad");
+    return false
   }
+}
+
+function renderChart(){
+  const rows=(historyCache.positions||[]).filter(x=>Number.isFinite(Number(x.mark))).slice(0,60).reverse();
+  const values=rows.map(x=>Number(x.mark));
+  if(values.length<2){els.chartLine.setAttribute("d","");els.chartArea.setAttribute("d","");return}
+  const min=Math.min(...values),max=Math.max(...values),range=Math.max(max-min,1);
+  const pts=values.map((v,i)=>{
+    const x=i/(values.length-1)*600;
+    const y=122-((v-min)/range)*100;
+    return [x,y]
+  });
+  const line="M"+pts.map(p=>p[0].toFixed(1)+","+p[1].toFixed(1)).join(" L");
+  const area=line+" L600,140 L0,140 Z";
+  els.chartLine.setAttribute("d",line);els.chartArea.setAttribute("d",area)
 }
 
 async function load(){
@@ -392,17 +524,20 @@ async function load(){
     ]);
     botSnapshot=b;configSnapshot=cfg;authConfigured=!!auth.configured;
 
-    els.eq.textContent=money(a.equity_usd);els.usd.textContent=money(a.usd_free);els.btc.textContent=num(a.btc_total,8);
-    els.pnl.textContent=money(a.open_pnl);els.pnl.className="v "+pnlClass(a.open_pnl);
-    els.rpnl.textContent=money(a.realized_pnl_24h);els.rpnl.className="v "+pnlClass(a.realized_pnl_24h);
-
     els.mark.textContent=money(a.mark);els.tradeMark.textContent=money(a.mark);
-    els.ba.textContent=money(a.bid)+" / "+money(a.ask);els.tradeBa.textContent=els.ba.textContent;
-    els.watch.textContent=(a.watch_source??"offline")+" · "+(a.watch_last==null?"—":money(a.watch_last));
-    els.basis.textContent=a.watch_basis_usd==null?"—":money(a.watch_basis_usd);
-    els.age.textContent=b.last_tick_age_ms==null?"No tick":b.last_tick_age_ms+" ms";
+    els.homeBid.textContent=money(a.bid);els.homeAsk.textContent=money(a.ask);
+    els.watch.textContent=a.watch_last==null?"—":money(a.watch_last);
+    const basisText=a.watch_basis_usd==null?"—":(Number(a.watch_basis_usd)>=0?"+":"")+money(a.watch_basis_usd).replace("$","$");
+    els.basis.textContent=basisText;els.tradeBasis.textContent=basisText;
+    els.tradeBa.textContent="Bid "+money(a.bid)+"  ·  Ask "+money(a.ask);
+
     const freshClass="pill "+(b.stale?"bad":"good"),freshText=b.stale?"STALE":"LIVE";
-    els.freshBadge.className=freshClass;els.freshBadge.textContent=freshText;els.tradeFreshBadge.className=freshClass;els.tradeFreshBadge.textContent=freshText;
+    [els.freshBadge,els.tradeFreshBadge].forEach(x=>{x.className=freshClass;x.textContent=freshText});
+    els.age.textContent=b.last_tick_age_ms==null?"No tick":b.last_tick_age_ms+" ms";
+
+    els.eq.textContent=money(a.equity_usd);els.usd.textContent=money(a.usd_free);els.btc.textContent=num(a.btc_total,8);
+    els.pnl.textContent=money(a.open_pnl);els.pnl.className=pnlClass(a.open_pnl);
+    els.rpnl.textContent=money(a.realized_pnl_24h);els.rpnl.className=pnlClass(a.realized_pnl_24h);
 
     const stateClass="pill "+(b.state==="OFFLINE"?"bad":b.state==="IDLE"?"warn":"good");
     [els.botBadge,els.stateText,els.tradeState].forEach(x=>{x.className=stateClass;x.textContent=b.state??"—"});
@@ -412,12 +547,17 @@ async function load(){
     els.tradeBtc.textContent=num(a.btc_total,8);els.tradePnl.textContent=money(a.open_pnl);els.tradePnl.className=pnlClass(a.open_pnl);
     els.tradeRpnl.textContent=money(a.realized_pnl_24h);els.tradeRpnl.className=pnlClass(a.realized_pnl_24h);
 
-    els.dbBadge.textContent=s.initialized&&!s.last_error?"POSTGRES LIVE":"DB ISSUE";els.dbBadge.className="pill "+(s.initialized&&!s.last_error?"good":"bad");
+    els.dbBadge.textContent=s.initialized&&!s.last_error?"DB LIVE":"DB ISSUE";els.dbBadge.className="pill "+(s.initialized&&!s.last_error?"good":"bad");
     els.sysDb.textContent=s.initialized&&!s.last_error?"Azure PostgreSQL / Managed Identity":"Issue detected";els.sysDb.className=s.initialized&&!s.last_error?"goodText":"badText";
 
     els.aDaily.textContent=money(an.daily_realized_pnl_usd);els.aDaily.className="v "+pnlClass(an.daily_realized_pnl_usd);
     els.aWeekly.textContent=money(an.weekly_realized_pnl_usd);els.aWeekly.className="v "+pnlClass(an.weekly_realized_pnl_usd);
     els.aWinRate.textContent=num(an.win_rate_pct,2)+"%";els.aDrawdown.textContent=num(an.max_drawdown_pct,2)+"%";
+    els.xDaily.textContent=money(an.daily_realized_pnl_usd);els.xDaily.className="v "+pnlClass(an.daily_realized_pnl_usd);
+    els.xWeekly.textContent=money(an.weekly_realized_pnl_usd);els.xWeekly.className="v "+pnlClass(an.weekly_realized_pnl_usd);
+    els.xWinRate.textContent=num(an.win_rate_pct,2)+"%";els.xWL.textContent=(an.wins??0)+" / "+(an.losses??0);
+    els.xDuration.textContent=an.avg_trade_duration_seconds==null?"—":num(an.avg_trade_duration_seconds/60,1)+" min";
+    els.xFees.textContent=money(an.fees_usd);els.xVolume.textContent=num(an.volume_btc,8);els.xDrawdown.textContent=num(an.max_drawdown_pct,2)+"%";
     els.actorStats.textContent=Object.entries(an.by_actor||{}).map(([k,v])=>k+": "+v.fills+" fills · "+money(v.realized_pnl_usd)+" realized · "+money(v.fees_usd)+" fees").join(" | ")||"No actor statistics yet.";
 
     els.cShort.value=cfg.short_ma;els.cLong.value=cfg.long_ma;els.cStop.value=cfg.stop_loss_pct;els.cSize.value=cfg.position_size_btc;
@@ -427,7 +567,7 @@ async function load(){
 
     els.log.textContent=(l.events||[]).slice(0,30).map(e=>(e.ts?new Date(e.ts).toLocaleTimeString():"--")+"  "+e.level+"  "+e.message).join("\n");
     if(!authConfigured)authenticated=true;
-    refreshAuthUI();
+    refreshAuthUI()
   }catch(e){els.log.textContent="Cannot reach API: "+e.message;toast("Aether API connection problem","bad")}
 }
 
@@ -436,7 +576,8 @@ async function loadHistory(){
   try{
     const all=await Promise.all(names.map(x=>api("/api/v1/history/"+x+"?limit=100")));
     names.forEach((x,i)=>historyCache[x]=all[i].items||[]);
-    els.ledgerCount.textContent=(historyCache.fills?.length||0)+" FILLS";renderLedger();
+    els.ledgerCount.textContent=(historyCache.fills?.length||0)+" FILLS";
+    renderLedger();renderChart()
   }catch(e){els.ledger.innerHTML='<div class="helper bad" style="padding:14px">History unavailable: '+esc(e.message)+'</div>'}
 }
 function setLedger(name){activeLedger=name;document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("active",b.dataset.tab===name));renderLedger()}
@@ -453,7 +594,7 @@ function renderLedger(){
   const cols=specs[activeLedger];
   if(!rows.length){els.ledger.innerHTML='<div class="helper" style="padding:14px">No '+esc(activeLedger)+' records yet.</div>';return}
   els.ledger.innerHTML="<table><thead><tr>"+cols.map(c=>"<th>"+esc(c[0])+"</th>").join("")+"</tr></thead><tbody>"+
-    rows.map(r=>"<tr>"+cols.map(c=>"<td>"+esc(c[1](r))+"</td>").join("")+"</tr>").join("")+"</tbody></table>";
+    rows.map(r=>"<tr>"+cols.map(c=>"<td>"+esc(c[1](r))+"</td>").join("")+"</tr>").join("")+"</tbody></table>"
 }
 
 async function action(url,btn,loading,success,idle){
@@ -461,12 +602,12 @@ async function action(url,btn,loading,success,idle){
   loadingButton(btn,loading);
   try{
     const out=await api(url,{method:"POST",headers:authHeaders()});if(out.ok===false)throw new Error(out.error||"Action rejected");
-    successButton(btn,success,idle);toast(success,"good");
+    successButton(btn,success,idle);toast(success,"good")
   }catch(e){
     if(e.status===401){authenticated=false;refreshAuthUI()}
-    errorButton(btn,"Failed",idle);toast(e.message,"bad");
+    errorButton(btn,"Failed",idle);toast(e.message,"bad")
   }
-  await Promise.all([load(),loadHistory()]);
+  await Promise.all([load(),loadHistory()])
 }
 
 async function saveConfig(){
@@ -476,9 +617,9 @@ async function saveConfig(){
   try{
     const out=await api("/api/v1/config",{method:"POST",headers:{"Content-Type":"application/json",...authHeaders()},body:JSON.stringify(body)});
     if(out.ok===false)throw new Error(out.error||"Configuration rejected");
-    successButton(els.saveCfgBtn,"Saved ✓","Save Configuration");toast("Configuration saved","good");
+    successButton(els.saveCfgBtn,"Saved ✓","Save Configuration");toast("Configuration saved","good")
   }catch(e){errorButton(els.saveCfgBtn,"Failed","Save Configuration");toast(e.message,"bad")}
-  await load();
+  await load()
 }
 
 els.connectBtn.addEventListener("click",()=>verifyToken(true));
@@ -488,11 +629,11 @@ els.stopBtn.addEventListener("click",()=>action("/api/v1/bot/stop",els.stopBtn,"
 els.buyBtn.addEventListener("click",()=>action("/api/v1/orders/market?side=buy",els.buyBtn,"Submitting…","Buy filled ✓","Buy 0.01 BTC"));
 els.sellBtn.addEventListener("click",()=>action("/api/v1/orders/market?side=sell",els.sellBtn,"Submitting…","Sell filled ✓","Sell Position"));
 els.unlockBtn.addEventListener("click",()=>action("/api/v1/risk/unlock",els.unlockBtn,"Unlocking…","Unlocked ✓","Clear Flatten Lock"));
-els.flattenBtn.addEventListener("click",()=>action("/api/v1/orders/flatten",els.flattenBtn,"Flattening…","Flattened ✓","Emergency Flatten & Lock Entries"));
+els.flattenBtn.addEventListener("click",()=>action("/api/v1/orders/flatten",els.flattenBtn,"Flattening…","Flattened ✓","Emergency Flatten & Lock"));
 els.saveCfgBtn.addEventListener("click",saveConfig);
 els.tabs.addEventListener("click",e=>{const b=e.target.closest(".tab");if(b)setLedger(b.dataset.tab)});
 
-const savedPage=sessionStorage.getItem("aether_page");if(["dashboard","trade","activity","settings"].includes(savedPage))setPage(savedPage);
+const savedPage=sessionStorage.getItem("aether_page");if(["home","trade","activity","analytics","settings"].includes(savedPage))setPage(savedPage);
 const remembered=token();if(remembered)els.opToken.value=remembered;
 (async()=>{
   await Promise.all([load(),loadHistory()]);
