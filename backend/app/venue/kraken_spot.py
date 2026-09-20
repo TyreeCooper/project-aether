@@ -101,6 +101,14 @@ class KrakenSpotReadOnlyClient:
         return {str(asset): float(value) for asset, value in raw.items()}
 
     @staticmethod
+    def extract_btc_balance(balances: dict[str, float]) -> float:
+        # Kraken has historically exposed BTC under XBT/XXBT identifiers.
+        for key in ("BTC", "XBT", "XXBT"):
+            if key in balances:
+                return float(balances[key])
+        return 0.0
+
+    @staticmethod
     def assess_permissions(permissions: list[str] | tuple[str, ...]) -> KrakenCredentialAssessment:
         granted = tuple(sorted(set(permissions)))
         required = {"query-funds"}
