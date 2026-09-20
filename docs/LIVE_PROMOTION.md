@@ -31,11 +31,17 @@ Still required before Stage 1 is complete:
 - Require a successful reconciliation immediately before arming whenever venue-account reconciliation is enabled.
 
 ### Stage 2 — validate-only order adapter
-- Implement Kraken Spot order construction using `validate=true`.
-- Submit the exact intended order shape for validation only.
-- Require successful validation before any live promotion.
-- Store request fingerprint and validation result.
-- Never treat validation success as a fill.
+Implemented foundation:
+- Kraken Spot order construction with `validate=true` hard-coded in a dedicated adapter.
+- Dedicated validation credentials separate from read-only reconciliation credentials.
+- Step-up protected validation endpoint.
+- Request fingerprint and validation-result persistence when PostgreSQL is enabled.
+- Validation success is explicitly reported as non-fill/non-live execution.
+
+Still required before Stage 2 is complete:
+- Exercise the adapter against an operator-owned Kraken Spot account.
+- Capture successful and rejected validation fixtures.
+- Add restart/idempotency regression coverage using persisted fingerprints.
 
 ### Stage 3 — qualified Spot test environment
 If Kraken grants Spot test-environment access:
@@ -45,10 +51,15 @@ If Kraken grants Spot test-environment access:
 - Validate kill-switch and restart behavior.
 
 ### Stage 4 — shadow mode
-- Consume live market data and live account state.
-- Generate decisions but send no orders.
-- Compare hypothetical fills/costs against observed market conditions.
-- Require stable operation over a defined evaluation window.
+Implemented foundation:
+- Execution-suppressed strategy decision recording.
+- In-memory operator view and optional PostgreSQL persistence.
+- Buy/sell/stop decisions carry mark, quantity, position context, and would-execute state.
+
+Still required before Stage 4 is complete:
+- Couple shadow decisions to authenticated live account state.
+- Calculate hypothetical fill/cost outcomes against observed market conditions.
+- Define and pass the stable-operation evaluation window.
 
 ### Stage 5 — micro-live
 Only after explicit operator approval:
