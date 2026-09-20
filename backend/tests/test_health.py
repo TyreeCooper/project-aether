@@ -121,3 +121,18 @@ def test_validate_only_route_reports_unconfigured_credentials():
         "ok": False,
         "error": "validate_only_credentials_not_configured",
     }
+
+
+def test_shadow_performance_requires_auth():
+    assert client.get("/api/v1/shadow/performance").status_code == 401
+
+
+def test_shadow_performance_exposes_cost_metrics():
+    response = client.get("/api/v1/shadow/performance", headers=AUTH)
+    assert response.status_code == 200
+    body = response.json()
+    assert "realized_session" in body
+    assert "total_fees" in body
+    assert "total_spread_cost" in body
+    assert "total_slippage_cost" in body
+    assert "max_drawdown_pct" in body
