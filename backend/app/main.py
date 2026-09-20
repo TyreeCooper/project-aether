@@ -7,6 +7,8 @@ from pydantic import BaseModel, Field
 
 from app.engine import engine
 from app.security import AuthContext, require_operator, require_step_up
+from app.config import settings
+from app.venue import KrakenSpotReadOnlyClient
 
 
 @asynccontextmanager
@@ -190,3 +192,43 @@ async def unlock(_auth: AuthContext = Depends(require_step_up)):
 @app.post("/api/v1/risk/reset-fault")
 async def reset_fault(_auth: AuthContext = Depends(require_step_up)):
     return await engine.reset_fault()
+
+
+@app.get("/api/v1/venue/kraken/readiness")
+async def kraken_readiness(_auth: AuthContext = Depends(require_operator)):
+    if not settings.kraken_read_api_key or not settings.kraken_read_api_secret:
+        return {
+            "configured": False,
+            "ready": False,
+            "reason": "read_only_credentials_not_configured",
+        }
+
+    client = KrakenSpotReadOnlyClient(
+        api_key=settings.kraken_read_api_key,
+        api_secret=settings.kraken_read_api_secret,
+    )
+
+    try:
+        key_info = await client.get_api_key_info()
+        permissions = key_info.get("permissions") or []
+        assessment = client.assess_permissions(permissions)
+
+        response = {
+            "configured": True,
+            "ready": assessment.valid_for_read_only_reconciliation,
+            "missing_permissions": list(assessment.missing_permissions),
+            "prohibited_permissions": list(assessment.prohibited_permissions),
+            "ip_allowlist_configured": bool(key_info.get("ipAllowlist")),
+        }
+
+        if assessment.valid_for_read_only_reconciliation:
+            balances = await client.get_balances()
+            response["btc_balance"] = client.extract_btc_balance(balances)
+
+        return response
+    except Exception:
+        return {
+            "configured": True,
+            "ready": False,
+            "reason": "kraken_readiness_check_failed",
+        }
