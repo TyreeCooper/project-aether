@@ -78,3 +78,10 @@ When enabled, paper orders, fills, portfolio snapshots, and structured audit eve
 Aether now fails closed after repeated missing/failed market marks. The watchdog trips the flatten lock and moves the bot to `FAULT`. A FAULT cannot be cleared by the ordinary unlock route.
 
 The operator must provide step-up authorization and call `POST /api/v1/risk/reset-fault`. Reset succeeds only after fresh market data has been observed, and the bot returns to `OFFLINE` rather than automatically re-arming.
+
+
+## Pre-arm readiness gates
+
+Arming remains a separate explicit operator action. When configured, Aether now checks durable persistence health and fresh venue reconciliation before moving from `OFFLINE` to an armed state.
+
+A reconciliation mismatch is fail-closed: it engages the flatten lock and transitions the engine to `FAULT`. A matching reconciliation records freshness but does not arm the strategy.
