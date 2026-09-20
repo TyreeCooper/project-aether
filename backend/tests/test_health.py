@@ -88,3 +88,36 @@ def test_kraken_reconcile_requires_read_only_credentials():
         "ok": False,
         "error": "read_only_credentials_not_configured",
     }
+
+
+def test_shadow_decisions_route_requires_auth():
+    assert client.get("/api/v1/shadow/decisions").status_code == 401
+
+
+def test_shadow_decisions_route_exposes_mode():
+    response = client.get("/api/v1/shadow/decisions", headers=AUTH)
+    assert response.status_code == 200
+    assert "enabled" in response.json()
+    assert "decisions" in response.json()
+
+
+def test_validate_only_route_requires_step_up():
+    response = client.post(
+        "/api/v1/venue/kraken/validate-order",
+        headers=AUTH,
+        json={"side": "buy", "qty": 0.001},
+    )
+    assert response.status_code == 403
+
+
+def test_validate_only_route_reports_unconfigured_credentials():
+    response = client.post(
+        "/api/v1/venue/kraken/validate-order",
+        headers=STEP_UP,
+        json={"side": "buy", "qty": 0.001},
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "ok": False,
+        "error": "validate_only_credentials_not_configured",
+    }
