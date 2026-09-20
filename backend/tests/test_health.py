@@ -4,6 +4,12 @@ from app.main import app
 
 client = TestClient(app)
 
+AUTH = {"Authorization": "Bearer dev-only-change-me"}
+STEP_UP = {
+    "Authorization": "Bearer dev-only-change-me",
+    "X-Aether-Step-Up": "dev-only-step-up-change-me",
+}
+
 
 def test_health_ok():
     response = client.get("/api/v1/health")
@@ -13,13 +19,24 @@ def test_health_ok():
     assert body["env"] == "paper"
 
 
+def test_operator_routes_require_auth():
+    assert client.get("/api/v1/status").status_code == 401
+    assert client.get("/api/v1/account").status_code == 401
+
+
+def test_step_up_routes_require_second_secret():
+    assert client.post("/api/v1/bot/start", headers=AUTH).status_code == 403
+    assert client.post("/api/v1/risk/unlock", headers=AUTH).status_code == 403
+
+
 def test_bot_starts_offline():
-    response = client.get("/api/v1/bot")
+    response = client.get("/api/v1/bot", headers=AUTH)
+    assert response.status_code == 200
     assert response.json()["state"] == "OFFLINE"
 
 
 def test_status_route_exposes_safety_flags():
-    response = client.get("/api/v1/status")
+    response = client.get("/api/v1/status", headers=AUTH)
     assert response.status_code == 200
     body = response.json()
     assert body["paper_mode"] is True
@@ -28,7 +45,7 @@ def test_status_route_exposes_safety_flags():
 
 
 def test_performance_route_exposes_cost_and_risk_metrics():
-    response = client.get("/api/v1/performance")
+    response = client.get("/api/v1/performance", headers=AUTH)
     assert response.status_code == 200
     body = response.json()
     assert "net_realized_pnl" in body
@@ -39,8 +56,18 @@ def test_performance_route_exposes_cost_and_risk_metrics():
 
 
 def test_orders_trades_and_positions_routes_exist():
-    assert client.get("/api/v1/orders").status_code == 200
-    assert client.get("/api/v1/trades").status_code == 200
-    positions = client.get("/api/v1/positions")
+    assert client.get("/api/v1/orders", headers=AUTH).status_code == 200
+    assert client.get("/api/v1/trades", headers=AUTH).status_code == 200
+    positions = client.get("/api/v1/positions", headers=AUTH)
     assert positions.status_code == 200
     assert "positions" in positions.json()
+
+
+def test_stop_and_flatten_need_operator_auth_not_step_up():
+    assert client.post("/api/v1/bot/stop", headers=AUTH).status_code == 200
+    assert client.post("/api/v1/orders/flatten", headers=AUTH).status_code == 200
+
+
+def test_step_up_accepts_valid_second_secret():
+    response = client.post("/api/v1/risk/unlock", headers=STEP_UP)
+    assert response.status_code == 200
