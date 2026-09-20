@@ -400,6 +400,108 @@ class DatabaseStore:
             except Exception as exc:
                 self.last_error = f"{type(exc).__name__}: {exc}"
 
+
+    @staticmethod
+    def _row_to_dict(row: asyncpg.Record) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in dict(row).items():
+            if isinstance(value, datetime):
+                result[key] = value.isoformat()
+            else:
+                result[key] = value
+        return result
+
+    async def _fetch_history(
+        self,
+        sql: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        if not self.initialized:
+            return []
+        safe_limit = max(1, min(int(limit), 500))
+        try:
+            conn = await self._connect()
+            try:
+                rows = await conn.fetch(sql, safe_limit)
+            finally:
+                await conn.close()
+            self.last_error = None
+            return [self._row_to_dict(row) for row in rows]
+        except Exception as exc:
+            self.last_error = f"{type(exc).__name__}: {exc}"
+            return []
+
+    async def history_orders(self, limit: int = 100) -> list[dict[str, Any]]:
+        return await self._fetch_history(
+            """
+            SELECT execution_id, ts, actor, side, requested_qty_btc,
+                   status, paper_mode, created_at
+            FROM aether_order
+            ORDER BY ts DESC
+            LIMIT $1
+            """,
+            limit,
+        )
+
+    async def history_fills(self, limit: int = 100) -> list[dict[str, Any]]:
+        return await self._fetch_history(
+            """
+            SELECT execution_id, ts, actor, side, qty_btc, price_usd,
+                   fee_usd, realized_pnl_usd, created_at
+            FROM aether_fill
+            ORDER BY ts DESC
+            LIMIT $1
+            """,
+            limit,
+        )
+
+    async def history_risk(self, limit: int = 100) -> list[dict[str, Any]]:
+        return await self._fetch_history(
+            """
+            SELECT event_key, ts, reason, context, created_at
+            FROM aether_risk_event
+            ORDER BY ts DESC
+            LIMIT $1
+            """,
+            limit,
+        )
+
+    async def history_account(self, limit: int = 100) -> list[dict[str, Any]]:
+        return await self._fetch_history(
+            """
+            SELECT id, ts, usd, btc, equity, realized_session,
+                   daily_realized, peak_equity
+            FROM aether_account_snapshot
+            ORDER BY id DESC
+            LIMIT $1
+            """,
+            limit,
+        )
+
+    async def history_positions(self, limit: int = 100) -> list[dict[str, Any]]:
+        return await self._fetch_history(
+            """
+            SELECT id, ts, state, btc, avg_entry, mark, open_pnl
+            FROM aether_position_snapshot
+            ORDER BY id DESC
+            LIMIT $1
+            """,
+            limit,
+        )
+
+    async def history_bot(self, limit: int = 100) -> list[dict[str, Any]]:
+        return await self._fetch_history(
+            """
+            SELECT id, ts, state, strategy, short_ma, long_ma,
+                   stop_loss_pct, position_size_btc,
+                   max_position_btc, flatten_lock
+            FROM aether_bot_snapshot
+            ORDER BY id DESC
+            LIMIT $1
+            """,
+            limit,
+        )
+
     def schedule_save(self, payload: dict[str, Any]) -> None:
         if not self.initialized:
             return

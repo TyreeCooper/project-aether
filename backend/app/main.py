@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -24,7 +24,7 @@ async def lifespan(_: FastAPI):
         await db_store.close()
 
 
-app = FastAPI(title="Project Aether API", version="0.5.1", lifespan=lifespan)
+app = FastAPI(title="Project Aether API", version="0.6.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -110,6 +110,38 @@ async def account():
 @app.get("/api/v1/audit")
 async def audit():
     return {"events": list(engine.audit)}
+
+
+
+
+@app.get("/api/v1/history/orders")
+async def history_orders(limit: int = Query(default=100, ge=1, le=500)):
+    return {"items": await db_store.history_orders(limit), "limit": limit}
+
+
+@app.get("/api/v1/history/fills")
+async def history_fills(limit: int = Query(default=100, ge=1, le=500)):
+    return {"items": await db_store.history_fills(limit), "limit": limit}
+
+
+@app.get("/api/v1/history/risk")
+async def history_risk(limit: int = Query(default=100, ge=1, le=500)):
+    return {"items": await db_store.history_risk(limit), "limit": limit}
+
+
+@app.get("/api/v1/history/account")
+async def history_account(limit: int = Query(default=100, ge=1, le=500)):
+    return {"items": await db_store.history_account(limit), "limit": limit}
+
+
+@app.get("/api/v1/history/positions")
+async def history_positions(limit: int = Query(default=100, ge=1, le=500)):
+    return {"items": await db_store.history_positions(limit), "limit": limit}
+
+
+@app.get("/api/v1/history/bot")
+async def history_bot(limit: int = Query(default=100, ge=1, le=500)):
+    return {"items": await db_store.history_bot(limit), "limit": limit}
 
 
 @app.post("/api/v1/bot/start")
