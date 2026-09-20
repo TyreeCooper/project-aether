@@ -1,60 +1,42 @@
 # Project Aether
 
-Automated Bitcoin (BTC/USD) operator console and execution engine.
+Paper-first Bitcoin (BTC/USD) operator console.
 
-**Status:** Phase 0 skeleton (foundations). Paper / sandbox only. This repository does not authorize live capital.
+**Status:** Paper machine + public SMA rule + mobile-friendly web app. Live execution is blocked.
 
-Specification: see `docs/` and the v1.1 functional specification.
+## What it does now
 
-## Architecture (v1)
+- Starts a paper ledger at $10,000 USD
+- Polls a public BTC/USD mark
+- Evaluates a published dual-SMA crossover (8 / 21) after warm-up
+- Simulates fills with a fee so the blotter is not fantasy
+- Lets you arm, pause, ticket, and flatten from a phone-sized layout
 
-| Layer | Stack |
-| --- | --- |
-| Dashboard | Next.js + Tailwind CSS |
-| API / engine | Python 3.12, FastAPI, asyncio |
-| Exchange adapter | CCXT (Kraken first; Coinbase Advanced portable) |
-| Hot cache | Redis 7 |
-| System of record | PostgreSQL 16 + Alembic |
-
-Design constraints from the specification:
-
-- Secrets never leave the backend.
-- Execution uses the venue tape only.
-- Fail closed: process restart leaves the bot OFFLINE.
-- Withdraw / transfer API permissions are forbidden.
-
-## Quick start (local)
+## Quick start
 
 ```bash
 cp .env.example .env
-# edit OPERATOR_PASSWORD and OPERATOR_AUTH_SECRET
-docker compose up --build
+cd backend
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
 ```
 
-- API health: http://localhost:8000/api/v1/health
-- API docs: http://localhost:8000/docs
-- Dashboard: http://localhost:3000
+In another terminal:
 
-## Repository layout
-
-```
-backend/          FastAPI application
-frontend/         Next.js dashboard shell
-docs/             Phase notes
-docker-compose.yml
-.env.example      Required variables (no secrets)
+```bash
+cd frontend
+npm install
+npm run dev
 ```
 
-## Roadmap
+Open http://localhost:3000 on a phone or browser.
 
-0. Foundations (this commit)
-1. Market data dual feed
-2. Account snapshots and audit log
-3. Risk Guard and paper execution
-4. SMA crossover strategy
-5. Hardening and go-live checklist
-6. Limited live (minimum size only, after written approval)
+Tap **Start** to arm the bot. It stays OFFLINE on process boot (fail closed).
+
+## Rule under test
+
+Long-only SMA cross on the public mark series. Stop at 2% below average entry. This rule may lose money. Paper exists to keep or kill it without live BTC.
 
 ## Safety
 
-Do not place live API keys in this repository. Do not enable withdraw on any key. Do not set `AETHER_ENV=live` until Phase 5 exit criteria are met.
+Do not set live keys. Do not treat paper equity as a forecast of live results.
