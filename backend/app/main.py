@@ -1,3 +1,4 @@
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -15,9 +16,16 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="Project Aether API", version="0.2.0", lifespan=lifespan)
 
+_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+if os.getenv("FRONTEND_ORIGIN"):
+    _origins.append(os.getenv("FRONTEND_ORIGIN"))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
