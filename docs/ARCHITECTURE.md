@@ -29,6 +29,8 @@ PaperPortfolio
 
 The current reference strategy is a long-only SMA 8/21 crossover. It exists to exercise the platform, not as a claim of profitable alpha.
 
+The default paper feed is Kraken Spot WebSocket v2 ticker data for `BTC/USD`; CoinGecko remains the historical warm-up source and can also be selected explicitly with `MARKET_DATA_PROVIDER=coingecko`.
+
 ## Module boundaries
 
 - `app/market_data/` — price-provider contracts and the current CoinGecko paper provider.
@@ -40,7 +42,7 @@ The current reference strategy is a long-only SMA 8/21 crossover. It exists to e
 - `app/portfolio/` — cash, BTC, cost basis, realized/open P&L, drawdown, and trade statistics.
 - `app/audit/` — structured audit envelope and current in-memory sink.
 - `app/db/` — SQLAlchemy durable-ledger models, async sessions, and the optional ledger repository.
-- `app/main.py` — versioned FastAPI operator API.
+- `app/security/` — operator bearer authentication and step-up authorization.\n- `app/main.py` — versioned FastAPI operator API.
 - `frontend/` — mobile-first Next.js operator console.
 
 ## Safety boundary
