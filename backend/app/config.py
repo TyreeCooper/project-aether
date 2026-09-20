@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     aether_env: str = "paper"
     venue: str = "kraken"
     symbol: str = "BTC/USD"
+    market_data_provider: str = "kraken_ws"
     database_url: str = "postgresql+asyncpg://aether:aether@localhost:5432/aether"
     redis_url: str = "redis://localhost:6379/0"
     persistence_enabled: bool = False
