@@ -51,3 +51,14 @@ Step-up is required for:
 Emergency stop/flatten remain available with normal operator authentication so the extra authorization step cannot delay a safety action.
 
 The browser console does not contain either secret at build time. They are entered into in-memory UI state for the current tab.
+
+
+## Arming gates
+
+`POST /bot/start` fails closed when any enabled prerequisite is unhealthy.
+
+Current optional gates:
+- PostgreSQL persistence: when `AETHER_PERSISTENCE_ENABLED=true`, the database must pass a round-trip health probe.
+- Venue reconciliation: when `VENUE_RECONCILIATION_REQUIRED=true`, the most recent successful reconciliation must be newer than `VENUE_RECONCILIATION_MAX_AGE_SECONDS`.
+
+A successful reconciliation does not arm the bot. It only satisfies the reconciliation prerequisite.
