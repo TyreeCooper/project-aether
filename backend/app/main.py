@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from app.db import db_store
 from app.engine import engine
 
 STATIC = Path(__file__).parent / "static"
@@ -13,11 +14,16 @@ STATIC = Path(__file__).parent / "static"
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    await engine.initialize_persistence()
     engine.start_loop()
-    yield
+    try:
+        yield
+    finally:
+        await engine.shutdown()
+        await db_store.close()
 
 
-app = FastAPI(title="Project Aether API", version="0.4.0", lifespan=lifespan)
+app = FastAPI(title="Project Aether API", version="0.5.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -48,7 +54,13 @@ async def health():
         "stale": snap.get("stale"),
         "paper_mode": True,
         "live_blocked": True,
+        "storage": db_store.status(),
     }
+
+
+@app.get("/api/v1/storage")
+async def storage():
+    return db_store.status()
 
 
 @app.get("/api/v1/bot")
