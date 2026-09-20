@@ -83,3 +83,18 @@ button.danger { background: #3a1515; border-color: var(--bad); color: #ffd0d0; }
 .muted { color: var(--muted); font-size: 13px; }
 .up { color: var(--good); }
 .down { color: var(--bad); }
+
+.auth-grid { display: grid; gap: 10px; }
+@media (min-width: 800px) {
+  .auth-grid { grid-template-columns: 1fr 1fr; }
+}
+.auth-grid label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
+.auth-grid input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  color: var(--text);
+  background: #081827;
+  border: 1px solid var(--line);
+  font: inherit;
+}

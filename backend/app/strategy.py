@@ -24,7 +24,12 @@ def crossover_signal(
     prev_long = sma(closes[:-1], long_len)
     cur_short = sma(closes, short_len)
     cur_long = sma(closes, long_len)
-    if None in (prev_short, prev_long, cur_short, cur_long):
+    if (
+        prev_short is None
+        or prev_long is None
+        or cur_short is None
+        or cur_long is None
+    ):
         return None
     if not in_position and prev_short <= prev_long and cur_short > cur_long:
         return "buy"

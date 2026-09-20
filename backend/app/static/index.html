@@ -6,25 +6,32 @@
 <title>Aether Paper</title>
 <style>
 body{margin:0;font-family:system-ui;background:#071422;color:#e8eef4}
-.wrap{max-width:640px;margin:0 auto;padding:12px 12px 90px}
+.wrap{max-width:680px;margin:0 auto;padding:12px 12px 90px}
 .bar{display:flex;justify-content:space-between;align-items:center;background:#0d1f33;padding:12px;border:1px solid #1c3a55}
 .card{background:#0d1f33;border:1px solid #1c3a55;padding:14px;margin-top:10px}
 h2{margin:0 0 8px;font-size:11px;color:#8aa0b5;letter-spacing:.08em}
-.row{display:flex;justify-content:space-between;margin:8px 0;font-size:16px}
-button{min-height:44px;flex:1;margin:4px;background:#12314a;color:#fff;border:1px solid #1c3a55}
-.rowbtns{display:flex}
-.bad{background:#3a1515;border-color:#e05b5b}
-.dock{position:fixed;left:0;right:0;bottom:0;padding:10px;background:#061018}
-.dock button{width:100%;margin:0}
-.log{font:12px monospace;color:#8aa0b5;white-space:pre-wrap;max-height:180px;overflow:auto}
-.warn{color:#e0a24b}
+.row{display:flex;justify-content:space-between;gap:12px;margin:8px 0;font-size:15px}
+button,input{min-height:44px;background:#12314a;color:#fff;border:1px solid #1c3a55;padding:10px}
+input{width:100%;box-sizing:border-box;background:#081827}
+.rowbtns{display:flex;gap:6px;flex-wrap:wrap}.rowbtns button{flex:1}
+.bad{background:#3a1515;border-color:#e05b5b}.dock{position:fixed;left:0;right:0;bottom:0;padding:10px;background:#061018}
+.dock button{width:100%;margin:0}.log{font:12px monospace;color:#8aa0b5;white-space:pre-wrap;max-height:180px;overflow:auto}
+.warn{color:#e0a24b}.muted{color:#8aa0b5;font-size:12px}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <div class="bar"><b>AETHER PAPER</b><span class="warn">PAPER</span></div>
+  <div class="bar"><b>AETHER PAPER</b><span class="warn">LIVE BLOCKED</span></div>
   <div class="card">
-    <h2>ACCOUNT</h2>
+    <h2>OPERATOR AUTH</h2>
+    <input id="operatorToken" type="password" autocomplete="off" placeholder="Operator token"/>
+    <div style="height:8px"></div>
+    <input id="stepUpToken" type="password" autocomplete="off" placeholder="Step-up token"/>
+    <p class="muted">Tokens remain in this page's memory only.</p>
+  </div>
+  <div class="card">
+    <h2>SYSTEM / ACCOUNT</h2>
+    <div class="row"><span>State</span><span id="st">-</span></div>
     <div class="row"><span>Mark</span><span id="mark">-</span></div>
     <div class="row"><span>USD</span><span id="usd">-</span></div>
     <div class="row"><span>BTC</span><span id="btc">-</span></div>
@@ -32,34 +39,47 @@ button{min-height:44px;flex:1;margin:4px;background:#12314a;color:#fff;border:1p
     <div class="row"><span>Open P/L</span><span id="pnl">-</span></div>
   </div>
   <div class="card">
-    <h2>BOT</h2>
-    <div class="row"><span>State</span><span id="st">-</span></div>
+    <h2>CONTROLS</h2>
     <div class="rowbtns">
-      <button onclick="p('/api/v1/bot/start')">Start</button>
+      <button onclick="p('/api/v1/bot/start',true)">Start</button>
       <button onclick="p('/api/v1/bot/stop')">Stop</button>
-      <button onclick="p('/api/v1/orders/market?side=buy')">Buy</button>
-      <button onclick="p('/api/v1/orders/market?side=sell')">Sell</button>
+      <button onclick="p('/api/v1/orders/market?side=buy',true)">Buy</button>
+      <button onclick="p('/api/v1/orders/market?side=sell',true)">Sell</button>
     </div>
   </div>
-  <div class="card"><h2>AUDIT</h2><div class="log" id="log"></div></div>
+  <div class="card"><h2>AUDIT</h2><div class="log" id="log">Enter operator token.</div></div>
 </div>
 <div class="dock"><button class="bad" onclick="p('/api/v1/orders/flatten')">Emergency flatten</button></div>
 <script>
+const auth=(step=false)=>{
+  const h={};
+  if(operatorToken.value)h.Authorization='Bearer '+operatorToken.value;
+  if(step&&stepUpToken.value)h['X-Aether-Step-Up']=stepUpToken.value;
+  return h;
+};
 async function load(){
+  if(!operatorToken.value){log.textContent='Enter operator token.';return;}
   try{
     const [a,b,l]=await Promise.all([
-      fetch('/api/v1/account').then(r=>r.json()),
-      fetch('/api/v1/bot').then(r=>r.json()),
-      fetch('/api/v1/audit').then(r=>r.json())
+      fetch('/api/v1/account',{headers:auth()}).then(r=>{if(!r.ok)throw Error(r.status);return r.json()}),
+      fetch('/api/v1/bot',{headers:auth()}).then(r=>{if(!r.ok)throw Error(r.status);return r.json()}),
+      fetch('/api/v1/audit',{headers:auth()}).then(r=>{if(!r.ok)throw Error(r.status);return r.json()})
     ]);
-    mark.textContent=a.mark??'-'; usd.textContent=a.usd_free??'-';
-    btc.textContent=a.btc_total??'-'; eq.textContent=a.equity_usd??'-';
-    pnl.textContent=a.open_pnl??'-'; st.textContent=b.state??'-';
+    mark.textContent=a.mark??'-';usd.textContent=a.usd_free??'-';btc.textContent=a.btc_total??'-';
+    eq.textContent=a.equity_usd??'-';pnl.textContent=a.open_pnl??'-';st.textContent=b.state??'-';
     log.textContent=(l.events||[]).slice(0,20).map(e=>(e.ts||'').slice(11,19)+' '+e.level+' '+e.message).join('\n');
-  }catch(e){log.textContent='Cannot reach API';}
+  }catch(e){log.textContent='Authenticated API request failed: '+e.message;}
 }
-async function p(url){await fetch(url,{method:'POST'}); load();}
-load(); setInterval(load,4000);
+async function p(url,step=false){
+  try{
+    const r=await fetch(url,{method:'POST',headers:auth(step)});
+    const b=await r.json();
+    if(!r.ok||b.ok===false)log.textContent=b.detail||b.error||('HTTP '+r.status);
+  }catch(e){log.textContent='Action failed: '+e.message;}
+  await load();
+}
+operatorToken.addEventListener('change',load);
+load();setInterval(load,4000);
 </script>
 </body>
 </html>
