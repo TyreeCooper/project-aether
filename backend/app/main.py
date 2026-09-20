@@ -14,7 +14,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="Project Aether API", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="Project Aether API", version="0.3.0", lifespan=lifespan)
 
 _origins = [
     "http://localhost:3000",
@@ -68,7 +68,12 @@ async def account():
         "btc_total": snap["btc"],
         "equity_usd": snap["equity"],
         "realized_pnl_24h": snap["daily_realized"],
+        "realized_pnl_session": snap["realized_session"],
+        "gross_realized_pnl": snap["gross_realized"],
         "open_pnl": snap["open_pnl"],
+        "total_fees": snap["total_fees"],
+        "total_spread_cost": snap["total_spread_cost"],
+        "total_slippage_cost": snap["total_slippage_cost"],
         "margin_utilized_pct": 0.0,
         "mark_source": snap["mark_source"],
         "mark": snap["mark"],
