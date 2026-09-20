@@ -1,9 +1,4 @@
-"""Deterministic paper execution gateway.
-
-Current behavior intentionally matches the previous engine: fill at mark and charge
-a taker fee. Spread/slippage fields are explicit so later paper realism can be
-added without changing the engine contract.
-"""
+"""Deterministic paper execution gateway with explicit execution costs."""
 
 from __future__ import annotations
 
@@ -11,14 +6,39 @@ from app.execution.base import ExecutionGateway, ExecutionResult, OrderRequest
 
 
 class PaperExecutionGateway(ExecutionGateway):
-    def __init__(self, taker_fee_rate: float) -> None:
-        if taker_fee_rate < 0:
-            raise ValueError("taker_fee_rate must be non-negative")
+    def __init__(
+        self,
+        taker_fee_rate: float,
+        *,
+        spread_bps: float = 0.0,
+        slippage_bps: float = 0.0,
+    ) -> None:
+        if taker_fee_rate < 0 or spread_bps < 0 or slippage_bps < 0:
+            raise ValueError("execution cost inputs must be non-negative")
         self.taker_fee_rate = taker_fee_rate
+        self.spread_bps = spread_bps
+        self.slippage_bps = slippage_bps
 
     async def execute_market(self, request: OrderRequest) -> ExecutionResult:
-        execution_price = request.reference_price
+        half_spread_fraction = (self.spread_bps / 2.0) / 10_000.0
+        slippage_fraction = self.slippage_bps / 10_000.0
+        direction = 1.0 if request.side == "buy" else -1.0
+
+        execution_price = request.reference_price * (
+            1.0 + direction * (half_spread_fraction + slippage_fraction)
+        )
+        spread_cost = (
+            request.reference_price
+            * request.qty
+            * half_spread_fraction
+        )
+        slippage_cost = (
+            request.reference_price
+            * request.qty
+            * slippage_fraction
+        )
         fee = execution_price * request.qty * self.taker_fee_rate
+
         return ExecutionResult(
             client_order_id=request.client_order_id,
             side=request.side,
@@ -26,4 +46,6 @@ class PaperExecutionGateway(ExecutionGateway):
             reference_price=request.reference_price,
             execution_price=execution_price,
             fee_usd=fee,
+            spread_cost_usd=spread_cost,
+            slippage_cost_usd=slippage_cost,
         )
