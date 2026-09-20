@@ -33,6 +33,22 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def fee_inclusive_avg_entry(
+    current_avg: float,
+    current_qty: float,
+    price: float,
+    qty: float,
+    fee: float,
+) -> float:
+    """Weighted BTC cost basis including buy-side fees."""
+    new_qty = current_qty + qty
+    if new_qty <= 0:
+        return 0.0
+    prior_cost = current_avg * current_qty
+    new_cost = price * qty + fee
+    return (prior_cost + new_cost) / new_qty
+
+
 class PaperEngine:
     def __init__(self) -> None:
         self.paper_mode = True
@@ -351,10 +367,12 @@ class PaperEngine:
         realized_pnl = 0.0
         if side == "buy":
             new_qty = self.btc + qty
-            self.avg_entry = (
-                (self.avg_entry * self.btc + price * qty) / new_qty
-                if new_qty
-                else 0.0
+            self.avg_entry = fee_inclusive_avg_entry(
+                self.avg_entry,
+                self.btc,
+                price,
+                qty,
+                fee,
             )
             self.usd -= price * qty + fee
             self.btc = new_qty
