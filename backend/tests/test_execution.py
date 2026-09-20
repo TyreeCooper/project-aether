@@ -1,6 +1,6 @@
 import asyncio
 
-from app.execution import OrderRequest, PaperExecutionGateway
+from app.execution import DuplicateOrderError, OrderRequest, PaperExecutionGateway
 
 
 def _run(gateway: PaperExecutionGateway, *, side: str = "buy"):
@@ -54,3 +54,23 @@ def test_sell_fill_moves_against_trader_for_spread_and_slippage():
     )
 
     assert round(fill.execution_price, 2) == 49_950.00
+
+
+def test_duplicate_client_order_id_is_rejected():
+    async def run():
+        gateway = PaperExecutionGateway(taker_fee_rate=0.0)
+        request = OrderRequest(
+            side="buy",
+            qty=0.01,
+            reference_price=50_000.0,
+            actor="test",
+            client_order_id="fixed-id",
+        )
+        await gateway.execute_market(request)
+        try:
+            await gateway.execute_market(request)
+        except DuplicateOrderError:
+            return
+        raise AssertionError("duplicate order was not rejected")
+
+    asyncio.run(run())
