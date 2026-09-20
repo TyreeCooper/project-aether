@@ -37,6 +37,8 @@ POSITION_BTC = 0.01
 MAX_POSITION_BTC = 0.02
 MAX_DRAWDOWN_PCT = 8.0
 DAILY_LOSS_CAP = 250.0
+MAX_CONSECUTIVE_MARK_FAILURES = 3
+MAX_MARK_AGE_MS = 30_000
 SYMBOL = "BTC/USD"
 
 
@@ -92,6 +94,7 @@ class PaperEngine:
         self.mark_source = "unavailable"
         self.last_tick_age_ms: int | None = None
         self._last_tick_mono: float | None = None
+        self._consecutive_mark_failures = 0
         self.closes: deque[float] = deque(maxlen=300)
         self.orders: deque[dict[str, Any]] = deque(maxlen=500)
         self.fills: deque[dict[str, Any]] = deque(maxlen=500)
@@ -117,6 +120,20 @@ class PaperEngine:
 
     def _set_state(self, target: BotState | str) -> None:
         self.state = transition(self.state, target).value
+
+    def _trip_market_data_kill_switch(self, reason: str) -> None:
+        self.flatten_lock = True
+        self._set_state(BotState.FAULT)
+        self._log(
+            "ERROR",
+            f"Market-data kill switch tripped: {reason}",
+            component="risk_guard",
+            event="market_data_kill_switch",
+            payload={
+                "reason": reason,
+                "consecutive_failures": self._consecutive_mark_failures,
+            },
+        )
 
     def _log(
         self,
@@ -207,6 +224,8 @@ class PaperEngine:
             "mark": self.mark,
             "mark_source": self.mark_source,
             "last_tick_age_ms": age,
+            "consecutive_mark_failures": self._consecutive_mark_failures,
+            "max_mark_age_ms": MAX_MARK_AGE_MS,
             "usd": p.usd,
             "btc": p.btc,
             "equity": p.equity,
@@ -570,18 +589,37 @@ class PaperEngine:
         try:
             snapshot = await self.market_data.get_mark(self.symbol)
         except Exception as exc:
+            self._consecutive_mark_failures += 1
             self._log(
                 "WARN",
                 f"Mark fetch failed: {exc}",
                 component="market_data",
                 event="mark_fetch_failed",
+                payload={"consecutive_failures": self._consecutive_mark_failures},
             )
+            if self._consecutive_mark_failures >= MAX_CONSECUTIVE_MARK_FAILURES:
+                async with self._lock:
+                    if self.state != BotState.FAULT.value:
+                        self._trip_market_data_kill_switch("mark_fetch_failure_threshold")
             return
 
         if snapshot is None:
+            self._consecutive_mark_failures += 1
+            self._log(
+                "WARN",
+                "Market data provider returned no fresh mark.",
+                component="market_data",
+                event="mark_unavailable",
+                payload={"consecutive_failures": self._consecutive_mark_failures},
+            )
+            if self._consecutive_mark_failures >= MAX_CONSECUTIVE_MARK_FAILURES:
+                async with self._lock:
+                    if self.state != BotState.FAULT.value:
+                        self._trip_market_data_kill_switch("mark_unavailable_threshold")
             return
 
         async with self._lock:
+            self._consecutive_mark_failures = 0
             self.mark = snapshot.price
             self.mark_source = snapshot.source
             self.closes.append(snapshot.price)
@@ -681,6 +719,8 @@ class PaperEngine:
 
     async def unlock(self) -> dict[str, Any]:
         async with self._lock:
+            if self.state == BotState.FAULT.value:
+                return {"ok": False, "error": "fault_requires_reset"}
             self.flatten_lock = False
             self._log(
                 "INFO",
@@ -688,6 +728,34 @@ class PaperEngine:
                 actor="operator",
                 component="risk_guard",
                 event="flatten_lock_cleared",
+            )
+            return {"ok": True, **self.snapshot()}
+
+    async def reset_fault(self) -> dict[str, Any]:
+        async with self._lock:
+            if self.state != BotState.FAULT.value:
+                return {"ok": False, "error": "not_in_fault"}
+
+            age = None
+            if self._last_tick_mono is not None:
+                age = int((time.monotonic() - self._last_tick_mono) * 1000)
+
+            if (
+                self.mark is None
+                or age is None
+                or age > MAX_MARK_AGE_MS
+                or self._consecutive_mark_failures > 0
+            ):
+                return {"ok": False, "error": "market_data_not_fresh"}
+
+            self._set_state(BotState.OFFLINE)
+            self.flatten_lock = False
+            self._log(
+                "INFO",
+                "FAULT reset after fresh market data verification; bot remains OFFLINE.",
+                actor="operator",
+                component="risk_guard",
+                event="fault_reset",
             )
             return {"ok": True, **self.snapshot()}
 
