@@ -17,6 +17,14 @@ import httpx
 
 
 @dataclass(frozen=True)
+class KrakenValidationResult:
+    valid: bool
+    client_order_id: str
+    description: str | None
+    raw_result: dict
+
+
+@dataclass(frozen=True)
 class KrakenCredentialAssessment:
     valid_for_read_only_reconciliation: bool
     permissions: tuple[str, ...]
@@ -125,4 +133,52 @@ class KrakenSpotReadOnlyClient:
             permissions=granted,
             missing_permissions=missing,
             prohibited_permissions=dangerous,
+        )
+
+
+
+class KrakenSpotValidateOnlyClient(KrakenSpotReadOnlyClient):
+    """Kraken Spot order validator that cannot submit a live order.
+
+    Every request sent through validate_market_order hard-codes validate=true.
+    There is deliberately no generic order-placement method.
+    """
+
+    async def validate_market_order(
+        self,
+        *,
+        pair: str,
+        side: str,
+        volume: float,
+        client_order_id: str,
+    ) -> KrakenValidationResult:
+        if side not in {"buy", "sell"}:
+            raise ValueError("side must be buy or sell")
+        if volume <= 0:
+            raise ValueError("volume must be positive")
+        if not pair:
+            raise ValueError("pair is required")
+        if not client_order_id:
+            raise ValueError("client_order_id is required")
+
+        result = await self._private_post(
+            "/0/private/AddOrder",
+            {
+                "ordertype": "market",
+                "type": side,
+                "volume": format(volume, ".12g"),
+                "pair": pair,
+                "cl_ord_id": client_order_id,
+                "validate": "true",
+            },
+        )
+
+        descr = result.get("descr") or {}
+        description = descr.get("order") if isinstance(descr, dict) else None
+
+        return KrakenValidationResult(
+            valid=True,
+            client_order_id=client_order_id,
+            description=str(description) if description is not None else None,
+            raw_result=result,
         )
