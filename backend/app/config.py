@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     symbol: str = "BTC/USD"
     database_url: str = "postgresql+asyncpg://aether:aether@localhost:5432/aether"
     redis_url: str = "redis://localhost:6379/0"
+    persistence_enabled: bool = False
     operator_auth_secret: str = "dev-only-change-me"
     exchange_api_key: str = ""
     exchange_api_secret: str = ""
