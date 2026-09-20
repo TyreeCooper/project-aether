@@ -85,6 +85,12 @@ class PaperEngine:
             enforce=False,
         )
         self.entry_decisions = EntryDecisionService(self.profitability_gate)
+        self.shadow = ShadowSimulator(
+            starting_usd=STARTING_USD,
+            taker_fee_rate=TAKER_FEE,
+            spread_bps=settings.paper_spread_bps,
+            slippage_bps=settings.paper_slippage_bps,
+        )
         self.reconciliation = ReconciliationService(tolerance_btc=1e-8)
         self.last_profitability: ProfitabilityDecision | None = None
         self.last_persistence_health: bool | None = None
@@ -263,6 +269,7 @@ class PaperEngine:
             "profitability_enforced": self.profitability_gate.enforce,
             "shadow_mode_enabled": settings.shadow_mode_enabled,
             "shadow_decision_count": len(self.shadow_decisions),
+            "shadow_performance": self.shadow.performance(self.mark),
             "last_profitability_reason": profitability.reason if profitability else None,
             "last_expected_move_bps": profitability.expected_move_bps if profitability else None,
             "last_minimum_required_bps": (
@@ -500,7 +507,7 @@ class PaperEngine:
 
         return applied
 
-    def _entry_allowed(self, qty: float) -> bool:
+    def _entry_allowed(self, qty: float, *, shadow: bool = False) -> bool:
         if not self.mark:
             return False
 
@@ -514,10 +521,18 @@ class PaperEngine:
             flatten_lock=self.flatten_lock,
             paper_mode=self.paper_mode,
             live_blocked=self.live_blocked,
-            position_btc=self.btc,
+            position_btc=self.shadow.btc if shadow else self.btc,
             max_position_btc=self.max_position,
-            equity=self.equity,
-            peak_equity=self.peak_equity,
+            equity=(
+                self.shadow.portfolio.equity(self.mark)
+                if shadow
+                else self.equity
+            ),
+            peak_equity=(
+                self.shadow.portfolio.peak_equity
+                if shadow
+                else self.peak_equity
+            ),
             max_drawdown_pct=MAX_DRAWDOWN_PCT,
             daily_realized=self.daily_realized,
             daily_loss_cap=DAILY_LOSS_CAP,
@@ -565,16 +580,29 @@ class PaperEngine:
         if self.mark is None:
             return
 
+        shadow_in_position_before = self.shadow.in_position
+        execution = None
+        if would_execute:
+            execution = await self.shadow.execute(
+                side=signal,
+                qty=qty,
+                mark=self.mark,
+            )
+
         record = {
             "ts_utc": datetime.now(timezone.utc).isoformat(),
             "symbol": self.symbol,
             "signal": signal,
             "mark": self.mark,
             "qty": qty,
-            "in_position": self.btc > 0,
+            "in_position": shadow_in_position_before,
             "would_execute": would_execute,
             "reason": reason,
             "paper_mode": True,
+            "hypothetical_execution": (
+                execution.as_dict() if execution is not None else None
+            ),
+            "shadow_performance": self.shadow.performance(self.mark),
         }
         self.shadow_decisions.appendleft(record)
         self._log(
@@ -592,7 +620,7 @@ class PaperEngine:
                 signal=signal,
                 mark=self.mark,
                 qty=qty,
-                in_position=self.btc > 0,
+                in_position=shadow_in_position_before,
                 would_execute=would_execute,
                 reason=reason,
                 payload=record,
@@ -602,13 +630,19 @@ class PaperEngine:
         if self.state not in (BotState.IDLE.value, BotState.IN_POSITION.value) or not self.mark:
             return
 
-        if self.btc > 0 and self.avg_entry > 0:
-            stop = self.avg_entry * (1 - self.stop_loss_pct / 100)
+        strategy_btc = self.shadow.btc if settings.shadow_mode_enabled else self.btc
+        strategy_avg_entry = (
+            self.shadow.avg_entry if settings.shadow_mode_enabled else self.avg_entry
+        )
+        strategy_in_position = strategy_btc > 0
+
+        if strategy_in_position and strategy_avg_entry > 0:
+            stop = strategy_avg_entry * (1 - self.stop_loss_pct / 100)
             if self.mark <= stop:
                 if settings.shadow_mode_enabled:
                     await self._record_shadow_decision(
                         signal="sell",
-                        qty=self.btc,
+                        qty=strategy_btc,
                         would_execute=True,
                         reason="stop_triggered",
                     )
@@ -627,11 +661,14 @@ class PaperEngine:
             list(self.closes),
             self.short_ma,
             self.long_ma,
-            in_position=self.btc > 0,
+            in_position=strategy_in_position,
         )
 
         if signal == "buy":
-            allowed = self._entry_allowed(self.position_size)
+            allowed = self._entry_allowed(
+                self.position_size,
+                shadow=settings.shadow_mode_enabled,
+            )
             if settings.shadow_mode_enabled:
                 await self._record_shadow_decision(
                     signal="buy",
@@ -660,11 +697,11 @@ class PaperEngine:
             )
             await self._execute("buy", self.position_size, "bot")
 
-        elif signal == "sell" and self.btc > 0:
+        elif signal == "sell" and strategy_in_position:
             if settings.shadow_mode_enabled:
                 await self._record_shadow_decision(
                     signal="sell",
-                    qty=self.btc,
+                    qty=strategy_btc,
                     would_execute=True,
                     reason="exit_signal",
                 )
