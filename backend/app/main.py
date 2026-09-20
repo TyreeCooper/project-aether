@@ -185,3 +185,8 @@ async def flatten(_auth: AuthContext = Depends(require_operator)):
 @app.post("/api/v1/risk/unlock")
 async def unlock(_auth: AuthContext = Depends(require_step_up)):
     return await engine.unlock()
+
+
+@app.post("/api/v1/risk/reset-fault")
+async def reset_fault(_auth: AuthContext = Depends(require_step_up)):
+    return await engine.reset_fault()
