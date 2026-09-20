@@ -1,7 +1,7 @@
 """In-process paper trading orchestrator.
 
-Market data, execution, portfolio accounting, and profitability checks are
-separate concerns. Live execution remains blocked.
+Market data, execution, portfolio accounting, profitability, risk, and audit
+are separate concerns. Live execution remains blocked.
 """
 
 from __future__ import annotations
@@ -9,14 +9,15 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import deque
-from datetime import datetime, timezone
 from typing import Any
 
+from app.audit import AuditEvent, InMemoryAuditSink
 from app.execution import ExecutionGateway, ExecutionResult, OrderRequest, PaperExecutionGateway
 from app.market_data import CoinGeckoMarketDataProvider, MarketDataProvider
 from app.portfolio import PaperPortfolio
 from app.profitability import ProfitabilityDecision, ProfitabilityGate, StaticCostModel
 from app.risk import deny_entry
+from app.services import EntryDecisionService
 from app.strategy import crossover_signal, sma
 
 STARTING_USD = 10_000.0
@@ -35,10 +36,6 @@ DAILY_LOSS_CAP = 250.0
 SYMBOL = "BTC/USD"
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
 class PaperEngine:
     def __init__(
         self,
@@ -46,6 +43,7 @@ class PaperEngine:
         execution: ExecutionGateway | None = None,
         portfolio: PaperPortfolio | None = None,
         profitability_gate: ProfitabilityGate | None = None,
+        audit_sink: InMemoryAuditSink | None = None,
     ) -> None:
         self.paper_mode = True
         self.live_blocked = True
@@ -69,14 +67,15 @@ class PaperEngine:
             minimum_edge_multiple=MIN_EDGE_MULTIPLE,
             enforce=False,
         )
+        self.entry_decisions = EntryDecisionService(self.profitability_gate)
         self.last_profitability: ProfitabilityDecision | None = None
+        self.audit_sink = audit_sink or InMemoryAuditSink(max_events=500)
 
         self.mark: float | None = None
         self.mark_source = "unavailable"
         self.last_tick_age_ms: int | None = None
         self._last_tick_mono: float | None = None
         self.closes: deque[float] = deque(maxlen=300)
-        self.audit: deque[dict[str, Any]] = deque(maxlen=200)
 
         self.short_ma = SHORT_MA
         self.long_ma = LONG_MA
@@ -86,10 +85,39 @@ class PaperEngine:
 
         self._task: asyncio.Task | None = None
         self._lock = asyncio.Lock()
-        self._log("INFO", "Paper engine constructed. Bot OFFLINE. Live execution blocked.")
+        self._log(
+            "INFO",
+            "Paper engine constructed. Bot OFFLINE. Live execution blocked.",
+            component="engine",
+            event="engine_constructed",
+        )
 
-    def _log(self, level: str, message: str) -> None:
-        self.audit.appendleft({"ts": _now(), "level": level, "message": message})
+    @property
+    def audit(self):
+        return self.audit_sink.events
+
+    def _log(
+        self,
+        level: str,
+        message: str,
+        *,
+        actor: str = "system",
+        component: str = "engine",
+        event: str = "message",
+        correlation_id: str | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        self.audit_sink.emit(
+            AuditEvent.create(
+                level=level,
+                message=message,
+                actor=actor,
+                component=component,
+                event=event,
+                correlation_id=correlation_id,
+                payload=payload,
+            )
+        )
 
     @property
     def usd(self) -> float:
@@ -182,14 +210,33 @@ class PaperEngine:
                 self.mark_source = getattr(self.market_data, "source", "provider")
                 self._last_tick_mono = time.monotonic()
                 self.portfolio.mark_to_market(self.mark)
-            self._log("INFO", f"Seeded {len(self.closes)} public BTC marks for SMA warm-up.")
+            self._log(
+                "INFO",
+                f"Seeded {len(self.closes)} public BTC marks for SMA warm-up.",
+                component="market_data",
+                event="history_seeded",
+                payload={"count": len(self.closes), "source": self.mark_source},
+            )
         except Exception as exc:
-            self._log("WARN", f"History seed failed: {exc}")
+            self._log(
+                "WARN",
+                f"History seed failed: {exc}",
+                component="market_data",
+                event="history_seed_failed",
+            )
 
     def _apply_execution(self, fill: ExecutionResult, actor: str) -> bool:
         applied, error = self.portfolio.apply_fill(fill, self.mark)
         if not applied:
-            self._log("WARN", f"Paper fill rejected by portfolio: {error}")
+            self._log(
+                "WARN",
+                f"Paper fill rejected by portfolio: {error}",
+                actor=actor,
+                component="portfolio",
+                event="fill_rejected",
+                correlation_id=fill.client_order_id,
+                payload={"reason": error, "side": fill.side, "qty": fill.qty},
+            )
             return False
 
         if fill.side == "buy":
@@ -201,11 +248,21 @@ class PaperEngine:
             "FILL",
             (
                 f"{actor} {fill.side.upper()} {fill.qty} BTC @ "
-                f"{fill.execution_price:.2f} fee {fill.fee_usd:.2f} "
-                f"spread_cost {fill.spread_cost_usd:.2f} "
-                f"slippage_cost {fill.slippage_cost_usd:.2f} "
-                f"client_order_id={fill.client_order_id}"
+                f"{fill.execution_price:.2f} fee {fill.fee_usd:.2f}"
             ),
+            actor=actor,
+            component="execution",
+            event="fill_applied",
+            correlation_id=fill.client_order_id,
+            payload={
+                "side": fill.side,
+                "qty": fill.qty,
+                "reference_price": fill.reference_price,
+                "execution_price": fill.execution_price,
+                "fee_usd": fill.fee_usd,
+                "spread_cost_usd": fill.spread_cost_usd,
+                "slippage_cost_usd": fill.slippage_cost_usd,
+            },
         )
         return True
 
@@ -223,40 +280,69 @@ class PaperEngine:
             reference_price=self.mark,
             actor=actor,
         )
+        self._log(
+            "ORDER",
+            f"{actor} submitted paper {side} for {qty} BTC",
+            actor=actor,
+            component="execution",
+            event="order_submitted",
+            correlation_id=request.client_order_id,
+            payload={"side": side, "qty": qty, "reference_price": self.mark},
+        )
         fill = await self.execution.execute_market(request)
         return self._apply_execution(fill, actor)
 
-    def _profitability_allows_entry(self, qty: float) -> bool:
+    def _entry_allowed(self, qty: float) -> bool:
         if not self.mark:
             return False
 
-        # The reference SMA rule does not yet estimate forward move in bps.
-        # In paper mode the gate is advisory until a strategy supplies that
-        # estimate; the missing estimate is surfaced explicitly, not guessed.
-        decision = self.profitability_gate.evaluate(
-            qty=qty,
-            reference_price=self.mark,
+        # The public SMA reference rule intentionally does not invent a forward
+        # return estimate. Until a strategy supplies one, profitability remains
+        # advisory in paper mode and the missing estimate is visible.
+        decision = self.entry_decisions.evaluate(
             expected_move_bps=None,
+            reference_price=self.mark,
+            qty=qty,
+            flatten_lock=self.flatten_lock,
+            paper_mode=self.paper_mode,
+            live_blocked=self.live_blocked,
+            position_btc=self.btc,
+            max_position_btc=self.max_position,
+            equity=self.equity,
+            peak_equity=self.peak_equity,
+            max_drawdown_pct=MAX_DRAWDOWN_PCT,
+            daily_realized=self.daily_realized,
+            daily_loss_cap=DAILY_LOSS_CAP,
         )
-        self.last_profitability = decision
+        self.last_profitability = decision.profitability
 
         if not decision.allowed:
             self._log(
                 "WARN",
-                (
-                    "Buy denied by profitability gate: "
-                    f"{decision.reason}; required={decision.minimum_required_bps:.2f}bps"
-                ),
+                f"Buy denied: {decision.reason}",
+                component="risk_guard",
+                event="entry_denied",
+                payload={
+                    "reason": decision.reason,
+                    "minimum_required_bps": decision.profitability.minimum_required_bps,
+                },
             )
             return False
 
-        if decision.reason == "expected_edge_unavailable":
+        if decision.profitability.reason == "expected_edge_unavailable":
             self._log(
                 "INFO",
                 (
                     "Profitability gate advisory only: expected edge unavailable; "
-                    f"estimated one-way cost={decision.costs.total_cost_bps:.2f}bps"
+                    f"estimated one-way cost="
+                    f"{decision.profitability.costs.total_cost_bps:.2f}bps"
                 ),
+                component="profitability",
+                event="edge_unavailable",
+                payload={
+                    "estimated_cost_bps": decision.profitability.costs.total_cost_bps,
+                    "minimum_required_bps": decision.profitability.minimum_required_bps,
+                },
             )
         return True
 
@@ -267,7 +353,13 @@ class PaperEngine:
         if self.btc > 0 and self.avg_entry > 0:
             stop = self.avg_entry * (1 - self.stop_loss_pct / 100)
             if self.mark <= stop:
-                self._log("BOT", f"Stop-loss hit at {self.mark:.2f} (stop {stop:.2f}).")
+                self._log(
+                    "BOT",
+                    f"Stop-loss hit at {self.mark:.2f} (stop {stop:.2f}).",
+                    actor="bot",
+                    component="strategy",
+                    event="stop_triggered",
+                )
                 await self._execute("sell", self.btc, "bot-stop")
                 return
 
@@ -279,38 +371,38 @@ class PaperEngine:
         )
 
         if signal == "buy":
-            if not self._profitability_allows_entry(self.position_size):
+            if not self._entry_allowed(self.position_size):
                 return
 
-            reason = deny_entry(
-                flatten_lock=self.flatten_lock,
-                paper_mode=self.paper_mode,
-                live_blocked=self.live_blocked,
-                qty=self.position_size,
-                position_btc=self.btc,
-                max_position_btc=self.max_position,
-                equity=self.equity,
-                peak_equity=self.peak_equity,
-                max_drawdown_pct=MAX_DRAWDOWN_PCT,
-                daily_realized=self.daily_realized,
-                daily_loss_cap=DAILY_LOSS_CAP,
+            self._log(
+                "BOT",
+                f"SMA cross-up. Paper BUY {self.position_size} BTC",
+                actor="bot",
+                component="strategy",
+                event="entry_signal",
             )
-            if reason:
-                self._log("WARN", f"Buy denied: {reason}")
-                return
-
-            self._log("BOT", f"SMA cross-up. Paper BUY {self.position_size} BTC")
             await self._execute("buy", self.position_size, "bot")
 
         elif signal == "sell" and self.btc > 0:
-            self._log("BOT", "SMA cross-down. Paper SELL inventory")
+            self._log(
+                "BOT",
+                "SMA cross-down. Paper SELL inventory",
+                actor="bot",
+                component="strategy",
+                event="exit_signal",
+            )
             await self._execute("sell", self.btc, "bot")
 
     async def tick(self) -> None:
         try:
             snapshot = await self.market_data.get_mark(self.symbol)
         except Exception as exc:
-            self._log("WARN", f"Mark fetch failed: {exc}")
+            self._log(
+                "WARN",
+                f"Mark fetch failed: {exc}",
+                component="market_data",
+                event="mark_fetch_failed",
+            )
             return
 
         if snapshot is None:
@@ -330,7 +422,12 @@ class PaperEngine:
             try:
                 await self.tick()
             except Exception as exc:
-                self._log("ERROR", f"Tick fault: {exc}")
+                self._log(
+                    "ERROR",
+                    f"Tick fault: {exc}",
+                    component="scheduler",
+                    event="tick_fault",
+                )
             await asyncio.sleep(POLL_SECONDS)
 
     def start_loop(self) -> None:
@@ -342,13 +439,25 @@ class PaperEngine:
             if self.flatten_lock:
                 return {"ok": False, "error": "flatten_lock"}
             self.state = "IN_POSITION" if self.btc > 0 else "IDLE"
-            self._log("INFO", f"Bot armed ({self.state}).")
+            self._log(
+                "INFO",
+                f"Bot armed ({self.state}).",
+                actor="operator",
+                component="engine",
+                event="bot_armed",
+            )
             return {"ok": True, **self.snapshot()}
 
     async def stop_bot(self) -> dict[str, Any]:
         async with self._lock:
             self.state = "OFFLINE"
-            self._log("INFO", "Bot disarmed. Position left untouched.")
+            self._log(
+                "INFO",
+                "Bot disarmed. Position left untouched.",
+                actor="operator",
+                component="engine",
+                event="bot_disarmed",
+            )
             return {"ok": True, **self.snapshot()}
 
     async def manual(self, side: str, qty: float | None = None) -> dict[str, Any]:
@@ -383,13 +492,25 @@ class PaperEngine:
             if self.btc > 0 and self.mark:
                 await self._execute("sell", self.btc, "flatten")
             self.state = "OFFLINE"
-            self._log("INFO", "Emergency flatten complete. Entries locked.")
+            self._log(
+                "INFO",
+                "Emergency flatten complete. Entries locked.",
+                actor="operator",
+                component="risk_guard",
+                event="flatten_complete",
+            )
             return {"ok": True, **self.snapshot()}
 
     async def unlock(self) -> dict[str, Any]:
         async with self._lock:
             self.flatten_lock = False
-            self._log("INFO", "Flatten lock cleared by operator.")
+            self._log(
+                "INFO",
+                "Flatten lock cleared by operator.",
+                actor="operator",
+                component="risk_guard",
+                event="flatten_lock_cleared",
+            )
             return {"ok": True, **self.snapshot()}
 
 
