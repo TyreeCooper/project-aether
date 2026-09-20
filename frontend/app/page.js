@@ -197,6 +197,7 @@ export default function DashboardPage() {
           <button type="button" disabled={busy || !steppedUp} onClick={() => act(() => post("/api/v1/bot/start", operatorToken, stepUpToken))}>Start</button>
           <button type="button" disabled={busy || !authenticated} onClick={() => act(() => post("/api/v1/bot/stop", operatorToken))}>Stop</button>
           <button type="button" disabled={busy || !steppedUp} onClick={() => act(() => post("/api/v1/risk/unlock", operatorToken, stepUpToken))}>Unlock</button>
+          <button type="button" disabled={busy || !steppedUp || bot?.state !== "FAULT"} onClick={() => act(() => post("/api/v1/risk/reset-fault", operatorToken, stepUpToken))}>Reset fault</button>
         </div>
       </section>
 
