@@ -41,6 +41,10 @@ class ExecutionResult:
     slippage_cost_usd: float = 0.0
 
 
+class DuplicateOrderError(RuntimeError):
+    pass
+
+
 class ExecutionGateway(ABC):
     @abstractmethod
     async def execute_market(self, request: OrderRequest) -> ExecutionResult:
