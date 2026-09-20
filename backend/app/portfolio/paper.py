@@ -91,6 +91,44 @@ class PaperPortfolio:
         avg_loser = (sum(losses) / len(losses)) if losses else None
         return count, len(wins), len(losses), win_rate, avg_winner, avg_loser
 
+    def restore(
+        self,
+        *,
+        usd: float,
+        btc: float,
+        avg_entry: float,
+        entry_fees_open: float,
+        realized_session: float,
+        daily_realized: float,
+        gross_realized: float,
+        total_fees: float,
+        total_spread_cost: float,
+        total_slippage_cost: float,
+        peak_equity: float,
+        max_drawdown_pct: float,
+        captured_at: datetime,
+        closed_trade_pnls: list[float] | None = None,
+        mark: float | None = None,
+    ) -> None:
+        self.usd = float(usd)
+        self.btc = float(btc)
+        self.avg_entry = float(avg_entry)
+        self.entry_fees_open = float(entry_fees_open)
+        self.realized_session = float(realized_session)
+        self.gross_realized = float(gross_realized)
+        self.total_fees = float(total_fees)
+        self.total_spread_cost = float(total_spread_cost)
+        self.total_slippage_cost = float(total_slippage_cost)
+        self.peak_equity = float(peak_equity)
+        self.max_drawdown_pct = float(max_drawdown_pct)
+        self.closed_trade_pnls = list(closed_trade_pnls or [])
+
+        today = datetime.now(timezone.utc).date()
+        captured_date = captured_at.astimezone(timezone.utc).date()
+        self.daily_realized = float(daily_realized) if captured_date == today else 0.0
+        self._daily_date = today
+        self.mark_to_market(mark)
+
     def snapshot(self, mark: float | None) -> PortfolioSnapshot:
         self._roll_daily_if_needed()
         self.mark_to_market(mark)
