@@ -14,6 +14,7 @@ from app.db.models import (
     Fill,
     Order,
     Position,
+    ReconcileEvent,
 )
 from app.db.session import async_session_factory
 
@@ -178,3 +179,31 @@ class LedgerRepository:
                 }
         except SQLAlchemyError:
             return None
+
+
+    async def record_reconcile(
+        self,
+        *,
+        status: str,
+        local_btc: float,
+        venue_btc: float,
+        delta_btc: float,
+        note: str | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> bool:
+        try:
+            async with async_session_factory() as session:
+                session.add(
+                    ReconcileEvent(
+                        status=status,
+                        local_btc=local_btc,
+                        venue_btc=venue_btc,
+                        delta_btc=delta_btc,
+                        note=note,
+                        payload=payload or {},
+                    )
+                )
+                await session.commit()
+            return True
+        except SQLAlchemyError:
+            return False
