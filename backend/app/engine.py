@@ -16,7 +16,7 @@ from app.audit import AuditEvent, InMemoryAuditSink
 from app.config import settings
 from app.db.ledger import LedgerRepository
 from app.execution import ExecutionGateway, ExecutionResult, OrderRequest, PaperExecutionGateway
-from app.market_data import CoinGeckoMarketDataProvider, MarketDataProvider
+from app.market_data import CoinGeckoMarketDataProvider, KrakenWebSocketMarketDataProvider, MarketDataProvider
 from app.portfolio import PaperPortfolio
 from app.profitability import ProfitabilityDecision, ProfitabilityGate, StaticCostModel
 from app.risk import deny_entry
@@ -40,6 +40,15 @@ DAILY_LOSS_CAP = 250.0
 SYMBOL = "BTC/USD"
 
 
+def _default_market_data_provider() -> MarketDataProvider:
+    provider = settings.market_data_provider.strip().lower()
+    if provider == "kraken_ws":
+        return KrakenWebSocketMarketDataProvider()
+    if provider == "coingecko":
+        return CoinGeckoMarketDataProvider()
+    raise ValueError(f"unsupported market_data_provider: {settings.market_data_provider}")
+
+
 class PaperEngine:
     def __init__(
         self,
@@ -56,7 +65,7 @@ class PaperEngine:
         self.flatten_lock = False
         self.symbol = SYMBOL
 
-        self.market_data = market_data or CoinGeckoMarketDataProvider()
+        self.market_data = market_data or _default_market_data_provider()
         self.execution = execution or PaperExecutionGateway(
             taker_fee_rate=TAKER_FEE,
             spread_bps=PAPER_SPREAD_BPS,
