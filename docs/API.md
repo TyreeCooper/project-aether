@@ -14,8 +14,7 @@ Base path: `/api/v1`
 | `GET /orders` | Recent in-memory paper orders |
 | `GET /trades` | Recent in-memory paper fills |
 | `GET /performance` | Net/gross P&L, costs, drawdown, and trade statistics |
-| `GET /audit` | Structured audit events |
-
+| `GET /audit` | Structured audit events |\n| `GET /venue/kraken/readiness` | Read-only Kraken key and balance-read readiness |\n
 ## Mutating routes
 
 | Route | Purpose |
@@ -24,8 +23,7 @@ Base path: `/api/v1`
 | `POST /bot/stop` | Stop new automated activity without flattening inventory |
 | `POST /orders/market?side=buy|sell` | Manual paper market ticket |
 | `POST /orders/flatten` | Paper emergency flatten and engage flatten lock |
-| `POST /risk/unlock` | Clear flatten lock |
-
+| `POST /risk/unlock` | Clear flatten lock |\n| `POST /risk/reset-fault` | Reset FAULT after freshness checks; remains OFFLINE |\n
 Authentication and step-up authorization are not yet implemented. Do not expose these mutating routes to an untrusted public network.
 
 
