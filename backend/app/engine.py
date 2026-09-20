@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.audit import AuditEvent, InMemoryAuditSink
+from app.config import settings
+from app.db.ledger import LedgerRepository
 from app.execution import ExecutionGateway, ExecutionResult, OrderRequest, PaperExecutionGateway
 from app.market_data import CoinGeckoMarketDataProvider, MarketDataProvider
 from app.portfolio import PaperPortfolio
@@ -45,6 +47,7 @@ class PaperEngine:
         portfolio: PaperPortfolio | None = None,
         profitability_gate: ProfitabilityGate | None = None,
         audit_sink: InMemoryAuditSink | None = None,
+        ledger: LedgerRepository | None = None,
     ) -> None:
         self.paper_mode = True
         self.live_blocked = True
@@ -71,6 +74,9 @@ class PaperEngine:
         self.entry_decisions = EntryDecisionService(self.profitability_gate)
         self.last_profitability: ProfitabilityDecision | None = None
         self.audit_sink = audit_sink or InMemoryAuditSink(max_events=500)
+        self.ledger = ledger if ledger is not None else (
+            LedgerRepository() if settings.persistence_enabled else None
+        )
 
         self.mark: float | None = None
         self.mark_source = "unavailable"
@@ -110,17 +116,23 @@ class PaperEngine:
         correlation_id: str | None = None,
         payload: dict[str, Any] | None = None,
     ) -> None:
-        self.audit_sink.emit(
-            AuditEvent.create(
-                level=level,
-                message=message,
-                actor=actor,
-                component=component,
-                event=event,
-                correlation_id=correlation_id,
-                payload=payload,
-            )
+        audit_event = AuditEvent.create(
+            level=level,
+            message=message,
+            actor=actor,
+            component=component,
+            event=event,
+            correlation_id=correlation_id,
+            payload=payload,
         )
+        self.audit_sink.emit(audit_event)
+
+        if self.ledger is not None:
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                return
+            loop.create_task(self.ledger.record_audit(audit_event.to_dict()))
 
     @property
     def usd(self) -> float:
@@ -201,6 +213,7 @@ class PaperEngine:
             "win_rate_pct": p.win_rate_pct,
             "avg_winner": p.avg_winner,
             "avg_loser": p.avg_loser,
+            "persistence_enabled": self.ledger is not None,
             "profitability_enforced": self.profitability_gate.enforce,
             "last_profitability_reason": profitability.reason if profitability else None,
             "last_expected_move_bps": profitability.expected_move_bps if profitability else None,
@@ -209,6 +222,100 @@ class PaperEngine:
             ),
             "reason": "Paper machine. Public SMA rule. Live execution blocked.",
         }
+
+    async def restore_persisted_state(self) -> None:
+        if self.ledger is None:
+            return
+
+        state = await self.ledger.load_latest_state(self.symbol)
+        if state is None:
+            self._log(
+                "INFO",
+                "No persisted paper state restored.",
+                component="database",
+                event="restore_empty",
+            )
+            return
+
+        account = state["account"]
+        position = state["position"]
+        fills = state["fills"]
+        orders = state["orders"]
+
+        closed_pnls = [
+            float(row.net_pnl_usd)
+            for row in fills
+            if row.net_pnl_usd is not None
+        ]
+
+        self.mark = float(account.mark) if account.mark is not None else None
+        self.portfolio.restore(
+            usd=float(account.usd),
+            btc=float(account.btc),
+            avg_entry=float(position.avg_entry) if position is not None else 0.0,
+            entry_fees_open=float(account.entry_fees_open),
+            realized_session=float(account.realized_session),
+            daily_realized=float(account.daily_realized),
+            gross_realized=float(account.gross_realized),
+            total_fees=float(account.total_fees),
+            total_spread_cost=float(account.total_spread_cost),
+            total_slippage_cost=float(account.total_slippage_cost),
+            peak_equity=float(position.peak_equity) if position is not None else float(account.equity_usd),
+            max_drawdown_pct=float(account.max_drawdown_pct),
+            captured_at=account.captured_at,
+            closed_trade_pnls=closed_pnls,
+            mark=self.mark,
+        )
+
+        self.fills.clear()
+        for row in fills:
+            self.fills.append(
+                {
+                    "ts_utc": row.occurred_at.isoformat(),
+                    "client_order_id": row.client_order_id,
+                    "symbol": row.symbol,
+                    "side": row.side,
+                    "qty": row.qty,
+                    "reference_price": row.reference_price,
+                    "execution_price": row.execution_price,
+                    "fee_usd": row.fee_usd,
+                    "spread_cost_usd": row.spread_cost_usd,
+                    "slippage_cost_usd": row.slippage_cost_usd,
+                    "realized_net_pnl_usd": row.net_pnl_usd,
+                    "paper_mode": row.paper_mode,
+                }
+            )
+
+        self.orders.clear()
+        for row in orders:
+            self.orders.append(
+                {
+                    "ts_utc": row.created_at.isoformat(),
+                    "client_order_id": row.client_order_id,
+                    "symbol": row.symbol,
+                    "side": row.side,
+                    "qty": row.qty,
+                    "reference_price": row.reference_price,
+                    "actor": row.actor,
+                    "status": row.status,
+                    "paper_mode": row.paper_mode,
+                }
+            )
+
+        # Restores always fail closed. The operator must arm explicitly.
+        self.state = "OFFLINE"
+        self._log(
+            "INFO",
+            "Persisted paper ledger restored; bot remains OFFLINE.",
+            component="database",
+            event="restore_complete",
+            payload={
+                "orders": len(self.orders),
+                "fills": len(self.fills),
+                "btc": self.btc,
+                "usd": self.usd,
+            },
+        )
 
     async def seed_history(self) -> None:
         try:
@@ -318,19 +425,29 @@ class PaperEngine:
         )
         fill = await self.execution.execute_market(request)
         applied = self._apply_execution(fill, actor)
-        self.orders.appendleft(
-            {
-                "ts_utc": datetime.now(timezone.utc).isoformat(),
-                "client_order_id": request.client_order_id,
-                "symbol": self.symbol,
-                "side": request.side,
-                "qty": request.qty,
-                "reference_price": request.reference_price,
-                "actor": request.actor,
-                "status": "filled" if applied else "rejected",
-                "paper_mode": True,
-            }
-        )
+        order_record = {
+            "ts_utc": datetime.now(timezone.utc).isoformat(),
+            "client_order_id": request.client_order_id,
+            "symbol": self.symbol,
+            "side": request.side,
+            "qty": request.qty,
+            "reference_price": request.reference_price,
+            "actor": request.actor,
+            "status": "filled" if applied else "rejected",
+            "paper_mode": True,
+        }
+        self.orders.appendleft(order_record)
+
+        if self.ledger is not None:
+            await self.ledger.record_order(order_record)
+            if applied and self.fills:
+                await self.ledger.record_fill(self.fills[0])
+                await self.ledger.save_portfolio(
+                    symbol=self.symbol,
+                    snapshot=self.snapshot(),
+                    entry_fees_open=self.portfolio.entry_fees_open,
+                )
+
         return applied
 
     def _entry_allowed(self, qty: float) -> bool:
@@ -458,6 +575,7 @@ class PaperEngine:
             await self.evaluate_and_maybe_trade()
 
     async def loop(self) -> None:
+        await self.restore_persisted_state()
         await self.seed_history()
         while True:
             try:
