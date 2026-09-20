@@ -1,11 +1,15 @@
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app.engine import engine
+
+STATIC = Path(__file__).parent / "static"
 
 
 @asynccontextmanager
@@ -14,19 +18,11 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="Project Aether API", version="0.2.0", lifespan=lifespan)
-
-_origins = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-]
-if os.getenv("FRONTEND_ORIGIN"):
-    _origins.append(os.getenv("FRONTEND_ORIGIN"))
-
+app = FastAPI(title="Project Aether API", version="0.3.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_origins,
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -34,6 +30,11 @@ app.add_middleware(
 
 class QtyBody(BaseModel):
     qty: float | None = Field(default=None, gt=0, le=1)
+
+
+@app.get("/")
+async def home():
+    return FileResponse(STATIC / "index.html")
 
 
 @app.get("/api/v1/health")
@@ -44,11 +45,7 @@ async def health():
         "env": "paper",
         "venue": "paper-coingecko",
         "symbol": "BTC/USD",
-        "postgres": "not_required_paper",
-        "redis": "not_required_paper",
-        "venue_ws": "public_rest_poll",
         "last_tick_age_ms": snap["last_tick_age_ms"],
-        "live_keys_present": False,
         "paper_mode": True,
     }
 
