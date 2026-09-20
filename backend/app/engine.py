@@ -87,6 +87,7 @@ class PaperEngine:
         self.entry_decisions = EntryDecisionService(self.profitability_gate)
         self.reconciliation = ReconciliationService(tolerance_btc=1e-8)
         self.last_profitability: ProfitabilityDecision | None = None
+        self.last_persistence_health: bool | None = None
         self.audit_sink = audit_sink or InMemoryAuditSink(max_events=500)
         self.ledger = ledger if ledger is not None else (
             LedgerRepository() if settings.persistence_enabled else None
@@ -248,6 +249,7 @@ class PaperEngine:
             "avg_winner": p.avg_winner,
             "avg_loser": p.avg_loser,
             "persistence_enabled": self.ledger is not None,
+            "persistence_healthy": self.last_persistence_health,
             "profitability_enforced": self.profitability_gate.enforce,
             "last_profitability_reason": profitability.reason if profitability else None,
             "last_expected_move_bps": profitability.expected_move_bps if profitability else None,
@@ -654,6 +656,19 @@ class PaperEngine:
                 return {"ok": False, "error": "flatten_lock"}
             if self.state == BotState.FAULT.value:
                 return {"ok": False, "error": "fault_requires_reset"}
+
+            if self.ledger is not None:
+                self.last_persistence_health = await self.ledger.health()
+                if not self.last_persistence_health:
+                    self._log(
+                        "ERROR",
+                        "Bot arm denied because durable persistence is unhealthy.",
+                        actor="operator",
+                        component="database",
+                        event="arm_denied_persistence_unhealthy",
+                    )
+                    return {"ok": False, "error": "persistence_unhealthy"}
+
             self._set_state(
                 BotState.IN_POSITION if self.btc > 0 else BotState.IDLE
             )
