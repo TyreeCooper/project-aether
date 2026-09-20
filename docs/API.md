@@ -27,3 +27,29 @@ Base path: `/api/v1`
 | `POST /risk/unlock` | Clear flatten lock |
 
 Authentication and step-up authorization are not yet implemented. Do not expose these mutating routes to an untrusted public network.
+
+
+## Authentication
+
+All routes except `GET /health` require operator authentication.
+
+Send:
+
+```text
+Authorization: Bearer <OPERATOR_AUTH_SECRET>
+```
+
+High-risk mutations additionally require:
+
+```text
+X-Aether-Step-Up: <OPERATOR_STEP_UP_SECRET>
+```
+
+Step-up is required for:
+- `POST /bot/start`
+- `POST /orders/market`
+- `POST /risk/unlock`
+
+Emergency stop/flatten remain available with normal operator authentication so the extra authorization step cannot delay a safety action.
+
+The browser console does not contain either secret at build time. They are entered into in-memory UI state for the current tab.
