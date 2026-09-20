@@ -191,6 +191,13 @@ class PaperEngine:
             "total_spread_cost": p.total_spread_cost,
             "total_slippage_cost": p.total_slippage_cost,
             "peak_equity": p.peak_equity,
+            "max_drawdown_pct": p.max_drawdown_pct,
+            "closed_trade_count": p.closed_trade_count,
+            "winning_trades": p.winning_trades,
+            "losing_trades": p.losing_trades,
+            "win_rate_pct": p.win_rate_pct,
+            "avg_winner": p.avg_winner,
+            "avg_loser": p.avg_loser,
             "profitability_enforced": self.profitability_gate.enforce,
             "last_profitability_reason": profitability.reason if profitability else None,
             "last_expected_move_bps": profitability.expected_move_bps if profitability else None,
@@ -226,7 +233,7 @@ class PaperEngine:
             )
 
     def _apply_execution(self, fill: ExecutionResult, actor: str) -> bool:
-        applied, error = self.portfolio.apply_fill(fill, self.mark)
+        applied, error, realized_net = self.portfolio.apply_fill(fill, self.mark)
         if not applied:
             self._log(
                 "WARN",
@@ -262,6 +269,7 @@ class PaperEngine:
                 "fee_usd": fill.fee_usd,
                 "spread_cost_usd": fill.spread_cost_usd,
                 "slippage_cost_usd": fill.slippage_cost_usd,
+                "realized_net_pnl_usd": realized_net,
             },
         )
         return True
