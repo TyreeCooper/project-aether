@@ -19,6 +19,7 @@ from app.execution import ExecutionGateway, ExecutionResult, OrderRequest, Paper
 from app.market_data import CoinGeckoMarketDataProvider, KrakenWebSocketMarketDataProvider, MarketDataProvider
 from app.portfolio import PaperPortfolio
 from app.profitability import ProfitabilityDecision, ProfitabilityGate, StaticCostModel
+from app.reconciliation import ReconciliationService
 from app.risk import deny_entry
 from app.services import EntryDecisionService
 from app.state import BotState, transition
@@ -84,6 +85,7 @@ class PaperEngine:
             enforce=False,
         )
         self.entry_decisions = EntryDecisionService(self.profitability_gate)
+        self.reconciliation = ReconciliationService(tolerance_btc=1e-8)
         self.last_profitability: ProfitabilityDecision | None = None
         self.audit_sink = audit_sink or InMemoryAuditSink(max_events=500)
         self.ledger = ledger if ledger is not None else (
@@ -730,6 +732,60 @@ class PaperEngine:
                 event="flatten_lock_cleared",
             )
             return {"ok": True, **self.snapshot()}
+
+    async def reconcile_position(
+        self,
+        *,
+        venue_btc: float,
+        source: str,
+    ) -> dict[str, Any]:
+        async with self._lock:
+            decision = self.reconciliation.compare_position(
+                local_btc=self.btc,
+                venue_btc=venue_btc,
+            )
+
+            payload = {
+                "source": source,
+                "local_btc": decision.local_btc,
+                "venue_btc": decision.venue_btc,
+                "delta_btc": decision.delta_btc,
+                "tolerance_btc": decision.tolerance_btc,
+                "reason": decision.reason,
+            }
+
+            self._log(
+                "INFO" if decision.ok else "ERROR",
+                (
+                    "Position reconciliation matched."
+                    if decision.ok
+                    else "Position reconciliation mismatch."
+                ),
+                component="reconciliation",
+                event="reconcile_matched" if decision.ok else "reconcile_mismatch",
+                payload=payload,
+            )
+
+            if self.ledger is not None:
+                await self.ledger.record_reconcile(
+                    status="matched" if decision.ok else "mismatch",
+                    local_btc=decision.local_btc,
+                    venue_btc=decision.venue_btc,
+                    delta_btc=decision.delta_btc,
+                    note=source,
+                    payload=payload,
+                )
+
+            if not decision.ok:
+                self.flatten_lock = True
+                self._set_state(BotState.FAULT)
+
+            return {
+                "ok": decision.ok,
+                **payload,
+                "state": self.state,
+                "flatten_lock": self.flatten_lock,
+            }
 
     async def reset_fault(self) -> dict[str, Any]:
         async with self._lock:
