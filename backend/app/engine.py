@@ -74,6 +74,8 @@ class PaperEngine:
         self.stop_loss_pct = STOP_LOSS_PCT
         self.position_size = POSITION_BTC
         self.max_position = MAX_POSITION_BTC
+        self.max_drawdown_pct = MAX_DRAWDOWN_PCT
+        self.daily_loss_cap = DAILY_LOSS_CAP
         self._task = None
         self._lock = asyncio.Lock()
         self._restore_file()
@@ -101,6 +103,17 @@ class PaperEngine:
             self.ask = float(data["ask"])
         if data.get("mark_source"):
             self.mark_source = str(data["mark_source"])
+        self.short_ma = int(data.get("short_ma", self.short_ma))
+        self.long_ma = int(data.get("long_ma", self.long_ma))
+        self.stop_loss_pct = float(data.get("stop_loss_pct", self.stop_loss_pct))
+        self.position_size = float(data.get("position_size_btc", self.position_size))
+        self.max_position = float(data.get("max_position_btc", self.max_position))
+        self.max_drawdown_pct = float(
+            data.get("max_drawdown_pct", self.max_drawdown_pct)
+        )
+        self.daily_loss_cap = float(
+            data.get("daily_loss_cap", self.daily_loss_cap)
+        )
 
         self.closes.clear()
         for px in data.get("closes") or []:
@@ -167,6 +180,8 @@ class PaperEngine:
             "stop_loss_pct": self.stop_loss_pct,
             "position_size_btc": self.position_size,
             "max_position_btc": self.max_position,
+            "max_drawdown_pct": self.max_drawdown_pct,
+            "daily_loss_cap": self.daily_loss_cap,
             "closes": list(self.closes)[-80:],
             "audit": list(self.audit)[:50],
             "saved_at": _now(),
@@ -226,6 +241,8 @@ class PaperEngine:
             "stop_loss_pct": self.stop_loss_pct,
             "position_size_btc": self.position_size,
             "max_position_btc": self.max_position,
+            "max_drawdown_pct": self.max_drawdown_pct,
+            "daily_loss_cap": self.daily_loss_cap,
             "bars": len(self.closes),
             "warm_up_needed": self.long_ma + 1,
             "short_value": sma(list(self.closes), self.short_ma),
@@ -444,9 +461,9 @@ class PaperEngine:
                 max_position_btc=self.max_position,
                 equity=self.equity,
                 peak_equity=self.peak_equity,
-                max_drawdown_pct=MAX_DRAWDOWN_PCT,
+                max_drawdown_pct=self.max_drawdown_pct,
                 daily_realized=self.daily_realized,
-                daily_loss_cap=DAILY_LOSS_CAP,
+                daily_loss_cap=self.daily_loss_cap,
             )
             if reason:
                 self._risk_denied(reason, self.position_size, "bot")
@@ -502,6 +519,68 @@ class PaperEngine:
                 pass
         await db_store.flush()
 
+    async def update_config(self, config: dict[str, Any]):
+        async with self._lock:
+            if self.state != "OFFLINE" or self.btc > 0:
+                return {"ok": False, "error": "config_requires_offline_flat"}
+
+            short_ma = int(config.get("short_ma", self.short_ma))
+            long_ma = int(config.get("long_ma", self.long_ma))
+            stop_loss_pct = float(
+                config.get("stop_loss_pct", self.stop_loss_pct)
+            )
+            position_size = float(
+                config.get("position_size_btc", self.position_size)
+            )
+            max_position = float(
+                config.get("max_position_btc", self.max_position)
+            )
+            max_drawdown_pct = float(
+                config.get("max_drawdown_pct", self.max_drawdown_pct)
+            )
+            daily_loss_cap = float(
+                config.get("daily_loss_cap", self.daily_loss_cap)
+            )
+
+            if not 2 <= short_ma <= 100:
+                return {"ok": False, "error": "short_ma_out_of_range"}
+            if not short_ma < long_ma <= 200:
+                return {"ok": False, "error": "long_ma_must_exceed_short_ma"}
+            if not 0.1 <= stop_loss_pct <= 20:
+                return {"ok": False, "error": "stop_loss_pct_out_of_range"}
+            if not 0 < position_size <= max_position:
+                return {"ok": False, "error": "position_size_exceeds_max"}
+            if not 0 < max_position <= 1:
+                return {"ok": False, "error": "max_position_out_of_range"}
+            if not 0.5 <= max_drawdown_pct <= 50:
+                return {"ok": False, "error": "max_drawdown_pct_out_of_range"}
+            if not 1 <= daily_loss_cap <= 10000:
+                return {"ok": False, "error": "daily_loss_cap_out_of_range"}
+
+            self.short_ma = short_ma
+            self.long_ma = long_ma
+            self.stop_loss_pct = stop_loss_pct
+            self.position_size = position_size
+            self.max_position = max_position
+            self.max_drawdown_pct = max_drawdown_pct
+            self.daily_loss_cap = daily_loss_cap
+            self._log(
+                "CONFIG",
+                "Operator updated paper strategy/risk configuration.",
+                {
+                    "kind": "config",
+                    "short_ma": short_ma,
+                    "long_ma": long_ma,
+                    "stop_loss_pct": stop_loss_pct,
+                    "position_size_btc": position_size,
+                    "max_position_btc": max_position,
+                    "max_drawdown_pct": max_drawdown_pct,
+                    "daily_loss_cap": daily_loss_cap,
+                },
+            )
+            self._persist()
+            return {"ok": True, **self.snapshot()}
+
     async def start_bot(self):
         async with self._lock:
             if self.flatten_lock:
@@ -534,9 +613,9 @@ class PaperEngine:
                     max_position_btc=self.max_position,
                     equity=self.equity,
                     peak_equity=self.peak_equity,
-                    max_drawdown_pct=MAX_DRAWDOWN_PCT,
+                    max_drawdown_pct=self.max_drawdown_pct,
                     daily_realized=self.daily_realized,
-                    daily_loss_cap=DAILY_LOSS_CAP,
+                    daily_loss_cap=self.daily_loss_cap,
                 )
                 if reason:
                     self._risk_denied(reason, qty, "operator")

@@ -1,7 +1,9 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
+import hmac
+import os
 
-from fastapi import FastAPI, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -24,7 +26,7 @@ async def lifespan(_: FastAPI):
         await db_store.close()
 
 
-app = FastAPI(title="Project Aether API", version="0.7.0", lifespan=lifespan)
+app = FastAPI(title="Project Aether API", version="0.8.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -36,6 +38,31 @@ app.add_middleware(
 
 class QtyBody(BaseModel):
     qty: float | None = Field(default=None, gt=0, le=1)
+
+
+class ConfigBody(BaseModel):
+    short_ma: int = Field(ge=2, le=100)
+    long_ma: int = Field(ge=3, le=200)
+    stop_loss_pct: float = Field(ge=0.1, le=20)
+    position_size_btc: float = Field(gt=0, le=1)
+    max_position_btc: float = Field(gt=0, le=1)
+    max_drawdown_pct: float = Field(ge=0.5, le=50)
+    daily_loss_cap: float = Field(ge=1, le=10000)
+
+
+OPERATOR_TOKEN = os.getenv("AETHER_OPERATOR_TOKEN", "").strip()
+
+
+def require_operator(
+    x_operator_token: str | None = Header(default=None),
+) -> None:
+    if not OPERATOR_TOKEN:
+        return
+    if not x_operator_token or not hmac.compare_digest(
+        x_operator_token,
+        OPERATOR_TOKEN,
+    ):
+        raise HTTPException(status_code=401, detail="operator authentication required")
 
 
 def _basis(exec_last, watch_last):
@@ -69,6 +96,42 @@ async def health():
 @app.get("/api/v1/storage")
 async def storage():
     return db_store.status()
+
+
+@app.get("/api/v1/auth/status")
+async def auth_status():
+    return {
+        "configured": bool(OPERATOR_TOKEN),
+        "enforced_on_mutations": bool(OPERATOR_TOKEN),
+    }
+
+
+@app.get("/api/v1/analytics")
+async def analytics(limit: int = Query(default=500, ge=1, le=500)):
+    return await db_store.analytics(limit)
+
+
+@app.get("/api/v1/config")
+async def config():
+    snap = engine.snapshot()
+    return {
+        "short_ma": snap["short_ma"],
+        "long_ma": snap["long_ma"],
+        "stop_loss_pct": snap["stop_loss_pct"],
+        "position_size_btc": snap["position_size_btc"],
+        "max_position_btc": snap["max_position_btc"],
+        "max_drawdown_pct": snap["max_drawdown_pct"],
+        "daily_loss_cap": snap["daily_loss_cap"],
+        "editable": snap["state"] == "OFFLINE" and snap["btc"] == 0,
+    }
+
+
+@app.post("/api/v1/config")
+async def update_config(
+    body: ConfigBody,
+    _: None = Depends(require_operator),
+):
+    return await engine.update_config(body.model_dump())
 
 
 @app.get("/api/v1/bot")
@@ -145,17 +208,21 @@ async def history_bot(limit: int = Query(default=100, ge=1, le=500)):
 
 
 @app.post("/api/v1/bot/start")
-async def bot_start():
+async def bot_start(_: None = Depends(require_operator)):
     return await engine.start_bot()
 
 
 @app.post("/api/v1/bot/stop")
-async def bot_stop():
+async def bot_stop(_: None = Depends(require_operator)):
     return await engine.stop_bot()
 
 
 @app.post("/api/v1/orders/market")
-async def market(side: str, body: QtyBody | None = None):
+async def market(
+    side: str,
+    body: QtyBody | None = None,
+    _: None = Depends(require_operator),
+):
     side = side.lower()
     if side not in ("buy", "sell"):
         return {"ok": False, "error": "side must be buy or sell"}
@@ -164,10 +231,10 @@ async def market(side: str, body: QtyBody | None = None):
 
 
 @app.post("/api/v1/orders/flatten")
-async def flatten():
+async def flatten(_: None = Depends(require_operator)):
     return await engine.flatten()
 
 
 @app.post("/api/v1/risk/unlock")
-async def unlock():
+async def unlock(_: None = Depends(require_operator)):
     return await engine.unlock()

@@ -58,6 +58,86 @@ def _event_ts(value: Any) -> datetime:
     return datetime.now(timezone.utc)
 
 
+
+def summarize_fills(
+    fills: list[dict[str, Any]],
+    accounts: list[dict[str, Any]],
+) -> dict[str, Any]:
+    now = datetime.now(timezone.utc)
+    today = now.date()
+    week_start = today.fromordinal(today.toordinal() - today.weekday())
+
+    daily_pnl = 0.0
+    weekly_pnl = 0.0
+    total_fees = 0.0
+    total_volume = 0.0
+    wins = 0
+    losses = 0
+    breakeven = 0
+    closed = 0
+    durations: list[float] = []
+    open_started: datetime | None = None
+    position = 0.0
+
+    for fill in sorted(fills, key=lambda x: str(x.get("ts", ""))):
+        ts = _event_ts(fill.get("ts"))
+        qty = float(fill.get("qty_btc", 0) or 0)
+        side = str(fill.get("side", "")).lower()
+        pnl = float(fill.get("realized_pnl_usd", 0) or 0)
+        fee = float(fill.get("fee_usd", 0) or 0)
+
+        total_fees += fee
+        total_volume += qty
+        if ts.date() == today:
+            daily_pnl += pnl
+        if ts.date() >= week_start:
+            weekly_pnl += pnl
+
+        if side == "buy":
+            if position <= 1e-12:
+                open_started = ts
+            position += qty
+        elif side == "sell":
+            position = max(0.0, position - qty)
+            if pnl > 1e-9:
+                wins += 1
+            elif pnl < -1e-9:
+                losses += 1
+            else:
+                breakeven += 1
+            closed += 1
+            if position <= 1e-12 and open_started is not None:
+                durations.append((ts - open_started).total_seconds())
+                open_started = None
+
+    max_drawdown_pct = 0.0
+    for row in accounts:
+        peak = float(row.get("peak_equity", 0) or 0)
+        equity = float(row.get("equity", 0) or 0)
+        if peak > 0:
+            max_drawdown_pct = max(
+                max_drawdown_pct,
+                (peak - equity) / peak * 100,
+            )
+
+    decisive = wins + losses
+    return {
+        "fills": len(fills),
+        "closed_exits": closed,
+        "wins": wins,
+        "losses": losses,
+        "breakeven": breakeven,
+        "win_rate_pct": round(wins / decisive * 100, 2) if decisive else 0.0,
+        "daily_realized_pnl_usd": round(daily_pnl, 6),
+        "weekly_realized_pnl_usd": round(weekly_pnl, 6),
+        "fees_usd": round(total_fees, 6),
+        "volume_btc": round(total_volume, 8),
+        "avg_trade_duration_seconds": (
+            round(sum(durations) / len(durations), 2) if durations else None
+        ),
+        "max_drawdown_pct": round(max_drawdown_pct, 4),
+    }
+
 class DatabaseStore:
     def __init__(self) -> None:
         self.azure_connection_string = os.getenv(
@@ -501,6 +581,32 @@ class DatabaseStore:
             """,
             limit,
         )
+
+    async def analytics(self, limit: int = 500) -> dict[str, Any]:
+        fills = await self.history_fills(limit)
+        accounts = await self.history_account(limit)
+        summary = summarize_fills(fills, accounts)
+
+        by_actor: dict[str, dict[str, float | int]] = {}
+        for fill in fills:
+            actor = str(fill.get("actor", "unknown"))
+            bucket = by_actor.setdefault(
+                actor,
+                {"fills": 0, "realized_pnl_usd": 0.0, "fees_usd": 0.0},
+            )
+            bucket["fills"] = int(bucket["fills"]) + 1
+            bucket["realized_pnl_usd"] = round(
+                float(bucket["realized_pnl_usd"])
+                + float(fill.get("realized_pnl_usd", 0) or 0),
+                6,
+            )
+            bucket["fees_usd"] = round(
+                float(bucket["fees_usd"]) + float(fill.get("fee_usd", 0) or 0),
+                6,
+            )
+
+        summary["by_actor"] = by_actor
+        return summary
 
     def schedule_save(self, payload: dict[str, Any]) -> None:
         if not self.initialized:

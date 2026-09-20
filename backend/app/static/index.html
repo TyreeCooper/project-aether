@@ -40,6 +40,9 @@ th{color:#8aa0b5;font-weight:600;background:#0a1929;position:sticky;top:0}
 .summary .box{background:#0a1929;padding:10px;border:1px solid #173148}
 .summary .label{font-size:10px;color:#8aa0b5;text-transform:uppercase;letter-spacing:.06em}
 .summary .value{font-size:17px;font-weight:700;margin-top:4px}
+.configgrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.configgrid label{font-size:11px;color:#8aa0b5}
+.configgrid input{width:100%;margin-top:5px;padding:9px;background:#071422;color:#e8eef4;border:1px solid #1c3a55;border-radius:4px}
 .dock{position:fixed;left:0;right:0;bottom:0;padding:10px;background:#061018;border-top:1px solid #1c3a55}
 .dock-inner{max-width:920px;margin:0 auto}
 .dock button{width:100%;margin:0}
@@ -47,6 +50,7 @@ th{color:#8aa0b5;font-weight:600;background:#0a1929;position:sticky;top:0}
   .grid{grid-template-columns:1fr}
   .card.full{grid-column:1}
   .summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .configgrid{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 </style>
 </head>
@@ -98,6 +102,40 @@ th{color:#8aa0b5;font-weight:600;background:#0a1929;position:sticky;top:0}
       </div>
     </div>
 
+
+    <div class="card full">
+      <h2>PERFORMANCE ANALYTICS</h2>
+      <div class="summary">
+        <div class="box"><div class="label">Today P/L</div><div id="aDaily" class="value">-</div></div>
+        <div class="box"><div class="label">Week P/L</div><div id="aWeekly" class="value">-</div></div>
+        <div class="box"><div class="label">Win rate</div><div id="aWinRate" class="value">-</div></div>
+        <div class="box"><div class="label">Max drawdown</div><div id="aDrawdown" class="value">-</div></div>
+        <div class="box"><div class="label">Wins / Losses</div><div id="aWL" class="value">-</div></div>
+        <div class="box"><div class="label">Avg duration</div><div id="aDuration" class="value">-</div></div>
+        <div class="box"><div class="label">Total fees</div><div id="aFees" class="value">-</div></div>
+        <div class="box"><div class="label">BTC volume</div><div id="aVolume" class="value">-</div></div>
+      </div>
+      <div id="actorStats" class="muted" style="margin-top:10px;font-size:12px"></div>
+    </div>
+
+    <div class="card full">
+      <h2>STRATEGY & RISK CONFIGURATION</h2>
+      <div class="configgrid">
+        <label>Short MA<input id="cShort" type="number" min="2" max="100"></label>
+        <label>Long MA<input id="cLong" type="number" min="3" max="200"></label>
+        <label>Stop loss %<input id="cStop" type="number" min=".1" max="20" step=".1"></label>
+        <label>Position BTC<input id="cSize" type="number" min=".000001" max="1" step=".001"></label>
+        <label>Max position BTC<input id="cMax" type="number" min=".000001" max="1" step=".001"></label>
+        <label>Max drawdown %<input id="cDD" type="number" min=".5" max="50" step=".5"></label>
+        <label>Daily loss cap $<input id="cLoss" type="number" min="1" max="10000" step="1"></label>
+        <label>Operator token<input id="opToken" type="password" autocomplete="off" placeholder="only if auth enabled"></label>
+      </div>
+      <div class="rowbtns" style="margin-top:10px">
+        <button id="saveCfg" onclick="saveConfig()">Save configuration</button>
+      </div>
+      <div id="configNote" class="muted" style="margin-top:8px;font-size:12px"></div>
+    </div>
+
     <div class="card full">
       <h2>TRADE LEDGER</h2>
       <div class="summary">
@@ -131,6 +169,12 @@ th{color:#8aa0b5;font-weight:600;background:#0a1929;position:sticky;top:0}
 <script>
 let activeTab='fills';
 const historyCache={};
+let authConfigured=false;
+
+function authHeaders(){
+  const token=sessionStorage.getItem('aether_operator_token')||'';
+  return token?{'X-Operator-Token':token}:{};
+}
 
 function money(v){
   if(v===null||v===undefined||Number.isNaN(Number(v))) return '-';
@@ -152,11 +196,14 @@ async function api(url){
 
 async function load(){
   try{
-    const [a,b,l,s]=await Promise.all([
+    const [a,b,l,s,an,cfg,auth]=await Promise.all([
       api('/api/v1/account'),
       api('/api/v1/bot'),
       api('/api/v1/audit'),
-      api('/api/v1/storage')
+      api('/api/v1/storage'),
+      api('/api/v1/analytics?limit=500'),
+      api('/api/v1/config'),
+      api('/api/v1/auth/status')
     ]);
     src.textContent=a.mark_source??'-';
     mark.textContent=money(a.mark);
@@ -187,6 +234,34 @@ async function load(){
 
     dbBadge.textContent=s.initialized?'POSTGRES LIVE':'DB FALLBACK';
     dbBadge.className='badge '+(s.initialized&&!s.last_error?'good':'err');
+
+    aDaily.textContent=money(an.daily_realized_pnl_usd);
+    aDaily.className='value '+pnlClass(an.daily_realized_pnl_usd);
+    aWeekly.textContent=money(an.weekly_realized_pnl_usd);
+    aWeekly.className='value '+pnlClass(an.weekly_realized_pnl_usd);
+    aWinRate.textContent=num(an.win_rate_pct,2)+'%';
+    aDrawdown.textContent=num(an.max_drawdown_pct,2)+'%';
+    aWL.textContent=(an.wins??0)+' / '+(an.losses??0);
+    aDuration.textContent=an.avg_trade_duration_seconds==null?'-':num(an.avg_trade_duration_seconds/60,1)+' min';
+    aFees.textContent=money(an.fees_usd);
+    aVolume.textContent=num(an.volume_btc,8);
+    actorStats.textContent=Object.entries(an.by_actor||{}).map(([k,v])=>
+      k+': '+v.fills+' fills, '+money(v.realized_pnl_usd)+' realized, '+money(v.fees_usd)+' fees'
+    ).join(' | ')||'No actor statistics yet.';
+
+    cShort.value=cfg.short_ma;
+    cLong.value=cfg.long_ma;
+    cStop.value=cfg.stop_loss_pct;
+    cSize.value=cfg.position_size_btc;
+    cMax.value=cfg.max_position_btc;
+    cDD.value=cfg.max_drawdown_pct;
+    cLoss.value=cfg.daily_loss_cap;
+    saveCfg.disabled=!cfg.editable;
+    authConfigured=!!auth.configured;
+    configNote.textContent=(cfg.editable?'Configuration editable while OFFLINE and flat.':'Stop bot and flatten before editing. ')+
+      (authConfigured?' Operator token authentication is enforced.':' Operator token is not configured in Azure yet.');
+    const remembered=sessionStorage.getItem('aether_operator_token')||'';
+    if(!opToken.value&&remembered) opToken.value=remembered;
 
     log.textContent=(l.events||[]).slice(0,30).map(e=>
       (e.ts?new Date(e.ts).toLocaleTimeString():'--')+' '+e.level+' '+e.message
@@ -277,9 +352,35 @@ function renderLedger(){
   ledger.innerHTML='<table><thead>'+head+'</thead><tbody>'+body+'</tbody></table>';
 }
 
-async function postAction(url){
+async function saveConfig(){
+  const token=opToken.value.trim();
+  if(token) sessionStorage.setItem('aether_operator_token',token);
+  const body={
+    short_ma:Number(cShort.value),
+    long_ma:Number(cLong.value),
+    stop_loss_pct:Number(cStop.value),
+    position_size_btc:Number(cSize.value),
+    max_position_btc:Number(cMax.value),
+    max_drawdown_pct:Number(cDD.value),
+    daily_loss_cap:Number(cLoss.value)
+  };
   try{
-    const r=await fetch(url,{method:'POST'});
+    const r=await fetch('/api/v1/config',{
+      method:'POST',
+      headers:{'Content-Type':'application/json',...authHeaders()},
+      body:JSON.stringify(body)
+    });
+    const out=await r.json();
+    if(!r.ok||out.ok===false) alert(out.detail||out.error||'Configuration rejected');
+  }catch(e){alert('Configuration failed: '+e.message)}
+  await load();
+}
+
+async function postAction(url){
+  const token=opToken?.value?.trim();
+  if(token) sessionStorage.setItem('aether_operator_token',token);
+  try{
+    const r=await fetch(url,{method:'POST',headers:authHeaders()});
     const body=await r.json();
     if(body.ok===false) alert(body.error||'Action rejected');
   }catch(e){
