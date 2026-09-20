@@ -234,3 +234,40 @@ async def kraken_readiness(_auth: AuthContext = Depends(require_operator)):
             "ready": False,
             "reason": "kraken_readiness_check_failed",
         }
+
+
+@app.post("/api/v1/venue/kraken/reconcile")
+async def kraken_reconcile(_auth: AuthContext = Depends(require_operator)):
+    if not settings.kraken_read_api_key or not settings.kraken_read_api_secret:
+        return {
+            "ok": False,
+            "error": "read_only_credentials_not_configured",
+        }
+
+    client = KrakenSpotReadOnlyClient(
+        api_key=settings.kraken_read_api_key,
+        api_secret=settings.kraken_read_api_secret,
+    )
+
+    try:
+        key_info = await client.get_api_key_info()
+        assessment = client.assess_permissions(key_info.get("permissions") or [])
+        if not assessment.valid_for_read_only_reconciliation:
+            return {
+                "ok": False,
+                "error": "read_only_credentials_not_safe",
+                "missing_permissions": list(assessment.missing_permissions),
+                "prohibited_permissions": list(assessment.prohibited_permissions),
+            }
+
+        balances = await client.get_balances()
+        venue_btc = client.extract_btc_balance(balances)
+        return await engine.reconcile_position(
+            venue_btc=venue_btc,
+            source="kraken_spot_read_only",
+        )
+    except Exception:
+        return {
+            "ok": False,
+            "error": "kraken_reconciliation_failed",
+        }
