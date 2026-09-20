@@ -20,8 +20,9 @@ _origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
 ]
-if os.getenv("FRONTEND_ORIGIN"):
-    _origins.append(os.getenv("FRONTEND_ORIGIN"))
+frontend_origin = os.getenv("FRONTEND_ORIGIN")
+if frontend_origin:
+    _origins.append(frontend_origin)
 
 app.add_middleware(
     CORSMiddleware,
