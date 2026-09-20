@@ -117,6 +117,7 @@ class PaperEngine:
             "long_ma": self.long_ma,
             "stop_loss_pct": self.stop_loss_pct,
             "position_size_btc": self.position_size,
+            "max_position_btc": self.max_position,
             "bars": len(self.closes),
             "warm_up_needed": self.long_ma + 1,
             "short_value": sma(list(self.closes), self.short_ma),
@@ -263,7 +264,13 @@ class PaperEngine:
             if side == "buy":
                 reason = deny_entry(flatten_lock=self.flatten_lock, paper_mode=True, live_blocked=True, qty=qty, position_btc=self.btc, max_position_btc=self.max_position, equity=self.equity, peak_equity=self.peak_equity, max_drawdown_pct=MAX_DRAWDOWN_PCT, daily_realized=self.daily_realized, daily_loss_cap=DAILY_LOSS_CAP)
                 if reason:
-                    return {"ok": False, "error": reason}
+                    return {
+                        "ok": False,
+                        "error": reason,
+                        "requested_qty_btc": qty,
+                        "current_position_btc": self.btc,
+                        "max_position_btc": self.max_position,
+                    }
             self._apply_fill(side, qty, self.mark, "operator")
             return {"ok": True, **self.snapshot()}
 
