@@ -1,11 +1,12 @@
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from app.engine import engine
+from app.security import AuthContext, require_operator, require_step_up
 
 
 @asynccontextmanager
@@ -55,7 +56,7 @@ async def health():
 
 
 @app.get("/api/v1/status")
-async def status():
+async def status(_auth: AuthContext = Depends(require_operator)):
     snap = engine.snapshot()
     return {
         "state": snap["state"],
@@ -72,12 +73,12 @@ async def status():
 
 
 @app.get("/api/v1/bot")
-async def bot():
+async def bot(_auth: AuthContext = Depends(require_operator)):
     return engine.snapshot()
 
 
 @app.get("/api/v1/account")
-async def account():
+async def account(_auth: AuthContext = Depends(require_operator)):
     snap = engine.snapshot()
     return {
         "usd_free": snap["usd"],
@@ -99,7 +100,7 @@ async def account():
 
 
 @app.get("/api/v1/positions")
-async def positions():
+async def positions(_auth: AuthContext = Depends(require_operator)):
     snap = engine.snapshot()
     return {
         "positions": [
@@ -116,17 +117,17 @@ async def positions():
 
 
 @app.get("/api/v1/orders")
-async def orders():
+async def orders(_auth: AuthContext = Depends(require_operator)):
     return {"orders": list(engine.orders)}
 
 
 @app.get("/api/v1/trades")
-async def trades():
+async def trades(_auth: AuthContext = Depends(require_operator)):
     return {"trades": list(engine.fills)}
 
 
 @app.get("/api/v1/performance")
-async def performance():
+async def performance(_auth: AuthContext = Depends(require_operator)):
     snap = engine.snapshot()
     return {
         "equity_usd": snap["equity"],
@@ -149,22 +150,22 @@ async def performance():
 
 
 @app.get("/api/v1/audit")
-async def audit():
+async def audit(_auth: AuthContext = Depends(require_operator)):
     return {"events": list(engine.audit)}
 
 
 @app.post("/api/v1/bot/start")
-async def bot_start():
+async def bot_start(_auth: AuthContext = Depends(require_step_up)):
     return await engine.start_bot()
 
 
 @app.post("/api/v1/bot/stop")
-async def bot_stop():
+async def bot_stop(_auth: AuthContext = Depends(require_operator)):
     return await engine.stop_bot()
 
 
 @app.post("/api/v1/orders/market")
-async def market(side: str, body: QtyBody | None = None):
+async def market(side: str, body: QtyBody | None = None, _auth: AuthContext = Depends(require_step_up)):
     side = side.lower()
     if side not in ("buy", "sell"):
         return {"ok": False, "error": "side must be buy or sell"}
@@ -173,10 +174,10 @@ async def market(side: str, body: QtyBody | None = None):
 
 
 @app.post("/api/v1/orders/flatten")
-async def flatten():
+async def flatten(_auth: AuthContext = Depends(require_operator)):
     return await engine.flatten()
 
 
 @app.post("/api/v1/risk/unlock")
-async def unlock():
+async def unlock(_auth: AuthContext = Depends(require_step_up)):
     return await engine.unlock()
