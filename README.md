@@ -2,41 +2,13 @@
 
 Paper-first Bitcoin (BTC/USD) operator console.
 
-**Status:** Paper machine + public SMA rule + mobile-friendly web app. Live execution is blocked.
+**Live host:** Azure App Service `aether-prod-api` in resource group `aether-rg`.
+Push to `main` deploys via `.github/workflows/main_aether-prod-api.yml`.
 
-## What it does now
+- UI: `https://aether-prod-api.azurewebsites.net/`
+- Health: `/api/v1/health`
+- Docs: `/docs`
 
-- Starts a paper ledger at $10,000 USD
-- Polls a public BTC/USD mark
-- Evaluates a published dual-SMA crossover (8 / 21) after warm-up
-- Simulates fills with a fee so the blotter is not fantasy
-- Lets you arm, pause, ticket, and flatten from a phone-sized layout
+One site. FastAPI serves the phone page at `/` and the JSON API under `/api/v1`. Live exchange execution is blocked.
 
-## Quick start
-
-```bash
-cp .env.example .env
-cd backend
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
-```
-
-In another terminal:
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Open http://localhost:3000 on a phone or browser.
-
-Tap **Start** to arm the bot. It stays OFFLINE on process boot (fail closed).
-
-## Rule under test
-
-Long-only SMA cross on the public mark series. Stop at 2% below average entry. This rule may lose money. Paper exists to keep or kill it without live BTC.
-
-## Safety
-
-Do not set live keys. Do not treat paper equity as a forecast of live results.
+Paper ledger is written to disk (`/home/aether/paper_state.json` on App Service) so a restart does not reset the blotter.
