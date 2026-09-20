@@ -81,9 +81,12 @@ def upgrade() -> None:
         sa.Column("open_pnl", sa.Float(), nullable=False, server_default="0"),
         sa.Column("realized_session", sa.Float(), nullable=False, server_default="0"),
         sa.Column("daily_realized", sa.Float(), nullable=False, server_default="0"),
+        sa.Column("gross_realized", sa.Float(), nullable=False, server_default="0"),
+        sa.Column("entry_fees_open", sa.Float(), nullable=False, server_default="0"),
         sa.Column("total_fees", sa.Float(), nullable=False, server_default="0"),
         sa.Column("total_spread_cost", sa.Float(), nullable=False, server_default="0"),
         sa.Column("total_slippage_cost", sa.Float(), nullable=False, server_default="0"),
+        sa.Column("max_drawdown_pct", sa.Float(), nullable=False, server_default="0"),
         sa.Column("captured_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )
     op.create_index("ix_account_snapshots_captured_at", "account_snapshots", ["captured_at"])
