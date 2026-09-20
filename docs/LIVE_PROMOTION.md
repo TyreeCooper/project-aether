@@ -20,11 +20,15 @@ Because Aether is a BTC/USD spot system, this repository must not quietly substi
 - Optional PostgreSQL paper ledger.
 
 ### Stage 1 — credential validation
-- Add a read-only Kraken Spot account adapter.
-- Verify API-key metadata and permissions.
-- Require withdrawals disabled.
-- Reconcile balances/positions without order placement.
-- Persist reconciliation events.
+Implemented foundation:
+- Read-only Kraken Spot account adapter.
+- API-key metadata/permission readiness checks.
+- Withdrawal-capable permissions are rejected by readiness assessment.
+- Position reconciliation policy and persisted reconciliation events.
+
+Still required before Stage 1 is complete:
+- Wire authenticated venue balance reads into an operator-triggered reconciliation endpoint.
+- Require a successful reconciliation immediately before arming whenever venue-account reconciliation is enabled.
 
 ### Stage 2 — validate-only order adapter
 - Implement Kraken Spot order construction using `validate=true`.
