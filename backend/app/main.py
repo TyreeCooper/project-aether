@@ -73,6 +73,8 @@ async def status(_auth: AuthContext = Depends(require_operator)):
         "mark": snap["mark"],
         "mark_source": snap["mark_source"],
         "last_tick_age_ms": snap["last_tick_age_ms"],
+        "persistence_enabled": snap["persistence_enabled"],
+        "persistence_healthy": snap["persistence_healthy"],
         "profitability_enforced": snap["profitability_enforced"],
         "last_profitability_reason": snap["last_profitability_reason"],
     }
@@ -213,7 +215,7 @@ async def kraken_readiness(_auth: AuthContext = Depends(require_operator)):
         permissions = key_info.get("permissions") or []
         assessment = client.assess_permissions(permissions)
 
-        response = {
+        response: dict[str, object] = {
             "configured": True,
             "ready": assessment.valid_for_read_only_reconciliation,
             "missing_permissions": list(assessment.missing_permissions),
