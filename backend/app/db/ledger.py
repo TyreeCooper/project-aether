@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.db.models import (
@@ -26,6 +26,15 @@ class LedgerRepository:
     paper phase these methods return False on database failure instead of
     crashing the trading loop.
     """
+
+    async def health(self) -> bool:
+        """Return True only when the configured database accepts a round trip."""
+        try:
+            async with async_session_factory() as session:
+                await session.execute(text("SELECT 1"))
+            return True
+        except SQLAlchemyError:
+            return False
 
     async def record_order(self, order: dict[str, Any]) -> bool:
         try:
