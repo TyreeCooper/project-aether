@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import deque
+from datetime import datetime, timezone
 from typing import Any
 
 from app.audit import AuditEvent, InMemoryAuditSink
@@ -76,6 +77,8 @@ class PaperEngine:
         self.last_tick_age_ms: int | None = None
         self._last_tick_mono: float | None = None
         self.closes: deque[float] = deque(maxlen=300)
+        self.orders: deque[dict[str, Any]] = deque(maxlen=500)
+        self.fills: deque[dict[str, Any]] = deque(maxlen=500)
 
         self.short_ma = SHORT_MA
         self.long_ma = LONG_MA
@@ -251,6 +254,22 @@ class PaperEngine:
         elif self.portfolio.btc <= 0:
             self.state = "IDLE" if self.state != "OFFLINE" else "OFFLINE"
 
+        fill_record = {
+            "ts_utc": datetime.now(timezone.utc).isoformat(),
+            "client_order_id": fill.client_order_id,
+            "symbol": self.symbol,
+            "side": fill.side,
+            "qty": fill.qty,
+            "reference_price": fill.reference_price,
+            "execution_price": fill.execution_price,
+            "fee_usd": fill.fee_usd,
+            "spread_cost_usd": fill.spread_cost_usd,
+            "slippage_cost_usd": fill.slippage_cost_usd,
+            "realized_net_pnl_usd": realized_net,
+            "paper_mode": True,
+        }
+        self.fills.appendleft(fill_record)
+
         self._log(
             "FILL",
             (
@@ -298,7 +317,21 @@ class PaperEngine:
             payload={"side": side, "qty": qty, "reference_price": self.mark},
         )
         fill = await self.execution.execute_market(request)
-        return self._apply_execution(fill, actor)
+        applied = self._apply_execution(fill, actor)
+        self.orders.appendleft(
+            {
+                "ts_utc": datetime.now(timezone.utc).isoformat(),
+                "client_order_id": request.client_order_id,
+                "symbol": self.symbol,
+                "side": request.side,
+                "qty": request.qty,
+                "reference_price": request.reference_price,
+                "actor": request.actor,
+                "status": "filled" if applied else "rejected",
+                "paper_mode": True,
+            }
+        )
+        return applied
 
     def _entry_allowed(self, qty: float) -> bool:
         if not self.mark:
