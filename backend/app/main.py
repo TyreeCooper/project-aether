@@ -300,6 +300,14 @@ async def shadow_decisions(_auth: AuthContext = Depends(require_operator)):
     }
 
 
+@app.get("/api/v1/shadow/performance")
+async def shadow_performance(_auth: AuthContext = Depends(require_operator)):
+    return {
+        "enabled": settings.shadow_mode_enabled,
+        **engine.shadow.performance(engine.mark),
+    }
+
+
 @app.post("/api/v1/venue/kraken/validate-order")
 async def kraken_validate_order(
     body: ValidateOrderBody,
