@@ -62,3 +62,21 @@ Current optional gates:
 - Venue reconciliation: when `VENUE_RECONCILIATION_REQUIRED=true`, the most recent successful reconciliation must be newer than `VENUE_RECONCILIATION_MAX_AGE_SECONDS`.
 
 A successful reconciliation does not arm the bot. It only satisfies the reconciliation prerequisite.
+
+
+## Shadow mode
+
+Set `SHADOW_MODE_ENABLED=true` to record strategy decisions without sending them to the paper execution gateway.
+
+- `GET /api/v1/shadow/decisions` returns the in-memory decision window.
+- Buy, sell, and stop decisions are recorded with mark, quantity, position context, and whether the decision would have executed.
+- When PostgreSQL persistence is enabled, decisions are also written to `shadow_decisions`.
+- Shadow mode never promotes itself to paper or live execution.
+
+## Kraken validate-only order checks
+
+`POST /api/v1/venue/kraken/validate-order` requires operator + step-up authorization and dedicated `KRAKEN_VALIDATE_API_KEY` / `KRAKEN_VALIDATE_API_SECRET` credentials.
+
+The venue adapter hard-codes `validate=true`; it exposes no live-order method. A successful response means the order shape passed Kraken validation. It is not a fill and does not alter Aether's portfolio.
+
+When persistence is enabled, the request fingerprint and sanitized validation result are stored in `venue_validation_events`.
