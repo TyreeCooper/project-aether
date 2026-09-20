@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     persistence_enabled: bool = False
     operator_auth_secret: str = "dev-only-change-me"
     operator_step_up_secret: str = "dev-only-step-up-change-me"
+    kraken_read_api_key: str = ""
+    kraken_read_api_secret: str = ""
     exchange_api_key: str = ""
     exchange_api_secret: str = ""
     exchange_api_passphrase: str = ""
