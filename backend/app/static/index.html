@@ -3,186 +3,241 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
-<meta name="theme-color" content="#07111f"/>
-<title>Aether Operator</title>
+<meta name="theme-color" content="#08111d"/>
+<title>Aether</title>
 <style>
 :root{
   color-scheme:dark;
-  --bg:#07111f;--panel:#0d1a2b;--panel2:#101f33;--line:#1b3550;
-  --text:#f4f7fb;--muted:#91a4b7;--blue:#2f7df6;--blue2:#66a3ff;
-  --green:#46d17d;--red:#ff6670;--amber:#f0b95b;--shadow:0 14px 30px rgba(0,0,0,.28)
+  --bg:#08111d;--panel:#0e1a2a;--panel2:#132338;--line:#203a56;
+  --text:#f6f8fb;--muted:#8fa2b7;--blue:#397ff6;--blue2:#6aa7ff;
+  --green:#42d47d;--red:#ff6672;--amber:#f0b65a;
+  --shadow:0 18px 45px rgba(0,0,0,.28)
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-body{min-height:100vh}
+html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+body{overscroll-behavior-y:none}
 button,input{font:inherit}
 button{cursor:pointer}
-.app{max-width:980px;margin:0 auto;padding:14px 14px calc(104px + env(safe-area-inset-bottom))}
-.topbar{position:sticky;top:0;z-index:20;display:flex;justify-content:space-between;align-items:center;gap:12px;padding:13px 14px;background:rgba(7,17,31,.92);backdrop-filter:blur(18px);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow)}
-.brand{display:flex;align-items:center;gap:10px}
-.logo{width:34px;height:34px;border-radius:10px;background:linear-gradient(145deg,#2f7df6,#5e51ff);display:grid;place-items:center;font-weight:900;box-shadow:0 8px 24px rgba(47,125,246,.3)}
-.brandname{font-weight:850;letter-spacing:.08em;font-size:14px}
-.sub{font-size:11px;color:var(--muted);margin-top:2px}
-.statuses{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
-.pill{font-size:10px;font-weight:800;letter-spacing:.04em;padding:6px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);background:#0a1625}
-.pill.good{color:var(--green);border-color:rgba(70,209,125,.35);background:rgba(70,209,125,.08)}
-.pill.warn{color:var(--amber);border-color:rgba(240,185,91,.35);background:rgba(240,185,91,.08)}
-.pill.bad{color:var(--red);border-color:rgba(255,102,112,.35);background:rgba(255,102,112,.08)}
-.hero{margin-top:14px;padding:18px;border:1px solid var(--line);border-radius:18px;background:linear-gradient(155deg,#10233b,#0b1727);box-shadow:var(--shadow)}
-.eyebrow{font-size:10px;font-weight:800;letter-spacing:.13em;color:var(--muted)}
-.equity{font-size:38px;line-height:1.05;font-weight:900;letter-spacing:-.04em;margin-top:7px}
-.hero-meta{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:18px}
-.mini{padding:11px;border-radius:12px;background:rgba(4,11,20,.42);border:1px solid rgba(255,255,255,.06)}
-.label{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
-.value{font-size:16px;font-weight:750;margin-top:4px;overflow-wrap:anywhere}
-.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:15px;box-shadow:0 8px 24px rgba(0,0,0,.16);min-width:0}
+.app{max-width:980px;margin:auto;padding:10px 12px calc(92px + env(safe-area-inset-bottom))}
+.topbar{position:sticky;top:0;z-index:30;display:flex;justify-content:space-between;align-items:center;padding:11px 12px;background:rgba(8,17,29,.91);backdrop-filter:blur(18px);border:1px solid var(--line);border-radius:15px;box-shadow:var(--shadow)}
+.brand{display:flex;gap:10px;align-items:center}
+.logo{width:36px;height:36px;border-radius:11px;display:grid;place-items:center;font-weight:900;background:linear-gradient(145deg,#387ff6,#6757ff);box-shadow:0 8px 22px rgba(57,127,246,.32)}
+.brand-title{font-weight:900;letter-spacing:.08em;font-size:14px}
+.brand-sub{font-size:10px;color:var(--muted);margin-top:2px}
+.header-state{display:flex;gap:6px;align-items:center}
+.pill{display:inline-flex;align-items:center;gap:5px;padding:6px 8px;border-radius:999px;border:1px solid var(--line);background:#0b1624;color:var(--muted);font-size:10px;font-weight:850;letter-spacing:.04em}
+.pill.good{color:var(--green);border-color:rgba(66,212,125,.36);background:rgba(66,212,125,.08)}
+.pill.bad{color:var(--red);border-color:rgba(255,102,114,.36);background:rgba(255,102,114,.08)}
+.pill.warn{color:var(--amber);border-color:rgba(240,182,90,.36);background:rgba(240,182,90,.08)}
+.page{display:none;animation:pageIn .24s ease}
+.page.active{display:block}
+@keyframes pageIn{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+.page-head{padding:18px 3px 4px}
+.page-head h1{font-size:24px;line-height:1.05;margin:0;font-weight:900;letter-spacing:-.03em}
+.page-head p{margin:6px 0 0;color:var(--muted);font-size:12px}
+.hero{margin-top:10px;padding:18px;border-radius:20px;border:1px solid var(--line);background:radial-gradient(circle at top right,rgba(57,127,246,.18),transparent 35%),linear-gradient(150deg,#122640,#0b1727);box-shadow:var(--shadow)}
+.eyebrow{font-size:10px;font-weight:850;letter-spacing:.13em;color:var(--muted)}
+.equity{font-size:40px;line-height:1;font-weight:950;letter-spacing:-.045em;margin-top:8px}
+.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:17px}
+.metric{padding:11px;border-radius:13px;background:rgba(3,9,16,.38);border:1px solid rgba(255,255,255,.06)}
+.metric .k{font-size:9px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase}
+.metric .v{font-size:16px;font-weight:800;margin-top:4px;overflow-wrap:anywhere}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px;margin-top:11px}
+.card{min-width:0;padding:15px;border-radius:17px;background:var(--panel);border:1px solid var(--line);box-shadow:0 10px 28px rgba(0,0,0,.16)}
 .card.full{grid-column:1/-1}
-.card-title{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}
-.card-title h2{font-size:11px;letter-spacing:.11em;color:var(--muted);margin:0}
-.row{display:flex;justify-content:space-between;gap:18px;align-items:center;padding:8px 0;border-bottom:1px solid rgba(145,164,183,.09);font-size:14px}
+.card-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px}
+.card-head h2{margin:0;font-size:11px;color:var(--muted);letter-spacing:.1em}
+.row{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:9px 0;border-bottom:1px solid rgba(143,162,183,.09);font-size:14px}
 .row:last-child{border-bottom:0}
-.row span:last-child{text-align:right;font-weight:650}
-.access{border-color:rgba(47,125,246,.35);background:linear-gradient(145deg,rgba(47,125,246,.12),var(--panel))}
-.access-line{display:flex;gap:8px}
-.input{width:100%;min-height:48px;border-radius:11px;border:1px solid var(--line);background:#07111f;color:var(--text);padding:0 13px;outline:none}
-.input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(47,125,246,.14)}
-.btn{min-height:48px;border-radius:12px;border:1px solid var(--line);background:#142941;color:var(--text);padding:0 16px;font-weight:800;letter-spacing:.01em;transition:.15s ease}
-.btn:active{transform:scale(.98)}
-.btn:disabled{opacity:.42;cursor:not-allowed}
-.btn.primary{background:linear-gradient(180deg,#3588ff,#246bd5);border-color:#3f91ff;box-shadow:0 8px 20px rgba(47,125,246,.22)}
-.btn.success{background:linear-gradient(180deg,#1f8f55,#176d42);border-color:#299d61}
-.btn.danger{background:linear-gradient(180deg,#b83241,#8e2330);border-color:#d74a57}
-.btn.secondary{background:#13243a}
-.action-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
-.action-grid .btn{min-height:56px;font-size:15px}
-.action-grid .wide{grid-column:1/-1}
-.helper{font-size:12px;color:var(--muted);line-height:1.45;margin-top:9px}
-.helper.good{color:var(--green)}.helper.bad{color:var(--red)}.helper.warn{color:var(--amber)}
+.row span:last-child{text-align:right;font-weight:700}
 .summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
-.box{background:#091625;border:1px solid rgba(145,164,183,.12);border-radius:12px;padding:11px}
-.box .value{font-size:17px}
-.configgrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}
-.field label{display:block;font-size:10px;letter-spacing:.05em;color:var(--muted);margin:0 0 5px 2px}
-.field input{width:100%;min-height:44px;border:1px solid var(--line);border-radius:10px;background:#07111f;color:var(--text);padding:0 10px}
-.tabs{display:flex;gap:7px;overflow-x:auto;padding:2px 0 8px;scrollbar-width:none}
-.tabs::-webkit-scrollbar{display:none}
-.tab{min-width:max-content;min-height:38px;padding:0 13px;border-radius:999px;border:1px solid var(--line);background:#0a1625;color:var(--muted);font-weight:750}
-.tab.active{background:rgba(47,125,246,.16);border-color:#2f7df6;color:#b9d4ff}
-.tablewrap{overflow:auto;border:1px solid var(--line);border-radius:12px;background:#091625}
-table{width:100%;border-collapse:collapse;font-size:12px;min-width:740px}
-th,td{padding:10px 9px;border-bottom:1px solid rgba(145,164,183,.1);text-align:left;white-space:nowrap}
-th{color:var(--muted);font-weight:700;background:#0a1727;position:sticky;top:0}
-.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.box{padding:11px;border-radius:13px;background:#0a1624;border:1px solid rgba(143,162,183,.12)}
+.box .k{font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+.box .v{font-size:17px;font-weight:850;margin-top:5px}
 .goodText{color:var(--green)!important}.badText{color:var(--red)!important}.warnText{color:var(--amber)!important}
-.log{font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;color:#aab9c9;white-space:pre-wrap;max-height:230px;overflow:auto;background:#091625;border-radius:12px;padding:10px;border:1px solid rgba(145,164,183,.1)}
-.bottom{position:fixed;left:0;right:0;bottom:0;z-index:30;padding:10px 14px calc(10px + env(safe-area-inset-bottom));background:rgba(6,14,25,.94);backdrop-filter:blur(18px);border-top:1px solid var(--line)}
-.bottom-inner{max-width:980px;margin:0 auto}
-.bottom .btn{width:100%;min-height:54px}
-.toast{position:fixed;left:50%;bottom:calc(82px + env(safe-area-inset-bottom));transform:translate(-50%,20px);z-index:100;width:min(92vw,460px);padding:12px 14px;border-radius:12px;background:#13243a;border:1px solid var(--line);box-shadow:var(--shadow);opacity:0;pointer-events:none;transition:.2s ease;font-size:13px;font-weight:700}
-.toast.show{opacity:1;transform:translate(-50%,0)}
-.toast.good{border-color:rgba(70,209,125,.45)}.toast.bad{border-color:rgba(255,102,112,.5)}
-.spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.25);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:-2px;margin-right:7px}
+.helper{font-size:12px;line-height:1.45;color:var(--muted);margin-top:9px}
+.helper.good{color:var(--green)}.helper.bad{color:var(--red)}.helper.warn{color:var(--amber)}
+.action-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.btn{
+  position:relative;overflow:hidden;min-height:54px;border:1px solid var(--line);border-radius:14px;
+  padding:0 16px;color:#fff;background:linear-gradient(180deg,#18304b,#11243a);
+  font-weight:850;letter-spacing:.01em;box-shadow:0 10px 24px rgba(0,0,0,.18);
+  transition:transform .12s ease,box-shadow .18s ease,filter .18s ease,background .18s ease,border-color .18s ease
+}
+.btn::after{content:"";position:absolute;inset:0;background:rgba(255,255,255,.11);opacity:0;transition:.15s}
+.btn:not(:disabled):active{transform:scale(.965);box-shadow:0 4px 10px rgba(0,0,0,.18)}
+.btn:not(:disabled):active::after{opacity:1}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn.primary{background:linear-gradient(180deg,#408dff,#286edc);border-color:#5598ff;box-shadow:0 10px 24px rgba(57,127,246,.24)}
+.btn.success{background:linear-gradient(180deg,#22965a,#197241);border-color:#32aa6b}
+.btn.danger{background:linear-gradient(180deg,#be3748,#922532);border-color:#dc5060}
+.btn.secondary{background:linear-gradient(180deg,#1a3048,#112337)}
+.btn.wide{grid-column:1/-1}
+.btn.loading{filter:saturate(.8);pointer-events:none}
+.btn.state-success{animation:successPulse .7s ease;background:linear-gradient(180deg,#2fbf70,#1d874f);border-color:#57df91}
+.btn.state-error{animation:errorShake .32s ease;background:linear-gradient(180deg,#cf4352,#9d2935);border-color:#ff7180}
+@keyframes successPulse{0%{transform:scale(.97)}45%{transform:scale(1.025);box-shadow:0 0 0 7px rgba(66,212,125,.12)}100%{transform:none}}
+@keyframes errorShake{0%,100%{transform:none}25%{transform:translateX(-4px)}50%{transform:translateX(4px)}75%{transform:translateX(-2px)}}
+.spinner{display:inline-block;width:15px;height:15px;margin-right:8px;vertical-align:-2px;border:2px solid rgba(255,255,255,.28);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
+.input{width:100%;min-height:50px;border:1px solid var(--line);border-radius:12px;background:#08111d;color:var(--text);padding:0 13px;outline:none}
+.input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(57,127,246,.15)}
+.access-line{display:flex;gap:8px}
+.configgrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}
+.field label{display:block;margin:0 0 5px 2px;font-size:9px;letter-spacing:.07em;color:var(--muted)}
+.field input{width:100%;min-height:45px;border:1px solid var(--line);border-radius:11px;background:#08111d;color:var(--text);padding:0 10px}
+.tabs{display:flex;gap:7px;overflow-x:auto;padding:2px 0 9px;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{min-width:max-content;min-height:39px;padding:0 13px;border-radius:999px;border:1px solid var(--line);background:#0a1624;color:var(--muted);font-weight:800}
+.tab.active{color:#cbe0ff;border-color:var(--blue);background:rgba(57,127,246,.15)}
+.tablewrap{overflow:auto;border:1px solid var(--line);border-radius:13px;background:#091522}
+table{width:100%;border-collapse:collapse;font-size:12px;min-width:740px}
+th,td{padding:10px 9px;border-bottom:1px solid rgba(143,162,183,.1);text-align:left;white-space:nowrap}
+th{position:sticky;top:0;background:#0b1827;color:var(--muted);font-weight:750}
+.log{font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;color:#a8b7c8;white-space:pre-wrap;max-height:300px;overflow:auto;background:#091522;border:1px solid rgba(143,162,183,.1);border-radius:13px;padding:11px}
+.bottom-nav{position:fixed;left:0;right:0;bottom:0;z-index:50;padding:8px 10px calc(8px + env(safe-area-inset-bottom));background:rgba(6,14,24,.94);backdrop-filter:blur(20px);border-top:1px solid var(--line)}
+.nav-inner{max-width:620px;margin:auto;display:grid;grid-template-columns:repeat(4,1fr);gap:5px}
+.nav-btn{min-height:56px;border:0;border-radius:13px;background:transparent;color:#778da4;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:3px;font-size:10px;font-weight:800;transition:.16s ease}
+.nav-btn .ico{font-size:20px;line-height:1}
+.nav-btn.active{color:#eaf2ff;background:rgba(57,127,246,.12)}
+.nav-btn:active{transform:scale(.94)}
+.toast{position:fixed;left:50%;bottom:calc(79px + env(safe-area-inset-bottom));transform:translate(-50%,18px);z-index:100;width:min(92vw,440px);padding:12px 14px;border-radius:13px;background:#14263c;border:1px solid var(--line);box-shadow:var(--shadow);opacity:0;pointer-events:none;transition:.2s;font-size:13px;font-weight:800}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.toast.good{border-color:rgba(66,212,125,.45)}.toast.bad{border-color:rgba(255,102,114,.5)}
+.system-list{display:grid;gap:8px}
+.system-item{display:flex;justify-content:space-between;gap:12px;padding:11px;border-radius:12px;background:#0a1624;border:1px solid rgba(143,162,183,.1);font-size:13px}
 @media(max-width:720px){
   .app{padding-left:10px;padding-right:10px}
-  .topbar{border-radius:14px}
-  .statuses .pill:first-child{display:none}
-  .grid{grid-template-columns:1fr}
-  .card.full{grid-column:1}
-  .hero-meta,.summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .header-state .pill:first-child{display:none}
+  .grid{grid-template-columns:1fr}.card.full{grid-column:1}
+  .metrics,.summary{grid-template-columns:repeat(2,minmax(0,1fr))}
   .configgrid{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .equity{font-size:34px}
+  .equity{font-size:36px}
+  .page-head h1{font-size:22px}
 }
-@media(max-width:390px){
-  .brandname{font-size:12px}.sub{font-size:10px}
-  .equity{font-size:31px}
-  .action-grid .btn{font-size:14px}
-}
+@media(min-width:721px){.bottom-nav{left:50%;right:auto;transform:translateX(-50%);width:620px;border:1px solid var(--line);border-bottom:0;border-radius:18px 18px 0 0}}
 </style>
 </head>
 <body>
 <div class="app">
-  <header class="topbar">
-    <div class="brand">
-      <div class="logo">A</div>
-      <div><div class="brandname">AETHER</div><div class="sub">Autonomous paper trading console</div></div>
-    </div>
-    <div class="statuses">
-      <span id="dbBadge" class="pill">DB</span>
-      <span id="botBadge" class="pill">OFFLINE</span>
-      <span class="pill warn">PAPER</span>
-    </div>
-  </header>
+<header class="topbar">
+  <div class="brand">
+    <div class="logo">A</div>
+    <div><div class="brand-title">AETHER</div><div class="brand-sub">Paper trading operator</div></div>
+  </div>
+  <div class="header-state">
+    <span id="dbBadge" class="pill">DB</span>
+    <span id="botBadge" class="pill">OFFLINE</span>
+    <span class="pill warn">PAPER</span>
+  </div>
+</header>
 
-  <section class="hero">
+<main>
+<section id="page-dashboard" class="page active">
+  <div class="page-head"><h1>Dashboard</h1><p>Portfolio, market and performance at a glance.</p></div>
+  <div class="hero">
     <div class="eyebrow">PORTFOLIO EQUITY</div>
     <div id="eq" class="equity">—</div>
-    <div class="hero-meta">
-      <div class="mini"><div class="label">USD</div><div id="usd" class="value">—</div></div>
-      <div class="mini"><div class="label">BTC</div><div id="btc" class="value">—</div></div>
-      <div class="mini"><div class="label">Open P/L</div><div id="pnl" class="value">—</div></div>
-      <div class="mini"><div class="label">Realized P/L</div><div id="rpnl" class="value">—</div></div>
+    <div class="metrics">
+      <div class="metric"><div class="k">USD</div><div id="usd" class="v">—</div></div>
+      <div class="metric"><div class="k">BTC</div><div id="btc" class="v">—</div></div>
+      <div class="metric"><div class="k">Open P/L</div><div id="pnl" class="v">—</div></div>
+      <div class="metric"><div class="k">Realized P/L</div><div id="rpnl" class="v">—</div></div>
     </div>
-  </section>
-
+  </div>
   <div class="grid">
-    <section class="card full access">
-      <div class="card-title"><h2>OPERATOR ACCESS</h2><span id="authBadge" class="pill">LOCKED</span></div>
-      <div class="access-line">
-        <input id="opToken" class="input" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Enter operator token"/>
-        <button id="connectBtn" class="btn primary" type="button">Connect</button>
-      </div>
-      <div id="authNote" class="helper">Controls are locked until your operator token is verified.</div>
-    </section>
-
     <section class="card">
-      <div class="card-title"><h2>MARKET</h2><span id="freshBadge" class="pill">CHECKING</span></div>
-      <div class="row"><span>Kraken fill tape</span><span id="mark">—</span></div>
+      <div class="card-head"><h2>MARKET</h2><span id="freshBadge" class="pill">CHECKING</span></div>
+      <div class="row"><span>Kraken</span><span id="mark">—</span></div>
       <div class="row"><span>Bid / Ask</span><span id="ba">—</span></div>
-      <div class="row"><span>Mark age</span><span id="age">—</span></div>
-      <div class="row"><span>Binance.US watch</span><span id="watch">—</span></div>
+      <div class="row"><span>Binance.US</span><span id="watch">—</span></div>
       <div class="row"><span>Basis</span><span id="basis">—</span></div>
     </section>
-
     <section class="card">
-      <div class="card-title"><h2>BOT STATUS</h2><span id="stateText" class="pill">—</span></div>
+      <div class="card-head"><h2>BOT</h2><span id="stateText" class="pill">—</span></div>
       <div class="row"><span>Strategy</span><span id="strategy">—</span></div>
-      <div class="row"><span>Position size</span><span id="psz">—</span></div>
+      <div class="row"><span>Position</span><span id="psz">—</span></div>
       <div class="row"><span>Max position</span><span id="mpsz">—</span></div>
-      <div class="row"><span>Flatten lock</span><span id="lock">—</span></div>
+      <div class="row"><span>Entry lock</span><span id="lock">—</span></div>
       <div id="note" class="helper"></div>
     </section>
-
     <section class="card full">
-      <div class="card-title"><h2>TRADING CONTROLS</h2><span class="pill">PROTECTED</span></div>
+      <div class="card-head"><h2>PERFORMANCE</h2><span class="pill">LIVE LEDGER</span></div>
+      <div class="summary">
+        <div class="box"><div class="k">Today P/L</div><div id="aDaily" class="v">—</div></div>
+        <div class="box"><div class="k">Week P/L</div><div id="aWeekly" class="v">—</div></div>
+        <div class="box"><div class="k">Win Rate</div><div id="aWinRate" class="v">—</div></div>
+        <div class="box"><div class="k">Max Drawdown</div><div id="aDrawdown" class="v">—</div></div>
+      </div>
+    </section>
+  </div>
+</section>
+
+<section id="page-trade" class="page">
+  <div class="page-head"><h1>Trade</h1><p>Arm, stop and manage the paper engine.</p></div>
+  <div class="grid">
+    <section class="card full">
+      <div class="card-head"><h2>CONTROL PANEL</h2><span id="tradeAuthBadge" class="pill bad">LOCKED</span></div>
       <div class="action-grid">
         <button id="startBtn" class="btn success control" type="button">Start Bot</button>
         <button id="stopBtn" class="btn secondary control" type="button">Stop Bot</button>
         <button id="buyBtn" class="btn primary control" type="button">Buy 0.01 BTC</button>
         <button id="sellBtn" class="btn secondary control" type="button">Sell Position</button>
         <button id="unlockBtn" class="btn secondary wide control" type="button">Clear Flatten Lock</button>
+        <button id="flattenBtn" class="btn danger wide control" type="button">Emergency Flatten & Lock Entries</button>
       </div>
-      <div id="controlNote" class="helper">Authenticate above to enable controls.</div>
+      <div id="controlNote" class="helper">Connect your operator token in Settings.</div>
     </section>
+    <section class="card">
+      <div class="card-head"><h2>EXECUTION TAPE</h2><span id="tradeFreshBadge" class="pill">—</span></div>
+      <div class="row"><span>Last</span><span id="tradeMark">—</span></div>
+      <div class="row"><span>Bid / Ask</span><span id="tradeBa">—</span></div>
+      <div class="row"><span>Mark age</span><span id="age">—</span></div>
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>POSITION</h2><span id="tradeState" class="pill">—</span></div>
+      <div class="row"><span>BTC</span><span id="tradeBtc">—</span></div>
+      <div class="row"><span>Open P/L</span><span id="tradePnl">—</span></div>
+      <div class="row"><span>Realized</span><span id="tradeRpnl">—</span></div>
+    </section>
+  </div>
+</section>
 
+<section id="page-activity" class="page">
+  <div class="page-head"><h1>Activity</h1><p>Orders, fills, positions, risk events and audit history.</p></div>
+  <div class="grid">
     <section class="card full">
-      <div class="card-title"><h2>PERFORMANCE</h2><span class="pill">LIVE LEDGER</span></div>
-      <div class="summary">
-        <div class="box"><div class="label">Today P/L</div><div id="aDaily" class="value">—</div></div>
-        <div class="box"><div class="label">Week P/L</div><div id="aWeekly" class="value">—</div></div>
-        <div class="box"><div class="label">Win Rate</div><div id="aWinRate" class="value">—</div></div>
-        <div class="box"><div class="label">Max Drawdown</div><div id="aDrawdown" class="value">—</div></div>
-        <div class="box"><div class="label">Wins / Losses</div><div id="aWL" class="value">—</div></div>
-        <div class="box"><div class="label">Avg Duration</div><div id="aDuration" class="value">—</div></div>
-        <div class="box"><div class="label">Fees</div><div id="aFees" class="value">—</div></div>
-        <div class="box"><div class="label">BTC Volume</div><div id="aVolume" class="value">—</div></div>
+      <div class="card-head"><h2>TRADE LEDGER</h2><span id="ledgerCount" class="pill">0 FILLS</span></div>
+      <div class="tabs" id="tabs">
+        <button class="tab active" data-tab="fills">Fills</button>
+        <button class="tab" data-tab="orders">Orders</button>
+        <button class="tab" data-tab="positions">Positions</button>
+        <button class="tab" data-tab="risk">Risk</button>
+        <button class="tab" data-tab="account">Account</button>
+        <button class="tab" data-tab="bot">Bot</button>
       </div>
-      <div id="actorStats" class="helper"></div>
+      <div id="ledger" class="tablewrap"></div>
     </section>
-
     <section class="card full">
-      <div class="card-title"><h2>STRATEGY & RISK</h2><span id="configBadge" class="pill">READ ONLY</span></div>
+      <div class="card-head"><h2>AUDIT STREAM</h2><span class="pill">LATEST 30</span></div>
+      <div id="log" class="log">Loading…</div>
+    </section>
+  </div>
+</section>
+
+<section id="page-settings" class="page">
+  <div class="page-head"><h1>Settings</h1><p>Operator access, strategy, risk and system information.</p></div>
+  <div class="grid">
+    <section class="card full">
+      <div class="card-head"><h2>OPERATOR ACCESS</h2><span id="authBadge" class="pill bad">LOCKED</span></div>
+      <div class="access-line">
+        <input id="opToken" class="input" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Enter operator token"/>
+        <button id="connectBtn" class="btn primary" type="button">Connect</button>
+      </div>
+      <div id="authNote" class="helper">Enter the operator token saved in Azure.</div>
+    </section>
+    <section class="card full">
+      <div class="card-head"><h2>STRATEGY & RISK</h2><span id="configBadge" class="pill">READ ONLY</span></div>
       <div class="configgrid">
         <div class="field"><label>SHORT MA</label><input id="cShort" type="number" min="2" max="100"></div>
         <div class="field"><label>LONG MA</label><input id="cLong" type="number" min="3" max="200"></div>
@@ -195,163 +250,138 @@ th{color:var(--muted);font-weight:700;background:#0a1727;position:sticky;top:0}
       <button id="saveCfgBtn" class="btn primary" style="margin-top:10px;width:100%" type="button">Save Configuration</button>
       <div id="configNote" class="helper"></div>
     </section>
-
     <section class="card full">
-      <div class="card-title"><h2>TRADE LEDGER</h2><span id="ledgerCount" class="pill">0 FILLS</span></div>
-      <div class="tabs" id="tabs">
-        <button class="tab active" data-tab="fills">Fills</button>
-        <button class="tab" data-tab="orders">Orders</button>
-        <button class="tab" data-tab="positions">Positions</button>
-        <button class="tab" data-tab="risk">Risk</button>
-        <button class="tab" data-tab="account">Account</button>
-        <button class="tab" data-tab="bot">Bot History</button>
+      <div class="card-head"><h2>SYSTEM</h2><span class="pill">AETHER 0.9.0</span></div>
+      <div class="system-list">
+        <div class="system-item"><span>Persistence</span><strong id="sysDb">—</strong></div>
+        <div class="system-item"><span>Execution tape</span><strong>Kraken</strong></div>
+        <div class="system-item"><span>Watch tape</span><strong>Binance.US</strong></div>
+        <div class="system-item"><span>Mode</span><strong class="warnText">Paper / Live blocked</strong></div>
+        <div class="system-item"><span>Authentication</span><strong id="sysAuth">—</strong></div>
       </div>
-      <div id="ledger" class="tablewrap"></div>
-    </section>
-
-    <section class="card full">
-      <div class="card-title"><h2>AUDIT STREAM</h2><span class="pill">LATEST 30</span></div>
-      <div class="log" id="log">Loading…</div>
+      <div id="actorStats" class="helper"></div>
     </section>
   </div>
+</section>
+</main>
 </div>
 
-<div class="bottom">
-  <div class="bottom-inner">
-    <button id="flattenBtn" class="btn danger control" type="button">Emergency Flatten & Lock Entries</button>
+<nav class="bottom-nav" aria-label="Primary">
+  <div class="nav-inner">
+    <button class="nav-btn active" data-page="dashboard"><span class="ico">⌂</span><span>Home</span></button>
+    <button class="nav-btn" data-page="trade"><span class="ico">↗</span><span>Trade</span></button>
+    <button class="nav-btn" data-page="activity"><span class="ico">≡</span><span>Activity</span></button>
+    <button class="nav-btn" data-page="settings"><span class="ico">⚙</span><span>Settings</span></button>
   </div>
-</div>
+</nav>
 <div id="toast" class="toast"></div>
 
 <script>
 "use strict";
 const $=id=>document.getElementById(id);
-const els={};
-[
-"dbBadge","botBadge","eq","usd","btc","pnl","rpnl","authBadge","opToken","connectBtn","authNote",
-"mark","ba","age","watch","basis","freshBadge","stateText","strategy","psz","mpsz","lock","note",
-"startBtn","stopBtn","buyBtn","sellBtn","unlockBtn","controlNote","aDaily","aWeekly","aWinRate",
-"aDrawdown","aWL","aDuration","aFees","aVolume","actorStats","configBadge","cShort","cLong","cStop",
-"cSize","cMax","cDD","cLoss","saveCfgBtn","configNote","tabs","ledger","ledgerCount","log","flattenBtn","toast"
-].forEach(id=>els[id]=$(id));
+const ids=["dbBadge","botBadge","eq","usd","btc","pnl","rpnl","freshBadge","mark","ba","watch","basis","stateText","strategy","psz","mpsz","lock","note","aDaily","aWeekly","aWinRate","aDrawdown","startBtn","stopBtn","buyBtn","sellBtn","unlockBtn","flattenBtn","tradeAuthBadge","controlNote","tradeFreshBadge","tradeMark","tradeBa","age","tradeState","tradeBtc","tradePnl","tradeRpnl","tabs","ledger","ledgerCount","log","authBadge","opToken","connectBtn","authNote","configBadge","cShort","cLong","cStop","cSize","cMax","cDD","cLoss","saveCfgBtn","configNote","sysDb","sysAuth","actorStats","toast"];
+const els={};ids.forEach(id=>els[id]=$(id));
 
-let activeTab="fills";
-let authenticated=false;
-let authConfigured=false;
-let botSnapshot=null;
-let configSnapshot=null;
+let activeLedger="fills", authenticated=false, authConfigured=false;
+let botSnapshot=null, configSnapshot=null, initialAuthChecked=false;
 const historyCache={};
 
-function money(v){
-  if(v===null||v===undefined||Number.isNaN(Number(v)))return "—";
-  return "$"+Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
-}
-function num(v,d=4){
-  if(v===null||v===undefined||Number.isNaN(Number(v)))return "—";
-  return Number(v).toLocaleString(undefined,{maximumFractionDigits:d});
-}
-function shortId(v){return v?String(v).slice(0,10):"—"}
-function clock(v){return v?new Date(v).toLocaleString():"—"}
-function pnlClass(v){return Number(v)>0?"goodText":Number(v)<0?"badText":""}
-function esc(v){return String(v??"—").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]))}
 function token(){return sessionStorage.getItem("aether_operator_token")||""}
 function authHeaders(){return token()?{"X-Operator-Token":token()}:{}}
+function money(v){return v===null||v===undefined||Number.isNaN(Number(v))?"—":"$"+Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}
+function num(v,d=4){return v===null||v===undefined||Number.isNaN(Number(v))?"—":Number(v).toLocaleString(undefined,{maximumFractionDigits:d})}
+function clock(v){return v?new Date(v).toLocaleString():"—"}
+function shortId(v){return v?String(v).slice(0,10):"—"}
+function esc(v){return String(v??"—").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]))}
+function pnlClass(v){return Number(v)>0?"goodText":Number(v)<0?"badText":""}
 
 function toast(message,type=""){
-  els.toast.textContent=message;
-  els.toast.className="toast show "+type;
-  clearTimeout(toast.timer);
-  toast.timer=setTimeout(()=>els.toast.className="toast",2600);
+  els.toast.textContent=message;els.toast.className="toast show "+type;
+  clearTimeout(toast.timer);toast.timer=setTimeout(()=>els.toast.className="toast",2400);
 }
-
 async function api(url,options={}){
-  const r=await fetch(url,{cache:"no-store",...options});
-  let body={};
+  const r=await fetch(url,{cache:"no-store",...options});let body={};
   try{body=await r.json()}catch{}
-  if(!r.ok){
-    const msg=body.detail||body.error||("Request failed ("+r.status+")");
-    const err=new Error(msg);err.status=r.status;throw err;
-  }
+  if(!r.ok){const e=new Error(body.detail||body.error||("Request failed ("+r.status+")"));e.status=r.status;throw e}
   return body;
 }
 
-function setBusy(btn,busy,label){
+function setPage(name){
+  document.querySelectorAll(".page").forEach(p=>p.classList.toggle("active",p.id==="page-"+name));
+  document.querySelectorAll(".nav-btn").forEach(b=>b.classList.toggle("active",b.dataset.page===name));
+  sessionStorage.setItem("aether_page",name);
+  window.scrollTo({top:0,behavior:"smooth"});
+}
+document.querySelector(".nav-inner").addEventListener("click",e=>{const b=e.target.closest(".nav-btn");if(b)setPage(b.dataset.page)});
+
+function resetButton(btn,label){
   if(!btn)return;
-  if(busy){
-    btn.dataset.label=btn.textContent;
-    btn.innerHTML='<span class="spinner"></span>'+label;
-    btn.disabled=true;
-  }else{
-    btn.textContent=btn.dataset.label||label;
-    refreshControlState();
-  }
+  btn.classList.remove("loading","state-success","state-error");
+  btn.innerHTML=label;
+  refreshControlState();
 }
-
-function refreshControlState(){
-  const locked=!!botSnapshot?.flatten_lock;
-  const stale=!!botSnapshot?.stale;
-  const canControl=!authConfigured||authenticated;
-  document.querySelectorAll(".control").forEach(b=>b.disabled=!canControl);
-  els.startBtn.disabled=!canControl||locked;
-  els.buyBtn.disabled=!canControl||locked||stale;
-  els.sellBtn.disabled=!canControl||Number(botSnapshot?.btc||0)<=0;
-  els.unlockBtn.disabled=!canControl||!locked;
-  els.flattenBtn.disabled=!canControl;
-  els.saveCfgBtn.disabled=!canControl||!configSnapshot?.editable;
-  els.controlNote.textContent=canControl
-    ? (locked?"Entries are locked. Clear the flatten lock before new entries.":"Controls authenticated and ready.")
-    : "Enter your operator token above and tap Connect.";
-  els.controlNote.className="helper "+(canControl?"good":"warn");
+function loadingButton(btn,label){
+  btn.classList.remove("state-success","state-error");btn.classList.add("loading");
+  btn.disabled=true;btn.innerHTML='<span class="spinner"></span>'+label;
 }
-
-async function verifyToken(showSuccess=true){
-  const entered=els.opToken.value.trim();
-  if(entered)sessionStorage.setItem("aether_operator_token",entered);
-  if(!authConfigured){
-    authenticated=true;refreshAuthUI();return true;
-  }
-  if(!token()){
-    authenticated=false;refreshAuthUI();
-    if(showSuccess)toast("Operator token required","bad");
-    return false;
-  }
-  setBusy(els.connectBtn,true,"Verifying");
-  try{
-    await api("/api/v1/auth/verify",{method:"POST",headers:authHeaders()});
-    authenticated=true;
-    refreshAuthUI();
-    if(showSuccess)toast("Operator access verified","good");
-    return true;
-  }catch(e){
-    authenticated=false;
-    sessionStorage.removeItem("aether_operator_token");
-    els.opToken.value="";
-    refreshAuthUI();
-    if(showSuccess)toast(e.message,"bad");
-    return false;
-  }finally{
-    setBusy(els.connectBtn,false,"Connect");
-  }
+function successButton(btn,label,idleLabel,stay=false){
+  btn.classList.remove("loading","state-error");btn.classList.add("state-success");btn.disabled=true;btn.textContent=label;
+  if(!stay)setTimeout(()=>resetButton(btn,idleLabel),850);
+}
+function errorButton(btn,label,idleLabel){
+  btn.classList.remove("loading","state-success");btn.classList.add("state-error");btn.disabled=true;btn.textContent=label;
+  setTimeout(()=>resetButton(btn,idleLabel),1000);
 }
 
 function refreshAuthUI(){
+  const connected=!authConfigured||authenticated;
   if(!authConfigured){
-    els.authBadge.textContent="OPEN";
-    els.authBadge.className="pill warn";
-    els.authNote.textContent="Authentication is not configured on the server.";
-    els.authNote.className="helper warn";
+    els.authBadge.textContent="OPEN";els.authBadge.className="pill warn";
+    els.authNote.textContent="Authentication is not configured on the server.";els.authNote.className="helper warn";
+    els.tradeAuthBadge.textContent="OPEN";els.tradeAuthBadge.className="pill warn";
   }else if(authenticated){
-    els.authBadge.textContent="VERIFIED";
-    els.authBadge.className="pill good";
-    els.authNote.textContent="Operator session verified on this device.";
-    els.authNote.className="helper good";
+    els.authBadge.textContent="VERIFIED";els.authBadge.className="pill good";
+    els.authNote.textContent="Operator access verified on this device.";els.authNote.className="helper good";
+    els.tradeAuthBadge.textContent="VERIFIED";els.tradeAuthBadge.className="pill good";
+    if(!els.connectBtn.classList.contains("loading")){els.connectBtn.classList.add("state-success");els.connectBtn.textContent="Connected ✓"}
   }else{
-    els.authBadge.textContent="LOCKED";
-    els.authBadge.className="pill bad";
-    els.authNote.textContent="Enter the operator token you saved in Azure, then tap Connect.";
-    els.authNote.className="helper";
+    els.authBadge.textContent="LOCKED";els.authBadge.className="pill bad";
+    els.authNote.textContent="Enter the operator token saved in Azure, then tap Connect.";els.authNote.className="helper";
+    els.tradeAuthBadge.textContent="LOCKED";els.tradeAuthBadge.className="pill bad";
+    if(!els.connectBtn.classList.contains("loading")){els.connectBtn.classList.remove("state-success");els.connectBtn.textContent="Connect"}
   }
+  els.sysAuth.textContent=authConfigured?(authenticated?"Verified":"Token enforced"):"Not configured";
+  els.sysAuth.className=authenticated?"goodText":authConfigured?"warnText":"badText";
   refreshControlState();
+}
+
+function refreshControlState(){
+  const can=!authConfigured||authenticated, locked=!!botSnapshot?.flatten_lock, stale=!!botSnapshot?.stale;
+  document.querySelectorAll(".control").forEach(b=>{if(!b.classList.contains("loading")&&!b.classList.contains("state-success")&&!b.classList.contains("state-error"))b.disabled=!can});
+  if(!els.startBtn.classList.contains("loading"))els.startBtn.disabled=!can||locked||botSnapshot?.state!=="OFFLINE";
+  if(!els.stopBtn.classList.contains("loading"))els.stopBtn.disabled=!can||botSnapshot?.state==="OFFLINE";
+  if(!els.buyBtn.classList.contains("loading"))els.buyBtn.disabled=!can||locked||stale;
+  if(!els.sellBtn.classList.contains("loading"))els.sellBtn.disabled=!can||Number(botSnapshot?.btc||0)<=0;
+  if(!els.unlockBtn.classList.contains("loading"))els.unlockBtn.disabled=!can||!locked;
+  if(!els.flattenBtn.classList.contains("loading"))els.flattenBtn.disabled=!can;
+  if(!els.saveCfgBtn.classList.contains("loading"))els.saveCfgBtn.disabled=!can||!configSnapshot?.editable;
+  els.controlNote.textContent=!can?"Operator locked. Connect in Settings.":locked?"Entries locked after emergency flatten.":"Operator controls ready.";
+  els.controlNote.className="helper "+(!can||locked?"warn":"good");
+}
+
+async function verifyToken(showToast=true){
+  const entered=els.opToken.value.trim();if(entered)sessionStorage.setItem("aether_operator_token",entered);
+  if(!authConfigured){authenticated=true;refreshAuthUI();return true}
+  if(!token()){authenticated=false;refreshAuthUI();if(showToast)toast("Operator token required","bad");return false}
+  loadingButton(els.connectBtn,"Verifying…");
+  try{
+    await api("/api/v1/auth/verify",{method:"POST",headers:authHeaders()});
+    authenticated=true;refreshAuthUI();successButton(els.connectBtn,"Verified ✓","Connected ✓",true);
+    if(showToast)toast("Operator connected","good");return true;
+  }catch(e){
+    authenticated=false;sessionStorage.removeItem("aether_operator_token");els.opToken.value="";refreshAuthUI();
+    errorButton(els.connectBtn,"Invalid token","Connect");if(showToast)toast(e.message,"bad");return false;
+  }
 }
 
 async function load(){
@@ -362,140 +392,113 @@ async function load(){
     ]);
     botSnapshot=b;configSnapshot=cfg;authConfigured=!!auth.configured;
 
-    els.eq.textContent=money(a.equity_usd);
-    els.usd.textContent=money(a.usd_free);
-    els.btc.textContent=num(a.btc_total,8);
-    els.pnl.textContent=money(a.open_pnl);els.pnl.className="value "+pnlClass(a.open_pnl);
-    els.rpnl.textContent=money(a.realized_pnl_24h);els.rpnl.className="value "+pnlClass(a.realized_pnl_24h);
+    els.eq.textContent=money(a.equity_usd);els.usd.textContent=money(a.usd_free);els.btc.textContent=num(a.btc_total,8);
+    els.pnl.textContent=money(a.open_pnl);els.pnl.className="v "+pnlClass(a.open_pnl);
+    els.rpnl.textContent=money(a.realized_pnl_24h);els.rpnl.className="v "+pnlClass(a.realized_pnl_24h);
 
-    els.mark.textContent=money(a.mark);
-    els.ba.textContent=money(a.bid)+" / "+money(a.ask);
+    els.mark.textContent=money(a.mark);els.tradeMark.textContent=money(a.mark);
+    els.ba.textContent=money(a.bid)+" / "+money(a.ask);els.tradeBa.textContent=els.ba.textContent;
     els.watch.textContent=(a.watch_source??"offline")+" · "+(a.watch_last==null?"—":money(a.watch_last));
     els.basis.textContent=a.watch_basis_usd==null?"—":money(a.watch_basis_usd);
     els.age.textContent=b.last_tick_age_ms==null?"No tick":b.last_tick_age_ms+" ms";
-    els.freshBadge.textContent=b.stale?"STALE":"LIVE";
-    els.freshBadge.className="pill "+(b.stale?"bad":"good");
+    const freshClass="pill "+(b.stale?"bad":"good"),freshText=b.stale?"STALE":"LIVE";
+    els.freshBadge.className=freshClass;els.freshBadge.textContent=freshText;els.tradeFreshBadge.className=freshClass;els.tradeFreshBadge.textContent=freshText;
 
-    els.botBadge.textContent=b.state??"—";
-    els.botBadge.className="pill "+(b.state==="OFFLINE"?"bad":b.state==="IDLE"?"warn":"good");
-    els.stateText.textContent=b.state??"—";
-    els.stateText.className=els.botBadge.className;
-    els.strategy.textContent=b.strategy??"—";
-    els.psz.textContent=num(b.position_size_btc,8)+" BTC";
-    els.mpsz.textContent=num(b.max_position_btc,8)+" BTC";
-    els.lock.textContent=b.flatten_lock?"LOCKED":"CLEAR";
-    els.lock.className=b.flatten_lock?"badText":"goodText";
-    els.note.textContent=b.flatten_lock?"Flatten lock is active.":b.stale?"Market mark is stale.":"Market and risk state normal.";
-    els.note.className="helper "+(b.flatten_lock||b.stale?"warn":"good");
+    const stateClass="pill "+(b.state==="OFFLINE"?"bad":b.state==="IDLE"?"warn":"good");
+    [els.botBadge,els.stateText,els.tradeState].forEach(x=>{x.className=stateClass;x.textContent=b.state??"—"});
+    els.strategy.textContent=b.strategy??"—";els.psz.textContent=num(b.position_size_btc,8)+" BTC";els.mpsz.textContent=num(b.max_position_btc,8)+" BTC";
+    els.lock.textContent=b.flatten_lock?"LOCKED":"CLEAR";els.lock.className=b.flatten_lock?"badText":"goodText";
+    els.note.textContent=b.flatten_lock?"Flatten lock active.":b.stale?"Market mark stale.":"Risk state normal.";els.note.className="helper "+(b.flatten_lock||b.stale?"warn":"good");
+    els.tradeBtc.textContent=num(a.btc_total,8);els.tradePnl.textContent=money(a.open_pnl);els.tradePnl.className=pnlClass(a.open_pnl);
+    els.tradeRpnl.textContent=money(a.realized_pnl_24h);els.tradeRpnl.className=pnlClass(a.realized_pnl_24h);
 
-    els.dbBadge.textContent=s.initialized&&!s.last_error?"POSTGRES LIVE":"DB ISSUE";
-    els.dbBadge.className="pill "+(s.initialized&&!s.last_error?"good":"bad");
+    els.dbBadge.textContent=s.initialized&&!s.last_error?"POSTGRES LIVE":"DB ISSUE";els.dbBadge.className="pill "+(s.initialized&&!s.last_error?"good":"bad");
+    els.sysDb.textContent=s.initialized&&!s.last_error?"Azure PostgreSQL / Managed Identity":"Issue detected";els.sysDb.className=s.initialized&&!s.last_error?"goodText":"badText";
 
-    els.aDaily.textContent=money(an.daily_realized_pnl_usd);els.aDaily.className="value "+pnlClass(an.daily_realized_pnl_usd);
-    els.aWeekly.textContent=money(an.weekly_realized_pnl_usd);els.aWeekly.className="value "+pnlClass(an.weekly_realized_pnl_usd);
-    els.aWinRate.textContent=num(an.win_rate_pct,2)+"%";
-    els.aDrawdown.textContent=num(an.max_drawdown_pct,2)+"%";
-    els.aWL.textContent=(an.wins??0)+" / "+(an.losses??0);
-    els.aDuration.textContent=an.avg_trade_duration_seconds==null?"—":num(an.avg_trade_duration_seconds/60,1)+" min";
-    els.aFees.textContent=money(an.fees_usd);
-    els.aVolume.textContent=num(an.volume_btc,8);
-    els.actorStats.textContent=Object.entries(an.by_actor||{}).map(([k,v])=>k+": "+v.fills+" fills · "+money(v.realized_pnl_usd)+" realized · "+money(v.fees_usd)+" fees").join("  |  ")||"No actor statistics yet.";
+    els.aDaily.textContent=money(an.daily_realized_pnl_usd);els.aDaily.className="v "+pnlClass(an.daily_realized_pnl_usd);
+    els.aWeekly.textContent=money(an.weekly_realized_pnl_usd);els.aWeekly.className="v "+pnlClass(an.weekly_realized_pnl_usd);
+    els.aWinRate.textContent=num(an.win_rate_pct,2)+"%";els.aDrawdown.textContent=num(an.max_drawdown_pct,2)+"%";
+    els.actorStats.textContent=Object.entries(an.by_actor||{}).map(([k,v])=>k+": "+v.fills+" fills · "+money(v.realized_pnl_usd)+" realized · "+money(v.fees_usd)+" fees").join(" | ")||"No actor statistics yet.";
 
-    els.cShort.value=cfg.short_ma;els.cLong.value=cfg.long_ma;els.cStop.value=cfg.stop_loss_pct;
-    els.cSize.value=cfg.position_size_btc;els.cMax.value=cfg.max_position_btc;els.cDD.value=cfg.max_drawdown_pct;els.cLoss.value=cfg.daily_loss_cap;
-    els.configBadge.textContent=cfg.editable?"EDITABLE":"LOCKED";
-    els.configBadge.className="pill "+(cfg.editable?"good":"warn");
-    els.configNote.textContent=cfg.editable?"Bot is OFFLINE and flat. Strategy changes are allowed.":"Stop the bot and return to zero BTC before editing strategy parameters.";
+    els.cShort.value=cfg.short_ma;els.cLong.value=cfg.long_ma;els.cStop.value=cfg.stop_loss_pct;els.cSize.value=cfg.position_size_btc;
+    els.cMax.value=cfg.max_position_btc;els.cDD.value=cfg.max_drawdown_pct;els.cLoss.value=cfg.daily_loss_cap;
+    els.configBadge.textContent=cfg.editable?"EDITABLE":"LOCKED";els.configBadge.className="pill "+(cfg.editable?"good":"warn");
+    els.configNote.textContent=cfg.editable?"Bot is OFFLINE and flat. Changes are allowed.":"Stop the bot and return to zero BTC before editing.";
 
     els.log.textContent=(l.events||[]).slice(0,30).map(e=>(e.ts?new Date(e.ts).toLocaleTimeString():"--")+"  "+e.level+"  "+e.message).join("\n");
-
-    if(authConfigured&&token()&&!authenticated)await verifyToken(false);
     if(!authConfigured)authenticated=true;
     refreshAuthUI();
-  }catch(e){
-    els.log.textContent="Cannot reach API: "+e.message;
-    toast("Aether API connection problem","bad");
-  }
+  }catch(e){els.log.textContent="Cannot reach API: "+e.message;toast("Aether API connection problem","bad")}
 }
 
 async function loadHistory(){
-  const endpoints=["fills","orders","risk","account","positions","bot"];
+  const names=["fills","orders","risk","account","positions","bot"];
   try{
-    const data=await Promise.all(endpoints.map(x=>api("/api/v1/history/"+x+"?limit=100")));
-    endpoints.forEach((x,i)=>historyCache[x]=data[i].items||[]);
-    els.ledgerCount.textContent=(historyCache.fills?.length||0)+" FILLS";
-    renderLedger();
-  }catch(e){
-    els.ledger.innerHTML='<div class="helper bad" style="padding:14px">History unavailable: '+esc(e.message)+'</div>';
-  }
+    const all=await Promise.all(names.map(x=>api("/api/v1/history/"+x+"?limit=100")));
+    names.forEach((x,i)=>historyCache[x]=all[i].items||[]);
+    els.ledgerCount.textContent=(historyCache.fills?.length||0)+" FILLS";renderLedger();
+  }catch(e){els.ledger.innerHTML='<div class="helper bad" style="padding:14px">History unavailable: '+esc(e.message)+'</div>'}
 }
-
-function setTab(name){
-  activeTab=name;
-  document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("active",b.dataset.tab===name));
-  renderLedger();
-}
-
+function setLedger(name){activeLedger=name;document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("active",b.dataset.tab===name));renderLedger()}
 function renderLedger(){
-  const rows=historyCache[activeTab]||[];
+  const rows=historyCache[activeLedger]||[];
   const specs={
     fills:[["Time",x=>clock(x.ts)],["Exec ID",x=>shortId(x.execution_id)],["Actor",x=>x.actor],["Side",x=>x.side],["Qty BTC",x=>num(x.qty_btc,8)],["Price",x=>money(x.price_usd)],["Fee",x=>money(x.fee_usd)],["Realized P/L",x=>money(x.realized_pnl_usd)]],
-    orders:[["Time",x=>clock(x.ts)],["Exec ID",x=>shortId(x.execution_id)],["Actor",x=>x.actor],["Side",x=>x.side],["Qty BTC",x=>num(x.requested_qty_btc,8)],["Status",x=>x.status],["Mode",x=>x.paper_mode?"paper":"live"]],
-    risk:[["Time",x=>clock(x.ts)],["Event",x=>shortId(x.event_key)],["Reason",x=>x.reason],["Qty",x=>num(x.context?.requested_qty_btc,8)],["Position",x=>num(x.context?.current_position_btc,8)]],
-    account:[["Time",x=>clock(x.ts)],["USD",x=>money(x.usd)],["BTC",x=>num(x.btc,8)],["Equity",x=>money(x.equity)],["Realized",x=>money(x.realized_session)],["Daily",x=>money(x.daily_realized)],["Peak",x=>money(x.peak_equity)]],
+    orders:[["Time",x=>clock(x.ts)],["Exec ID",x=>shortId(x.execution_id)],["Actor",x=>x.actor],["Side",x=>x.side],["Qty BTC",x=>num(x.requested_qty_btc,8)],["Status",x=>x.status]],
+    risk:[["Time",x=>clock(x.ts)],["Event",x=>shortId(x.event_key)],["Reason",x=>x.reason],["Qty",x=>num(x.context?.requested_qty_btc,8)]],
+    account:[["Time",x=>clock(x.ts)],["USD",x=>money(x.usd)],["BTC",x=>num(x.btc,8)],["Equity",x=>money(x.equity)],["Daily",x=>money(x.daily_realized)]],
     positions:[["Time",x=>clock(x.ts)],["State",x=>x.state],["BTC",x=>num(x.btc,8)],["Avg entry",x=>money(x.avg_entry)],["Mark",x=>money(x.mark)],["Open P/L",x=>money(x.open_pnl)]],
-    bot:[["Time",x=>clock(x.ts)],["State",x=>x.state],["Strategy",x=>x.strategy],["Short/Long",x=>x.short_ma+"/"+x.long_ma],["Stop %",x=>num(x.stop_loss_pct,2)],["Size BTC",x=>num(x.position_size_btc,8)],["Max BTC",x=>num(x.max_position_btc,8)],["Lock",x=>String(x.flatten_lock)]]
+    bot:[["Time",x=>clock(x.ts)],["State",x=>x.state],["Strategy",x=>x.strategy],["Short/Long",x=>x.short_ma+"/"+x.long_ma],["Stop %",x=>num(x.stop_loss_pct,2)],["Lock",x=>String(x.flatten_lock)]]
   };
-  const cols=specs[activeTab];
-  if(!rows.length){els.ledger.innerHTML='<div class="helper" style="padding:14px">No '+esc(activeTab)+' records yet.</div>';return}
-  const head="<tr>"+cols.map(c=>"<th>"+esc(c[0])+"</th>").join("")+"</tr>";
-  const body=rows.map(r=>"<tr>"+cols.map(c=>"<td>"+esc(c[1](r))+"</td>").join("")+"</tr>").join("");
-  els.ledger.innerHTML="<table><thead>"+head+"</thead><tbody>"+body+"</tbody></table>";
+  const cols=specs[activeLedger];
+  if(!rows.length){els.ledger.innerHTML='<div class="helper" style="padding:14px">No '+esc(activeLedger)+' records yet.</div>';return}
+  els.ledger.innerHTML="<table><thead><tr>"+cols.map(c=>"<th>"+esc(c[0])+"</th>").join("")+"</tr></thead><tbody>"+
+    rows.map(r=>"<tr>"+cols.map(c=>"<td>"+esc(c[1](r))+"</td>").join("")+"</tr>").join("")+"</tbody></table>";
 }
 
-async function protectedAction(url,btn,label){
-  if(authConfigured&&!authenticated){toast("Connect your operator token first","bad");return}
-  setBusy(btn,true,label);
+async function action(url,btn,loading,success,idle){
+  if(authConfigured&&!authenticated){toast("Connect in Settings first","bad");setPage("settings");return}
+  loadingButton(btn,loading);
   try{
-    const body=await api(url,{method:"POST",headers:authHeaders()});
-    if(body.ok===false)throw new Error(body.error||"Action rejected");
-    toast(label+" complete","good");
+    const out=await api(url,{method:"POST",headers:authHeaders()});if(out.ok===false)throw new Error(out.error||"Action rejected");
+    successButton(btn,success,idle);toast(success,"good");
   }catch(e){
     if(e.status===401){authenticated=false;refreshAuthUI()}
-    toast(e.message,"bad");
-  }finally{
-    setBusy(btn,false,label);
-    await Promise.all([load(),loadHistory()]);
+    errorButton(btn,"Failed",idle);toast(e.message,"bad");
   }
+  await Promise.all([load(),loadHistory()]);
 }
 
 async function saveConfig(){
-  if(authConfigured&&!authenticated){toast("Connect your operator token first","bad");return}
+  if(authConfigured&&!authenticated){toast("Connect operator access first","bad");return}
   const body={short_ma:Number(els.cShort.value),long_ma:Number(els.cLong.value),stop_loss_pct:Number(els.cStop.value),position_size_btc:Number(els.cSize.value),max_position_btc:Number(els.cMax.value),max_drawdown_pct:Number(els.cDD.value),daily_loss_cap:Number(els.cLoss.value)};
-  setBusy(els.saveCfgBtn,true,"Saving");
+  loadingButton(els.saveCfgBtn,"Saving…");
   try{
     const out=await api("/api/v1/config",{method:"POST",headers:{"Content-Type":"application/json",...authHeaders()},body:JSON.stringify(body)});
     if(out.ok===false)throw new Error(out.error||"Configuration rejected");
-    toast("Configuration saved","good");
-  }catch(e){toast(e.message,"bad")}
-  finally{setBusy(els.saveCfgBtn,false,"Save Configuration");await load()}
+    successButton(els.saveCfgBtn,"Saved ✓","Save Configuration");toast("Configuration saved","good");
+  }catch(e){errorButton(els.saveCfgBtn,"Failed","Save Configuration");toast(e.message,"bad")}
+  await load();
 }
 
 els.connectBtn.addEventListener("click",()=>verifyToken(true));
 els.opToken.addEventListener("keydown",e=>{if(e.key==="Enter")verifyToken(true)});
-els.startBtn.addEventListener("click",()=>protectedAction("/api/v1/bot/start",els.startBtn,"Start Bot"));
-els.stopBtn.addEventListener("click",()=>protectedAction("/api/v1/bot/stop",els.stopBtn,"Stop Bot"));
-els.buyBtn.addEventListener("click",()=>protectedAction("/api/v1/orders/market?side=buy",els.buyBtn,"Buy"));
-els.sellBtn.addEventListener("click",()=>protectedAction("/api/v1/orders/market?side=sell",els.sellBtn,"Sell"));
-els.unlockBtn.addEventListener("click",()=>protectedAction("/api/v1/risk/unlock",els.unlockBtn,"Unlock"));
-els.flattenBtn.addEventListener("click",()=>protectedAction("/api/v1/orders/flatten",els.flattenBtn,"Emergency Flatten"));
+els.startBtn.addEventListener("click",()=>action("/api/v1/bot/start",els.startBtn,"Starting…","Started ✓","Start Bot"));
+els.stopBtn.addEventListener("click",()=>action("/api/v1/bot/stop",els.stopBtn,"Stopping…","Stopped ✓","Stop Bot"));
+els.buyBtn.addEventListener("click",()=>action("/api/v1/orders/market?side=buy",els.buyBtn,"Submitting…","Buy filled ✓","Buy 0.01 BTC"));
+els.sellBtn.addEventListener("click",()=>action("/api/v1/orders/market?side=sell",els.sellBtn,"Submitting…","Sell filled ✓","Sell Position"));
+els.unlockBtn.addEventListener("click",()=>action("/api/v1/risk/unlock",els.unlockBtn,"Unlocking…","Unlocked ✓","Clear Flatten Lock"));
+els.flattenBtn.addEventListener("click",()=>action("/api/v1/orders/flatten",els.flattenBtn,"Flattening…","Flattened ✓","Emergency Flatten & Lock Entries"));
 els.saveCfgBtn.addEventListener("click",saveConfig);
-els.tabs.addEventListener("click",e=>{const b=e.target.closest(".tab");if(b)setTab(b.dataset.tab)});
+els.tabs.addEventListener("click",e=>{const b=e.target.closest(".tab");if(b)setLedger(b.dataset.tab)});
 
+const savedPage=sessionStorage.getItem("aether_page");if(["dashboard","trade","activity","settings"].includes(savedPage))setPage(savedPage);
 const remembered=token();if(remembered)els.opToken.value=remembered;
-load();loadHistory();
-setInterval(load,5000);
-setInterval(loadHistory,15000);
+(async()=>{
+  await Promise.all([load(),loadHistory()]);
+  if(authConfigured&&remembered&&!initialAuthChecked){initialAuthChecked=true;await verifyToken(false)}
+})();
+setInterval(load,5000);setInterval(loadHistory,15000);
 </script>
 </body>
 </html>
