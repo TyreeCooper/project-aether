@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     persistence_enabled: bool = False
     operator_auth_secret: str = "dev-only-change-me"
+    operator_step_up_secret: str = "dev-only-step-up-change-me"
     exchange_api_key: str = ""
     exchange_api_secret: str = ""
     exchange_api_passphrase: str = ""
