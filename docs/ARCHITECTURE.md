@@ -71,3 +71,10 @@ AETHER_PERSISTENCE_ENABLED=true
 ```
 
 When enabled, paper orders, fills, portfolio snapshots, and structured audit events are written to PostgreSQL. On process restart Aether restores the most recent paper ledger but deliberately remains `OFFLINE`; the operator must explicitly arm it again. Persistence failure is currently best-effort in PAPER mode and does not authorize LIVE operation.
+
+
+## Market-data watchdog
+
+Aether now fails closed after repeated missing/failed market marks. The watchdog trips the flatten lock and moves the bot to `FAULT`. A FAULT cannot be cleared by the ordinary unlock route.
+
+The operator must provide step-up authorization and call `POST /api/v1/risk/reset-fault`. Reset succeeds only after fresh market data has been observed, and the bot returns to `OFFLINE` rather than automatically re-arming.
