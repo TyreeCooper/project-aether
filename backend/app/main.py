@@ -26,7 +26,7 @@ async def lifespan(_: FastAPI):
         await db_store.close()
 
 
-app = FastAPI(title="Project Aether API", version="0.8.0", lifespan=lifespan)
+app = FastAPI(title="Project Aether API", version="0.8.1", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -104,6 +104,11 @@ async def auth_status():
         "configured": bool(OPERATOR_TOKEN),
         "enforced_on_mutations": bool(OPERATOR_TOKEN),
     }
+
+
+@app.post("/api/v1/auth/verify")
+async def auth_verify(_: None = Depends(require_operator)):
+    return {"ok": True, "authenticated": True}
 
 
 @app.get("/api/v1/analytics")
