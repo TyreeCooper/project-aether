@@ -14,6 +14,10 @@ async def lifespan(_: FastAPI):
     engine.start_loop()
     yield
 
+    close = getattr(engine.market_data, "close", None)
+    if close is not None:
+        await close()
+
 
 app = FastAPI(title="Project Aether API", version="0.3.0", lifespan=lifespan)
 
@@ -44,11 +48,11 @@ async def health():
     return {
         "ok": True,
         "env": "paper",
-        "venue": "paper-coingecko",
+        "venue": "paper-public-market-data",
         "symbol": "BTC/USD",
         "postgres": "not_required_paper",
         "redis": "not_required_paper",
-        "venue_ws": "public_rest_poll",
+        "venue_ws": snap["mark_source"],
         "last_tick_age_ms": snap["last_tick_age_ms"],
         "live_keys_present": False,
         "paper_mode": True,
