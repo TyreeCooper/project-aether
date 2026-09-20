@@ -27,7 +27,7 @@ button:disabled{opacity:.4}
   <div class="bar"><b>AETHER PAPER</b><span class="warn">PAPER</span></div>
   <div class="card">
     <h2>ACCOUNT</h2>
-    <div class="row"><span>Source</span><span id="src">-</span></div>
+    <div class="row"><span>Fill source</span><span id="src">-</span></div>
     <div class="row"><span>Last</span><span id="mark">-</span></div>
     <div class="row"><span>Bid / Ask</span><span id="ba">-</span></div>
     <div class="row"><span>Mark age</span><span id="age">-</span></div>
@@ -36,6 +36,13 @@ button:disabled{opacity:.4}
     <div class="row"><span>Equity</span><span id="eq">-</span></div>
     <div class="row"><span>Open P/L</span><span id="pnl">-</span></div>
     <div id="note" class="warn"></div>
+  </div>
+  <div class="card">
+    <h2>WATCH (NOT FILLS)</h2>
+    <div class="row"><span>Source</span><span id="wsrc">-</span></div>
+    <div class="row"><span>Last</span><span id="wlast">-</span></div>
+    <div class="row"><span>Bid / Ask</span><span id="wba">-</span></div>
+    <div class="row"><span>Basis vs fill</span><span id="wbasis">-</span></div>
   </div>
   <div class="card">
     <h2>BOT</h2>
@@ -67,6 +74,10 @@ async function load(){
     btc.textContent=a.btc_total??'-';
     eq.textContent=a.equity_usd??'-';
     pnl.textContent=a.open_pnl??'-';
+    wsrc.textContent=a.watch_source??'offline';
+    wlast.textContent=a.watch_last??'-';
+    wba.textContent=(a.watch_bid??'-')+' / '+(a.watch_ask??'-');
+    wbasis.textContent=a.watch_basis_usd==null?'-':a.watch_basis_usd;
     st.textContent=b.state??'-';
     lock.textContent=String(b.flatten_lock);
     const ageMs=b.last_tick_age_ms;

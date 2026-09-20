@@ -1,4 +1,4 @@
-"""Public Kraken tape. No API keys. Used only as a paper mark."""
+"""Public tapes. No API keys. Kraken is the paper fill mark. Binance.US is watch-only."""
 
 from __future__ import annotations
 
@@ -9,9 +9,11 @@ import httpx
 KRAKEN_TICKER = "https://api.kraken.com/0/public/Ticker"
 KRAKEN_OHLC = "https://api.kraken.com/0/public/OHLC"
 PAIR = "XBTUSD"
+BINANCE_US_BOOK = "https://api.binance.us/api/v3/ticker/bookTicker"
+BINANCE_US_LAST = "https://api.binance.us/api/v3/ticker/price"
 
 
-def parse_ticker(payload: dict[str, Any]) -> dict[str, float] | None:
+def parse_ticker(payload: dict[str, Any]) -> dict[str, Any] | None:
     if payload.get("error"):
         return None
     result = payload.get("result") or {}
@@ -39,7 +41,27 @@ def parse_ohlc_closes(payload: dict[str, Any], limit: int = 120) -> list[float]:
     return closes
 
 
-async def fetch_ticker() -> dict[str, float] | None:
+def parse_binance_book(payload: dict[str, Any]) -> dict[str, Any] | None:
+    try:
+        bid = float(payload["bidPrice"])
+        ask = float(payload["askPrice"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    last = payload.get("lastPrice")
+    try:
+        last_f = float(last) if last is not None else (bid + ask) / 2
+    except (TypeError, ValueError):
+        last_f = (bid + ask) / 2
+    return {
+        "last": last_f,
+        "bid": bid,
+        "ask": ask,
+        "source": "binance.us",
+        "symbol": payload.get("symbol", "BTCUSD"),
+    }
+
+
+async def fetch_ticker() -> dict[str, Any] | None:
     async with httpx.AsyncClient(timeout=10.0) as client:
         res = await client.get(KRAKEN_TICKER, params={"pair": PAIR})
         res.raise_for_status()
@@ -51,3 +73,19 @@ async def fetch_closes() -> list[float]:
         res = await client.get(KRAKEN_OHLC, params={"pair": PAIR, "interval": 1})
         res.raise_for_status()
         return parse_ohlc_closes(res.json())
+
+
+async def fetch_binance_us() -> dict[str, Any] | None:
+    async with httpx.AsyncClient(timeout=8.0) as client:
+        book = await client.get(BINANCE_US_BOOK, params={"symbol": "BTCUSD"})
+        book.raise_for_status()
+        parsed = parse_binance_book(book.json())
+        if not parsed:
+            return None
+        try:
+            last = await client.get(BINANCE_US_LAST, params={"symbol": "BTCUSD"})
+            if last.status_code == 200:
+                parsed["last"] = float(last.json()["price"])
+        except Exception:
+            pass
+        return parsed

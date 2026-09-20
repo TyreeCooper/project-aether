@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from app import venue
 from app.db import db_store
 from app.engine import engine
 
@@ -23,7 +24,7 @@ async def lifespan(_: FastAPI):
         await db_store.close()
 
 
-app = FastAPI(title="Project Aether API", version="0.5.0", lifespan=lifespan)
+app = FastAPI(title="Project Aether API", version="0.5.1", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -35,6 +36,12 @@ app.add_middleware(
 
 class QtyBody(BaseModel):
     qty: float | None = Field(default=None, gt=0, le=1)
+
+
+def _basis(exec_last, watch_last):
+    if exec_last is None or watch_last is None:
+        return None
+    return round(float(watch_last) - float(exec_last), 2)
 
 
 @app.get("/")
@@ -49,6 +56,7 @@ async def health():
         "ok": True,
         "env": "paper",
         "venue": snap.get("mark_source"),
+        "watch": "binance.us",
         "symbol": "BTC/USD",
         "last_tick_age_ms": snap["last_tick_age_ms"],
         "stale": snap.get("stale"),
@@ -71,6 +79,12 @@ async def bot():
 @app.get("/api/v1/account")
 async def account():
     snap = engine.snapshot()
+    watch = None
+    try:
+        watch = await venue.fetch_binance_us()
+    except Exception:
+        watch = None
+    watch_last = watch.get("last") if watch else None
     return {
         "usd_free": snap["usd"],
         "usd_total": snap["usd"],
@@ -85,6 +99,11 @@ async def account():
         "bid": snap.get("bid"),
         "ask": snap.get("ask"),
         "stale": snap.get("stale"),
+        "watch_source": watch.get("source") if watch else None,
+        "watch_last": watch_last,
+        "watch_bid": watch.get("bid") if watch else None,
+        "watch_ask": watch.get("ask") if watch else None,
+        "watch_basis_usd": _basis(snap.get("mark"), watch_last),
     }
 
 
