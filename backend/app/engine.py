@@ -108,7 +108,24 @@ class PaperEngine:
         db_state = await db_store.load_state()
         if db_state:
             self._apply_state(db_state, "PostgreSQL")
+            # Fail-safe restart policy:
+            # - Flat accounts never auto-rearm after a process/App Service restart.
+            # - Existing positions remain IN_POSITION so protective exits can still run.
+            if self.btc > 0:
+                self.state = "IN_POSITION"
+                self._log(
+                    "SAFETY",
+                    "Restart recovery detected an open position; protective management remains active.",
+                )
+            else:
+                self.state = "OFFLINE"
+                self._log(
+                    "SAFETY",
+                    "Restart recovery forced bot OFFLINE; operator re-arm required.",
+                )
+            self._persist()
         else:
+            self.state = "OFFLINE"
             await db_store.save_state(self._state_payload())
 
     def _state_payload(self) -> dict[str, Any]:
