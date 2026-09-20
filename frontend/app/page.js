@@ -39,6 +39,7 @@ export default function DashboardPage() {
   const [account, setAccount] = useState(null);
   const [bot, setBot] = useState(null);
   const [performance, setPerformance] = useState(null);
+  const [venueReadiness, setVenueReadiness] = useState(null);
   const [audit, setAudit] = useState([]);
   const [operatorToken, setOperatorToken] = useState("");
   const [stepUpToken, setStepUpToken] = useState("");
@@ -55,16 +56,18 @@ export default function DashboardPage() {
         return;
       }
 
-      const [a, b, p, log] = await Promise.all([
+      const [a, b, p, log, venue] = await Promise.all([
         getJson("/api/v1/account", operatorToken),
         getJson("/api/v1/bot", operatorToken),
         getJson("/api/v1/performance", operatorToken),
         getJson("/api/v1/audit", operatorToken),
+        getJson("/api/v1/venue/kraken/readiness", operatorToken),
       ]);
       setAccount(a);
       setBot(b);
       setPerformance(p);
       setAudit(log.events || []);
+      setVenueReadiness(venue);
       setError("");
     } catch (err) {
       const message = String(err?.message || err);
@@ -191,8 +194,29 @@ export default function DashboardPage() {
         <div className="row"><span>Slippage cost</span><span>{fmt(performance?.total_slippage_cost)}</span></div>
       </section>
 
+
       <section className="card" style={{ marginTop: 10 }}>
-        <h2>[6] BOT CONTROLS</h2>
+        <h2>[6] VENUE READINESS</h2>
+        <div className="row"><span>Read-only credentials</span><span>{venueReadiness?.configured ? "CONFIGURED" : "NOT CONFIGURED"}</span></div>
+        <div className="row"><span>Readiness</span><span>{venueReadiness?.ready ? "READY" : "NOT READY"}</span></div>
+        <div className="row"><span>IP allowlist</span><span>{venueReadiness?.ip_allowlist_configured ? "CONFIGURED" : "-"}</span></div>
+        <div className="row"><span>Venue BTC</span><span>{venueReadiness?.btc_balance ?? "-"}</span></div>
+        <div className="row"><span>Last reconciliation</span><span>{bot?.last_reconciliation_ok == null ? "-" : bot.last_reconciliation_ok ? "MATCHED" : "MISMATCH"}</span></div>
+        <div className="row"><span>Reconcile age</span><span>{bot?.last_reconciliation_age_ms == null ? "-" : `${bot.last_reconciliation_age_ms} ms`}</span></div>
+        <div className="row"><span>Required to arm</span><span>{String(bot?.venue_reconciliation_required)}</span></div>
+        <div className="actions">
+          <button
+            type="button"
+            disabled={busy || !authenticated || !venueReadiness?.configured}
+            onClick={() => act(() => post("/api/v1/venue/kraken/reconcile", operatorToken))}
+          >
+            Reconcile venue
+          </button>
+        </div>
+      </section>
+
+      <section className="card" style={{ marginTop: 10 }}>
+        <h2>[7] BOT CONTROLS</h2>
         <div className="actions">
           <button type="button" disabled={busy || !steppedUp} onClick={() => act(() => post("/api/v1/bot/start", operatorToken, stepUpToken))}>Start</button>
           <button type="button" disabled={busy || !authenticated} onClick={() => act(() => post("/api/v1/bot/stop", operatorToken))}>Stop</button>
@@ -202,7 +226,7 @@ export default function DashboardPage() {
       </section>
 
       <section className="card" style={{ marginTop: 10 }}>
-        <h2>[7] MANUAL PAPER TICKETS</h2>
+        <h2>[8] MANUAL PAPER TICKETS</h2>
         <div className="actions">
           <button type="button" disabled={busy || !steppedUp} onClick={() => act(() => post("/api/v1/orders/market?side=buy", operatorToken, stepUpToken))}>Buy market</button>
           <button type="button" disabled={busy || !steppedUp} onClick={() => act(() => post("/api/v1/orders/market?side=sell", operatorToken, stepUpToken))}>Sell market</button>
@@ -210,7 +234,7 @@ export default function DashboardPage() {
       </section>
 
       <section className="card" style={{ marginTop: 10 }}>
-        <h2>[8] AUDIT</h2>
+        <h2>[9] AUDIT</h2>
         <div className="log">
           {(audit.length ? audit : [{ ts: "", level: "INFO", message: "Waiting for authenticated engine data" }])
             .slice(0, 25)
