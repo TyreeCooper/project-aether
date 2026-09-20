@@ -3,96 +3,295 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
-<title>Aether Paper</title>
+<title>Aether Operator Console</title>
 <style>
-body{margin:0;font-family:system-ui;background:#071422;color:#e8eef4}
-.wrap{max-width:640px;margin:0 auto;padding:12px 12px 90px}
-.bar{display:flex;justify-content:space-between;align-items:center;background:#0d1f33;padding:12px;border:1px solid #1c3a55}
-.card{background:#0d1f33;border:1px solid #1c3a55;padding:14px;margin-top:10px}
-h2{margin:0 0 8px;font-size:11px;color:#8aa0b5;letter-spacing:.08em}
-.row{display:flex;justify-content:space-between;margin:8px 0;font-size:16px}
-button{min-height:44px;flex:1;margin:4px;background:#12314a;color:#fff;border:1px solid #1c3a55}
-button:disabled{opacity:.4}
-.rowbtns{display:flex;flex-wrap:wrap}
-.bad{background:#3a1515;border-color:#e05b5b}
-.dock{position:fixed;left:0;right:0;bottom:0;padding:10px;background:#061018}
-.dock button{width:100%;margin:0}
-.log{font:12px monospace;color:#8aa0b5;white-space:pre-wrap;max-height:180px;overflow:auto}
+:root{color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:#071422;color:#e8eef4}
+.wrap{max-width:920px;margin:0 auto;padding:12px 12px 96px}
+.bar{display:flex;justify-content:space-between;align-items:center;gap:10px;background:#0d1f33;padding:12px;border:1px solid #1c3a55;position:sticky;top:0;z-index:5}
+.brand{font-weight:800;letter-spacing:.04em}
+.badge{font-size:11px;padding:4px 7px;border:1px solid #805e1b;color:#f2b84b}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:10px}
+.card{background:#0d1f33;border:1px solid #1c3a55;padding:14px;min-width:0}
+.card.full{grid-column:1/-1}
+h2{margin:0 0 10px;font-size:11px;color:#8aa0b5;letter-spacing:.08em}
+.row{display:flex;justify-content:space-between;gap:14px;margin:8px 0;font-size:15px}
+.row span:last-child{text-align:right;overflow-wrap:anywhere}
+.metric{font-size:22px;font-weight:700}
+.muted{color:#8aa0b5}
+.good{color:#6fd28f}
 .warn{color:#e0a24b}
 .err{color:#e05b5b}
+.rowbtns{display:flex;flex-wrap:wrap;gap:6px}
+button{min-height:44px;padding:0 14px;background:#12314a;color:#fff;border:1px solid #1c3a55;border-radius:6px}
+button:disabled{opacity:.4}
+button.bad{background:#3a1515;border-color:#e05b5b}
+button.active{background:#1b4669;border-color:#4f94c7}
+.tabs{display:flex;gap:6px;overflow:auto;padding-bottom:4px}
+.tabs button{min-width:max-content;min-height:38px}
+.tablewrap{overflow:auto;border:1px solid #173148}
+table{width:100%;border-collapse:collapse;font-size:12px;min-width:720px}
+th,td{padding:9px 8px;border-bottom:1px solid #173148;text-align:left;white-space:nowrap}
+th{color:#8aa0b5;font-weight:600;background:#0a1929;position:sticky;top:0}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.log{font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:#a9b7c5;white-space:pre-wrap;max-height:220px;overflow:auto}
+.summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.summary .box{background:#0a1929;padding:10px;border:1px solid #173148}
+.summary .label{font-size:10px;color:#8aa0b5;text-transform:uppercase;letter-spacing:.06em}
+.summary .value{font-size:17px;font-weight:700;margin-top:4px}
+.dock{position:fixed;left:0;right:0;bottom:0;padding:10px;background:#061018;border-top:1px solid #1c3a55}
+.dock-inner{max-width:920px;margin:0 auto}
+.dock button{width:100%;margin:0}
+@media(max-width:720px){
+  .grid{grid-template-columns:1fr}
+  .card.full{grid-column:1}
+  .summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <div class="bar"><b>AETHER PAPER</b><span class="warn">PAPER</span></div>
-  <div class="card">
-    <h2>ACCOUNT</h2>
-    <div class="row"><span>Fill source</span><span id="src">-</span></div>
-    <div class="row"><span>Last</span><span id="mark">-</span></div>
-    <div class="row"><span>Bid / Ask</span><span id="ba">-</span></div>
-    <div class="row"><span>Mark age</span><span id="age">-</span></div>
-    <div class="row"><span>USD</span><span id="usd">-</span></div>
-    <div class="row"><span>BTC</span><span id="btc">-</span></div>
-    <div class="row"><span>Equity</span><span id="eq">-</span></div>
-    <div class="row"><span>Open P/L</span><span id="pnl">-</span></div>
-    <div id="note" class="warn"></div>
+  <div class="bar">
+    <div class="brand">AETHER OPERATOR</div>
+    <div><span id="dbBadge" class="badge">DB...</span> <span class="badge">PAPER</span></div>
   </div>
-  <div class="card">
-    <h2>WATCH (NOT FILLS)</h2>
-    <div class="row"><span>Source</span><span id="wsrc">-</span></div>
-    <div class="row"><span>Last</span><span id="wlast">-</span></div>
-    <div class="row"><span>Bid / Ask</span><span id="wba">-</span></div>
-    <div class="row"><span>Basis vs fill</span><span id="wbasis">-</span></div>
-  </div>
-  <div class="card">
-    <h2>BOT</h2>
-    <div class="row"><span>State</span><span id="st">-</span></div>
-    <div class="row"><span>Flatten lock</span><span id="lock">-</span></div>
-    <div class="rowbtns">
-      <button id="bStart" onclick="p('/api/v1/bot/start')">Start</button>
-      <button onclick="p('/api/v1/bot/stop')">Stop</button>
-      <button id="bBuy" onclick="p('/api/v1/orders/market?side=buy')">Buy</button>
-      <button onclick="p('/api/v1/orders/market?side=sell')">Sell</button>
-      <button onclick="p('/api/v1/risk/unlock')">Unlock</button>
+
+  <div class="grid">
+    <div class="card">
+      <h2>ACCOUNT</h2>
+      <div class="row"><span>Equity</span><span id="eq" class="metric">-</span></div>
+      <div class="row"><span>USD</span><span id="usd">-</span></div>
+      <div class="row"><span>BTC</span><span id="btc">-</span></div>
+      <div class="row"><span>Open P/L</span><span id="pnl">-</span></div>
+      <div class="row"><span>Realized P/L</span><span id="rpnl">-</span></div>
+    </div>
+
+    <div class="card">
+      <h2>MARKET</h2>
+      <div class="row"><span>Fill source</span><span id="src">-</span></div>
+      <div class="row"><span>Last</span><span id="mark">-</span></div>
+      <div class="row"><span>Bid / Ask</span><span id="ba">-</span></div>
+      <div class="row"><span>Mark age</span><span id="age">-</span></div>
+      <div class="row"><span>Watch</span><span id="watch">-</span></div>
+      <div class="row"><span>Basis</span><span id="basis">-</span></div>
+    </div>
+
+    <div class="card">
+      <h2>BOT</h2>
+      <div class="row"><span>State</span><span id="st">-</span></div>
+      <div class="row"><span>Strategy</span><span id="strategy">-</span></div>
+      <div class="row"><span>Position size</span><span id="psz">-</span></div>
+      <div class="row"><span>Max position</span><span id="mpsz">-</span></div>
+      <div class="row"><span>Flatten lock</span><span id="lock">-</span></div>
+      <div id="note" class="warn"></div>
+    </div>
+
+    <div class="card">
+      <h2>CONTROLS</h2>
+      <div class="rowbtns">
+        <button id="bStart" onclick="postAction('/api/v1/bot/start')">Start</button>
+        <button onclick="postAction('/api/v1/bot/stop')">Stop</button>
+        <button id="bBuy" onclick="postAction('/api/v1/orders/market?side=buy')">Buy</button>
+        <button onclick="postAction('/api/v1/orders/market?side=sell')">Sell</button>
+        <button onclick="postAction('/api/v1/risk/unlock')">Unlock</button>
+      </div>
+    </div>
+
+    <div class="card full">
+      <h2>TRADE LEDGER</h2>
+      <div class="summary">
+        <div class="box"><div class="label">Fills</div><div id="sFills" class="value">-</div></div>
+        <div class="box"><div class="label">Volume BTC</div><div id="sVolume" class="value">-</div></div>
+        <div class="box"><div class="label">Fees</div><div id="sFees" class="value">-</div></div>
+        <div class="box"><div class="label">Realized</div><div id="sRealized" class="value">-</div></div>
+      </div>
+      <div class="tabs" style="margin-top:12px">
+        <button class="active" data-tab="fills" onclick="setTab('fills',this)">Fills</button>
+        <button data-tab="orders" onclick="setTab('orders',this)">Orders</button>
+        <button data-tab="positions" onclick="setTab('positions',this)">Positions</button>
+        <button data-tab="risk" onclick="setTab('risk',this)">Risk</button>
+        <button data-tab="account" onclick="setTab('account',this)">Account</button>
+        <button data-tab="bot" onclick="setTab('bot',this)">Bot history</button>
+      </div>
+      <div id="ledger" class="tablewrap" style="margin-top:8px"></div>
+    </div>
+
+    <div class="card full">
+      <h2>AUDIT</h2>
+      <div class="log" id="log"></div>
     </div>
   </div>
-  <div class="card"><h2>AUDIT</h2><div class="log" id="log"></div></div>
 </div>
-<div class="dock"><button class="bad" onclick="p('/api/v1/orders/flatten')">Emergency flatten</button></div>
+
+<div class="dock"><div class="dock-inner">
+  <button class="bad" onclick="postAction('/api/v1/orders/flatten')">Emergency flatten</button>
+</div></div>
+
 <script>
+let activeTab='fills';
+const historyCache={};
+
+function money(v){
+  if(v===null||v===undefined||Number.isNaN(Number(v))) return '-';
+  return '$'+Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+function num(v,d=4){
+  if(v===null||v===undefined||Number.isNaN(Number(v))) return '-';
+  return Number(v).toLocaleString(undefined,{maximumFractionDigits:d});
+}
+function shortId(v){return v?String(v).slice(0,10):'-'}
+function clock(v){return v?new Date(v).toLocaleString():'-'}
+function pnlClass(v){return Number(v)>0?'good':Number(v)<0?'err':''}
+
+async function api(url){
+  const r=await fetch(url,{cache:'no-store'});
+  if(!r.ok) throw new Error(url+' '+r.status);
+  return r.json();
+}
+
 async function load(){
   try{
-    const [a,b,l]=await Promise.all([
-      fetch('/api/v1/account').then(r=>r.json()),
-      fetch('/api/v1/bot').then(r=>r.json()),
-      fetch('/api/v1/audit').then(r=>r.json())
+    const [a,b,l,s]=await Promise.all([
+      api('/api/v1/account'),
+      api('/api/v1/bot'),
+      api('/api/v1/audit'),
+      api('/api/v1/storage')
     ]);
     src.textContent=a.mark_source??'-';
-    mark.textContent=a.mark??'-';
-    ba.textContent=(a.bid??'-')+' / '+(a.ask??'-');
-    usd.textContent=a.usd_free??'-';
-    btc.textContent=a.btc_total??'-';
-    eq.textContent=a.equity_usd??'-';
-    pnl.textContent=a.open_pnl??'-';
-    wsrc.textContent=a.watch_source??'offline';
-    wlast.textContent=a.watch_last??'-';
-    wba.textContent=(a.watch_bid??'-')+' / '+(a.watch_ask??'-');
-    wbasis.textContent=a.watch_basis_usd==null?'-':a.watch_basis_usd;
+    mark.textContent=money(a.mark);
+    ba.textContent=money(a.bid)+' / '+money(a.ask);
+    usd.textContent=money(a.usd_free);
+    btc.textContent=num(a.btc_total,8);
+    eq.textContent=money(a.equity_usd);
+    pnl.textContent=money(a.open_pnl);
+    pnl.className=pnlClass(a.open_pnl);
+    rpnl.textContent=money(a.realized_pnl_24h);
+    rpnl.className=pnlClass(a.realized_pnl_24h);
+    watch.textContent=(a.watch_source??'offline')+' '+(a.watch_last==null?'':money(a.watch_last));
+    basis.textContent=a.watch_basis_usd==null?'-':money(a.watch_basis_usd);
+
     st.textContent=b.state??'-';
+    strategy.textContent=b.strategy??'-';
+    psz.textContent=num(b.position_size_btc,8)+' BTC';
+    mpsz.textContent=num(b.max_position_btc,8)+' BTC';
     lock.textContent=String(b.flatten_lock);
     const ageMs=b.last_tick_age_ms;
-    document.getElementById('age').textContent=ageMs==null?'no tick':(ageMs+' ms');
-    const stale=!!b.stale;
-    const locked=!!b.flatten_lock;
-    note.textContent=locked?'Entries locked after flatten. Tap Unlock.':(stale?'Mark stale or missing.':'');
+    age.textContent=ageMs==null?'no tick':(ageMs+' ms');
+
+    const stale=!!b.stale, locked=!!b.flatten_lock;
+    note.textContent=locked?'Entries locked after flatten. Tap Unlock.':(stale?'Market mark stale or missing.':'');
     note.className=locked||stale?'err':'warn';
     bStart.disabled=locked;
     bBuy.disabled=locked||stale;
-    log.textContent=(l.events||[]).slice(0,20).map(e=>(e.ts||'').slice(11,19)+' '+e.level+' '+e.message).join('\n');
-  }catch(e){log.textContent='Cannot reach API';}
+
+    dbBadge.textContent=s.initialized?'POSTGRES LIVE':'DB FALLBACK';
+    dbBadge.className='badge '+(s.initialized&&!s.last_error?'good':'err');
+
+    log.textContent=(l.events||[]).slice(0,30).map(e=>
+      (e.ts?new Date(e.ts).toLocaleTimeString():'--')+' '+e.level+' '+e.message
+    ).join('\n');
+  }catch(e){
+    log.textContent='Cannot reach API: '+e.message;
+  }
 }
-async function p(url){await fetch(url,{method:'POST'}); load();}
-load(); setInterval(load,4000);
+
+async function loadHistory(){
+  const endpoints=['fills','orders','risk','account','positions','bot'];
+  try{
+    const data=await Promise.all(endpoints.map(x=>api('/api/v1/history/'+x+'?limit=100')));
+    endpoints.forEach((x,i)=>historyCache[x]=data[i].items||[]);
+    renderSummary();
+    renderLedger();
+  }catch(e){
+    ledger.innerHTML='<div class="err" style="padding:12px">History unavailable: '+e.message+'</div>';
+  }
+}
+
+function renderSummary(){
+  const fills=historyCache.fills||[];
+  const today=new Date().toISOString().slice(0,10);
+  const day=fills.filter(x=>String(x.ts||'').slice(0,10)===today);
+  const source=day.length?day:fills;
+  const fees=source.reduce((n,x)=>n+Number(x.fee_usd||0),0);
+  const volume=source.reduce((n,x)=>n+Number(x.qty_btc||0),0);
+  const realized=source.reduce((n,x)=>n+Number(x.realized_pnl_usd||0),0);
+  sFills.textContent=source.length;
+  sVolume.textContent=num(volume,8);
+  sFees.textContent=money(fees);
+  sRealized.textContent=money(realized);
+  sRealized.className='value '+pnlClass(realized);
+}
+
+function setTab(name,btn){
+  activeTab=name;
+  document.querySelectorAll('.tabs button').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  renderLedger();
+}
+
+function renderLedger(){
+  const rows=historyCache[activeTab]||[];
+  const specs={
+    fills:[
+      ['Time',x=>clock(x.ts)],['Exec ID',x=>shortId(x.execution_id)],['Actor',x=>x.actor],
+      ['Side',x=>x.side],['Qty BTC',x=>num(x.qty_btc,8)],['Price',x=>money(x.price_usd)],
+      ['Fee',x=>money(x.fee_usd)],['Realized P/L',x=>money(x.realized_pnl_usd)]
+    ],
+    orders:[
+      ['Time',x=>clock(x.ts)],['Exec ID',x=>shortId(x.execution_id)],['Actor',x=>x.actor],
+      ['Side',x=>x.side],['Qty BTC',x=>num(x.requested_qty_btc,8)],['Status',x=>x.status],
+      ['Mode',x=>x.paper_mode?'paper':'live']
+    ],
+    risk:[
+      ['Time',x=>clock(x.ts)],['Event',x=>shortId(x.event_key)],['Reason',x=>x.reason],
+      ['Qty',x=>num(x.context?.requested_qty_btc,8)],['Position',x=>num(x.context?.current_position_btc,8)]
+    ],
+    account:[
+      ['Time',x=>clock(x.ts)],['USD',x=>money(x.usd)],['BTC',x=>num(x.btc,8)],
+      ['Equity',x=>money(x.equity)],['Realized',x=>money(x.realized_session)],
+      ['Daily',x=>money(x.daily_realized)],['Peak',x=>money(x.peak_equity)]
+    ],
+    positions:[
+      ['Time',x=>clock(x.ts)],['State',x=>x.state],['BTC',x=>num(x.btc,8)],
+      ['Avg entry',x=>money(x.avg_entry)],['Mark',x=>money(x.mark)],['Open P/L',x=>money(x.open_pnl)]
+    ],
+    bot:[
+      ['Time',x=>clock(x.ts)],['State',x=>x.state],['Strategy',x=>x.strategy],
+      ['Short/Long',x=>x.short_ma+'/'+x.long_ma],['Stop %',x=>num(x.stop_loss_pct,2)],
+      ['Size BTC',x=>num(x.position_size_btc,8)],['Max BTC',x=>num(x.max_position_btc,8)],
+      ['Lock',x=>String(x.flatten_lock)]
+    ]
+  };
+  const cols=specs[activeTab];
+  if(!rows.length){
+    ledger.innerHTML='<div class="muted" style="padding:12px">No '+activeTab+' records yet.</div>';
+    return;
+  }
+  const head='<tr>'+cols.map(c=>'<th>'+c[0]+'</th>').join('')+'</tr>';
+  const body=rows.map(r=>'<tr>'+cols.map(c=>{
+    const val=c[1](r);
+    const cls=(c[0].includes('P/L')||c[0]==='Realized'||c[0]==='Daily')?pnlClass(val):'';
+    return '<td class="'+(c[0]==='Exec ID'||c[0]==='Event'?'mono ':'')+cls+'">'+String(val??'-')+'</td>';
+  }).join('')+'</tr>').join('');
+  ledger.innerHTML='<table><thead>'+head+'</thead><tbody>'+body+'</tbody></table>';
+}
+
+async function postAction(url){
+  try{
+    const r=await fetch(url,{method:'POST'});
+    const body=await r.json();
+    if(body.ok===false) alert(body.error||'Action rejected');
+  }catch(e){
+    alert('Action failed: '+e.message);
+  }
+  await Promise.all([load(),loadHistory()]);
+}
+
+load();
+loadHistory();
+setInterval(load,4000);
+setInterval(loadHistory,15000);
 </script>
 </body>
 </html>
