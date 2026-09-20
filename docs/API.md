@@ -68,9 +68,7 @@ A successful reconciliation does not arm the bot. It only satisfies the reconcil
 
 Set `SHADOW_MODE_ENABLED=true` to record strategy decisions without sending them to the paper execution gateway.
 
-- `GET /api/v1/shadow/decisions` returns the in-memory decision window.
-- Buy, sell, and stop decisions are recorded with mark, quantity, position context, and whether the decision would have executed.
-- When PostgreSQL persistence is enabled, decisions are also written to `shadow_decisions`.
+- `GET /api/v1/shadow/decisions` returns the in-memory decision window.\n- `GET /api/v1/shadow/performance` returns the isolated hypothetical portfolio and after-cost performance metrics.\n- Buy, sell, and stop decisions are recorded with mark, quantity, position context, whether the decision would have executed, and the hypothetical execution result.\n- When PostgreSQL persistence is enabled, decisions are also written to `shadow_decisions`.
 - Shadow mode never promotes itself to paper or live execution.
 
 ## Kraken validate-only order checks
@@ -80,3 +78,6 @@ Set `SHADOW_MODE_ENABLED=true` to record strategy decisions without sending them
 The venue adapter hard-codes `validate=true`; it exposes no live-order method. A successful response means the order shape passed Kraken validation. It is not a fill and does not alter Aether's portfolio.
 
 When persistence is enabled, the request fingerprint and sanitized validation result are stored in `venue_validation_events`.
+
+
+Shadow execution uses an isolated portfolio and the configured paper fee/spread/slippage model. It does not mutate the normal paper portfolio, order ledger, or fill ledger.
