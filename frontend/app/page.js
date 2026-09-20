@@ -151,6 +151,8 @@ export default function DashboardPage() {
           <div className="row"><span>Tick age</span><span>{health?.last_tick_age_ms ?? "-"} ms</span></div>
           <div className="row"><span>Live blocked</span><span>{String(bot?.live_blocked)}</span></div>
           <div className="row"><span>Flatten lock</span><span>{String(bot?.flatten_lock)}</span></div>
+          <div className="row"><span>Shadow mode</span><span>{bot?.shadow_mode_enabled ? "ENABLED" : "DISABLED"}</span></div>
+          <div className="row"><span>Shadow decisions</span><span>{bot?.shadow_decision_count ?? 0}</span></div>
         </section>
 
         <section className="card">
