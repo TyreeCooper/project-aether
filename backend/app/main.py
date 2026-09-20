@@ -1,14 +1,18 @@
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app.engine import engine
 from app.security import AuthContext, require_operator, require_step_up
 from app.config import settings
 from app.venue import KrakenSpotReadOnlyClient
+
+STATIC = Path(__file__).parent / "static"
 
 
 @asynccontextmanager
@@ -42,6 +46,11 @@ app.add_middleware(
 
 class QtyBody(BaseModel):
     qty: float | None = Field(default=None, gt=0, le=1)
+
+
+@app.get("/")
+async def home():
+    return FileResponse(STATIC / "index.html")
 
 
 @app.get("/api/v1/health")
