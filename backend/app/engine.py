@@ -103,6 +103,7 @@ class PaperEngine:
         self.closes: deque[float] = deque(maxlen=300)
         self.orders: deque[dict[str, Any]] = deque(maxlen=500)
         self.fills: deque[dict[str, Any]] = deque(maxlen=500)
+        self.shadow_decisions: deque[dict[str, Any]] = deque(maxlen=500)
 
         self.short_ma = SHORT_MA
         self.long_ma = LONG_MA
@@ -260,6 +261,8 @@ class PaperEngine:
             "persistence_enabled": self.ledger is not None,
             "persistence_healthy": self.last_persistence_health,
             "profitability_enforced": self.profitability_gate.enforce,
+            "shadow_mode_enabled": settings.shadow_mode_enabled,
+            "shadow_decision_count": len(self.shadow_decisions),
             "last_profitability_reason": profitability.reason if profitability else None,
             "last_expected_move_bps": profitability.expected_move_bps if profitability else None,
             "last_minimum_required_bps": (
@@ -551,6 +554,50 @@ class PaperEngine:
             )
         return True
 
+    async def _record_shadow_decision(
+        self,
+        *,
+        signal: str,
+        qty: float,
+        would_execute: bool,
+        reason: str,
+    ) -> None:
+        if self.mark is None:
+            return
+
+        record = {
+            "ts_utc": datetime.now(timezone.utc).isoformat(),
+            "symbol": self.symbol,
+            "signal": signal,
+            "mark": self.mark,
+            "qty": qty,
+            "in_position": self.btc > 0,
+            "would_execute": would_execute,
+            "reason": reason,
+            "paper_mode": True,
+        }
+        self.shadow_decisions.appendleft(record)
+        self._log(
+            "INFO",
+            f"Shadow decision recorded: {signal} ({reason}).",
+            actor="bot",
+            component="shadow",
+            event="shadow_decision",
+            payload=record,
+        )
+
+        if self.ledger is not None:
+            await self.ledger.record_shadow_decision(
+                symbol=self.symbol,
+                signal=signal,
+                mark=self.mark,
+                qty=qty,
+                in_position=self.btc > 0,
+                would_execute=would_execute,
+                reason=reason,
+                payload=record,
+            )
+
     async def evaluate_and_maybe_trade(self) -> None:
         if self.state not in (BotState.IDLE.value, BotState.IN_POSITION.value) or not self.mark:
             return
@@ -558,6 +605,14 @@ class PaperEngine:
         if self.btc > 0 and self.avg_entry > 0:
             stop = self.avg_entry * (1 - self.stop_loss_pct / 100)
             if self.mark <= stop:
+                if settings.shadow_mode_enabled:
+                    await self._record_shadow_decision(
+                        signal="sell",
+                        qty=self.btc,
+                        would_execute=True,
+                        reason="stop_triggered",
+                    )
+                    return
                 self._log(
                     "BOT",
                     f"Stop-loss hit at {self.mark:.2f} (stop {stop:.2f}).",
@@ -576,7 +631,24 @@ class PaperEngine:
         )
 
         if signal == "buy":
-            if not self._entry_allowed(self.position_size):
+            allowed = self._entry_allowed(self.position_size)
+            if settings.shadow_mode_enabled:
+                await self._record_shadow_decision(
+                    signal="buy",
+                    qty=self.position_size,
+                    would_execute=allowed,
+                    reason=(
+                        "entry_allowed"
+                        if allowed
+                        else (
+                            self.last_profitability.reason
+                            if self.last_profitability is not None
+                            else "entry_denied"
+                        )
+                    ),
+                )
+                return
+            if not allowed:
                 return
 
             self._log(
@@ -589,6 +661,14 @@ class PaperEngine:
             await self._execute("buy", self.position_size, "bot")
 
         elif signal == "sell" and self.btc > 0:
+            if settings.shadow_mode_enabled:
+                await self._record_shadow_decision(
+                    signal="sell",
+                    qty=self.btc,
+                    would_execute=True,
+                    reason="exit_signal",
+                )
+                return
             self._log(
                 "BOT",
                 "SMA cross-down. Paper SELL inventory",
