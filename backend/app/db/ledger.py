@@ -15,6 +15,8 @@ from app.db.models import (
     Order,
     Position,
     ReconcileEvent,
+    ShadowDecision,
+    VenueValidationEvent,
 )
 from app.db.session import async_session_factory
 
@@ -209,6 +211,71 @@ class LedgerRepository:
                         venue_btc=venue_btc,
                         delta_btc=delta_btc,
                         note=note,
+                        payload=payload or {},
+                    )
+                )
+                await session.commit()
+            return True
+        except SQLAlchemyError:
+            return False
+
+
+    async def record_validation_event(
+        self,
+        *,
+        venue: str,
+        client_order_id: str,
+        symbol: str,
+        side: str,
+        qty: float,
+        request_fingerprint: str,
+        valid: bool,
+        description: str | None,
+        payload: dict[str, Any] | None = None,
+    ) -> bool:
+        try:
+            async with async_session_factory() as session:
+                session.add(
+                    VenueValidationEvent(
+                        venue=venue,
+                        client_order_id=client_order_id,
+                        symbol=symbol,
+                        side=side,
+                        qty=qty,
+                        request_fingerprint=request_fingerprint,
+                        valid=valid,
+                        description=description,
+                        payload=payload or {},
+                    )
+                )
+                await session.commit()
+            return True
+        except SQLAlchemyError:
+            return False
+
+    async def record_shadow_decision(
+        self,
+        *,
+        symbol: str,
+        signal: str,
+        mark: float,
+        qty: float,
+        in_position: bool,
+        would_execute: bool,
+        reason: str,
+        payload: dict[str, Any] | None = None,
+    ) -> bool:
+        try:
+            async with async_session_factory() as session:
+                session.add(
+                    ShadowDecision(
+                        symbol=symbol,
+                        signal=signal,
+                        mark=mark,
+                        qty=qty,
+                        in_position=in_position,
+                        would_execute=would_execute,
+                        reason=reason,
                         payload=payload or {},
                     )
                 )
