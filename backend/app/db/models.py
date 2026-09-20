@@ -84,9 +84,12 @@ class AccountSnapshot(Base):
     open_pnl: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     realized_session: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     daily_realized: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    gross_realized: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    entry_fees_open: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     total_fees: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     total_spread_cost: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     total_slippage_cost: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    max_drawdown_pct: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (Index("ix_account_snapshots_captured_at", "captured_at"),)
