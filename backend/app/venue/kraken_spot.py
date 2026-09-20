@@ -1,6 +1,7 @@
-"""Read-only Kraken Spot account adapter.
+"""Kraken Spot account-safety adapters.
 
-This module performs authenticated account reads only. It does not expose an
+The read-only client performs authenticated account reads. The validation
+client can only submit AddOrder requests with validate=true and exposes no live
 order-placement method.
 """
 
@@ -134,7 +135,6 @@ class KrakenSpotReadOnlyClient:
             missing_permissions=missing,
             prohibited_permissions=dangerous,
         )
-
 
 
 class KrakenSpotValidateOnlyClient(KrakenSpotReadOnlyClient):
