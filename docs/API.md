@@ -48,7 +48,7 @@ X-Aether-Step-Up: <OPERATOR_STEP_UP_SECRET>
 Step-up is required for:
 - `POST /bot/start`
 - `POST /orders/market`
-- `POST /risk/unlock`
+- `POST /risk/unlock`\n- `POST /risk/reset-fault`
 
 Emergency stop/flatten remain available with normal operator authentication so the extra authorization step cannot delay a safety action.
 
