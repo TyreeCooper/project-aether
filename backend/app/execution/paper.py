@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.execution.base import ExecutionGateway, ExecutionResult, OrderRequest
+from app.execution.base import DuplicateOrderError, ExecutionGateway, ExecutionResult, OrderRequest
 
 
 class PaperExecutionGateway(ExecutionGateway):
@@ -18,8 +18,15 @@ class PaperExecutionGateway(ExecutionGateway):
         self.taker_fee_rate = taker_fee_rate
         self.spread_bps = spread_bps
         self.slippage_bps = slippage_bps
+        self._seen_client_order_ids: set[str] = set()
 
     async def execute_market(self, request: OrderRequest) -> ExecutionResult:
+        if request.client_order_id in self._seen_client_order_ids:
+            raise DuplicateOrderError(
+                f"duplicate client_order_id: {request.client_order_id}"
+            )
+        self._seen_client_order_ids.add(request.client_order_id)
+
         half_spread_fraction = (self.spread_bps / 2.0) / 10_000.0
         slippage_fraction = self.slippage_bps / 10_000.0
         direction = 1.0 if request.side == "buy" else -1.0
