@@ -71,3 +71,11 @@ def test_stop_and_flatten_need_operator_auth_not_step_up():
 def test_step_up_accepts_valid_second_secret():
     response = client.post("/api/v1/risk/unlock", headers=STEP_UP)
     assert response.status_code == 200
+
+
+def test_kraken_readiness_reports_unconfigured_without_read_only_key():
+    response = client.get("/api/v1/venue/kraken/readiness", headers=AUTH)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["configured"] is False
+    assert body["ready"] is False
