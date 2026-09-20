@@ -1,4 +1,7 @@
+import hashlib
+import json
 import os
+from uuid import uuid4
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -10,7 +13,7 @@ from pydantic import BaseModel, Field
 from app.engine import engine
 from app.security import AuthContext, require_operator, require_step_up
 from app.config import settings
-from app.venue import KrakenSpotReadOnlyClient
+from app.venue import KrakenSpotReadOnlyClient, KrakenSpotValidateOnlyClient
 
 STATIC = Path(__file__).parent / "static"
 
@@ -46,6 +49,13 @@ app.add_middleware(
 
 class QtyBody(BaseModel):
     qty: float | None = Field(default=None, gt=0, le=1)
+
+
+class ValidateOrderBody(BaseModel):
+    side: str
+    qty: float = Field(gt=0, le=1)
+    pair: str = "XBTUSD"
+    client_order_id: str | None = Field(default=None, max_length=96)
 
 
 @app.get("/")
@@ -280,3 +290,109 @@ async def kraken_reconcile(_auth: AuthContext = Depends(require_operator)):
             "ok": False,
             "error": "kraken_reconciliation_failed",
         }
+
+
+@app.get("/api/v1/shadow/decisions")
+async def shadow_decisions(_auth: AuthContext = Depends(require_operator)):
+    return {
+        "enabled": settings.shadow_mode_enabled,
+        "decisions": list(engine.shadow_decisions),
+    }
+
+
+@app.post("/api/v1/venue/kraken/validate-order")
+async def kraken_validate_order(
+    body: ValidateOrderBody,
+    _auth: AuthContext = Depends(require_step_up),
+):
+    if not settings.kraken_validate_api_key or not settings.kraken_validate_api_secret:
+        return {
+            "ok": False,
+            "error": "validate_only_credentials_not_configured",
+        }
+
+    side = body.side.lower()
+    if side not in {"buy", "sell"}:
+        return {"ok": False, "error": "side must be buy or sell"}
+
+    client_order_id = body.client_order_id or f"aether-val-{uuid4().hex[:20]}"
+    fingerprint_payload = {
+        "venue": "kraken",
+        "pair": body.pair,
+        "side": side,
+        "qty": body.qty,
+        "client_order_id": client_order_id,
+        "validate": True,
+    }
+    request_fingerprint = hashlib.sha256(
+        json.dumps(fingerprint_payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+    client = KrakenSpotValidateOnlyClient(
+        api_key=settings.kraken_validate_api_key,
+        api_secret=settings.kraken_validate_api_secret,
+    )
+
+    try:
+        result = await client.validate_market_order(
+            pair=body.pair,
+            side=side,
+            volume=body.qty,
+            client_order_id=client_order_id,
+        )
+    except Exception:
+        engine._log(
+            "WARN",
+            "Kraken validate-only order request failed.",
+            actor="operator",
+            component="venue",
+            event="order_validation_failed",
+            correlation_id=client_order_id,
+            payload={"request_fingerprint": request_fingerprint},
+        )
+        return {
+            "ok": False,
+            "error": "kraken_order_validation_failed",
+            "client_order_id": client_order_id,
+            "request_fingerprint": request_fingerprint,
+        }
+
+    persisted = None
+    if engine.ledger is not None:
+        persisted = await engine.ledger.record_validation_event(
+            venue="kraken",
+            client_order_id=client_order_id,
+            symbol=body.pair,
+            side=side,
+            qty=body.qty,
+            request_fingerprint=request_fingerprint,
+            valid=result.valid,
+            description=result.description,
+            payload={
+                "validate": True,
+                "description": result.description,
+            },
+        )
+
+    engine._log(
+        "INFO",
+        "Kraken order shape validated without live placement.",
+        actor="operator",
+        component="venue",
+        event="order_validated",
+        correlation_id=client_order_id,
+        payload={
+            "request_fingerprint": request_fingerprint,
+            "persisted": persisted,
+        },
+    )
+
+    return {
+        "ok": True,
+        "validated_only": True,
+        "live_order_submitted": False,
+        "client_order_id": client_order_id,
+        "request_fingerprint": request_fingerprint,
+        "description": result.description,
+        "persisted": persisted,
+    }
