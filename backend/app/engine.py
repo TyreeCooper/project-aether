@@ -534,7 +534,11 @@ class PaperEngine:
                 else self.peak_equity
             ),
             max_drawdown_pct=MAX_DRAWDOWN_PCT,
-            daily_realized=self.daily_realized,
+            daily_realized=(
+                self.shadow.portfolio.daily_realized
+                if shadow
+                else self.daily_realized
+            ),
             daily_loss_cap=DAILY_LOSS_CAP,
         )
         self.last_profitability = decision.profitability
