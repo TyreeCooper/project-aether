@@ -1,4 +1,4 @@
-"""Paper engine with disk persistence."""
+"""Paper engine with disk persistence and public Kraken tape."""
 from __future__ import annotations
 import asyncio, time
 from collections import deque
@@ -8,6 +8,7 @@ import httpx
 from app.persist import load_state, save_state
 from app.risk import deny_entry
 from app.strategy import crossover_signal, sma
+from app import venue
 
 STARTING_USD = 10_000.0
 TAKER_FEE = 0.0026
@@ -37,7 +38,9 @@ class PaperEngine:
         self.daily_realized = 0.0
         self.peak_equity = STARTING_USD
         self.mark = None
-        self.mark_source = "coingecko"
+        self.bid = None
+        self.ask = None
+        self.mark_source = "kraken"
         self.last_tick_age_ms = None
         self._last_tick_mono = None
         self.closes = deque(maxlen=300)
@@ -50,7 +53,7 @@ class PaperEngine:
         self._task = None
         self._lock = asyncio.Lock()
         self._restore()
-        self._log("INFO", "Paper engine ready. Live execution blocked.")
+        self._log("INFO", "Paper engine ready. Venue tape is public Kraken. Live execution blocked.")
 
     def _restore(self) -> None:
         data = load_state()
@@ -91,6 +94,11 @@ class PaperEngine:
     def _log(self, level: str, message: str) -> None:
         self.audit.appendleft({"ts": _now(), "level": level, "message": message})
 
+    def _fill_price(self, side: str) -> float | None:
+        if side == "buy":
+            return self.ask or self.mark
+        return self.bid or self.mark
+
     @property
     def equity(self) -> float:
         return self.usd + self.btc * (self.mark or 0.0)
@@ -123,6 +131,8 @@ class PaperEngine:
             "short_value": sma(list(self.closes), self.short_ma),
             "long_value": sma(list(self.closes), self.long_ma),
             "mark": self.mark,
+            "bid": self.bid,
+            "ask": self.ask,
             "mark_source": self.mark_source,
             "last_tick_age_ms": age,
             "stale": stale,
@@ -134,15 +144,22 @@ class PaperEngine:
             "realized_session": round(self.realized_session, 2),
             "daily_realized": round(self.daily_realized, 2),
             "peak_equity": round(self.peak_equity, 2),
-            "reason": "Paper machine. Public SMA rule. Live keys ignored.",
+            "reason": "Paper machine. Public Kraken tape. Live keys ignored.",
         }
 
     async def fetch_mark(self):
         try:
+            tick = await venue.fetch_ticker()
+            if tick:
+                return tick
+        except Exception as exc:
+            self._log("WARN", f"Kraken ticker failed: {exc}")
+        try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 res = await client.get("https://api.coingecko.com/api/v3/simple/price", params={"ids": "bitcoin", "vs_currencies": "usd"})
                 res.raise_for_status()
-                return float(res.json()["bitcoin"]["usd"])
+                last = float(res.json()["bitcoin"]["usd"])
+                return {"last": last, "bid": last, "ask": last, "source": "coingecko"}
         except Exception as exc:
             self._log("WARN", f"Mark fetch failed: {exc}")
             return None
@@ -150,6 +167,19 @@ class PaperEngine:
     async def seed_history(self) -> None:
         if len(self.closes) >= self.long_ma + 1:
             return
+        try:
+            closes = await venue.fetch_closes()
+            for px in closes:
+                self.closes.append(px)
+            if self.closes:
+                self.mark = self.closes[-1]
+                self._last_tick_mono = time.monotonic()
+                self.mark_source = "kraken"
+            self._log("INFO", f"Seeded {len(self.closes)} Kraken 1m closes for SMA warm-up.")
+            self._persist()
+            return
+        except Exception as exc:
+            self._log("WARN", f"Kraken OHLC failed: {exc}")
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 res = await client.get("https://api.coingecko.com/api/v3/coins/bitcoin/market_chart", params={"vs_currency": "usd", "days": "1"})
@@ -160,7 +190,8 @@ class PaperEngine:
             if self.closes:
                 self.mark = self.closes[-1]
                 self._last_tick_mono = time.monotonic()
-            self._log("INFO", f"Seeded {len(self.closes)} public BTC marks for SMA warm-up.")
+                self.mark_source = "coingecko"
+            self._log("INFO", f"Seeded {len(self.closes)} CoinGecko marks (fallback).")
             self._persist()
         except Exception as exc:
             self._log("WARN", f"History seed failed: {exc}")
@@ -192,7 +223,7 @@ class PaperEngine:
                 self.avg_entry = 0.0
                 self.state = "IDLE" if self.state != "OFFLINE" else "OFFLINE"
         self.peak_equity = max(self.peak_equity, self.equity)
-        self._log("FILL", f"{actor} {side.upper()} {qty} BTC @ {price:.2f} fee {fee:.2f}")
+        self._log("FILL", f"{actor} {side.upper()} {qty} BTC @ {price:.2f} fee {fee:.2f} src {self.mark_source}")
         self._persist()
 
     def evaluate_and_maybe_trade(self) -> None:
@@ -201,8 +232,9 @@ class PaperEngine:
         if self.btc > 0 and self.avg_entry > 0:
             stop = self.avg_entry * (1 - self.stop_loss_pct / 100)
             if self.mark <= stop:
+                px = self._fill_price("sell")
                 self._log("BOT", f"Stop-loss hit at {self.mark:.2f} (stop {stop:.2f}).")
-                self._apply_fill("sell", self.btc, self.mark, "bot-stop")
+                self._apply_fill("sell", self.btc, px, "bot-stop")
                 return
         signal = crossover_signal(list(self.closes), self.short_ma, self.long_ma, in_position=self.btc > 0)
         if signal == "buy":
@@ -210,19 +242,24 @@ class PaperEngine:
             if reason:
                 self._log("WARN", f"Buy denied: {reason}")
                 return
+            px = self._fill_price("buy")
             self._log("BOT", f"SMA cross-up. Paper BUY {self.position_size} BTC")
-            self._apply_fill("buy", self.position_size, self.mark, "bot")
+            self._apply_fill("buy", self.position_size, px, "bot")
         elif signal == "sell" and self.btc > 0:
+            px = self._fill_price("sell")
             self._log("BOT", "SMA cross-down. Paper SELL inventory")
-            self._apply_fill("sell", self.btc, self.mark, "bot")
+            self._apply_fill("sell", self.btc, px, "bot")
 
     async def tick(self) -> None:
-        price = await self.fetch_mark()
-        if price is None:
+        tick = await self.fetch_mark()
+        if tick is None:
             return
         async with self._lock:
-            self.mark = price
-            self.closes.append(price)
+            self.mark = tick["last"]
+            self.bid = tick.get("bid")
+            self.ask = tick.get("ask")
+            self.mark_source = tick.get("source", self.mark_source)
+            self.closes.append(self.mark)
             self._last_tick_mono = time.monotonic()
             self.peak_equity = max(self.peak_equity, self.equity)
             self.evaluate_and_maybe_trade()
@@ -258,27 +295,23 @@ class PaperEngine:
 
     async def manual(self, side: str, qty=None):
         async with self._lock:
-            if not self.mark:
+            px = self._fill_price(side)
+            if not px:
                 return {"ok": False, "error": "no_mark"}
             qty = qty or self.position_size
             if side == "buy":
                 reason = deny_entry(flatten_lock=self.flatten_lock, paper_mode=True, live_blocked=True, qty=qty, position_btc=self.btc, max_position_btc=self.max_position, equity=self.equity, peak_equity=self.peak_equity, max_drawdown_pct=MAX_DRAWDOWN_PCT, daily_realized=self.daily_realized, daily_loss_cap=DAILY_LOSS_CAP)
                 if reason:
-                    return {
-                        "ok": False,
-                        "error": reason,
-                        "requested_qty_btc": qty,
-                        "current_position_btc": self.btc,
-                        "max_position_btc": self.max_position,
-                    }
-            self._apply_fill(side, qty, self.mark, "operator")
+                    return {"ok": False, "error": reason, "requested_qty_btc": qty, "current_position_btc": self.btc, "max_position_btc": self.max_position}
+            self._apply_fill(side, qty, px, "operator")
             return {"ok": True, **self.snapshot()}
 
     async def flatten(self):
         async with self._lock:
             self.flatten_lock = True
-            if self.btc > 0 and self.mark:
-                self._apply_fill("sell", self.btc, self.mark, "flatten")
+            px = self._fill_price("sell")
+            if self.btc > 0 and px:
+                self._apply_fill("sell", self.btc, px, "flatten")
             self.state = "OFFLINE"
             self._log("INFO", "Emergency flatten complete. Entries locked.")
             self._persist()
