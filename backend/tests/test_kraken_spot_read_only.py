@@ -44,3 +44,10 @@ def test_permission_assessment_rejects_missing_query_funds():
 
     assert result.valid_for_read_only_reconciliation is False
     assert result.missing_permissions == ("query-funds",)
+
+
+def test_extract_btc_balance_accepts_historical_aliases():
+    assert KrakenSpotReadOnlyClient.extract_btc_balance({"XXBT": 0.25}) == 0.25
+    assert KrakenSpotReadOnlyClient.extract_btc_balance({"XBT": 0.5}) == 0.5
+    assert KrakenSpotReadOnlyClient.extract_btc_balance({"BTC": 0.75}) == 0.75
+    assert KrakenSpotReadOnlyClient.extract_btc_balance({"ZUSD": 100.0}) == 0.0
