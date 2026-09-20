@@ -53,6 +53,23 @@ async def health():
     }
 
 
+@app.get("/api/v1/status")
+async def status():
+    snap = engine.snapshot()
+    return {
+        "state": snap["state"],
+        "paper_mode": snap["paper_mode"],
+        "live_blocked": snap["live_blocked"],
+        "flatten_lock": snap["flatten_lock"],
+        "symbol": "BTC/USD",
+        "mark": snap["mark"],
+        "mark_source": snap["mark_source"],
+        "last_tick_age_ms": snap["last_tick_age_ms"],
+        "profitability_enforced": snap["profitability_enforced"],
+        "last_profitability_reason": snap["last_profitability_reason"],
+    }
+
+
 @app.get("/api/v1/bot")
 async def bot():
     return engine.snapshot()
@@ -77,6 +94,56 @@ async def account():
         "margin_utilized_pct": 0.0,
         "mark_source": snap["mark_source"],
         "mark": snap["mark"],
+    }
+
+
+@app.get("/api/v1/positions")
+async def positions():
+    snap = engine.snapshot()
+    return {
+        "positions": [
+            {
+                "symbol": "BTC/USD",
+                "qty_open": snap["btc"],
+                "avg_entry": snap["avg_entry"],
+                "mark": snap["mark"],
+                "open_pnl": snap["open_pnl"],
+                "state": snap["state"],
+            }
+        ]
+    }
+
+
+@app.get("/api/v1/orders")
+async def orders():
+    return {"orders": list(engine.orders)}
+
+
+@app.get("/api/v1/trades")
+async def trades():
+    return {"trades": list(engine.fills)}
+
+
+@app.get("/api/v1/performance")
+async def performance():
+    snap = engine.snapshot()
+    return {
+        "equity_usd": snap["equity"],
+        "gross_realized_pnl": snap["gross_realized"],
+        "net_realized_pnl": snap["realized_session"],
+        "open_pnl": snap["open_pnl"],
+        "daily_realized_pnl": snap["daily_realized"],
+        "total_fees": snap["total_fees"],
+        "total_spread_cost": snap["total_spread_cost"],
+        "total_slippage_cost": snap["total_slippage_cost"],
+        "peak_equity": snap["peak_equity"],
+        "max_drawdown_pct": snap["max_drawdown_pct"],
+        "closed_trade_count": snap["closed_trade_count"],
+        "winning_trades": snap["winning_trades"],
+        "losing_trades": snap["losing_trades"],
+        "win_rate_pct": snap["win_rate_pct"],
+        "avg_winner": snap["avg_winner"],
+        "avg_loser": snap["avg_loser"],
     }
 
 
