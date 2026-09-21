@@ -285,6 +285,7 @@ def asset_context(
     events: list[dict[str, Any]] | None = None,
     calendar_connected: bool = False,
     community: dict[str, Any] | None = None,
+    news: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     view = book.view()
     bars = list(book.bars)
