@@ -74,3 +74,17 @@ def test_desk_settings_are_bounded_and_reported():
     assert out["quote_poll_seconds"] == 30
     assert desk.risk_slice == 0.125
     assert desk.poll_seconds == 30
+
+
+def test_floor_exposes_intelligence_without_inventing_news():
+    desk = MultiDesk()
+    floor = desk.floor_snapshot()
+    intel = floor["intelligence"]
+    assert len(intel["assets"]) >= 10
+    assert "opportunity_ranking" in intel
+    assert intel["risk"]["calendar_connected"] is False
+    assert any(x["id"] == "kraken" and x["status"] == "connected" for x in intel["sources"])
+    page = desk.asset_snapshot("eth")
+    assert page is not None
+    assert page["intelligence"]["attribution"]["status"] == "unavailable"
+    assert page["intelligence"]["community"]["status"] == "unavailable"
