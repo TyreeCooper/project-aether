@@ -9,6 +9,7 @@ from typing import Any
 
 from app import live, venue
 from app.clock import is_new_five_minute
+from app.intelligence import asset_context, floor_intelligence
 from app.desk_persist import load_desk, save_desk
 from app.universe import ASSETS, export_assets, register_asset
 from app.wallet import STARTING_USD, SpotWallet
@@ -167,6 +168,7 @@ class MultiDesk:
             view = book.view()
             stats = book.analytics()
             view["analytics"] = stats
+            view["intelligence"] = asset_context(book, self.books)
             rows.append(view)
             realized += float(stats["realized_pnl"])
             fees += float(stats["fees"])
@@ -203,6 +205,7 @@ class MultiDesk:
                 "win_rate_pct": round(wins / max(wins + losses, 1) * 100, 2),
             },
             "assets": rows,
+            "intelligence": floor_intelligence(self.books),
         }
 
     def asset_snapshot(self, asset_id: str) -> dict[str, Any] | None:
@@ -243,6 +246,8 @@ class MultiDesk:
                 "low": low,
             },
             "fills": list(book.fills)[-50:],
+            "intelligence": asset_context(book, self.books),
+            "capture": book.current_excursion(),
         }
 
     def blotter(self, limit: int = 200) -> list[dict[str, Any]]:
