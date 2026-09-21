@@ -268,7 +268,16 @@ async def asset_intelligence(asset_id: str):
 
 @app.get("/api/v1/intelligence/sources")
 async def intelligence_sources():
-    return {"items": source_registry()}
+    return {
+        "items": source_registry(
+            calendar_connected=desk.risk_calendar_connected,
+        )
+    }
+
+
+@app.get("/api/v1/risk-calendar")
+async def risk_calendar():
+    return desk.risk_snapshot()
 
 
 @app.get("/api/v1/floor")
