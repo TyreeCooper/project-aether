@@ -11,6 +11,7 @@ from app import live, venue
 from app.clock import is_new_five_minute
 from app.community import fetch_reddit
 from app.intelligence import asset_context, floor_intelligence
+from app.news import fetch_asset_news
 from app.desk_persist import load_desk, save_desk
 from app.events import active_risk, fetch_calendar
 from app.universe import ASSETS, export_assets, register_asset
@@ -52,6 +53,9 @@ class MultiDesk:
         self.community_cache: dict[str, dict[str, Any]] = {}
         self._community_cursor = 0
         self._last_community_refresh = 0.0
+        self.news_cache: dict[str, dict[str, Any]] = {}
+        self._news_cursor = 0
+        self._last_news_refresh = 0.0
         self._restore(restored)
 
     def marks(self) -> dict[str, float]:
@@ -182,6 +186,7 @@ class MultiDesk:
                 events=self.risk_events,
                 calendar_connected=self.risk_calendar_connected,
                 community=self.community_cache.get(book.id),
+                news=self.news_cache.get(book.id),
             )
             rows.append(view)
             realized += float(stats["realized_pnl"])
@@ -224,6 +229,7 @@ class MultiDesk:
                 events=self.risk_events,
                 calendar_connected=self.risk_calendar_connected,
                 community_cache=self.community_cache,
+                news_cache=self.news_cache,
             ),
             "risk_calendar": self.risk_snapshot(),
         }
@@ -338,6 +344,30 @@ class MultiDesk:
             except Exception as exc:
                 logger.warning("seed failed %s %s", book.pair, exc)
 
+    async def _refresh_one_news(self, force: bool = False) -> None:
+        now = time.time()
+        if not force and now - self._last_news_refresh < 45:
+            return
+        self._last_news_refresh = now
+        if not self.books:
+            return
+        book = self.books[self._news_cursor % len(self.books)]
+        self._news_cursor = (self._news_cursor + 1) % max(len(self.books), 1)
+        try:
+            self.news_cache[book.id] = await fetch_asset_news(
+                book.id,
+                name=book.name,
+                symbol=book.symbol,
+            )
+        except Exception as exc:
+            self.news_cache[book.id] = {
+                "asset_id": book.id,
+                "status": "degraded",
+                "shadow_only": True,
+                "trade_influence_enabled": False,
+                "note": f"News refresh failed: {type(exc).__name__}",
+            }
+
     async def _refresh_one_community(self, force: bool = False) -> None:
         now = time.time()
         if not force and now - self._last_community_refresh < 30:
@@ -430,6 +460,7 @@ class MultiDesk:
     async def tick(self) -> None:
         await self._refresh_risk_calendar()
         await self._refresh_one_community()
+        await self._refresh_one_news()
         await self._quotes()
         exits = []
         for book in self.books:
@@ -459,6 +490,7 @@ class MultiDesk:
             await self.seed()
             await self._refresh_risk_calendar(force=True)
             await self._refresh_one_community(force=True)
+            await self._refresh_one_news(force=True)
             while True:
                 try:
                     await self.tick()
