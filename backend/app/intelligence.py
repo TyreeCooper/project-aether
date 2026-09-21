@@ -17,6 +17,7 @@ SOURCE_REGISTRY: tuple[dict[str, Any], ...] = (
     {"id": "bls", "name": "U.S. Bureau of Labor Statistics", "type": "macro_official", "tier": "A", "status": "planned"},
     {"id": "bea", "name": "U.S. Bureau of Economic Analysis", "type": "macro_official", "tier": "A", "status": "planned"},
     {"id": "forex_factory", "name": "Forex Factory", "type": "calendar_aggregator", "tier": "B", "status": "planned"},
+    {"id": "coinmarketcal", "name": "CoinMarketCal", "type": "crypto_calendar", "tier": "B", "status": "unconfigured"},
     {"id": "gdelt", "name": "GDELT", "type": "news_discovery", "tier": "B", "status": "planned"},
     {"id": "asset_official", "name": "Official asset/project channels", "type": "asset_official", "tier": "A", "status": "planned"},
     {"id": "community", "name": "Verified asset communities", "type": "community", "tier": "B", "status": "planned"},
@@ -296,10 +297,30 @@ def move_attribution(
         ),
     }
 
-def source_registry(calendar_connected: bool = False) -> list[dict[str, Any]]:
+def source_registry(
+    calendar_connected: bool = False,
+    *,
+    crypto_calendar_connected: bool = False,
+    crypto_calendar_configured: bool = False,
+    news_connected: bool = False,
+    community_connected: bool = False,
+) -> list[dict[str, Any]]:
     rows = [dict(x) for x in SOURCE_REGISTRY]
     for row in rows:
-        if row["id"] == "forex_factory" and calendar_connected:
+        source_id = row["id"]
+        if source_id == "forex_factory" and calendar_connected:
+            row["status"] = "connected"
+        elif source_id == "coinmarketcal":
+            row["status"] = (
+                "connected"
+                if crypto_calendar_connected
+                else "configured"
+                if crypto_calendar_configured
+                else "unconfigured"
+            )
+        elif source_id == "gdelt" and news_connected:
+            row["status"] = "connected"
+        elif source_id == "community" and community_connected:
             row["status"] = "connected"
     return rows
 
@@ -371,6 +392,8 @@ def floor_intelligence(
     calendar_connected: bool = False,
     community_cache: dict[str, dict[str, Any]] | None = None,
     news_cache: dict[str, dict[str, Any]] | None = None,
+    crypto_calendar_connected: bool = False,
+    crypto_calendar_configured: bool = False,
 ) -> dict[str, Any]:
     rows = []
     for book in books:
@@ -395,7 +418,19 @@ def floor_intelligence(
         "assets": rows,
         "opportunity_ranking": sorted(rows, key=lambda x: _f(x.get("range_24h_pct")), reverse=True),
         "risk": risk_state(events, calendar_connected=calendar_connected),
-        "sources": source_registry(calendar_connected=calendar_connected),
+        "sources": source_registry(
+            calendar_connected=calendar_connected,
+            crypto_calendar_connected=crypto_calendar_connected,
+            crypto_calendar_configured=crypto_calendar_configured,
+            news_connected=any(
+                str(row.get("status") or "") == "shadow"
+                for row in (news_cache or {}).values()
+            ),
+            community_connected=any(
+                str(row.get("status") or "") == "shadow"
+                for row in (community_cache or {}).values()
+            ),
+        ),
         "methodology": {
             "opportunity": "Kraken 24h high-low range; not claimed profit",
             "cross_asset": "rolling 1m return correlation where enough common bars exist",
