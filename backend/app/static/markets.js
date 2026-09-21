@@ -3,7 +3,6 @@
   let assets=[];
   let selected=localStorage.getItem(KEY)||"btc";
   let sparks={};
-  let tvWidget=null;
 
   function money(n){
     const v=Number(n);
@@ -23,7 +22,7 @@
     const pts=values.map((v,i)=>({x:p+i*((w-p*2)/Math.max(values.length-1,1)), y:h-p-((v-min)/span)*(h-p*2), v}));
     const d=pts.map((pt,i)=>(i?"L":"M")+pt.x.toFixed(1)+","+pt.y.toFixed(1)).join(" ");
     const last=pts[pts.length-1];
-    const gid="g"+Math.random().toString(36).slice(2,8);
+    const gid="g"+el.id+values.length;
     const stroke=up?"#26a69a":"#ef5350";
     const grid=dark()?"rgba(255,255,255,.08)":"rgba(42,36,28,.14)";
     const ink=dark()?"#d1d4dc":"#2a241c";
@@ -41,6 +40,9 @@
   }
 
   function ensureShell(){
+    if(!document.getElementById("deskMarketsCss")){
+      const l=document.createElement("link"); l.id="deskMarketsCss"; l.rel="stylesheet"; l.href="/static/desk-markets.css"; document.head.appendChild(l);
+    }
     if(!document.getElementById("assetRail")){
       const rail=document.createElement("div"); rail.id="assetRail"; rail.className="asset-rail";
       const tape=document.getElementById("ticker");
@@ -85,8 +87,7 @@
     const totals=document.getElementById("deskTotals");
     if(!list) return;
     list.innerHTML=assets.map(a=>{
-      const up=Number(a.last)>=Number(a.bid||a.last);
-      return '<button type="button" class="desk-row" data-id="'+a.id+'"><b>'+a.pair+'</b><span>'+money(a.last)+'</span><i class="'+(up?"up":"dn")+'">'+(a.paper?"PAPER":"WATCH")+'</i></button>';
+      return '<button type="button" class="desk-row" data-id="'+a.id+'"><b>'+a.pair+'</b><span>'+money(a.last)+'</span><i class="'+(a.paper?"up":"dn")+'">'+(a.paper?"PAPER":"WATCH")+'</i></button>';
     }).join("");
     list.querySelectorAll(".desk-row").forEach(b=>b.onclick=()=>select(b.getAttribute("data-id")));
     if(totals){
@@ -117,7 +118,7 @@
     const host=document.getElementById("tvKraken");
     if(!host || !window.TradingView) return;
     host.innerHTML="";
-    tvWidget=new window.TradingView.widget({
+    new window.TradingView.widget({
       autosize:true, symbol:symbol, interval:"60", timezone:"Etc/UTC",
       theme:dark()?"dark":"light", style:"1", locale:"en",
       container_id:"tvKraken", hide_legend:false, allow_symbol_change:false
@@ -134,12 +135,10 @@
   async function loadSpark(id){
     try{
       const res=await fetch("/api/v1/markets/"+id);
+      if(!res.ok) return;
       const data=await res.json();
-      sparks[id]=(data.closes||[]).map(Number).filter(Number.isFinite);
-      if(data.item){
-        const i=assets.findIndex(x=>x.id===id);
-        if(i>=0) assets[i]={...assets[i], ...data.item};
-      }
+      const closes=(data.closes||[]).map(Number).filter(Number.isFinite);
+      if(closes.length) sparks[id]=closes;
       if(selected===id) paintProfile();
     }catch(e){}
   }
@@ -150,6 +149,12 @@
       const res=await fetch("/api/v1/markets");
       const data=await res.json();
       assets=data.items||[];
+      assets.forEach(a=>{
+        if(a.last==null) return;
+        sparks[a.id]=sparks[a.id]||[];
+        sparks[a.id].push(Number(a.last));
+        if(sparks[a.id].length>48) sparks[a.id].shift();
+      });
       if(!assets.some(a=>a.id===selected)) selected="btc";
       paintTape(); paintRail(); paintBoard(); paintProfile();
     }catch(e){}
