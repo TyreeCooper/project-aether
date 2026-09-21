@@ -1,6 +1,13 @@
 from types import SimpleNamespace
 
-from app.intelligence import asset_context, opportunity_24h, pearson_from_bars
+from app.intelligence import (
+    asset_context,
+    beta_from_bars,
+    classify_regime,
+    market_quality,
+    opportunity_24h,
+    pearson_from_bars,
+)
 
 
 def test_opportunity_24h_measures_range_without_calling_it_profit():
@@ -79,3 +86,63 @@ def test_asset_context_preserves_shadow_feeds_and_news_is_only_candidate_evidenc
     assert len(news_drivers) == 1
     assert news_drivers[0]["evidence"]["claims_verified"] is False
     assert news["trade_influence_enabled"] is False
+
+
+def test_beta_and_market_quality_are_transparent_context_metrics():
+    target = []
+    benchmark = []
+    pt = 100.0
+    pb = 100.0
+    for i in range(80):
+        rb = 0.01 if i % 2 == 0 else -0.005
+        rt = rb * 2
+        pb *= 1 + rb
+        pt *= 1 + rt
+        ts = 1_700_100_000 + i * 60
+        benchmark.append(
+            {"ts": ts, "open": pb, "high": pb * 1.001, "low": pb * 0.999, "close": pb, "volume": 10}
+        )
+        target.append(
+            {"ts": ts, "open": pt, "high": pt * 1.001, "low": pt * 0.999, "close": pt, "volume": 20}
+        )
+    beta = beta_from_bars(target, benchmark)
+    assert beta is not None
+    assert 1.8 < beta < 2.2
+
+    hourly = [
+        {
+            "ts": 1_700_000_000 + i * 3600,
+            "open": 100,
+            "high": 101,
+            "low": 99,
+            "close": 100,
+            "volume": 100,
+        }
+        for i in range(168)
+    ]
+    quality = market_quality(
+        target,
+        hourly,
+        {
+            "current": pt,
+            "volume": 2400,
+            "spread_bps": 3,
+        },
+    )
+    assert quality["atr_14_1m"] is not None
+    assert quality["realized_vol_60m_pct"] is not None
+    assert quality["relative_volume_24h"] == 1.0
+    assert quality["liquidity_state"] == "normal"
+
+
+def test_regime_classifier_is_shadow_context_not_order_signal():
+    out = classify_regime(
+        {"opportunity_range_pct": 12, "range_position_pct": 92},
+        {
+            "1h": {"change_pct": 2.0},
+            "4h": {"change_pct": 4.0, "range_pct": 6.0},
+        },
+        {"liquidity_state": "normal"},
+    )
+    assert out["state"] == "high_volatility_trend"
+    assert out["trade_influence_enabled"] is False
