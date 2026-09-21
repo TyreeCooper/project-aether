@@ -139,7 +139,7 @@ def install(engine) -> None:
             f"Bar-low stop: low {low:.2f} <= {stop:.2f} fill {raw:.2f}.",
         )
         return bool(
-            engine._apply_fill("sell", engine.btc, raw, "bot-managed_stop")
+            engine._apply_fill("sell", engine.btc, raw, "bot-v3-managed_stop")
         )
 
     def wrapped_eval(new_bar: bool = False) -> None:
