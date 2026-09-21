@@ -14,7 +14,9 @@ def is_new_five_minute(bars_1m: list[dict[str, Any]], last_bucket: int | None) -
     if not bars_1m:
         return False, last_bucket
     bucket = five_minute_bucket(int(bars_1m[-1].get("ts") or 0))
-    if last_bucket is None or bucket != last_bucket:
+    if last_bucket is None:
+        return False, bucket
+    if bucket != last_bucket:
         return True, bucket
     return False, last_bucket
 

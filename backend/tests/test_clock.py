@@ -4,9 +4,11 @@ from app.clock import allow_after_losses, close_in_upper_third, is_new_five_minu
 def test_five_minute_edge():
     bars = [{"ts": 300, "close": 1}]
     fresh, bucket = is_new_five_minute(bars, None)
-    assert fresh and bucket == 300
+    assert not fresh and bucket == 300
     again, same = is_new_five_minute(bars, bucket)
     assert not again and same == 300
+    nxt, new_bucket = is_new_five_minute([{"ts": 600, "close": 1}], bucket)
+    assert nxt and new_bucket == 600
 
 
 def test_loss_sit_needs_15m_high():
