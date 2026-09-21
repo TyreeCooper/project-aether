@@ -1,10 +1,10 @@
-"""Paper engine with PostgreSQL-first persistence and public Kraken tape."""
+"""Paper engine with clean-bar strategy, cost-aware entries and managed exits."""
 from __future__ import annotations
 
 import asyncio
 import time
 from collections import deque
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -14,7 +14,13 @@ from app import venue
 from app.db import db_store
 from app.persist import load_state, save_state
 from app.risk import deny_entry
-from app.strategy import crossover_signal, sma
+from app.strategy import (
+    exit_plan,
+    round_trip_cost_pct,
+    sma,
+    trend_breakout_snapshot,
+    trend_exit_signal,
+)
 
 STARTING_USD = 10_000.0
 TAKER_FEE = 0.0026
@@ -27,10 +33,33 @@ MAX_POSITION_BTC = 0.02
 MAX_DRAWDOWN_PCT = 8.0
 DAILY_LOSS_CAP = 250.0
 STALE_MS = 15_000
+BAR_HISTORY = 1440
+BREAKOUT_BARS = 6
+EFFICIENCY_MIN = 0.35
+COST_MULTIPLE = 1.4
+COOLDOWN_MINUTES = 15
+LOSS_STREAK_COOLDOWN_MINUTES = 30
+TIME_STOP_MINUTES = 180
+
+
+def _now_dt() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return _now_dt().isoformat()
+
+
+def _parse_dt(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+    return None
 
 
 def fee_inclusive_avg_entry(
@@ -40,7 +69,6 @@ def fee_inclusive_avg_entry(
     qty: float,
     fee: float,
 ) -> float:
-    """Weighted BTC cost basis including buy-side fees."""
     new_qty = current_qty + qty
     if new_qty <= 0:
         return 0.0
@@ -60,14 +88,25 @@ class PaperEngine:
         self.avg_entry = 0.0
         self.realized_session = 0.0
         self.daily_realized = 0.0
+        self.daily_realized_date = _now_dt().date().isoformat()
         self.peak_equity = STARTING_USD
-        self.mark = None
-        self.bid = None
-        self.ask = None
+
+        self.mark: float | None = None
+        self.bid: float | None = None
+        self.ask: float | None = None
         self.mark_source = "kraken"
+        self.watch_last: float | None = None
+        self.watch_bid: float | None = None
+        self.watch_ask: float | None = None
+        self._last_watch_mono: float | None = None
         self.last_tick_age_ms = None
-        self._last_tick_mono = None
-        self.closes = deque(maxlen=300)
+        self._last_tick_mono: float | None = None
+
+        self.bars_1m = deque(maxlen=BAR_HISTORY)
+        self.closes = deque(maxlen=BAR_HISTORY)
+        self._forming_bar: dict[str, Any] | None = None
+        self._forming_bucket: int | None = None
+
         self.audit = deque(maxlen=200)
         self.short_ma = SHORT_MA
         self.long_ma = LONG_MA
@@ -76,12 +115,22 @@ class PaperEngine:
         self.max_position = MAX_POSITION_BTC
         self.max_drawdown_pct = MAX_DRAWDOWN_PCT
         self.daily_loss_cap = DAILY_LOSS_CAP
+
+        self.highest_since_entry = 0.0
+        self.position_stop = 0.0
+        self.entry_at: str | None = None
+        self.last_exit_at: str | None = None
+        self.cooldown_until: str | None = None
+        self.consecutive_losses = 0
+        self.last_strategy = {"regime": "warming", "reason": "warming", "signal": None}
+
+        self._paper_entry_guard = lambda side="buy", protective=False: None
         self._task = None
         self._lock = asyncio.Lock()
         self._restore_file()
         self._log(
             "INFO",
-            "Paper engine ready. Venue tape is public Kraken. Live execution blocked.",
+            "Paper engine ready. Clean 1m bars, higher-timeframe filter, live execution blocked.",
         )
 
     def _apply_state(self, data: dict[str, Any], source: str) -> None:
@@ -94,6 +143,9 @@ class PaperEngine:
         self.avg_entry = float(data.get("avg_entry", 0.0))
         self.realized_session = float(data.get("realized_session", 0.0))
         self.daily_realized = float(data.get("daily_realized", 0.0))
+        self.daily_realized_date = str(
+            data.get("daily_realized_date") or self.daily_realized_date
+        )
         self.peak_equity = float(data.get("peak_equity", self.peak_equity))
         if data.get("mark") is not None:
             self.mark = float(data["mark"])
@@ -103,26 +155,56 @@ class PaperEngine:
             self.ask = float(data["ask"])
         if data.get("mark_source"):
             self.mark_source = str(data["mark_source"])
+
         self.short_ma = int(data.get("short_ma", self.short_ma))
         self.long_ma = int(data.get("long_ma", self.long_ma))
         self.stop_loss_pct = float(data.get("stop_loss_pct", self.stop_loss_pct))
         self.position_size = float(data.get("position_size_btc", self.position_size))
         self.max_position = float(data.get("max_position_btc", self.max_position))
-        self.max_drawdown_pct = float(
-            data.get("max_drawdown_pct", self.max_drawdown_pct)
+        self.max_drawdown_pct = float(data.get("max_drawdown_pct", self.max_drawdown_pct))
+        self.daily_loss_cap = float(data.get("daily_loss_cap", self.daily_loss_cap))
+
+        self.highest_since_entry = float(
+            data.get("highest_since_entry", self.highest_since_entry) or 0
         )
-        self.daily_loss_cap = float(
-            data.get("daily_loss_cap", self.daily_loss_cap)
+        self.position_stop = float(data.get("position_stop", self.position_stop) or 0)
+        self.entry_at = data.get("entry_at")
+        self.last_exit_at = data.get("last_exit_at")
+        self.cooldown_until = data.get("cooldown_until")
+        self.consecutive_losses = int(
+            data.get("consecutive_losses", self.consecutive_losses) or 0
         )
 
-        self.closes.clear()
-        for px in data.get("closes") or []:
-            self.closes.append(float(px))
+        restored_bars = data.get("bars_1m") or []
+        if restored_bars:
+            self.bars_1m.clear()
+            self.closes.clear()
+            for row in restored_bars[-BAR_HISTORY:]:
+                if not isinstance(row, dict):
+                    continue
+                try:
+                    clean = {
+                        "ts": int(row["ts"]),
+                        "open": float(row["open"]),
+                        "high": float(row["high"]),
+                        "low": float(row["low"]),
+                        "close": float(row["close"]),
+                        "volume": float(row.get("volume", 0) or 0),
+                    }
+                except (KeyError, TypeError, ValueError):
+                    continue
+                self.bars_1m.append(clean)
+                self.closes.append(clean["close"])
+        elif data.get("closes"):
+            self.closes.clear()
+            for px in data.get("closes") or []:
+                self.closes.append(float(px))
 
         self.audit.clear()
         for row in reversed(data.get("audit") or []):
             if isinstance(row, dict) and "message" in row:
                 self.audit.appendleft(row)
+        self._roll_daily_if_needed(persist=False)
         self._log("INFO", f"Restored paper ledger from {source}.")
 
     def _restore_file(self) -> None:
@@ -137,11 +219,13 @@ class PaperEngine:
         db_state = await db_store.load_state()
         if db_state:
             self._apply_state(db_state, "PostgreSQL")
-            # Fail-safe restart policy:
-            # - Flat accounts never auto-rearm after a process/App Service restart.
-            # - Existing positions remain IN_POSITION so protective exits can still run.
             if self.btc > 0:
                 self.state = "IN_POSITION"
+                self.highest_since_entry = max(
+                    self.highest_since_entry,
+                    self.avg_entry,
+                    float(self.mark or 0),
+                )
                 self._log(
                     "SAFETY",
                     "Restart recovery detected an open position; protective management remains active.",
@@ -169,12 +253,13 @@ class PaperEngine:
             "open_pnl": self.open_pnl,
             "realized_session": self.realized_session,
             "daily_realized": self.daily_realized,
+            "daily_realized_date": self.daily_realized_date,
             "peak_equity": self.peak_equity,
             "mark": self.mark,
             "bid": self.bid,
             "ask": self.ask,
             "mark_source": self.mark_source,
-            "strategy": "sma_crossover",
+            "strategy": "sma_trend_breakout_v2",
             "short_ma": self.short_ma,
             "long_ma": self.long_ma,
             "stop_loss_pct": self.stop_loss_pct,
@@ -182,7 +267,14 @@ class PaperEngine:
             "max_position_btc": self.max_position,
             "max_drawdown_pct": self.max_drawdown_pct,
             "daily_loss_cap": self.daily_loss_cap,
-            "closes": list(self.closes)[-80:],
+            "bars_1m": list(self.bars_1m)[-720:],
+            "closes": list(self.closes)[-720:],
+            "highest_since_entry": self.highest_since_entry,
+            "position_stop": self.position_stop,
+            "entry_at": self.entry_at,
+            "last_exit_at": self.last_exit_at,
+            "cooldown_until": self.cooldown_until,
+            "consecutive_losses": self.consecutive_losses,
             "audit": list(self.audit)[:50],
             "saved_at": _now(),
             "stale": snap.get("stale"),
@@ -224,18 +316,57 @@ class PaperEngine:
             return 0.0
         return (self.mark - self.avg_entry) * self.btc
 
+    def _roll_daily_if_needed(self, persist: bool = True) -> None:
+        today = _now_dt().date().isoformat()
+        if self.daily_realized_date == today:
+            return
+        prior = self.daily_realized
+        self.daily_realized = 0.0
+        self.daily_realized_date = today
+        self._log("INFO", f"UTC daily P/L reset from {prior:.2f}.")
+        if persist:
+            self._persist()
+
+    def _cooldown_active(self) -> bool:
+        until = _parse_dt(self.cooldown_until)
+        return bool(until and _now_dt() < until)
+
+    def _strategy_snapshot(self) -> dict[str, Any]:
+        try:
+            return trend_breakout_snapshot(
+                list(self.bars_1m),
+                short_len=self.short_ma,
+                long_len=self.long_ma,
+                breakout_bars=BREAKOUT_BARS,
+                efficiency_min=EFFICIENCY_MIN,
+                cost_multiple=COST_MULTIPLE,
+                mark=self.mark,
+                bid=self.bid,
+                ask=self.ask,
+                fee_rate=TAKER_FEE,
+            )
+        except Exception as exc:
+            return {"signal": None, "regime": "error", "reason": f"strategy_error:{exc}"}
+
     def snapshot(self) -> dict[str, Any]:
         age = None
         if self._last_tick_mono is not None:
             age = int((time.monotonic() - self._last_tick_mono) * 1000)
             self.last_tick_age_ms = age
         stale = age is None or age > STALE_MS
+        self.last_strategy = self._strategy_snapshot()
+        cost_pct = round_trip_cost_pct(
+            self.mark,
+            self.bid,
+            self.ask,
+            fee_rate=TAKER_FEE,
+        )
         return {
             "state": self.state,
             "paper_mode": self.paper_mode,
             "live_blocked": self.live_blocked,
             "flatten_lock": self.flatten_lock,
-            "strategy": "sma_crossover",
+            "strategy": "sma_trend_breakout_v2",
             "short_ma": self.short_ma,
             "long_ma": self.long_ma,
             "stop_loss_pct": self.stop_loss_pct,
@@ -243,14 +374,15 @@ class PaperEngine:
             "max_position_btc": self.max_position,
             "max_drawdown_pct": self.max_drawdown_pct,
             "daily_loss_cap": self.daily_loss_cap,
-            "bars": len(self.closes),
-            "warm_up_needed": self.long_ma + 1,
+            "bars": len(self.bars_1m),
+            "warm_up_needed": max((self.long_ma + 2) * 15, 330),
             "short_value": sma(list(self.closes), self.short_ma),
             "long_value": sma(list(self.closes), self.long_ma),
             "mark": self.mark,
             "bid": self.bid,
             "ask": self.ask,
             "mark_source": self.mark_source,
+            "watch_last": self.watch_last,
             "last_tick_age_ms": age,
             "stale": stale,
             "usd": round(self.usd, 2),
@@ -260,8 +392,20 @@ class PaperEngine:
             "open_pnl": round(self.open_pnl, 2),
             "realized_session": round(self.realized_session, 2),
             "daily_realized": round(self.daily_realized, 2),
+            "daily_realized_date": self.daily_realized_date,
             "peak_equity": round(self.peak_equity, 2),
-            "reason": "Paper machine. Public Kraken tape. Live keys ignored.",
+            "position_stop": round(self.position_stop, 2) if self.position_stop else None,
+            "highest_since_entry": round(self.highest_since_entry, 2)
+            if self.highest_since_entry
+            else None,
+            "cooldown_until": self.cooldown_until,
+            "cooldown_active": self._cooldown_active(),
+            "consecutive_losses": self.consecutive_losses,
+            "round_trip_cost_pct": cost_pct,
+            "regime": self.last_strategy.get("regime"),
+            "strategy_reason": self.last_strategy.get("reason"),
+            "strategy_metrics": self.last_strategy,
+            "reason": "Paper machine. Clean 1m bars. Public Kraken tape. Live keys ignored.",
         }
 
     async def fetch_mark(self):
@@ -289,46 +433,85 @@ class PaperEngine:
             self._log("WARN", f"Mark fetch failed: {exc}")
             return None
 
-    async def seed_history(self) -> None:
-        if len(self.closes) >= self.long_ma + 1:
+    async def _refresh_watch(self) -> None:
+        if (
+            self._last_watch_mono is not None
+            and time.monotonic() - self._last_watch_mono < 30
+        ):
             return
+        self._last_watch_mono = time.monotonic()
         try:
-            closes = await venue.fetch_closes()
-            for px in closes:
-                self.closes.append(px)
-            if self.closes:
-                self.mark = self.closes[-1]
-                self._last_tick_mono = time.monotonic()
+            watch = await venue.fetch_binance_us()
+            if watch:
+                self.watch_last = float(watch["last"])
+                self.watch_bid = float(watch["bid"])
+                self.watch_ask = float(watch["ask"])
+        except Exception as exc:
+            self._log("WARN", f"Binance.US watch refresh failed: {exc}")
+
+    async def seed_history(self) -> None:
+        try:
+            bars = await venue.fetch_bars(interval=1, limit=720)
+            if len(bars) > 1:
+                bars = bars[:-1]
+            self.bars_1m.clear()
+            self.closes.clear()
+            for bar in bars[-720:]:
+                clean = {
+                    "ts": int(bar["ts"]),
+                    "open": float(bar["open"]),
+                    "high": float(bar["high"]),
+                    "low": float(bar["low"]),
+                    "close": float(bar["close"]),
+                    "volume": float(bar.get("volume", 0) or 0),
+                }
+                self.bars_1m.append(clean)
+                self.closes.append(clean["close"])
+            if self.bars_1m:
+                self.mark = float(self.bars_1m[-1]["close"])
                 self.mark_source = "kraken"
             self._log(
                 "INFO",
-                f"Seeded {len(self.closes)} Kraken 1m closes for SMA warm-up.",
-            )
-            self._persist()
-            return
-        except Exception as exc:
-            self._log("WARN", f"Kraken OHLC failed: {exc}")
-        try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                res = await client.get(
-                    "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart",
-                    params={"vs_currency": "usd", "days": "1"},
-                )
-                res.raise_for_status()
-                prices = res.json().get("prices") or []
-            for _ts, px in prices[-120:]:
-                self.closes.append(float(px))
-            if self.closes:
-                self.mark = self.closes[-1]
-                self._last_tick_mono = time.monotonic()
-                self.mark_source = "coingecko"
-            self._log(
-                "INFO",
-                f"Seeded {len(self.closes)} CoinGecko marks (fallback).",
+                f"Seeded {len(self.bars_1m)} completed Kraken 1m bars.",
             )
             self._persist()
         except Exception as exc:
-            self._log("WARN", f"History seed failed: {exc}")
+            self._log("WARN", f"Kraken OHLC seed failed: {exc}")
+
+    def _update_forming_bar(self, price: float) -> bool:
+        """Return True when a completed 1m bar was appended."""
+        now = _now_dt()
+        bucket = int(now.timestamp() // 60) * 60
+        if self._forming_bucket is None or self._forming_bar is None:
+            self._forming_bucket = bucket
+            self._forming_bar = {
+                "ts": bucket,
+                "open": price,
+                "high": price,
+                "low": price,
+                "close": price,
+                "volume": 0.0,
+            }
+            return False
+        if bucket == self._forming_bucket:
+            self._forming_bar["high"] = max(float(self._forming_bar["high"]), price)
+            self._forming_bar["low"] = min(float(self._forming_bar["low"]), price)
+            self._forming_bar["close"] = price
+            return False
+
+        completed = dict(self._forming_bar)
+        self.bars_1m.append(completed)
+        self.closes.append(float(completed["close"]))
+        self._forming_bucket = bucket
+        self._forming_bar = {
+            "ts": bucket,
+            "open": price,
+            "high": price,
+            "low": price,
+            "close": price,
+            "volume": 0.0,
+        }
+        return True
 
     def _risk_denied(self, reason: str, qty: float, actor: str) -> None:
         self._log(
@@ -346,6 +529,53 @@ class PaperEngine:
             },
         )
         self._persist()
+
+    def _initialize_position_controls(self) -> None:
+        if self.btc <= 0 or self.avg_entry <= 0 or not self.mark:
+            return
+        self.highest_since_entry = max(
+            self.highest_since_entry,
+            self.avg_entry,
+            float(self.mark),
+        )
+        if not self.entry_at:
+            self.entry_at = _now()
+        cost = round_trip_cost_pct(self.mark, self.bid, self.ask, TAKER_FEE)
+        plan = exit_plan(
+            list(self.bars_1m),
+            self.avg_entry,
+            self.highest_since_entry,
+            float(self.mark),
+            self.stop_loss_pct,
+            cost,
+        )
+        self.position_stop = max(self.position_stop, float(plan["active_stop"]))
+
+    def _register_flat_exit(self, realized_pnl: float) -> None:
+        self.last_exit_at = _now()
+        if realized_pnl < -1e-9:
+            self.consecutive_losses += 1
+        elif realized_pnl > 1e-9:
+            self.consecutive_losses = 0
+        minutes = (
+            LOSS_STREAK_COOLDOWN_MINUTES
+            if self.consecutive_losses >= 2
+            else COOLDOWN_MINUTES
+        )
+        self.cooldown_until = (_now_dt() + timedelta(minutes=minutes)).isoformat()
+        self.highest_since_entry = 0.0
+        self.position_stop = 0.0
+        self.entry_at = None
+        self._log(
+            "RISK",
+            f"Entry cooldown set for {minutes} minutes after exit.",
+            {
+                "kind": "risk",
+                "reason": "post_exit_cooldown",
+                "cooldown_minutes": minutes,
+                "consecutive_losses": self.consecutive_losses,
+            },
+        )
 
     def _apply_fill(
         self,
@@ -394,6 +624,7 @@ class PaperEngine:
             self.usd -= price * qty + fee
             self.btc = new_qty
             self.state = "IN_POSITION"
+            self._initialize_position_controls()
         else:
             proceeds = price * qty - fee
             realized_pnl = (price - self.avg_entry) * qty - fee
@@ -404,9 +635,8 @@ class PaperEngine:
             if self.btc <= 1e-12:
                 self.btc = 0.0
                 self.avg_entry = 0.0
-                self.state = (
-                    "IDLE" if self.state != "OFFLINE" else "OFFLINE"
-                )
+                self.state = "IDLE" if self.state != "OFFLINE" else "OFFLINE"
+                self._register_flat_exit(realized_pnl)
 
         self.peak_equity = max(self.peak_equity, self.equity)
         self._log(
@@ -430,70 +660,116 @@ class PaperEngine:
         self._persist()
         return True
 
-    def evaluate_and_maybe_trade(self) -> None:
-        if self.state not in ("IDLE", "IN_POSITION") or not self.mark:
-            return
-        if self.btc > 0 and self.avg_entry > 0:
-            stop = self.avg_entry * (1 - self.stop_loss_pct / 100)
-            if self.mark <= stop:
-                px = self._fill_price("sell")
-                self._log(
-                    "BOT",
-                    f"Stop-loss hit at {self.mark:.2f} (stop {stop:.2f}).",
-                )
-                if px:
-                    self._apply_fill("sell", self.btc, px, "bot-stop")
-                return
+    def _manage_open_position(self, new_bar: bool) -> bool:
+        if self.btc <= 0 or self.avg_entry <= 0 or not self.mark:
+            return False
+        self.highest_since_entry = max(self.highest_since_entry, float(self.mark))
+        cost = round_trip_cost_pct(self.mark, self.bid, self.ask, TAKER_FEE)
+        plan = exit_plan(
+            list(self.bars_1m),
+            self.avg_entry,
+            self.highest_since_entry,
+            float(self.mark),
+            self.stop_loss_pct,
+            cost,
+        )
+        self.position_stop = max(self.position_stop, float(plan["active_stop"]))
 
-        signal = crossover_signal(
-            list(self.closes),
+        reason = None
+        if self.position_stop and self.mark <= self.position_stop:
+            reason = "managed_stop"
+        elif new_bar and trend_exit_signal(
+            list(self.bars_1m),
             self.short_ma,
             self.long_ma,
-            in_position=self.btc > 0,
+        ):
+            reason = "trend_failure"
+        else:
+            entered = _parse_dt(self.entry_at)
+            if entered:
+                age_minutes = (_now_dt() - entered).total_seconds() / 60
+                gain_pct = ((self.mark / self.avg_entry) - 1) * 100
+                if (
+                    age_minutes >= TIME_STOP_MINUTES
+                    and gain_pct < cost * 1.25
+                ):
+                    reason = "time_stop"
+
+        if not reason:
+            return False
+        px = self._fill_price("sell")
+        if not px:
+            return False
+        self._log(
+            "BOT",
+            f"Managed exit: {reason} at {self.mark:.2f}; stop {self.position_stop:.2f}.",
         )
-        if signal == "buy":
-            reason = deny_entry(
-                flatten_lock=self.flatten_lock,
-                paper_mode=self.paper_mode,
-                live_blocked=self.live_blocked,
-                qty=self.position_size,
-                position_btc=self.btc,
-                max_position_btc=self.max_position,
-                equity=self.equity,
-                peak_equity=self.peak_equity,
-                max_drawdown_pct=self.max_drawdown_pct,
-                daily_realized=self.daily_realized,
-                daily_loss_cap=self.daily_loss_cap,
-            )
-            if reason:
-                self._risk_denied(reason, self.position_size, "bot")
-                return
-            px = self._fill_price("buy")
-            self._log(
-                "BOT",
-                f"SMA cross-up. Paper BUY {self.position_size} BTC",
-            )
-            if px:
-                self._apply_fill("buy", self.position_size, px, "bot")
-        elif signal == "sell" and self.btc > 0:
-            px = self._fill_price("sell")
-            self._log("BOT", "SMA cross-down. Paper SELL inventory")
-            if px:
-                self._apply_fill("sell", self.btc, px, "bot")
+        return self._apply_fill("sell", self.btc, px, f"bot-{reason}")
+
+    def evaluate_and_maybe_trade(self, new_bar: bool = False) -> None:
+        if self.state not in ("IDLE", "IN_POSITION") or not self.mark:
+            return
+        self._roll_daily_if_needed()
+        if self._manage_open_position(new_bar):
+            return
+        if self.btc > 0 or not new_bar:
+            return
+        if self._cooldown_active():
+            return
+
+        self.last_strategy = self._strategy_snapshot()
+        if self.last_strategy.get("signal") != "buy":
+            return
+
+        reason = deny_entry(
+            flatten_lock=self.flatten_lock,
+            paper_mode=self.paper_mode,
+            live_blocked=self.live_blocked,
+            qty=self.position_size,
+            position_btc=self.btc,
+            max_position_btc=self.max_position,
+            equity=self.equity,
+            peak_equity=self.peak_equity,
+            max_drawdown_pct=self.max_drawdown_pct,
+            daily_realized=self.daily_realized,
+            daily_loss_cap=self.daily_loss_cap,
+        )
+        if not reason:
+            reason = self._paper_entry_guard(side="buy", protective=False)
+        if reason:
+            self._risk_denied(reason, self.position_size, "bot")
+            return
+
+        px = self._fill_price("buy")
+        self._log(
+            "BOT",
+            (
+                "Qualified SMA trend breakout. "
+                f"eff={self.last_strategy.get('efficiency')} "
+                f"edge={self.last_strategy.get('opportunity_pct')}% "
+                f"cost={self.last_strategy.get('cost_pct')}%."
+            ),
+        )
+        if px:
+            self._apply_fill("buy", self.position_size, px, "bot")
 
     async def tick(self) -> None:
         tick = await self.fetch_mark()
         if tick is None:
             return
+        await self._refresh_watch()
         async with self._lock:
-            self.mark = tick["last"]
-            self.bid = tick.get("bid")
-            self.ask = tick.get("ask")
+            self.mark = float(tick["last"])
+            self.bid = float(tick["bid"]) if tick.get("bid") is not None else None
+            self.ask = float(tick["ask"]) if tick.get("ask") is not None else None
             self.mark_source = tick.get("source", self.mark_source)
-            self.closes.append(self.mark)
             self._last_tick_mono = time.monotonic()
+            self._roll_daily_if_needed()
+            new_bar = self._update_forming_bar(self.mark)
             self.peak_equity = max(self.peak_equity, self.equity)
-            self.evaluate_and_maybe_trade()
+            self.evaluate_and_maybe_trade(new_bar=new_bar)
+            if new_bar:
+                self._persist()
 
     async def loop(self) -> None:
         await self.seed_history()
@@ -505,9 +781,7 @@ class PaperEngine:
             await asyncio.sleep(POLL_SECONDS)
 
     def start_loop(self) -> None:
-        if self._task is None or getattr(
-            self._task, "done", lambda: True
-        )():
+        if self._task is None or getattr(self._task, "done", lambda: True)():
             self._task = asyncio.create_task(self.loop())
 
     async def shutdown(self) -> None:
@@ -526,15 +800,9 @@ class PaperEngine:
 
             short_ma = int(config.get("short_ma", self.short_ma))
             long_ma = int(config.get("long_ma", self.long_ma))
-            stop_loss_pct = float(
-                config.get("stop_loss_pct", self.stop_loss_pct)
-            )
-            position_size = float(
-                config.get("position_size_btc", self.position_size)
-            )
-            max_position = float(
-                config.get("max_position_btc", self.max_position)
-            )
+            stop_loss_pct = float(config.get("stop_loss_pct", self.stop_loss_pct))
+            position_size = float(config.get("position_size_btc", self.position_size))
+            max_position = float(config.get("max_position_btc", self.max_position))
             max_drawdown_pct = float(
                 config.get("max_drawdown_pct", self.max_drawdown_pct)
             )
@@ -638,10 +906,7 @@ class PaperEngine:
             if self.btc > 0 and px:
                 self._apply_fill("sell", self.btc, px, "flatten")
             self.state = "OFFLINE"
-            self._log(
-                "INFO",
-                "Emergency flatten complete. Entries locked.",
-            )
+            self._log("INFO", "Emergency flatten complete. Entries locked.")
             self._persist()
             return {"ok": True, **self.snapshot()}
 

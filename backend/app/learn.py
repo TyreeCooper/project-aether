@@ -1,4 +1,4 @@
-"""Score closed paper trades and rank nearby SMA settings. No live promotion."""
+"""Walk-forward review for the same trend/cost model used by the paper runtime."""
 from __future__ import annotations
 
 import json
@@ -8,14 +8,26 @@ from typing import Any
 
 from app.paper_exec import SLIPPAGE_BPS
 from app.persist import state_path
-from app.strategy import crossover_signal
+from app.strategy import exit_plan, trend_breakout_snapshot, trend_exit_signal
 
 TAKER_FEE = 0.0026
 STARTING = 10_000.0
-CHAMPION = {"short_ma": 8, "long_ma": 21, "stop_loss_pct": 2.0}
-GRID_SHORT = (6, 8, 10)
-GRID_LONG = (18, 21, 26)
-GRID_STOP = (1.5, 2.0, 2.5)
+MIN_OOS_TRADES = 8
+CHAMPION = {
+    "short_ma": 8,
+    "long_ma": 21,
+    "stop_loss_pct": 2.0,
+    "breakout_bars": 6,
+    "efficiency_min": 0.35,
+    "cost_multiple": 1.4,
+}
+CANDIDATES = (
+    {"short_ma": 6, "long_ma": 18, "stop_loss_pct": 1.5, "breakout_bars": 4, "efficiency_min": 0.30, "cost_multiple": 1.35},
+    {"short_ma": 8, "long_ma": 21, "stop_loss_pct": 1.5, "breakout_bars": 6, "efficiency_min": 0.35, "cost_multiple": 1.4},
+    {"short_ma": 8, "long_ma": 21, "stop_loss_pct": 2.0, "breakout_bars": 6, "efficiency_min": 0.35, "cost_multiple": 1.4},
+    {"short_ma": 10, "long_ma": 30, "stop_loss_pct": 2.0, "breakout_bars": 6, "efficiency_min": 0.40, "cost_multiple": 1.5},
+    {"short_ma": 12, "long_ma": 36, "stop_loss_pct": 2.5, "breakout_bars": 8, "efficiency_min": 0.45, "cost_multiple": 1.6},
+)
 
 
 def _learn_path() -> Path:
@@ -43,9 +55,17 @@ def load_learn() -> dict[str, Any]:
             "history": [],
         }
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data.get("champion"), dict):
+            data["champion"] = dict(CHAMPION)
+        return data
     except (OSError, json.JSONDecodeError):
-        return {"champion": dict(CHAMPION), "challenger": None, "last_review_at": None, "history": []}
+        return {
+            "champion": dict(CHAMPION),
+            "challenger": None,
+            "last_review_at": None,
+            "history": [],
+        }
 
 
 def save_learn(payload: dict[str, Any]) -> None:
@@ -64,7 +84,6 @@ def score_exits(fills: list[dict[str, Any]]) -> dict[str, Any]:
     year_start = today.replace(month=1, day=1)
     wins = losses = flat = 0
     pnl = daily = weekly = monthly = annual = 0.0
-    invert = 0.0
     by_reason: dict[str, int] = {}
     series: list[dict[str, Any]] = []
     last_ts = None
@@ -72,10 +91,8 @@ def score_exits(fills: list[dict[str, Any]]) -> dict[str, Any]:
         if str(fill.get("side", "")).lower() != "sell":
             continue
         realized = float(fill.get("realized_pnl_usd") or 0)
-        fee = float(fill.get("fee_usd") or 0)
         ts = _parse_ts(fill.get("ts"))
         pnl += realized
-        invert += -realized - (2 * fee)
         if ts:
             last_ts = ts
             if ts.date() == today:
@@ -86,7 +103,9 @@ def score_exits(fills: list[dict[str, Any]]) -> dict[str, Any]:
                 monthly += realized
             if ts.date() >= year_start:
                 annual += realized
-            series.append({"ts": ts.isoformat(), "pnl": round(realized, 4), "cum": round(pnl, 4)})
+            series.append(
+                {"ts": ts.isoformat(), "pnl": round(realized, 4), "cum": round(pnl, 4)}
+            )
         if realized > 1e-9:
             wins += 1
         elif realized < -1e-9:
@@ -96,9 +115,7 @@ def score_exits(fills: list[dict[str, Any]]) -> dict[str, Any]:
         actor = str(fill.get("actor") or "unknown")
         by_reason[actor] = by_reason.get(actor, 0) + 1
     closed = wins + losses + flat
-    age = None
-    if last_ts:
-        age = int((now - last_ts).total_seconds())
+    age = int((now - last_ts).total_seconds()) if last_ts else None
     return {
         "closed": closed,
         "wins": wins,
@@ -109,9 +126,10 @@ def score_exits(fills: list[dict[str, Any]]) -> dict[str, Any]:
         "weekly_pnl_usd": round(weekly, 4),
         "monthly_pnl_usd": round(monthly, 4),
         "annual_pnl_usd": round(annual, 4),
-        "invert_pnl_usd": round(invert, 4),
         "expectancy_usd": round(pnl / closed, 4) if closed else 0.0,
-        "win_rate_pct": round(wins / (wins + losses) * 100, 2) if wins + losses else 0.0,
+        "win_rate_pct": round(wins / (wins + losses) * 100, 2)
+        if wins + losses
+        else 0.0,
         "exits_by_actor": by_reason,
         "series": series[-60:],
         "last_exit_at": last_ts.isoformat() if last_ts else None,
@@ -120,68 +138,111 @@ def score_exits(fills: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def replay(closes: list[float], short_ma: int, long_ma: int, stop_pct: float) -> dict[str, Any]:
+def replay(bars: list[dict[str, Any]], config: dict[str, Any]) -> dict[str, Any]:
+    if len(bars) < 360:
+        return {
+            **config,
+            "trades": 0,
+            "wins": 0,
+            "losses": 0,
+            "breakeven": 0,
+            "pnl_usd": 0.0,
+            "expectancy_usd": 0.0,
+            "max_drawdown_pct": 0.0,
+        }
+
     usd = STARTING
     btc = 0.0
     avg = 0.0
+    highest = 0.0
+    entry_i: int | None = None
     wins = losses = flat = 0
     pnl = 0.0
     peak = STARTING
     max_dd = 0.0
     trades = 0
+    cooldown_until_i = 0
     slip = SLIPPAGE_BPS / 10_000.0
-    for i in range(len(closes)):
-        window = closes[: i + 1]
-        px = window[-1]
+
+    for i in range(330, len(bars)):
+        history = bars[: i + 1]
+        px = float(bars[i]["close"])
         equity = usd + btc * px
         peak = max(peak, equity)
         if peak > 0:
             max_dd = max(max_dd, (peak - equity) / peak * 100)
-        if btc > 0 and avg > 0 and px <= avg * (1 - stop_pct / 100):
-            fill = px * (1 - slip)
-            fee = fill * btc * TAKER_FEE
-            realized = (fill - avg) * btc - fee
-            usd += fill * btc - fee
-            pnl += realized
-            trades += 1
-            if realized > 1e-9:
-                wins += 1
-            elif realized < -1e-9:
-                losses += 1
-            else:
-                flat += 1
-            btc = 0.0
-            avg = 0.0
+
+        if btc > 0:
+            highest = max(highest, px)
+            cost_pct = TAKER_FEE * 2 * 100 + SLIPPAGE_BPS * 2 / 100
+            plan = exit_plan(
+                history,
+                avg,
+                highest,
+                px,
+                float(config["stop_loss_pct"]),
+                cost_pct,
+            )
+            timed_out = entry_i is not None and i - entry_i >= 180
+            trend_failed = trend_exit_signal(
+                history,
+                int(config["short_ma"]),
+                int(config["long_ma"]),
+            )
+            if (
+                float(bars[i]["low"]) <= float(plan["active_stop"])
+                or trend_failed
+                or timed_out
+            ):
+                fill = px * (1 - slip)
+                fee = fill * btc * TAKER_FEE
+                realized = (fill - avg) * btc - fee
+                usd += fill * btc - fee
+                pnl += realized
+                trades += 1
+                if realized > 1e-9:
+                    wins += 1
+                elif realized < -1e-9:
+                    losses += 1
+                else:
+                    flat += 1
+                btc = 0.0
+                avg = 0.0
+                highest = 0.0
+                entry_i = None
+                cooldown_until_i = i + 15
             continue
-        signal = crossover_signal(window, short_ma, long_ma, in_position=btc > 0)
-        if signal == "buy" and btc == 0:
-            fill = px * (1 + slip)
-            qty = 0.01
-            fee = fill * qty * TAKER_FEE
-            cost = fill * qty + fee
-            if cost <= usd:
-                usd -= cost
-                avg = (fill * qty + fee) / qty
-                btc = qty
-        elif signal == "sell" and btc > 0:
-            fill = px * (1 - slip)
-            fee = fill * btc * TAKER_FEE
-            realized = (fill - avg) * btc - fee
-            usd += fill * btc - fee
-            pnl += realized
-            trades += 1
-            if realized > 1e-9:
-                wins += 1
-            elif realized < -1e-9:
-                losses += 1
-            else:
-                flat += 1
-            btc = 0.0
-            avg = 0.0
+
+        if i < cooldown_until_i:
+            continue
+        snap = trend_breakout_snapshot(
+            history,
+            short_len=int(config["short_ma"]),
+            long_len=int(config["long_ma"]),
+            breakout_bars=int(config["breakout_bars"]),
+            efficiency_min=float(config["efficiency_min"]),
+            cost_multiple=float(config["cost_multiple"]),
+            mark=px,
+            bid=px * 0.9999,
+            ask=px * 1.0001,
+            fee_rate=TAKER_FEE,
+            slippage_bps=SLIPPAGE_BPS,
+        )
+        if snap.get("signal") != "buy":
+            continue
+        fill = px * (1 + slip)
+        qty = 0.01
+        fee = fill * qty * TAKER_FEE
+        cost = fill * qty + fee
+        if cost <= usd:
+            usd -= cost
+            avg = (fill * qty + fee) / qty
+            btc = qty
+            highest = px
+            entry_i = i
+
     return {
-        "short_ma": short_ma,
-        "long_ma": long_ma,
-        "stop_loss_pct": stop_pct,
+        **config,
         "trades": trades,
         "wins": wins,
         "losses": losses,
@@ -192,57 +253,77 @@ def replay(closes: list[float], short_ma: int, long_ma: int, stop_pct: float) ->
     }
 
 
-def review(closes: list[float], fills: list[dict[str, Any]], champion: dict[str, Any] | None = None) -> dict[str, Any]:
+def review(
+    bars: list[dict[str, Any]],
+    fills: list[dict[str, Any]],
+    champion: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     state = load_learn()
-    champ = dict(champion or state.get("champion") or CHAMPION)
+    champ = dict(CHAMPION)
+    champ.update(champion or state.get("champion") or {})
     live_score = score_exits(fills)
-    mid = max(len(closes) // 2, champ["long_ma"] + 2)
-    train, test = closes[:mid], closes[mid:]
-    ranked = []
-    for short in GRID_SHORT:
-        for long in GRID_LONG:
-            if short >= long:
-                continue
-            for stop in GRID_STOP:
-                train_res = replay(train, short, long, stop)
-                test_res = replay(test, short, long, stop)
-                ranked.append({
-                    "params": {"short_ma": short, "long_ma": long, "stop_loss_pct": stop},
-                    "train_expectancy": train_res["expectancy_usd"],
-                    "test_expectancy": test_res["expectancy_usd"],
-                    "test_pnl_usd": test_res["pnl_usd"],
-                    "test_drawdown_pct": test_res["max_drawdown_pct"],
-                    "test_trades": test_res["trades"],
-                })
-    ranked.sort(key=lambda x: (x["test_expectancy"], x["test_pnl_usd"], -x["test_drawdown_pct"]), reverse=True)
-    champ_test = replay(test, int(champ["short_ma"]), int(champ["long_ma"]), float(champ["stop_loss_pct"]))
+
+    split = max(len(bars) // 2, 360)
+    train = bars[:split]
+    test = bars[split:]
+    ranked: list[dict[str, Any]] = []
+    for config in CANDIDATES:
+        train_res = replay(train, dict(config))
+        test_res = replay(test, dict(config))
+        ranked.append(
+            {
+                "params": dict(config),
+                "train_expectancy": train_res["expectancy_usd"],
+                "test_expectancy": test_res["expectancy_usd"],
+                "test_pnl_usd": test_res["pnl_usd"],
+                "test_drawdown_pct": test_res["max_drawdown_pct"],
+                "test_trades": test_res["trades"],
+            }
+        )
+
+    ranked.sort(
+        key=lambda x: (
+            x["test_expectancy"],
+            x["test_pnl_usd"],
+            -x["test_drawdown_pct"],
+        ),
+        reverse=True,
+    )
+    champ_test = replay(test, champ)
     best = ranked[0] if ranked else None
-    promote = False
-    if best and best["test_trades"] >= 2:
+    challenger = None
+    if best and best["test_trades"] >= MIN_OOS_TRADES:
         if best["test_expectancy"] > champ_test["expectancy_usd"] + 0.25:
-            if best["test_drawdown_pct"] <= champ_test["max_drawdown_pct"] + 1.5:
-                promote = True
-    challenger = best if promote else None
-    invert_note = "Flip book is a check only. Long-only paper stays on."
-    if live_score["closed"] and live_score["invert_pnl_usd"] > live_score["realized_pnl_usd"] + 1:
-        invert_note = "Opposite side looked better on this sample. Still a note, not a live short."
+            if best["test_drawdown_pct"] <= champ_test["max_drawdown_pct"] + 1.0:
+                challenger = best
+
     report = {
         "champion": champ,
         "champion_replay": champ_test,
         "challenger": None if challenger is None else challenger["params"],
-        "challenger_replay": None if challenger is None else challenger,
+        "challenger_replay": challenger,
         "promote_ready": bool(challenger),
         "live_exits": live_score,
-        "bars_used": len(closes),
+        "bars_used": len(bars),
         "candidates": ranked[:5],
         "last_review_at": datetime.now(timezone.utc).isoformat(),
-        "note": invert_note,
+        "note": (
+            "Walk-forward paper review only. Runtime and replay share the same "
+            "trend, cost-hurdle and managed-exit primitives. No automatic promotion."
+        ),
     }
     state["champion"] = champ
     state["challenger"] = report["challenger"]
     state["last_review_at"] = report["last_review_at"]
     hist = list(state.get("history") or [])
-    hist.insert(0, {"at": report["last_review_at"], "promote_ready": report["promote_ready"], "live": live_score})
+    hist.insert(
+        0,
+        {
+            "at": report["last_review_at"],
+            "promote_ready": report["promote_ready"],
+            "live": live_score,
+        },
+    )
     state["history"] = hist[:20]
     save_learn(state)
     report["history"] = state["history"]

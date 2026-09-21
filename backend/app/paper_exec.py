@@ -1,4 +1,4 @@
-"""Harsh paper execution. Worse than mid-price; still not a live broker."""
+"""Conservative paper execution and market-quality guards."""
 from __future__ import annotations
 
 import time
@@ -7,34 +7,22 @@ SLIPPAGE_BPS = 5.0
 MAX_SPREAD_BPS = 10.0
 MAX_BASIS_USD = 80.0
 STALE_MS = 8_000
-REVIEW_EVERY_TICKS = 40
-CHOP_LOOKBACK = 21
-CHOP_RANGE_PCT = 0.35
+REVIEW_EVERY_TICKS = 60
 
 
-def slipped_price(side: str, bid: float | None, ask: float | None, mark: float | None) -> float | None:
+def slipped_price(
+    side: str,
+    bid: float | None,
+    ask: float | None,
+    mark: float | None,
+) -> float | None:
     raw = ask if side == "buy" else bid
     if raw is None:
         raw = mark
     if raw is None:
         return None
     slip = raw * SLIPPAGE_BPS / 10_000.0
-    if side == "buy":
-        return raw + slip
-    return raw - slip
-
-
-def deny_chop(closes: list[float], mark: float | None) -> str | None:
-    if mark is None or len(closes) < CHOP_LOOKBACK:
-        return None
-    window = list(closes)[-CHOP_LOOKBACK:]
-    high = max(window)
-    low = min(window)
-    if mark <= 0:
-        return None
-    if (high - low) / mark * 100 < CHOP_RANGE_PCT:
-        return "chop"
-    return None
+    return raw + slip if side == "buy" else raw - slip
 
 
 def deny_microstructure(
@@ -71,34 +59,29 @@ def deny_microstructure(
 
 
 def install(engine) -> None:
+    """Install harsh fills without changing the restart-safe OFFLINE state."""
     import app.engine as engine_mod
 
     engine_mod.POLL_SECONDS = 5
     engine_mod.STALE_MS = STALE_MS
-    inner_deny = engine_mod.deny_entry
     original_tick = engine.tick
     ticks = {"n": 0}
 
-    def wrapped_deny(**kwargs):
-        reason = inner_deny(**kwargs)
-        if reason:
-            return reason
+    def guard(side: str = "buy", protective: bool = False) -> str | None:
         stale = True
         last = getattr(engine, "_last_tick_mono", None)
         if last is not None:
             stale = int((time.monotonic() - last) * 1000) > STALE_MS
-        reason = deny_microstructure(
-            side="buy",
+        return deny_microstructure(
+            side=side,
             bid=engine.bid,
             ask=engine.ask,
             mark=engine.mark,
             source=engine.mark_source,
             stale=stale,
             watch_last=getattr(engine, "watch_last", None),
+            protective=protective,
         )
-        if reason:
-            return reason
-        return deny_chop(list(engine.closes), engine.mark)
 
     async def wrapped_tick():
         await original_tick()
@@ -108,16 +91,13 @@ def install(engine) -> None:
         try:
             from app import learn
             from app.db import db_store
-            fills = await db_store.history_fills(300)
-            learn.review(list(engine.closes), fills)
+
+            fills = await db_store.history_fills(500)
+            learn.review(list(engine.bars_1m), fills)
         except Exception as exc:
             engine._log("WARN", f"Journal pass skipped: {exc}")
 
-    engine_mod.deny_entry = wrapped_deny
+    engine._paper_entry_guard = guard
     engine._fill_price = lambda side: slipped_price(side, engine.bid, engine.ask, engine.mark)
     engine.tick = wrapped_tick
-    if not engine.flatten_lock:
-        engine.state = "IN_POSITION" if engine.btc > 0 else "IDLE"
-        engine._log("INFO", "Paper armed. Chop filter on. 5s tape.")
-    else:
-        engine._log("INFO", "Flatten lock holds. Loop still marks the tape.")
+    engine._log("INFO", "Harsh paper fills on. 5s tape; strategy uses completed 1m bars.")

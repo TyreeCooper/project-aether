@@ -1,5 +1,4 @@
 """Public tapes. No API keys. Kraken is the paper fill mark. Binance.US is watch-only."""
-
 from __future__ import annotations
 
 from typing import Any
@@ -29,16 +28,29 @@ def parse_ticker(payload: dict[str, Any]) -> dict[str, Any] | None:
     return {"last": last, "bid": bid, "ask": ask, "source": "kraken"}
 
 
-def parse_ohlc_closes(payload: dict[str, Any], limit: int = 120) -> list[float]:
+def parse_ohlc_bars(payload: dict[str, Any], limit: int = 720) -> list[dict[str, float | int]]:
     result = payload.get("result") or {}
-    series = next((v for v in result.values() if isinstance(v, list)), [])
-    closes: list[float] = []
+    series = next((v for k, v in result.items() if k != "last" and isinstance(v, list)), [])
+    bars: list[dict[str, float | int]] = []
     for row in series[-limit:]:
         try:
-            closes.append(float(row[4]))
+            bars.append(
+                {
+                    "ts": int(float(row[0])),
+                    "open": float(row[1]),
+                    "high": float(row[2]),
+                    "low": float(row[3]),
+                    "close": float(row[4]),
+                    "volume": float(row[6]) if len(row) > 6 else 0.0,
+                }
+            )
         except (IndexError, TypeError, ValueError):
             continue
-    return closes
+    return bars
+
+
+def parse_ohlc_closes(payload: dict[str, Any], limit: int = 120) -> list[float]:
+    return [float(b["close"]) for b in parse_ohlc_bars(payload, limit)]
 
 
 def parse_binance_book(payload: dict[str, Any]) -> dict[str, Any] | None:
@@ -68,11 +80,16 @@ async def fetch_ticker() -> dict[str, Any] | None:
         return parse_ticker(res.json())
 
 
-async def fetch_closes() -> list[float]:
+async def fetch_bars(interval: int = 1, limit: int = 720) -> list[dict[str, float | int]]:
     async with httpx.AsyncClient(timeout=15.0) as client:
-        res = await client.get(KRAKEN_OHLC, params={"pair": PAIR, "interval": 1})
+        res = await client.get(KRAKEN_OHLC, params={"pair": PAIR, "interval": interval})
         res.raise_for_status()
-        return parse_ohlc_closes(res.json())
+        return parse_ohlc_bars(res.json(), limit)
+
+
+async def fetch_closes() -> list[float]:
+    bars = await fetch_bars(interval=1, limit=720)
+    return [float(b["close"]) for b in bars]
 
 
 async def fetch_binance_us() -> dict[str, Any] | None:

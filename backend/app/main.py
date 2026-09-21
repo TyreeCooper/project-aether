@@ -36,12 +36,12 @@ logger.propagate = False
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    logger.info("event=app_start phase=begin version=1.5.1")
+    logger.info("event=app_start phase=begin version=2.0.0")
     await engine.initialize_persistence()
     install_harsh_paper(engine)
     engine.start_loop()
     logger.info(
-        "event=app_start phase=ready version=1.5.1 storage_configured=%s storage_initialized=%s live_ready=%s",
+        "event=app_start phase=ready version=2.0.0 storage_configured=%s storage_initialized=%s live_ready=%s",
         db_store.status().get("configured"),
         db_store.status().get("initialized"),
         live.status().get("live_ready"),
@@ -55,7 +55,7 @@ async def lifespan(_: FastAPI):
         logger.info("event=app_shutdown phase=complete")
 
 
-app = FastAPI(title="Project Aether API", version="1.5.1", lifespan=lifespan)
+app = FastAPI(title="Project Aether API", version="2.0.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -212,7 +212,7 @@ async def learn_status():
     state = learn.load_learn()
     fills = await db_store.history_fills(500)
     state["live_exits"] = learn.score_exits(fills)
-    state["bars_used"] = len(engine.closes)
+    state["bars_used"] = len(engine.bars_1m)
     champ = state.get("champion") or learn.CHAMPION
     state["champion"] = champ
     return state
@@ -221,7 +221,7 @@ async def learn_status():
 @app.post("/api/v1/learn/review")
 async def learn_review(_: None = Depends(require_operator)):
     fills = await db_store.history_fills(500)
-    return learn.review(list(engine.closes), fills)
+    return learn.review(list(engine.bars_1m), fills)
 
 
 @app.get("/api/v1/config")
