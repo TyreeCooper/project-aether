@@ -142,6 +142,7 @@ def replay(
     bars: list[dict[str, Any]],
     config: dict[str, Any],
     detailed: bool = False,
+    start_index: int = 330,
 ) -> dict[str, Any]:
     if len(bars) < 720:
         return {
@@ -180,7 +181,8 @@ def replay(
     trade_high = 0.0
     last_entry_bucket: int | None = None
 
-    for i in range(330, len(bars)):
+    first_i = max(330, int(start_index))
+    for i in range(first_i, len(bars)):
         history = bars[max(0, i - 1439) : i + 1]
         px = float(bars[i]["close"])
         equity = usd + btc * px

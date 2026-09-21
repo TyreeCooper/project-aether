@@ -265,7 +265,13 @@ def walk_forward_v3(
     while cursor < n:
         end = min(n, cursor + fold_size)
         segment = bars[max(0, cursor - 1_440) : end]
-        result = replay(segment, config, detailed=True)
+        warm_count = min(1_440, cursor)
+        result = replay(
+            segment,
+            config,
+            detailed=True,
+            start_index=warm_count,
+        )
         results.append(
             {
                 "oos_start": bars[cursor]["ts"],
