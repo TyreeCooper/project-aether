@@ -21,7 +21,6 @@ def crossover_signal(
     long_len: int,
     in_position: bool,
 ) -> str | None:
-    """Legacy/testable crossover primitive retained for compatibility."""
     if short_len >= long_len or len(closes) < long_len + 1:
         return None
     prev_short = sma(closes[:-1], short_len)
@@ -63,7 +62,6 @@ def normalize_bar(bar: Bar) -> Bar:
 
 
 def resample_bars(bars: list[Bar], minutes: int) -> list[Bar]:
-    """Aggregate timestamped 1m bars onto aligned N-minute boundaries."""
     if minutes <= 1:
         return [normalize_bar(b) for b in bars if float(b.get("close", 0) or 0) > 0]
     groups: dict[int, Bar] = {}
@@ -91,27 +89,43 @@ def resample_bars(bars: list[Bar], minutes: int) -> list[Bar]:
     return [groups[k] for k in sorted(groups)]
 
 
-def atr(bars: list[Bar], length: int = 14) -> float | None:
-    if length <= 0 or len(bars) < length + 1:
-        return None
+def _true_ranges(bars: list[Bar]) -> list[float]:
     clean = [normalize_bar(b) for b in bars]
     trs: list[float] = []
     for i in range(1, len(clean)):
         cur = clean[i]
         prev_close = clean[i - 1]["close"]
-        tr = max(
-            cur["high"] - cur["low"],
-            abs(cur["high"] - prev_close),
-            abs(cur["low"] - prev_close),
+        trs.append(
+            max(
+                cur["high"] - cur["low"],
+                abs(cur["high"] - prev_close),
+                abs(cur["low"] - prev_close),
+            )
         )
-        trs.append(tr)
+    return trs
+
+
+def atr(bars: list[Bar], length: int = 14) -> float | None:
+    if length <= 0 or len(bars) < length + 1:
+        return None
+    trs = _true_ranges(bars)
     if len(trs) < length:
         return None
     return sum(trs[-length:]) / length
 
 
+def atr_ratio(bars: list[Bar], length: int = 14, baseline: int = 50) -> float | None:
+    trs = _true_ranges(bars)
+    if len(trs) < baseline:
+        return None
+    current = sum(trs[-length:]) / length
+    base = sum(trs[-baseline:]) / baseline
+    if base <= 1e-12:
+        return None
+    return current / base
+
+
 def efficiency_ratio(closes: list[float], length: int = 10) -> float | None:
-    """Kaufman-style directional efficiency: 0=chop, 1=straight trend."""
     if length <= 0 or len(closes) < length + 1:
         return None
     window = closes[-(length + 1):]
@@ -129,7 +143,6 @@ def round_trip_cost_pct(
     fee_rate: float = 0.0026,
     slippage_bps: float = 5.0,
 ) -> float:
-    """Estimated buy+sell friction including fees, modeled slip and spread."""
     spread_pct = 0.0
     if bid and ask and bid > 0 and ask >= bid:
         mid = (bid + ask) / 2
@@ -145,19 +158,19 @@ def trend_breakout_snapshot(
     bars_1m: list[Bar],
     short_len: int = 8,
     long_len: int = 21,
-    breakout_bars: int = 6,
+    breakout_bars: int = 20,
     efficiency_min: float = 0.35,
     cost_multiple: float = 1.4,
+    compression_max: float = 0.85,
     mark: float | None = None,
     bid: float | None = None,
     ask: float | None = None,
     fee_rate: float = 0.0026,
     slippage_bps: float = 5.0,
 ) -> dict[str, Any]:
-    """Classify regime and decide whether a long entry has enough edge to pay costs."""
     bars5 = resample_bars(bars_1m, 5)
     bars15 = resample_bars(bars_1m, 15)
-    required_5 = max(long_len + 2, breakout_bars + 2)
+    required_5 = max(long_len + 2, breakout_bars + 2, 52)
     required_15 = long_len + 2
     cost_pct = round_trip_cost_pct(mark, bid, ask, fee_rate, slippage_bps)
     base = {
@@ -180,6 +193,9 @@ def trend_breakout_snapshot(
     slow15 = sma(closes15, long_len)
     slow15_prev = sma(closes15[:-1], long_len)
     eff = efficiency_ratio(closes5, 10)
+    ratio = atr_ratio(bars5, 14, 50)
+    atr_now = atr(bars5, 14)
+    atr_prev = atr(bars5[:-1], 14)
     if None in (fast5, slow5, fast15, slow15, slow15_prev, eff):
         return base
 
@@ -189,6 +205,11 @@ def trend_breakout_snapshot(
     breakout_level = max(float(b["high"]) for b in prior)
     current = float(bars5[-1]["close"])
     breakout = current > breakout_level
+    expanding = bool(
+        ratio is not None and atr_now is not None and atr_prev is not None
+        and (ratio >= 1.0 or atr_now > atr_prev)
+    )
+    compressed = bool(ratio is not None and ratio < compression_max)
 
     window = bars5[-(breakout_bars + 1):]
     recent_high = max(float(b["high"]) for b in window)
@@ -211,6 +232,9 @@ def trend_breakout_snapshot(
         "fast_15m": round(float(fast15), 6),
         "slow_15m": round(float(slow15), 6),
         "efficiency": round(float(eff), 6),
+        "atr_ratio": None if ratio is None else round(float(ratio), 6),
+        "compressed": compressed,
+        "expanding": expanding,
         "breakout_level": round(breakout_level, 6),
         "breakout": breakout,
         "range_pct": round(range_pct, 6),
@@ -225,6 +249,9 @@ def trend_breakout_snapshot(
     elif eff < efficiency_min:
         result["regime"] = "chop"
         result["reason"] = "low_efficiency"
+    elif ratio is not None and ratio < compression_max and not expanding:
+        result["regime"] = "compress"
+        result["reason"] = "awaiting_expansion"
     elif not breakout:
         result["reason"] = "no_breakout"
     elif opportunity_pct < hurdle_pct:
@@ -256,22 +283,22 @@ def exit_plan(
     mark: float,
     configured_stop_pct: float,
     cost_pct: float,
+    frozen_hard_stop: float = 0.0,
 ) -> dict[str, float]:
-    """Volatility-adjusted hard stop, breakeven transition and trailing stop."""
-    atr_value = atr(bars_1m, 14)
+    """Hard stop is frozen at entry. Trail and breakeven may only rise."""
+    atr_value = atr(resample_bars(bars_1m, 5) or bars_1m, 14)
     atr_pct = (atr_value / mark * 100) if atr_value and mark > 0 else 0.0
-    initial_stop_pct = min(
-        max(configured_stop_pct, 0.1),
-        max(0.8, atr_pct * 3.0, cost_pct * 1.25),
-    )
+    initial_stop_pct = max(0.8, min(configured_stop_pct, max(atr_pct * 2.5, cost_pct * 1.25, 0.8)))
     hard_stop = entry_price * (1 - initial_stop_pct / 100)
+    if frozen_hard_stop > 0:
+        hard_stop = max(hard_stop, frozen_hard_stop)
 
     gain_pct = ((mark / entry_price) - 1) * 100 if entry_price > 0 else 0.0
     breakeven_trigger_pct = max(0.9, cost_pct * 1.5)
     breakeven_price = entry_price * (1 + max(cost_pct * 0.55, 0.15) / 100)
 
     trail_activation_pct = max(1.2, cost_pct * 2.0)
-    trail_distance_pct = max(0.6, atr_pct * 2.5, cost_pct * 0.9)
+    trail_distance_pct = max(0.6, atr_pct * 2.0, cost_pct * 0.9)
     trailing_stop = (
         highest_price * (1 - trail_distance_pct / 100)
         if gain_pct >= trail_activation_pct
@@ -283,6 +310,8 @@ def exit_plan(
         active_stop = max(active_stop, breakeven_price)
     if trailing_stop > 0:
         active_stop = max(active_stop, trailing_stop)
+    if frozen_hard_stop > 0:
+        active_stop = max(active_stop, frozen_hard_stop)
 
     return {
         "atr_pct": round(atr_pct, 6),
