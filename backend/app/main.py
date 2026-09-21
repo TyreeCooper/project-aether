@@ -18,6 +18,7 @@ from app.desk import desk
 from app.engine import engine
 from app.fees import TAKER_FEE
 from app.intelligence import source_registry
+from app.intelligence_research import research_observations
 from app.paper_exec import (
     MAX_BASIS_USD,
     MAX_SPREAD_BPS,
@@ -326,6 +327,29 @@ async def intelligence_history(
         "observations": await db_store.history_intelligence_observations(
             asset_id,
             limit,
+        ),
+    }
+
+
+@app.get("/api/v1/assets/{asset_id}/intelligence/research")
+async def intelligence_research(
+    asset_id: str,
+    limit: int = Query(default=500, ge=20, le=500),
+    threshold_pct: float = Query(default=0.5, ge=0.1, le=10.0),
+):
+    if desk.asset_snapshot(asset_id) is None:
+        raise HTTPException(status_code=404, detail="unknown asset")
+    snapshots = await db_store.history_intelligence(asset_id, limit)
+    observations = await db_store.history_intelligence_observations(
+        asset_id,
+        limit,
+    )
+    return {
+        "asset_id": asset_id.lower(),
+        **research_observations(
+            snapshots,
+            observations,
+            threshold_pct=threshold_pct,
         ),
     }
 
