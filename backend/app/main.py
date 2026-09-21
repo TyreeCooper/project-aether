@@ -115,6 +115,10 @@ class QtyBody(BaseModel):
     qty: float | None = Field(default=None, gt=0, le=1)
 
 
+class SourceTrustBody(BaseModel):
+    state: str = Field(min_length=4, max_length=20)
+
+
 class ConfigBody(BaseModel):
     short_ma: int = Field(ge=2, le=100)
     long_ma: int = Field(ge=3, le=200)
@@ -269,6 +273,7 @@ async def settings():
                 "trade_influence_enabled": False,
             },
             "community_assets_configured": sorted(SUBREDDITS),
+            "asset_source_registry": desk.source_registry_snapshot().get("summary"),
             "community_trade_influence_enabled": False,
             "event_policy": desk.risk_snapshot().get("policy"),
         },
@@ -306,6 +311,28 @@ async def asset_intelligence(asset_id: str):
 @app.get("/api/v1/intelligence/sources")
 async def intelligence_sources():
     return {"items": _intelligence_sources_snapshot()}
+
+
+@app.get("/api/v1/intelligence/assets/sources")
+async def asset_intelligence_sources():
+    return desk.source_registry_snapshot()
+
+
+@app.post("/api/v1/intelligence/assets/sources/{source_id}/trust")
+async def asset_intelligence_source_trust(
+    source_id: str,
+    body: SourceTrustBody,
+    _: None = Depends(require_operator),
+):
+    try:
+        return {
+            "ok": True,
+            **desk.update_source_trust(source_id, body.state),
+        }
+    except KeyError:
+        raise HTTPException(status_code=404, detail="unknown intelligence source")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.get("/api/v1/crypto-events")
