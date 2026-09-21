@@ -38,8 +38,8 @@ def test_no_signal_when_warming():
 
 
 def test_cross_up_and_cross_down():
-    assert crossover_signal([3, 2, 1, 2], 2, 3, False) == "buy"
-    assert crossover_signal([1, 2, 3, 2], 2, 3, True) == "sell"
+    assert crossover_signal([3, 1, 1, 3], 2, 3, False) == "buy"
+    assert crossover_signal([1, 3, 3, 1], 2, 3, True) == "sell"
 
 
 def test_resample_bars_aligns_timeframes():
