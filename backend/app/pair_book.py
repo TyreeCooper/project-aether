@@ -22,6 +22,7 @@ def _now() -> str:
 class PairBook:
     def __init__(self, asset: dict[str, Any], wallet) -> None:
         self.id = str(asset["id"])
+        self.name = str(asset.get("name") or asset["symbol"])
         self.symbol = str(asset["symbol"])
         self.pair = str(asset["pair"])
         self.kraken = str(asset["kraken"])
@@ -162,11 +163,38 @@ class PairBook:
             self.fills.append({**result, "side": "sell", "ts": _now()})
         return result
 
+    def analytics(self) -> dict[str, Any]:
+        sells = [f for f in self.fills if str(f.get("side", "")).lower() == "sell"]
+        wins = sum(1 for f in sells if float(f.get("pnl") or 0) > 1e-9)
+        losses = sum(1 for f in sells if float(f.get("pnl") or 0) < -1e-9)
+        realized = sum(float(f.get("pnl") or 0) for f in sells)
+        fees = sum(float(f.get("fee") or 0) for f in self.fills)
+        gross_profit = sum(max(float(f.get("pnl") or 0), 0.0) for f in sells)
+        gross_loss = sum(abs(min(float(f.get("pnl") or 0), 0.0)) for f in sells)
+        first = float(self.bars[0]["close"]) if self.bars else 0.0
+        last = float(self.mark or (self.bars[-1]["close"] if self.bars else 0.0))
+        change_pct = ((last / first) - 1) * 100 if first > 0 and last > 0 else 0.0
+        return {
+            "trades": len(sells),
+            "wins": wins,
+            "losses": losses,
+            "win_rate_pct": round(wins / max(wins + losses, 1) * 100, 2),
+            "realized_pnl": round(realized, 4),
+            "fees": round(fees, 4),
+            "gross_profit": round(gross_profit, 4),
+            "gross_loss": round(gross_loss, 4),
+            "profit_factor": (
+                round(gross_profit / gross_loss, 4) if gross_loss > 1e-12 else None
+            ),
+            "change_pct": round(change_pct, 4),
+        }
+
     def view(self) -> dict[str, Any]:
         qty = self.qty()
         avg = self.wallet.avg_entry(self.id)
         return {
             "id": self.id,
+            "name": self.name,
             "symbol": self.symbol,
             "pair": self.pair,
             "kraken": self.kraken,
@@ -178,6 +206,7 @@ class PairBook:
             "qty": qty,
             "avg": avg,
             "stop": self.stop or None,
+            "position_value": qty * float(self.mark or 0.0),
             "open_pnl": (self.mark - avg) * qty if qty and self.mark else 0.0,
             "bars": len(self.bars),
             "signal": self.signal,

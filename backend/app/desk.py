@@ -40,6 +40,7 @@ class MultiDesk:
                 "highest": book.highest,
                 "entry_at": book.entry_at,
                 "last_reason": book.last_reason,
+                "fills": list(book.fills)[-200:],
             }
         save_desk(
             {
@@ -67,6 +68,9 @@ class MultiDesk:
                 book.highest = float(row.get("highest") or 0)
                 book.entry_at = row.get("entry_at")
                 book.last_reason = str(row.get("last_reason") or book.last_reason)
+                fills = row.get("fills") or []
+                if isinstance(fills, list):
+                    book.fills = [f for f in fills[-200:] if isinstance(f, dict)]
         if "armed" in data:
             self.armed = bool(data["armed"])
         logger.info(
@@ -86,6 +90,105 @@ class MultiDesk:
             "model": "one_kraken_spot_account",
             "persists": True,
         }
+
+    def floor_snapshot(self) -> dict[str, Any]:
+        marks = self.marks()
+        wallet = self.wallet.snapshot(marks)
+        rows: list[dict[str, Any]] = []
+        realized = fees = open_pnl = invested = 0.0
+        trades = wins = losses = 0
+        for book in self.books:
+            view = book.view()
+            stats = book.analytics()
+            view["analytics"] = stats
+            rows.append(view)
+            realized += float(stats["realized_pnl"])
+            fees += float(stats["fees"])
+            open_pnl += float(view["open_pnl"])
+            invested += float(view["position_value"])
+            trades += int(stats["trades"])
+            wins += int(stats["wins"])
+            losses += int(stats["losses"])
+        equity = float(wallet["equity"])
+        return {
+            "strategy_name": "Aether Vector Engine",
+            "strategy_internal": "sma_trend_breakout_v3",
+            "armed": self.armed,
+            "live_blocked": True,
+            "model": "one_kraken_spot_account",
+            "portfolio": {
+                "equity": round(equity, 4),
+                "cash": round(float(wallet["usd"]), 4),
+                "invested": round(invested, 4),
+                "open_pnl": round(open_pnl, 4),
+                "realized_pnl": round(realized, 4),
+                "total_pnl": round(open_pnl + realized, 4),
+                "fees": round(fees, 4),
+                "exposure_pct": round(invested / equity * 100, 2) if equity > 0 else 0.0,
+                "active_positions": sum(1 for row in rows if float(row["qty"]) > 0),
+                "assets": len(rows),
+                "trades": trades,
+                "wins": wins,
+                "losses": losses,
+                "win_rate_pct": round(wins / max(wins + losses, 1) * 100, 2),
+            },
+            "assets": rows,
+        }
+
+    def asset_snapshot(self, asset_id: str) -> dict[str, Any] | None:
+        book = self.by_id.get(str(asset_id).lower())
+        if not book:
+            return None
+        view = book.view()
+        stats = book.analytics()
+        try:
+            strategy = book.snapshot_strategy()
+        except Exception as exc:
+            strategy = {"signal": None, "reason": f"strategy_error:{exc}"}
+        bars = list(book.bars)
+        series = [
+            {
+                "ts": int(row["ts"]),
+                "open": float(row["open"]),
+                "high": float(row["high"]),
+                "low": float(row["low"]),
+                "close": float(row["close"]),
+            }
+            for row in bars[-240:]
+        ]
+        recent = bars[-240:]
+        high = max((float(x["high"]) for x in recent), default=float(book.mark or 0))
+        low = min((float(x["low"]) for x in recent), default=float(book.mark or 0))
+        return {
+            "strategy_name": "Aether Vector Engine",
+            "live_blocked": True,
+            "armed": self.armed,
+            "asset": view,
+            "analytics": stats,
+            "strategy": strategy,
+            "series": series,
+            "window": {
+                "bars": len(recent),
+                "high": high,
+                "low": low,
+            },
+            "fills": list(book.fills)[-50:],
+        }
+
+    def blotter(self, limit: int = 200) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for book in self.books:
+            for fill in book.fills:
+                rows.append(
+                    {
+                        **fill,
+                        "asset_id": book.id,
+                        "symbol": book.symbol,
+                        "pair": book.pair,
+                    }
+                )
+        rows.sort(key=lambda row: str(row.get("ts") or ""), reverse=True)
+        return rows[: max(1, int(limit))]
 
     async def seed(self) -> None:
         for book in self.books:

@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from app import learn, live, venue
 from app.db import db_store
+from app.desk import desk
 from app.engine import engine
 from app.paper_exec import install as install_harsh_paper
 from app.universe import public_catalog
@@ -129,31 +130,7 @@ def _basis(exec_last, watch_last):
 
 @app.get("/")
 async def home():
-    html = (STATIC / "index.html").read_text(encoding="utf-8")
-    if "ui-tune.css" not in html:
-        html = html.replace(
-            "</head>",
-            '<link rel="stylesheet" href="/static/ui-tune.css"/></head>',
-            1,
-        )
-    if "desk.css" not in html:
-        html = html.replace("</head>", ICON_LINKS + "</head>", 1)
-    extra = ""
-    if "ledger-order.js" not in html:
-        extra += '<script src="/static/ledger-order.js"></script>'
-    if "scoreboard.js" not in html:
-        extra += '<script src="/static/scoreboard.js"></script>'
-    if "strategy-status.js" not in html:
-        extra += '<script src="/static/strategy-status.js"></script>'
-    if "learn.js" not in html:
-        extra += '<script src="/static/learn.js"></script>'
-    if "desk.js" not in html:
-        extra += '<script src="/static/desk.js"></script>'
-    if "markets.js" not in html:
-        extra += '<script src="/static/markets.js"></script>'
-    if extra:
-        html = html.replace("</body>", extra + "</body>", 1)
-    return HTMLResponse(html)
+    return HTMLResponse((STATIC / "index.html").read_text(encoding="utf-8"))
 
 
 @app.get("/favicon.svg")
@@ -174,7 +151,7 @@ async def health():
         "env": "paper",
         "venue": snap.get("mark_source"),
         "watch": "binance.us",
-        "symbol": "BTC/USD",
+        "symbols": [a["pair"] for a in public_catalog()],
         "universe": [a["symbol"] for a in public_catalog()],
         "last_tick_age_ms": snap["last_tick_age_ms"],
         "stale": snap.get("stale"),
@@ -191,7 +168,35 @@ async def markets():
         items = await venue.fetch_markets()
     except Exception:
         items = public_catalog()
-    return {"items": items, "paper_symbol": "BTC/USD"}
+    return {"items": items, "paper_symbols": [a["pair"] for a in public_catalog()]}
+
+
+@app.get("/api/v1/floor")
+async def floor():
+    return desk.floor_snapshot()
+
+
+@app.get("/api/v1/assets/{asset_id}")
+async def asset_page(asset_id: str):
+    row = desk.asset_snapshot(asset_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="unknown asset")
+    return row
+
+
+@app.get("/api/v1/desk/blotter")
+async def desk_blotter(limit: int = Query(default=200, ge=1, le=500)):
+    return {"items": desk.blotter(limit)}
+
+
+@app.post("/api/v1/desk/arm")
+async def desk_arm(_: None = Depends(require_operator)):
+    return {"ok": True, **desk.arm()}
+
+
+@app.post("/api/v1/desk/disarm")
+async def desk_disarm(_: None = Depends(require_operator)):
+    return {"ok": True, **desk.disarm()}
 
 
 @app.get("/api/v1/live")

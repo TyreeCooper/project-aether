@@ -1,0 +1,20 @@
+from app.desk import MultiDesk
+
+
+def test_floor_and_asset_views_are_multi_asset_and_isolated():
+    desk = MultiDesk()
+    floor = desk.floor_snapshot()
+    assert floor["strategy_name"] == "Aether Vector Engine"
+    assert len(floor["assets"]) == 10
+    assert {row["id"] for row in floor["assets"]} == {
+        "btc", "eth", "sol", "xrp", "bnb", "ada", "link", "ton", "avax", "sui"
+    }
+
+    btc = desk.asset_snapshot("btc")
+    eth = desk.asset_snapshot("eth")
+    assert btc is not None and eth is not None
+    assert btc["asset"]["id"] == "btc"
+    assert eth["asset"]["id"] == "eth"
+    assert btc["asset"]["pair"] == "BTC/USD"
+    assert eth["asset"]["pair"] == "ETH/USD"
+    assert desk.asset_snapshot("does-not-exist") is None

@@ -1,645 +1,160 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
-<meta name="theme-color" content="#08070d"/>
-<title>Aether Pro</title>
-<style>
-:root{
-  color-scheme:dark;
-  --bg:#08070d;
-  --bg2:#0d0b14;
-  --panel:#11101a;
-  --panel2:#171522;
-  --line:#28243a;
-  --line2:#35304a;
-  --text:#f5f3fb;
-  --muted:#9992ab;
-  --muted2:#716b80;
-  --accent:#7b61ff;
-  --accent2:#9f8cff;
-  --blue:#4f8cff;
-  --green:#28c77b;
-  --red:#ff5f6d;
-  --amber:#f0b85b;
-  --shadow:0 18px 48px rgba(0,0,0,.34);
-}
-*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;min-height:100%;background:
-  radial-gradient(circle at 85% -10%,rgba(123,97,255,.16),transparent 32%),
-  linear-gradient(180deg,#08070d 0%,#0a0910 100%);
-  color:var(--text);
-  font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-body{overscroll-behavior-y:none}
-button,input{font:inherit}
-button{cursor:pointer}
-.app{max-width:1080px;margin:auto;padding:8px 12px calc(90px + env(safe-area-inset-bottom))}
-.topbar{
-  position:sticky;top:0;z-index:40;display:flex;align-items:center;justify-content:space-between;gap:10px;
-  min-height:58px;padding:10px 2px;background:rgba(8,7,13,.86);backdrop-filter:blur(18px)
-}
-.brand{display:flex;align-items:center;gap:10px}
-.logo{
-  width:38px;height:38px;border-radius:12px;display:grid;place-items:center;font-weight:950;
-  background:linear-gradient(145deg,#8b72ff,#5d42df);box-shadow:0 8px 24px rgba(123,97,255,.35)
-}
-.brand-title{font-size:15px;font-weight:900;letter-spacing:.08em}
-.brand-sub{font-size:10px;color:var(--muted);margin-top:1px}
-.topstate{display:flex;gap:6px;align-items:center}
-.pill{
-  display:inline-flex;align-items:center;justify-content:center;gap:5px;
-  min-height:27px;padding:0 9px;border-radius:999px;border:1px solid var(--line);
-  background:#0f0d17;color:var(--muted);font-size:10px;font-weight:850;letter-spacing:.04em
-}
-.pill.good{color:var(--green);border-color:rgba(40,199,123,.3);background:rgba(40,199,123,.07)}
-.pill.bad{color:var(--red);border-color:rgba(255,95,109,.3);background:rgba(255,95,109,.07)}
-.pill.warn{color:var(--amber);border-color:rgba(240,184,91,.3);background:rgba(240,184,91,.07)}
-.page{display:none;animation:pageIn .22s ease}
-.page.active{display:block}
-@keyframes pageIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
-.page-head{padding:14px 2px 8px}
-.page-head h1{margin:0;font-size:24px;line-height:1;font-weight:900;letter-spacing:-.035em}
-.page-head p{margin:6px 0 0;color:var(--muted);font-size:12px}
-.market-hero{
-  border:1px solid var(--line);border-radius:22px;background:
-  radial-gradient(circle at 86% 7%,rgba(123,97,255,.18),transparent 28%),
-  linear-gradient(155deg,#161321 0%,#0e0c15 68%);
-  padding:17px;box-shadow:var(--shadow);overflow:hidden
-}
-.market-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
-.symbol{display:flex;gap:10px;align-items:center}
-.coin{
-  width:38px;height:38px;border-radius:50%;display:grid;place-items:center;background:linear-gradient(145deg,#f3a437,#d57a00);
-  color:#fff;font-weight:950;box-shadow:0 8px 20px rgba(222,136,19,.2)
-}
-.symbol-title{font-size:15px;font-weight:850}
-.symbol-sub{font-size:10px;color:var(--muted);margin-top:2px}
-.price{font-size:39px;line-height:1;font-weight:950;letter-spacing:-.045em;margin-top:15px}
-.price-sub{display:flex;align-items:center;gap:8px;margin-top:7px;font-size:12px;color:var(--muted)}
-.chart-shell{height:148px;margin:14px -5px 0}
-#priceChart{width:100%;height:100%;overflow:visible}
-.chart-grid{stroke:rgba(255,255,255,.05);stroke-width:1}
-.chart-line{fill:none;stroke:url(#lineGrad);stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
-.chart-area{fill:url(#areaGrad)}
-.quick-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin-top:10px}
-.quick{padding:10px;border:1px solid rgba(255,255,255,.06);background:rgba(4,3,8,.35);border-radius:12px}
-.quick .k,.metric .k,.box .k{font-size:9px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase}
-.quick .v,.metric .v,.box .v{font-size:15px;font-weight:800;margin-top:4px;overflow-wrap:anywhere}
-.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:10px}
-.card{min-width:0;border:1px solid var(--line);border-radius:17px;background:rgba(17,16,26,.96);padding:14px;box-shadow:0 10px 28px rgba(0,0,0,.16)}
-.card.full{grid-column:1/-1}
-.card-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px}
-.card-head h2{margin:0;font-size:10px;font-weight:850;letter-spacing:.11em;color:var(--muted)}
-.row{display:flex;justify-content:space-between;gap:16px;align-items:center;padding:9px 0;border-bottom:1px solid rgba(153,146,171,.08);font-size:13px}
-.row:last-child{border-bottom:0}
-.row span:last-child{text-align:right;font-weight:700}
-.portfolio-balance{font-size:31px;font-weight:950;letter-spacing:-.04em;margin:4px 0 10px}
-.summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
-.box,.metric{padding:11px;border-radius:12px;border:1px solid rgba(153,146,171,.11);background:#0c0a12}
-.box .v{font-size:16px}
-.helper{font-size:11px;line-height:1.5;color:var(--muted);margin-top:8px}
-.helper.good{color:var(--green)}.helper.bad{color:var(--red)}.helper.warn{color:var(--amber)}
-.goodText{color:var(--green)!important}.badText{color:var(--red)!important}.warnText{color:var(--amber)!important}
-.trade-ticket{display:grid;gap:10px}
-.trade-price{padding:14px;border:1px solid var(--line);border-radius:15px;background:#0d0b13}
-.trade-price .big{font-size:30px;font-weight:950;letter-spacing:-.04em}
-.trade-price .small{font-size:11px;color:var(--muted);margin-top:4px}
-.action-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
-.btn{
-  position:relative;overflow:hidden;min-height:56px;border:1px solid var(--line2);border-radius:14px;padding:0 15px;color:#fff;
-  background:linear-gradient(180deg,#242032,#191625);font-weight:850;letter-spacing:.01em;
-  box-shadow:0 10px 24px rgba(0,0,0,.18);
-  transition:transform .12s ease,box-shadow .18s ease,filter .18s ease,background .18s ease,border-color .18s ease
-}
-.btn::after{content:"";position:absolute;inset:0;background:rgba(255,255,255,.11);opacity:0;transition:.14s}
-.btn:not(:disabled):active{transform:scale(.962);box-shadow:0 4px 10px rgba(0,0,0,.16)}
-.btn:not(:disabled):active::after{opacity:1}
-.btn:disabled{opacity:.38;cursor:not-allowed}
-.btn.primary{background:linear-gradient(180deg,#8b72ff,#6548e6);border-color:#9f8cff;box-shadow:0 10px 24px rgba(123,97,255,.23)}
-.btn.buy{background:linear-gradient(180deg,#23a969,#19784b);border-color:#35bf7d}
-.btn.sell{background:linear-gradient(180deg,#b53b49,#852a35);border-color:#d25260}
-.btn.secondary{background:linear-gradient(180deg,#252131,#181520)}
-.btn.wide{grid-column:1/-1}
-.btn.loading{pointer-events:none;filter:saturate(.75)}
-.btn.state-success{animation:successPulse .65s ease;background:linear-gradient(180deg,#2fc879,#1b8852);border-color:#58de96}
-.btn.state-error{animation:errorShake .32s ease;background:linear-gradient(180deg,#cf4251,#962a35);border-color:#ff7380}
-@keyframes successPulse{0%{transform:scale(.97)}45%{transform:scale(1.02);box-shadow:0 0 0 7px rgba(40,199,123,.1)}100%{transform:none}}
-@keyframes errorShake{0%,100%{transform:none}25%{transform:translateX(-4px)}50%{transform:translateX(4px)}75%{transform:translateX(-2px)}}
-.spinner{display:inline-block;width:15px;height:15px;margin-right:8px;vertical-align:-2px;border:2px solid rgba(255,255,255,.25);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
-.input{width:100%;min-height:50px;border:1px solid var(--line);border-radius:12px;background:#0a0810;color:var(--text);padding:0 13px;outline:none}
-.input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(123,97,255,.13)}
-.access-line{display:flex;gap:8px}
-.configgrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
-.field label{display:block;margin:0 0 5px 2px;font-size:9px;letter-spacing:.07em;color:var(--muted)}
-.field input{width:100%;min-height:45px;border:1px solid var(--line);border-radius:11px;background:#0a0810;color:var(--text);padding:0 10px}
-.tabs{display:flex;gap:7px;overflow-x:auto;padding:2px 0 9px;scrollbar-width:none}
-.tabs::-webkit-scrollbar{display:none}
-.tab{min-width:max-content;min-height:38px;padding:0 13px;border-radius:999px;border:1px solid var(--line);background:#0c0a12;color:var(--muted);font-weight:800}
-.tab.active{color:#e7e0ff;border-color:var(--accent);background:rgba(123,97,255,.13)}
-.tablewrap{overflow:auto;border:1px solid var(--line);border-radius:13px;background:#0a0810}
-table{width:100%;border-collapse:collapse;font-size:11px;min-width:720px}
-th,td{padding:10px 9px;border-bottom:1px solid rgba(153,146,171,.09);text-align:left;white-space:nowrap}
-th{position:sticky;top:0;background:#100e17;color:var(--muted);font-weight:800}
-.log{font:11px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;color:#aaa3b9;white-space:pre-wrap;max-height:300px;overflow:auto;background:#0a0810;border:1px solid rgba(153,146,171,.1);border-radius:13px;padding:11px}
-.system-list{display:grid;gap:8px}
-.system-item{display:flex;justify-content:space-between;gap:12px;padding:11px;border-radius:12px;background:#0c0a12;border:1px solid rgba(153,146,171,.1);font-size:12px}
-.bottom-nav{
-  position:fixed;left:0;right:0;bottom:0;z-index:60;padding:7px 8px calc(7px + env(safe-area-inset-bottom));
-  background:rgba(10,8,15,.94);backdrop-filter:blur(20px);border-top:1px solid var(--line)
-}
-.nav-inner{max-width:620px;margin:auto;display:grid;grid-template-columns:repeat(5,1fr);gap:2px}
-.nav-btn{
-  min-height:58px;border:0;border-radius:13px;background:transparent;color:#777083;display:flex;flex-direction:column;
-  align-items:center;justify-content:center;gap:4px;font-size:9px;font-weight:800;transition:.15s ease
-}
-.nav-btn svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-.nav-btn.active{color:#e8e1ff;background:rgba(123,97,255,.11)}
-.nav-btn:active{transform:scale(.94)}
-.toast{position:fixed;left:50%;bottom:calc(80px + env(safe-area-inset-bottom));transform:translate(-50%,18px);z-index:100;width:min(92vw,440px);padding:12px 14px;border-radius:13px;background:#1b1727;border:1px solid var(--line2);box-shadow:var(--shadow);opacity:0;pointer-events:none;transition:.2s;font-size:12px;font-weight:800}
-.toast.show{opacity:1;transform:translate(-50%,0)}
-.toast.good{border-color:rgba(40,199,123,.4)}.toast.bad{border-color:rgba(255,95,109,.45)}
-@media(max-width:720px){
-  .app{padding-left:9px;padding-right:9px}
-  .topstate .pill:first-child{display:none}
-  .grid{grid-template-columns:1fr}.card.full{grid-column:1}
-  .summary{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .configgrid{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .price{font-size:35px}.portfolio-balance{font-size:28px}
-}
-@media(min-width:721px){
-  .bottom-nav{left:50%;right:auto;transform:translateX(-50%);width:620px;border:1px solid var(--line);border-bottom:0;border-radius:20px 20px 0 0}
-}
-</style>
+<meta name="theme-color" content="#080a0f"/>
+<title>Aether Trading Desk</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml"/>
+<link rel="stylesheet" href="/static/aether-app.css"/>
 </head>
 <body>
-<div class="app">
-<header class="topbar">
-  <div class="brand">
-    <div class="logo">A</div>
-    <div><div class="brand-title">AETHER</div><div class="brand-sub">Autonomous trading operations</div></div>
-  </div>
-  <div class="topstate">
-    <span id="dbBadge" class="pill">DB</span>
-    <span id="botBadge" class="pill">OFFLINE</span>
-    <span class="pill warn">PAPER</span>
-  </div>
-</header>
-
-<main>
-<section id="page-home" class="page active">
-  <div class="page-head"><h1>Overview</h1><p>Market, portfolio and autonomous engine status.</p></div>
-
-  <section class="market-hero">
-    <div class="market-top">
-      <div class="symbol">
-        <div class="coin">₿</div>
-        <div><div class="symbol-title">BTC / USD</div><div class="symbol-sub">Kraken execution tape</div></div>
-      </div>
-      <span id="freshBadge" class="pill">CHECKING</span>
+<div class="app-shell">
+  <header class="topbar">
+    <div class="brand">
+      <img src="/static/aether-mark.svg" alt="" class="brand-mark"/>
+      <div><strong>AETHER</strong><span>Autonomous multi-asset paper desk</span></div>
     </div>
-    <div id="mark" class="price">—</div>
-    <div class="price-sub"><span id="basis">—</span><span>vs Binance.US</span></div>
-    <div class="chart-shell">
-      <svg id="priceChart" viewBox="0 0 600 140" preserveAspectRatio="none">
-        <defs>
-          <linearGradient id="lineGrad" x1="0" x2="1"><stop stop-color="#8b72ff"/><stop offset="1" stop-color="#4f8cff"/></linearGradient>
-          <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#7b61ff" stop-opacity=".24"/><stop offset="1" stop-color="#7b61ff" stop-opacity="0"/></linearGradient>
-        </defs>
-        <line class="chart-grid" x1="0" x2="600" y1="35" y2="35"/>
-        <line class="chart-grid" x1="0" x2="600" y1="70" y2="70"/>
-        <line class="chart-grid" x1="0" x2="600" y1="105" y2="105"/>
-        <path id="chartArea" class="chart-area" d=""/>
-        <path id="chartLine" class="chart-line" d=""/>
-      </svg>
+    <div class="status-line">
+      <span id="modeBadge" class="badge amber">PAPER</span>
+      <span id="engineBadge" class="badge">ENGINE</span>
     </div>
-    <div class="quick-metrics">
-      <div class="quick"><div class="k">Bid</div><div id="homeBid" class="v">—</div></div>
-      <div class="quick"><div class="k">Ask</div><div id="homeAsk" class="v">—</div></div>
-      <div class="quick"><div class="k">Watch</div><div id="watch" class="v">—</div></div>
-    </div>
-  </section>
+  </header>
 
-  <div class="grid">
-    <section class="card">
-      <div class="card-head"><h2>PORTFOLIO</h2><span class="pill">PAPER</span></div>
-      <div id="eq" class="portfolio-balance">—</div>
-      <div class="row"><span>Cash</span><span id="usd">—</span></div>
-      <div class="row"><span>BTC</span><span id="btc">—</span></div>
-      <div class="row"><span>Open P/L</span><span id="pnl">—</span></div>
-      <div class="row"><span>Realized P/L</span><span id="rpnl">—</span></div>
-    </section>
+  <nav id="assetNav" class="asset-nav" aria-label="Asset pages"></nav>
 
-    <section class="card">
-      <div class="card-head"><h2>AUTONOMOUS ENGINE</h2><span id="stateText" class="pill">—</span></div>
-      <div class="row"><span>Strategy</span><span id="strategy">—</span></div>
-      <div class="row"><span>Position size</span><span id="psz">—</span></div>
-      <div class="row"><span>Max position</span><span id="mpsz">—</span></div>
-      <div class="row"><span>Entry lock</span><span id="lock">—</span></div>
-      <div id="note" class="helper"></div>
-    </section>
-
-    <section class="card full">
-      <div class="card-head"><h2>PERFORMANCE SNAPSHOT</h2><span class="pill">LIVE LEDGER</span></div>
-      <div class="summary">
-        <div class="box"><div class="k">Today P/L</div><div id="aDaily" class="v">—</div></div>
-        <div class="box"><div class="k">Week P/L</div><div id="aWeekly" class="v">—</div></div>
-        <div class="box"><div class="k">Win Rate</div><div id="aWinRate" class="v">—</div></div>
-        <div class="box"><div class="k">Drawdown</div><div id="aDrawdown" class="v">—</div></div>
+  <main>
+    <section id="view-floor" class="view">
+      <div class="page-title">
+        <div><p class="eyebrow">PORTFOLIO COMMAND</p><h1>The Floor</h1><p>One account. Ten autonomous books. Portfolio totals, P&amp;L, allocation, breadth and desk health.</p></div>
+        <div id="floorClock" class="clock"></div>
       </div>
-    </section>
-  </div>
-</section>
 
-<section id="page-trade" class="page">
-  <div class="page-head"><h1>Trade</h1><p>Execution controls for the paper engine.</p></div>
-  <div class="grid">
-    <section class="card full trade-ticket">
-      <div class="card-head"><h2>BTC / USD</h2><span id="tradeAuthBadge" class="pill bad">LOCKED</span></div>
-      <div class="trade-price">
-        <div id="tradeMark" class="big">—</div>
-        <div id="tradeBa" class="small">Bid / Ask —</div>
-      </div>
-      <div class="action-grid">
-        <button id="buyBtn" class="btn buy control" type="button">Buy 0.01 BTC</button>
-        <button id="sellBtn" class="btn sell control" type="button">Sell Position</button>
-      </div>
-      <div class="action-grid">
-        <button id="startBtn" class="btn primary control" type="button">Start Bot</button>
-        <button id="stopBtn" class="btn secondary control" type="button">Stop Bot</button>
-      </div>
-      <button id="unlockBtn" class="btn secondary control" type="button">Clear Flatten Lock</button>
-      <button id="flattenBtn" class="btn danger control" type="button">Emergency Flatten & Lock</button>
-      <div id="controlNote" class="helper">Connect operator access in Settings.</div>
-    </section>
+      <section class="hero-grid">
+        <article class="hero-card primary"><span>Portfolio Equity</span><strong id="floorEquity">—</strong><small id="floorPnl">—</small></article>
+        <article class="hero-card"><span>Cash</span><strong id="floorCash">—</strong><small id="floorExposure">—</small></article>
+        <article class="hero-card"><span>Invested</span><strong id="floorInvested">—</strong><small id="floorPositions">—</small></article>
+        <article class="hero-card"><span>Realized P&amp;L</span><strong id="floorRealized">—</strong><small id="floorTrades">—</small></article>
+      </section>
 
-    <section class="card">
-      <div class="card-head"><h2>POSITION</h2><span id="tradeState" class="pill">—</span></div>
-      <div class="row"><span>BTC held</span><span id="tradeBtc">—</span></div>
-      <div class="row"><span>Open P/L</span><span id="tradePnl">—</span></div>
-      <div class="row"><span>Realized</span><span id="tradeRpnl">—</span></div>
-    </section>
-    <section class="card">
-      <div class="card-head"><h2>MARKET QUALITY</h2><span id="tradeFreshBadge" class="pill">—</span></div>
-      <div class="row"><span>Mark age</span><span id="age">—</span></div>
-      <div class="row"><span>Binance basis</span><span id="tradeBasis">—</span></div>
-    </section>
-  </div>
-</section>
-
-<section id="page-activity" class="page">
-  <div class="page-head"><h1>Activity</h1><p>Orders, fills, positions and risk events.</p></div>
-  <div class="grid">
-    <section class="card full">
-      <div class="card-head"><h2>TRADE LEDGER</h2><span id="ledgerCount" class="pill">0 FILLS</span></div>
-      <div class="tabs" id="tabs">
-        <button class="tab active" data-tab="fills">Fills</button>
-        <button class="tab" data-tab="orders">Orders</button>
-        <button class="tab" data-tab="positions">Positions</button>
-        <button class="tab" data-tab="risk">Risk</button>
-        <button class="tab" data-tab="account">Account</button>
-        <button class="tab" data-tab="bot">Bot</button>
-      </div>
-      <div id="ledger" class="tablewrap"></div>
-    </section>
-    <section class="card full">
-      <div class="card-head"><h2>AUDIT STREAM</h2><span class="pill">LATEST 30</span></div>
-      <div id="log" class="log">Loading…</div>
-    </section>
-  </div>
-</section>
-
-<section id="page-analytics" class="page">
-  <div class="page-head"><h1>Analytics</h1><p>Performance and execution quality.</p></div>
-  <div class="grid">
-    <section class="card full">
-      <div class="card-head"><h2>PERFORMANCE</h2><span class="pill">POSTGRES</span></div>
-      <div class="summary">
-        <div class="box"><div class="k">Today P/L</div><div id="xDaily" class="v">—</div></div>
-        <div class="box"><div class="k">Week P/L</div><div id="xWeekly" class="v">—</div></div>
-        <div class="box"><div class="k">Win Rate</div><div id="xWinRate" class="v">—</div></div>
-        <div class="box"><div class="k">Wins / Losses</div><div id="xWL" class="v">—</div></div>
-        <div class="box"><div class="k">Avg Duration</div><div id="xDuration" class="v">—</div></div>
-        <div class="box"><div class="k">Fees</div><div id="xFees" class="v">—</div></div>
-        <div class="box"><div class="k">BTC Volume</div><div id="xVolume" class="v">—</div></div>
-        <div class="box"><div class="k">Max Drawdown</div><div id="xDrawdown" class="v">—</div></div>
-      </div>
-      <div id="actorStats" class="helper"></div>
-    </section>
-  </div>
-</section>
-
-<section id="page-settings" class="page">
-  <div class="page-head"><h1>Settings</h1><p>Security, strategy, risk and system configuration.</p></div>
-  <div class="grid">
-    <section class="card full">
-      <div class="card-head"><h2>OPERATOR ACCESS</h2><span id="authBadge" class="pill bad">LOCKED</span></div>
-      <div class="access-line">
-        <input id="opToken" class="input" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Operator token"/>
-        <button id="connectBtn" class="btn primary" style="min-width:112px" type="button">Connect</button>
-      </div>
-      <div id="authNote" class="helper">Enter the operator token stored in Azure.</div>
+      <section class="dashboard-grid">
+        <article class="panel span-2">
+          <header><div><p class="eyebrow">P&amp;L MAP</p><h2>Asset P&amp;L</h2></div><span class="panel-note">open + realized</span></header>
+          <div id="pnlBars" class="bar-chart"></div>
+        </article>
+        <article class="panel">
+          <header><div><p class="eyebrow">CAPITAL</p><h2>Allocation</h2></div><span id="allocationTotal" class="panel-note">—</span></header>
+          <div id="allocationBars" class="bar-chart compact"></div>
+        </article>
+        <article class="panel">
+          <header><div><p class="eyebrow">MARKET</p><h2>Breadth</h2></div><span class="panel-note">current book window</span></header>
+          <div id="breadthBars" class="bar-chart compact"></div>
+        </article>
+        <article class="panel span-2">
+          <header><div><p class="eyebrow">TEN BOOKS</p><h2>Asset Board</h2></div><span class="panel-note">tap any row for its dedicated page</span></header>
+          <div id="assetBoard" class="asset-board"></div>
+        </article>
+        <article class="panel">
+          <header><div><p class="eyebrow">DESK HEALTH</p><h2>Operations</h2></div></header>
+          <div id="floorHealth" class="metric-list"></div>
+        </article>
+        <article class="panel">
+          <header><div><p class="eyebrow">PERFORMANCE</p><h2>Book Totals</h2></div></header>
+          <div id="floorPerformance" class="metric-list"></div>
+        </article>
+      </section>
     </section>
 
-    <section class="card full">
-      <div class="card-head"><h2>STRATEGY & RISK</h2><span id="configBadge" class="pill">READ ONLY</span></div>
-      <div class="configgrid">
-        <div class="field"><label>SHORT MA</label><input id="cShort" type="number" min="2" max="100"></div>
-        <div class="field"><label>LONG MA</label><input id="cLong" type="number" min="3" max="200"></div>
-        <div class="field"><label>STOP LOSS %</label><input id="cStop" type="number" min=".1" max="20" step=".1"></div>
-        <div class="field"><label>POSITION BTC</label><input id="cSize" type="number" min=".000001" max="1" step=".001"></div>
-        <div class="field"><label>MAX POSITION BTC</label><input id="cMax" type="number" min=".000001" max="1" step=".001"></div>
-        <div class="field"><label>MAX DRAWDOWN %</label><input id="cDD" type="number" min=".5" max="50" step=".5"></div>
-        <div class="field"><label>DAILY LOSS CAP $</label><input id="cLoss" type="number" min="1" max="10000" step="1"></div>
+    <section id="view-asset" class="view hidden">
+      <div class="asset-page-head">
+        <button id="backFloor" class="text-btn" type="button">← Floor</button>
+        <div class="asset-identity"><span id="assetSymbolBadge" class="symbol-badge">—</span><div><p id="assetName" class="eyebrow">—</p><h1 id="assetPair">—</h1></div></div>
+        <span id="assetStateBadge" class="badge">—</span>
       </div>
-      <button id="saveCfgBtn" class="btn primary" style="margin-top:10px;width:100%" type="button">Save Configuration</button>
-      <div id="configNote" class="helper"></div>
+
+      <section class="asset-hero">
+        <div><p class="eyebrow">KRAKEN MARK</p><strong id="assetMark">—</strong><span id="assetChange" class="delta">—</span></div>
+        <div class="quote-grid">
+          <div><span>Bid</span><b id="assetBid">—</b></div>
+          <div><span>Ask</span><b id="assetAsk">—</b></div>
+          <div><span>Watch</span><b id="assetWatch">—</b></div>
+          <div><span>Basis</span><b id="assetBasis">—</b></div>
+        </div>
+      </section>
+
+      <section class="panel asset-chart-panel">
+        <header><div><p class="eyebrow">PRICE ACTION</p><h2 id="assetChartTitle">—</h2></div><span id="assetWindow" class="panel-note">—</span></header>
+        <div id="assetChart" class="line-chart"></div>
+      </section>
+
+      <section class="dashboard-grid">
+        <article class="panel">
+          <header><div><p class="eyebrow">POSITION</p><h2>Asset Book</h2></div></header>
+          <div id="assetPosition" class="metric-list"></div>
+        </article>
+        <article class="panel">
+          <header><div><p class="eyebrow">PERFORMANCE</p><h2>Asset P&amp;L</h2></div></header>
+          <div id="assetPerformance" class="metric-list"></div>
+        </article>
+        <article class="panel">
+          <header><div><p class="eyebrow">AUTONOMOUS ENGINE</p><h2>Aether Vector Engine</h2></div><span id="assetSignal" class="badge">—</span></header>
+          <div id="assetStrategy" class="metric-list"></div>
+        </article>
+        <article class="panel">
+          <header><div><p class="eyebrow">RANGE</p><h2>Market Structure</h2></div></header>
+          <div id="assetRange" class="metric-list"></div>
+        </article>
+        <article class="panel span-2">
+          <header><div><p class="eyebrow">ASSET-ONLY LEDGER</p><h2 id="assetLedgerTitle">Fills</h2></div></header>
+          <div id="assetLedger" class="table-wrap"></div>
+        </article>
+      </section>
     </section>
 
-    <section class="card full">
-      <div class="card-head"><h2>SYSTEM</h2><span class="pill">AETHER 1.0</span></div>
-      <div class="system-list">
-        <div class="system-item"><span>Persistence</span><strong id="sysDb">—</strong></div>
-        <div class="system-item"><span>Execution tape</span><strong>Kraken</strong></div>
-        <div class="system-item"><span>Watch tape</span><strong>Binance.US</strong></div>
-        <div class="system-item"><span>Trading mode</span><strong class="warnText">Paper · Live blocked</strong></div>
-        <div class="system-item"><span>Operator auth</span><strong id="sysAuth">—</strong></div>
-      </div>
+    <section id="view-engine" class="view hidden">
+      <div class="page-title"><div><p class="eyebrow">AUTONOMOUS ENGINE</p><h1>Aether Vector Engine</h1><p>Adaptive trend, breakout, cost and risk logic operating independently across all ten Kraken books.</p></div></div>
+      <section class="hero-grid engine-hero">
+        <article class="hero-card primary"><span>Engine State</span><strong id="engineState">—</strong><small>global multi-asset allocator</small></article>
+        <article class="hero-card"><span>Active Books</span><strong id="engineActive">—</strong><small>positions currently open</small></article>
+        <article class="hero-card"><span>Live Execution</span><strong>BLOCKED</strong><small>paper only</small></article>
+        <article class="hero-card"><span>Account Model</span><strong>1 / 10</strong><small>one wallet, ten books</small></article>
+      </section>
+      <section class="panel">
+        <header><div><p class="eyebrow">DECISION MATRIX</p><h2>Ten Independent Books</h2></div></header>
+        <div id="engineMatrix" class="asset-board"></div>
+      </section>
     </section>
-  </div>
-</section>
-</main>
+
+    <section id="view-blotter" class="view hidden">
+      <div class="page-title"><div><p class="eyebrow">EXECUTION RECORD</p><h1>Blotter</h1><p>Paper fills across the complete Aether desk.</p></div></div>
+      <section class="panel"><div id="deskBlotter" class="table-wrap"></div></section>
+    </section>
+
+    <section id="view-booth" class="view hidden">
+      <div class="page-title"><div><p class="eyebrow">OPERATOR CONTROL</p><h1>Booth</h1><p>Authentication and global paper-engine controls.</p></div></div>
+      <section class="dashboard-grid">
+        <article class="panel span-2">
+          <header><div><p class="eyebrow">ACCESS</p><h2>Operator Authentication</h2></div><span id="authBadge" class="badge">LOCKED</span></header>
+          <div class="control-row"><input id="operatorToken" class="input" type="password" placeholder="Operator token" autocomplete="off"/><button id="connectOperator" class="action primary" type="button">Connect</button></div>
+          <p id="authNote" class="muted">Mutating controls require the operator token configured in Azure.</p>
+        </article>
+        <article class="panel span-2">
+          <header><div><p class="eyebrow">AETHER VECTOR ENGINE</p><h2>Global Paper Controls</h2></div><span class="badge amber">LIVE BLOCKED</span></header>
+          <div class="control-row"><button id="armDesk" class="action primary" type="button">Arm Ten-Asset Engine</button><button id="disarmDesk" class="action" type="button">Disarm Engine</button></div>
+        </article>
+      </section>
+    </section>
+  </main>
+
+  <nav class="bottom-nav" aria-label="Primary">
+    <button data-route="floor" class="on">Floor</button>
+    <button data-route="assets">Assets</button>
+    <button data-route="engine">Engine</button>
+    <button data-route="blotter">Blotter</button>
+    <button data-route="booth">Booth</button>
+  </nav>
 </div>
-
-<nav class="bottom-nav" aria-label="Primary">
-  <div class="nav-inner">
-    <button class="nav-btn active" data-page="home" aria-label="Overview">
-      <svg viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10.5V20h13v-9.5"/></svg><span>Home</span>
-    </button>
-    <button class="nav-btn" data-page="trade" aria-label="Trade">
-      <svg viewBox="0 0 24 24"><path d="M5 17 17 5"/><path d="M9 5h8v8"/></svg><span>Trade</span>
-    </button>
-    <button class="nav-btn" data-page="activity" aria-label="Activity">
-      <svg viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h14"/></svg><span>Activity</span>
-    </button>
-    <button class="nav-btn" data-page="analytics" aria-label="Analytics">
-      <svg viewBox="0 0 24 24"><path d="M5 19V9M12 19V5M19 19v-7"/></svg><span>Analytics</span>
-    </button>
-    <button class="nav-btn" data-page="settings" aria-label="Settings">
-      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.5 1A7 7 0 0 0 14.7 6L14.4 3h-4.8l-.3 3A7 7 0 0 0 7.6 7.1l-2.5-1-2 3.4 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.5-1A7 7 0 0 0 9.3 18l.3 3h4.8l.3-3a7 7 0 0 0 1.7-1.1l2.5 1 2-3.4-2-1.5c.1-.3.1-.7.1-1z"/></svg><span>Settings</span>
-    </button>
-  </div>
-</nav>
 <div id="toast" class="toast"></div>
-
-<script>
-"use strict";
-const $=id=>document.getElementById(id);
-const ids=["dbBadge","botBadge","freshBadge","mark","basis","homeBid","homeAsk","watch","eq","usd","btc","pnl","rpnl","stateText","strategy","psz","mpsz","lock","note","aDaily","aWeekly","aWinRate","aDrawdown","buyBtn","sellBtn","startBtn","stopBtn","unlockBtn","flattenBtn","tradeAuthBadge","tradeMark","tradeBa","controlNote","tradeState","tradeBtc","tradePnl","tradeRpnl","tradeFreshBadge","age","tradeBasis","tabs","ledger","ledgerCount","log","xDaily","xWeekly","xWinRate","xWL","xDuration","xFees","xVolume","xDrawdown","actorStats","authBadge","opToken","connectBtn","authNote","configBadge","cShort","cLong","cStop","cSize","cMax","cDD","cLoss","saveCfgBtn","configNote","sysDb","sysAuth","toast","chartLine","chartArea"];
-const els={};ids.forEach(id=>els[id]=$(id));
-
-let activeLedger="fills",authenticated=false,authConfigured=false,botSnapshot=null,configSnapshot=null,initialAuthChecked=false;
-const historyCache={};
-
-function token(){return sessionStorage.getItem("aether_operator_token")||""}
-function authHeaders(){return token()?{"X-Operator-Token":token()}:{}}
-function money(v){return v===null||v===undefined||Number.isNaN(Number(v))?"—":"$"+Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}
-function num(v,d=4){return v===null||v===undefined||Number.isNaN(Number(v))?"—":Number(v).toLocaleString(undefined,{maximumFractionDigits:d})}
-function clock(v){return v?new Date(v).toLocaleString():"—"}
-function shortId(v){return v?String(v).slice(0,10):"—"}
-function esc(v){return String(v??"—").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]))}
-function pnlClass(v){return Number(v)>0?"goodText":Number(v)<0?"badText":""}
-
-function toast(message,type=""){
-  els.toast.textContent=message;els.toast.className="toast show "+type;
-  clearTimeout(toast.timer);toast.timer=setTimeout(()=>els.toast.className="toast",2400)
-}
-async function api(url,options={}){
-  const r=await fetch(url,{cache:"no-store",...options});let body={};
-  try{body=await r.json()}catch{}
-  if(!r.ok){const e=new Error(body.detail||body.error||("Request failed ("+r.status+")"));e.status=r.status;throw e}
-  return body
-}
-
-function setPage(name){
-  document.querySelectorAll(".page").forEach(p=>p.classList.toggle("active",p.id==="page-"+name));
-  document.querySelectorAll(".nav-btn").forEach(b=>b.classList.toggle("active",b.dataset.page===name));
-  sessionStorage.setItem("aether_page",name);
-  window.scrollTo({top:0,behavior:"smooth"})
-}
-document.querySelector(".nav-inner").addEventListener("click",e=>{const b=e.target.closest(".nav-btn");if(b)setPage(b.dataset.page)});
-
-function loadingButton(btn,label){
-  btn.classList.remove("state-success","state-error");btn.classList.add("loading");btn.disabled=true;btn.innerHTML='<span class="spinner"></span>'+label
-}
-function resetButton(btn,label){
-  btn.classList.remove("loading","state-success","state-error");btn.textContent=label;refreshControlState()
-}
-function successButton(btn,label,idle,stay=false){
-  btn.classList.remove("loading","state-error");btn.classList.add("state-success");btn.disabled=true;btn.textContent=label;
-  if(!stay)setTimeout(()=>resetButton(btn,idle),900)
-}
-function errorButton(btn,label,idle){
-  btn.classList.remove("loading","state-success");btn.classList.add("state-error");btn.disabled=true;btn.textContent=label;
-  setTimeout(()=>resetButton(btn,idle),1000)
-}
-
-function refreshAuthUI(){
-  if(!authConfigured){
-    authenticated=true;
-    els.authBadge.textContent="OPEN";els.authBadge.className="pill warn";
-    els.authNote.textContent="Authentication is not configured on the server.";els.authNote.className="helper warn";
-    els.tradeAuthBadge.textContent="OPEN";els.tradeAuthBadge.className="pill warn"
-  }else if(authenticated){
-    els.authBadge.textContent="VERIFIED";els.authBadge.className="pill good";
-    els.authNote.textContent="Operator access verified on this device.";els.authNote.className="helper good";
-    els.tradeAuthBadge.textContent="VERIFIED";els.tradeAuthBadge.className="pill good";
-    if(!els.connectBtn.classList.contains("loading")){els.connectBtn.classList.add("state-success");els.connectBtn.textContent="Connected ✓";els.connectBtn.disabled=true}
-  }else{
-    els.authBadge.textContent="LOCKED";els.authBadge.className="pill bad";
-    els.authNote.textContent="Enter the operator token stored in Azure, then tap Connect.";els.authNote.className="helper";
-    els.tradeAuthBadge.textContent="LOCKED";els.tradeAuthBadge.className="pill bad";
-    if(!els.connectBtn.classList.contains("loading")){els.connectBtn.classList.remove("state-success");els.connectBtn.textContent="Connect";els.connectBtn.disabled=false}
-  }
-  els.sysAuth.textContent=authConfigured?(authenticated?"Verified":"Token enforced"):"Not configured";
-  els.sysAuth.className=authenticated?"goodText":authConfigured?"warnText":"badText";
-  refreshControlState()
-}
-
-function refreshControlState(){
-  const can=!authConfigured||authenticated,locked=!!botSnapshot?.flatten_lock,stale=!!botSnapshot?.stale;
-  document.querySelectorAll(".control").forEach(b=>{if(!b.classList.contains("loading")&&!b.classList.contains("state-success")&&!b.classList.contains("state-error"))b.disabled=!can});
-  if(!els.startBtn.classList.contains("loading"))els.startBtn.disabled=!can||locked||botSnapshot?.state!=="OFFLINE";
-  if(!els.stopBtn.classList.contains("loading"))els.stopBtn.disabled=!can||botSnapshot?.state==="OFFLINE";
-  if(!els.buyBtn.classList.contains("loading"))els.buyBtn.disabled=!can||locked||stale;
-  if(!els.sellBtn.classList.contains("loading"))els.sellBtn.disabled=!can||Number(botSnapshot?.btc||0)<=0;
-  if(!els.unlockBtn.classList.contains("loading"))els.unlockBtn.disabled=!can||!locked;
-  if(!els.flattenBtn.classList.contains("loading"))els.flattenBtn.disabled=!can;
-  if(!els.saveCfgBtn.classList.contains("loading"))els.saveCfgBtn.disabled=!can||!configSnapshot?.editable;
-  els.controlNote.textContent=!can?"Operator locked. Connect in Settings.":locked?"Entries locked after emergency flatten.":"Operator controls ready.";
-  els.controlNote.className="helper "+(!can||locked?"warn":"good")
-}
-
-async function verifyToken(showToast=true){
-  const entered=els.opToken.value.trim();if(entered)sessionStorage.setItem("aether_operator_token",entered);
-  if(!authConfigured){authenticated=true;refreshAuthUI();return true}
-  if(!token()){authenticated=false;refreshAuthUI();if(showToast)toast("Operator token required","bad");return false}
-  loadingButton(els.connectBtn,"Verifying…");
-  try{
-    await api("/api/v1/auth/verify",{method:"POST",headers:authHeaders()});
-    authenticated=true;
-    successButton(els.connectBtn,"Verified ✓","Connected ✓",true);
-    refreshAuthUI();
-    if(showToast)toast("Operator connected","good");
-    return true
-  }catch(e){
-    authenticated=false;sessionStorage.removeItem("aether_operator_token");els.opToken.value="";
-    errorButton(els.connectBtn,"Invalid token","Connect");refreshAuthUI();
-    if(showToast)toast(e.message,"bad");
-    return false
-  }
-}
-
-function renderChart(){
-  const rows=(historyCache.positions||[]).filter(x=>Number.isFinite(Number(x.mark))).slice(0,60).reverse();
-  const values=rows.map(x=>Number(x.mark));
-  if(values.length<2){els.chartLine.setAttribute("d","");els.chartArea.setAttribute("d","");return}
-  const min=Math.min(...values),max=Math.max(...values),range=Math.max(max-min,1);
-  const pts=values.map((v,i)=>{
-    const x=i/(values.length-1)*600;
-    const y=122-((v-min)/range)*100;
-    return [x,y]
-  });
-  const line="M"+pts.map(p=>p[0].toFixed(1)+","+p[1].toFixed(1)).join(" L");
-  const area=line+" L600,140 L0,140 Z";
-  els.chartLine.setAttribute("d",line);els.chartArea.setAttribute("d",area)
-}
-
-async function load(){
-  try{
-    const [a,b,l,s,an,cfg,auth]=await Promise.all([
-      api("/api/v1/account"),api("/api/v1/bot"),api("/api/v1/audit"),api("/api/v1/storage"),
-      api("/api/v1/analytics?limit=500"),api("/api/v1/config"),api("/api/v1/auth/status")
-    ]);
-    botSnapshot=b;configSnapshot=cfg;authConfigured=!!auth.configured;
-
-    els.mark.textContent=money(a.mark);els.tradeMark.textContent=money(a.mark);
-    els.homeBid.textContent=money(a.bid);els.homeAsk.textContent=money(a.ask);
-    els.watch.textContent=a.watch_last==null?"—":money(a.watch_last);
-    const basisText=a.watch_basis_usd==null?"—":(Number(a.watch_basis_usd)>=0?"+":"")+money(a.watch_basis_usd).replace("$","$");
-    els.basis.textContent=basisText;els.tradeBasis.textContent=basisText;
-    els.tradeBa.textContent="Bid "+money(a.bid)+"  ·  Ask "+money(a.ask);
-
-    const freshClass="pill "+(b.stale?"bad":"good"),freshText=b.stale?"STALE":"LIVE";
-    [els.freshBadge,els.tradeFreshBadge].forEach(x=>{x.className=freshClass;x.textContent=freshText});
-    els.age.textContent=b.last_tick_age_ms==null?"No tick":b.last_tick_age_ms+" ms";
-
-    els.eq.textContent=money(a.equity_usd);els.usd.textContent=money(a.usd_free);els.btc.textContent=num(a.btc_total,8);
-    els.pnl.textContent=money(a.open_pnl);els.pnl.className=pnlClass(a.open_pnl);
-    els.rpnl.textContent=money(a.realized_pnl_24h);els.rpnl.className=pnlClass(a.realized_pnl_24h);
-
-    const stateClass="pill "+(b.state==="OFFLINE"?"bad":b.state==="IDLE"?"warn":"good");
-    [els.botBadge,els.stateText,els.tradeState].forEach(x=>{x.className=stateClass;x.textContent=b.state??"—"});
-    els.strategy.textContent=b.strategy??"—";els.psz.textContent=num(b.position_size_btc,8)+" BTC";els.mpsz.textContent=num(b.max_position_btc,8)+" BTC";
-    els.lock.textContent=b.flatten_lock?"LOCKED":"CLEAR";els.lock.className=b.flatten_lock?"badText":"goodText";
-    els.note.textContent=b.flatten_lock?"Flatten lock active.":b.stale?"Market mark stale.":"Risk state normal.";els.note.className="helper "+(b.flatten_lock||b.stale?"warn":"good");
-    els.tradeBtc.textContent=num(a.btc_total,8);els.tradePnl.textContent=money(a.open_pnl);els.tradePnl.className=pnlClass(a.open_pnl);
-    els.tradeRpnl.textContent=money(a.realized_pnl_24h);els.tradeRpnl.className=pnlClass(a.realized_pnl_24h);
-
-    els.dbBadge.textContent=s.initialized&&!s.last_error?"DB LIVE":"DB ISSUE";els.dbBadge.className="pill "+(s.initialized&&!s.last_error?"good":"bad");
-    els.sysDb.textContent=s.initialized&&!s.last_error?"Azure PostgreSQL / Managed Identity":"Issue detected";els.sysDb.className=s.initialized&&!s.last_error?"goodText":"badText";
-
-    els.aDaily.textContent=money(an.daily_realized_pnl_usd);els.aDaily.className="v "+pnlClass(an.daily_realized_pnl_usd);
-    els.aWeekly.textContent=money(an.weekly_realized_pnl_usd);els.aWeekly.className="v "+pnlClass(an.weekly_realized_pnl_usd);
-    els.aWinRate.textContent=num(an.win_rate_pct,2)+"%";els.aDrawdown.textContent=num(an.max_drawdown_pct,2)+"%";
-    els.xDaily.textContent=money(an.daily_realized_pnl_usd);els.xDaily.className="v "+pnlClass(an.daily_realized_pnl_usd);
-    els.xWeekly.textContent=money(an.weekly_realized_pnl_usd);els.xWeekly.className="v "+pnlClass(an.weekly_realized_pnl_usd);
-    els.xWinRate.textContent=num(an.win_rate_pct,2)+"%";els.xWL.textContent=(an.wins??0)+" / "+(an.losses??0);
-    els.xDuration.textContent=an.avg_trade_duration_seconds==null?"—":num(an.avg_trade_duration_seconds/60,1)+" min";
-    els.xFees.textContent=money(an.fees_usd);els.xVolume.textContent=num(an.volume_btc,8);els.xDrawdown.textContent=num(an.max_drawdown_pct,2)+"%";
-    els.actorStats.textContent=Object.entries(an.by_actor||{}).map(([k,v])=>k+": "+v.fills+" fills · "+money(v.realized_pnl_usd)+" realized · "+money(v.fees_usd)+" fees").join(" | ")||"No actor statistics yet.";
-
-    els.cShort.value=cfg.short_ma;els.cLong.value=cfg.long_ma;els.cStop.value=cfg.stop_loss_pct;els.cSize.value=cfg.position_size_btc;
-    els.cMax.value=cfg.max_position_btc;els.cDD.value=cfg.max_drawdown_pct;els.cLoss.value=cfg.daily_loss_cap;
-    els.configBadge.textContent=cfg.editable?"EDITABLE":"LOCKED";els.configBadge.className="pill "+(cfg.editable?"good":"warn");
-    els.configNote.textContent=cfg.editable?"Bot is OFFLINE and flat. Changes are allowed.":"Stop the bot and return to zero BTC before editing.";
-
-    els.log.textContent=(l.events||[]).slice(0,30).map(e=>(e.ts?new Date(e.ts).toLocaleTimeString():"--")+"  "+e.level+"  "+e.message).join("\n");
-    if(!authConfigured)authenticated=true;
-    refreshAuthUI()
-  }catch(e){els.log.textContent="Cannot reach API: "+e.message;toast("Aether API connection problem","bad")}
-}
-
-async function loadHistory(){
-  const names=["fills","orders","risk","account","positions","bot"];
-  try{
-    const all=await Promise.all(names.map(x=>api("/api/v1/history/"+x+"?limit=100")));
-    names.forEach((x,i)=>historyCache[x]=all[i].items||[]);
-    els.ledgerCount.textContent=(historyCache.fills?.length||0)+" FILLS";
-    renderLedger();renderChart()
-  }catch(e){els.ledger.innerHTML='<div class="helper bad" style="padding:14px">History unavailable: '+esc(e.message)+'</div>'}
-}
-function setLedger(name){activeLedger=name;document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("active",b.dataset.tab===name));renderLedger()}
-function renderLedger(){
-  const rows=historyCache[activeLedger]||[];
-  const specs={
-    fills:[["Time",x=>clock(x.ts)],["Exec ID",x=>shortId(x.execution_id)],["Actor",x=>x.actor],["Side",x=>x.side],["Qty BTC",x=>num(x.qty_btc,8)],["Price",x=>money(x.price_usd)],["Fee",x=>money(x.fee_usd)],["Realized P/L",x=>money(x.realized_pnl_usd)]],
-    orders:[["Time",x=>clock(x.ts)],["Exec ID",x=>shortId(x.execution_id)],["Actor",x=>x.actor],["Side",x=>x.side],["Qty BTC",x=>num(x.requested_qty_btc,8)],["Status",x=>x.status]],
-    risk:[["Time",x=>clock(x.ts)],["Event",x=>shortId(x.event_key)],["Reason",x=>x.reason],["Qty",x=>num(x.context?.requested_qty_btc,8)]],
-    account:[["Time",x=>clock(x.ts)],["USD",x=>money(x.usd)],["BTC",x=>num(x.btc,8)],["Equity",x=>money(x.equity)],["Daily",x=>money(x.daily_realized)]],
-    positions:[["Time",x=>clock(x.ts)],["State",x=>x.state],["BTC",x=>num(x.btc,8)],["Avg entry",x=>money(x.avg_entry)],["Mark",x=>money(x.mark)],["Open P/L",x=>money(x.open_pnl)]],
-    bot:[["Time",x=>clock(x.ts)],["State",x=>x.state],["Strategy",x=>x.strategy],["Short/Long",x=>x.short_ma+"/"+x.long_ma],["Stop %",x=>num(x.stop_loss_pct,2)],["Lock",x=>String(x.flatten_lock)]]
-  };
-  const cols=specs[activeLedger];
-  if(!rows.length){els.ledger.innerHTML='<div class="helper" style="padding:14px">No '+esc(activeLedger)+' records yet.</div>';return}
-  els.ledger.innerHTML="<table><thead><tr>"+cols.map(c=>"<th>"+esc(c[0])+"</th>").join("")+"</tr></thead><tbody>"+
-    rows.map(r=>"<tr>"+cols.map(c=>"<td>"+esc(c[1](r))+"</td>").join("")+"</tr>").join("")+"</tbody></table>"
-}
-
-async function action(url,btn,loading,success,idle){
-  if(authConfigured&&!authenticated){toast("Connect in Settings first","bad");setPage("settings");return}
-  loadingButton(btn,loading);
-  try{
-    const out=await api(url,{method:"POST",headers:authHeaders()});if(out.ok===false)throw new Error(out.error||"Action rejected");
-    successButton(btn,success,idle);toast(success,"good")
-  }catch(e){
-    if(e.status===401){authenticated=false;refreshAuthUI()}
-    errorButton(btn,"Failed",idle);toast(e.message,"bad")
-  }
-  await Promise.all([load(),loadHistory()])
-}
-
-async function saveConfig(){
-  if(authConfigured&&!authenticated){toast("Connect operator access first","bad");return}
-  const body={short_ma:Number(els.cShort.value),long_ma:Number(els.cLong.value),stop_loss_pct:Number(els.cStop.value),position_size_btc:Number(els.cSize.value),max_position_btc:Number(els.cMax.value),max_drawdown_pct:Number(els.cDD.value),daily_loss_cap:Number(els.cLoss.value)};
-  loadingButton(els.saveCfgBtn,"Saving…");
-  try{
-    const out=await api("/api/v1/config",{method:"POST",headers:{"Content-Type":"application/json",...authHeaders()},body:JSON.stringify(body)});
-    if(out.ok===false)throw new Error(out.error||"Configuration rejected");
-    successButton(els.saveCfgBtn,"Saved ✓","Save Configuration");toast("Configuration saved","good")
-  }catch(e){errorButton(els.saveCfgBtn,"Failed","Save Configuration");toast(e.message,"bad")}
-  await load()
-}
-
-els.connectBtn.addEventListener("click",()=>verifyToken(true));
-els.opToken.addEventListener("keydown",e=>{if(e.key==="Enter")verifyToken(true)});
-els.startBtn.addEventListener("click",()=>action("/api/v1/bot/start",els.startBtn,"Starting…","Started ✓","Start Bot"));
-els.stopBtn.addEventListener("click",()=>action("/api/v1/bot/stop",els.stopBtn,"Stopping…","Stopped ✓","Stop Bot"));
-els.buyBtn.addEventListener("click",()=>action("/api/v1/orders/market?side=buy",els.buyBtn,"Submitting…","Buy filled ✓","Buy 0.01 BTC"));
-els.sellBtn.addEventListener("click",()=>action("/api/v1/orders/market?side=sell",els.sellBtn,"Submitting…","Sell filled ✓","Sell Position"));
-els.unlockBtn.addEventListener("click",()=>action("/api/v1/risk/unlock",els.unlockBtn,"Unlocking…","Unlocked ✓","Clear Flatten Lock"));
-els.flattenBtn.addEventListener("click",()=>action("/api/v1/orders/flatten",els.flattenBtn,"Flattening…","Flattened ✓","Emergency Flatten & Lock"));
-els.saveCfgBtn.addEventListener("click",saveConfig);
-els.tabs.addEventListener("click",e=>{const b=e.target.closest(".tab");if(b)setLedger(b.dataset.tab)});
-
-const savedPage=sessionStorage.getItem("aether_page");if(["home","trade","activity","analytics","settings"].includes(savedPage))setPage(savedPage);
-const remembered=token();if(remembered)els.opToken.value=remembered;
-(async()=>{
-  await Promise.all([load(),loadHistory()]);
-  if(authConfigured&&remembered&&!initialAuthChecked){initialAuthChecked=true;await verifyToken(false)}
-})();
-setInterval(load,5000);setInterval(loadHistory,15000);
-</script>
+<script src="/static/aether-app.js"></script>
 </body>
 </html>
