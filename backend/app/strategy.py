@@ -5,6 +5,8 @@ from datetime import datetime
 from math import isfinite
 from typing import Any
 
+from app.fees import TAKER_FEE as DEFAULT_TAKER_FEE
+
 Bar = dict[str, Any]
 
 
@@ -223,7 +225,7 @@ def round_trip_cost_pct(
     mark: float | None,
     bid: float | None,
     ask: float | None,
-    fee_rate: float = 0.008,
+    fee_rate: float = DEFAULT_TAKER_FEE,
     slippage_bps: float = 5.0,
 ) -> float:
     spread_pct = 0.0
@@ -252,7 +254,7 @@ def trend_breakout_snapshot(
     mark: float | None = None,
     bid: float | None = None,
     ask: float | None = None,
-    fee_rate: float = 0.008,
+    fee_rate: float = DEFAULT_TAKER_FEE,
     slippage_bps: float = 5.0,
 ) -> dict[str, Any]:
     """Cost-aware, multi-timeframe long breakout using completed bars only."""
