@@ -159,6 +159,9 @@ def _intelligence_sources_snapshot():
             str(row.get("status") or "") == "shadow"
             for row in desk.community_cache.values()
         ),
+        bls_connected=bool(
+            (desk.official_macro_sources.get("bls") or {}).get("connected")
+        ),
     )
 
 
@@ -256,6 +259,7 @@ async def settings():
         "intelligence": {
             "sources": _intelligence_sources_snapshot(),
             "macro_calendar_connected": desk.risk_calendar_connected,
+            "official_macro_sources": desk.official_macro_sources,
             "crypto_calendar": {
                 "provider": "CoinMarketCal",
                 "configured": desk.crypto_calendar_configured,
