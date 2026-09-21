@@ -17,6 +17,12 @@ from app.engine import engine
 from app.paper_exec import install as install_harsh_paper
 
 STATIC = Path(__file__).parent / "static"
+ICON_LINKS = (
+    '<link rel="icon" href="/favicon.svg" type="image/svg+xml"/>'
+    '<link rel="icon" href="/static/aether-mark.svg" type="image/svg+xml"/>'
+    '<link rel="apple-touch-icon" href="/static/aether-mark.svg"/>'
+    '<link rel="manifest" href="/static/site.webmanifest"/>'
+)
 
 logger = logging.getLogger("aether.telemetry")
 logger.setLevel(logging.INFO)
@@ -29,12 +35,12 @@ logger.propagate = False
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    logger.info("event=app_start phase=begin version=1.3.0")
+    logger.info("event=app_start phase=begin version=1.3.1")
     await engine.initialize_persistence()
     install_harsh_paper(engine)
     engine.start_loop()
     logger.info(
-        "event=app_start phase=ready version=1.3.0 storage_configured=%s storage_initialized=%s",
+        "event=app_start phase=ready version=1.3.1 storage_configured=%s storage_initialized=%s",
         db_store.status().get("configured"),
         db_store.status().get("initialized"),
     )
@@ -47,7 +53,7 @@ async def lifespan(_: FastAPI):
         logger.info("event=app_shutdown phase=complete")
 
 
-app = FastAPI(title="Project Aether API", version="1.3.0", lifespan=lifespan)
+app = FastAPI(title="Project Aether API", version="1.3.1", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -127,6 +133,8 @@ async def home():
             '<link rel="stylesheet" href="/static/ui-tune.css"/></head>',
             1,
         )
+    if "favicon.svg" not in html:
+        html = html.replace("</head>", ICON_LINKS + "</head>", 1)
     extra = ""
     if "ledger-order.js" not in html:
         extra += '<script src="/static/ledger-order.js"></script>'
@@ -137,6 +145,16 @@ async def home():
     if extra:
         html = html.replace("</body>", extra + "</body>", 1)
     return HTMLResponse(html)
+
+
+@app.get("/favicon.svg")
+async def favicon_svg():
+    return FileResponse(STATIC / "favicon.svg", media_type="image/svg+xml")
+
+
+@app.get("/favicon.ico")
+async def favicon_ico():
+    return FileResponse(STATIC / "aether-mark.svg", media_type="image/svg+xml")
 
 
 @app.get("/api/v1/health")
