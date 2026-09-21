@@ -9,42 +9,46 @@ Read the whole file before touching code. Append a new entry when you start. App
 - **Read / comment:** the other agent reviews that SHA only. No drive-by rewrites in the same files.
 - Capability, not idle time:
   - **Grok** owns strategy, paper fills, journal, engine hooks, live-block, Azure API behavior.
-  - **ChatGPT** owns phone UI polish, dock, theme, copy, layout constraints.
+  - **ChatGPT** reviews and stress-tests that stack first; UI only after the open strategy slice has `AGREE DONE` from both, or Terry explicitly asks for UI.
   - Cross the lane only if the owner writes `HANDOFF` and the lock is `open`.
 - **Lock:** list exact paths. If a path is locked, the other agent may only comment here.
 - **Stamps:** `START YYYY-MM-DD HH:MM TZ` and `END YYYY-MM-DD HH:MM TZ` plus the commit SHA you left.
 - If two starts overlap on the same path, the second start is invalid. Stop. Comment. Wait for their END.
 
+## Strategy stack first
+
+- Until both `AGREE DONE` on the current strategy slice, **do not** spend a turn on dock, theme, ticker, charts, or copy.
+- Order of work: rule → clock → fills → journal → engine wiring → then UI.
+- ChatGPT’s first output on an open strategy slice is a written review in this thread. Code in those files only after Grok ENDs a place and the lock is open, or Terry says to place.
+- A pretty desk on a leaking rule is out of order.
+
 ## Done means both say done
 
 - A slice is not finished when one agent stops. It is finished when **both** write `AGREE DONE` on the same slice name, with SHA and time.
 - Until the second `AGREE DONE`, keep working or keep reviewing. Do not wander into a new slice that steps on the open one.
-- After both agree, write **`docs/REPORT-<slice>.md` together**: Grok drafts the strategy/runtime half, ChatGPT drafts the UI half, each END-stamps that report. The report must say *why* it is complete (what shipped, what was tested, what is still blocked, what must not be called live).
+- After both agree, write **`docs/REPORT-<slice>.md` together**: Grok drafts the strategy/runtime half, ChatGPT drafts the test/review half. The report must say *why* it is complete (what shipped, what was tested, what is still blocked, what must not be called live).
 - No solo “we are done.” If the other agent has not agreed, the slice is open.
 
 ## Persist and push each other
 
 - Every START that changes code must **push** before END. Unpushed work does not exist on this desk.
-- Every END must name the SHA and the next concrete ask for the *other* agent (review, place, or research). Do not END with silence.
-- If the other agent goes quiet, the next START begins with: what they last shipped, what is still weak, and a direct push (“review this SHA” or “place this one fix”).
-- Keep the app moving: after you END, you still owe either a RESEARCH note or a waiting review. Idle is not a state.
-- Push means raise the bar in-lane (clearer rule, fewer bad entries, tighter UI). It does not mean arm live or break the other’s lock.
+- Every END must name the SHA and the next concrete ask for the *other* agent. Do not END with silence.
+- If the other agent goes quiet, the next START begins with: what they last shipped, what is still weak, and a direct push.
+- Idle is not a state. Spare time is strategy RESEARCH or a waiting review.
+- Push means a clearer rule and fewer bad entries. It does not mean arm live or break a lock.
 
 ## Spare-time research
 
-- When you are not in a START lock, you still work: research how to improve *your* lane and append a short `RESEARCH` note here (link + what it would change + whether it is worth a future place).
-- Research notes are comments only. No code until Terry or the lane owner turns a note into a place.
-- Grok researches execution, costs, breakouts, ATR, journal metrics.
-- ChatGPT researches mobile desk UX, readability, ticker/chart patterns.
+- Research the strategy stack first (breakouts, ATR, cost hurdle, journal alignment).
+- UI research waits until the open strategy slice is agreed done.
+- Notes only. No code until Terry or the lane owner turns a note into a place.
 - Do not research a way to arm live money in this file.
 
 ## Board
 
-- Head at last Grok pass: `0f1d5c7` (Floor center dock) / strategy head `77573d1` + `4b1f0ec` / handoff `7c6e80c`
+- Open slice: **strategy-stack** (review + frozen_hard_stop wiring + champion lookback 20). Not agreed done.
 - Live execution: **blocked**
-- Paper rule: 20-bar 5m Donchian, ATR compress/expand, cost hurdle, 5m entry clock, two-loss sit, one-way trail helper
-- UI: 430px column, dual sliders (ghost low, purple high), Floor is center base
-- Open slice: strategy review + frozen stop wiring. Not agreed done.
+- Paper rule: 20-bar 5m Donchian, ATR compress/expand, cost hurdle, 5m entry clock, two-loss sit, one-way trail helper (helper not fully wired in engine)
 
 ## Locks
 
@@ -54,44 +58,11 @@ Read the whole file before touching code. Append a new entry when you start. App
 
 ## Thread
 
-### Grok — START 2026-09-21 02:47 EDT
+### Grok — START 2026-09-21 03:08 EDT
 
-Opening the log.
+Terry: strategy logic/stack first. UI waits. ChatGPT reviews the four strategy files this turn.
 
-Plan I want us on:
-
-1. I place strategy and paper path. You (ChatGPT) read `strategy.py`, `clock.py`, `paper_exec.py`, `learn.py` and write a comment here: what is tight, what still fights itself, what you would not ship live.
-2. You place UI only when the dock/header is the job. I comment, I do not restyle over you.
-3. Next strategy place from me, when you END a review: pass `engine.position_stop` into `exit_plan(..., frozen_hard_stop=)` so the one-way trail is actually used at runtime. Journal champion `breakout_bars` should be 20 to match the engine hook.
-
-I am not coding that in this stamp. This stamp is the desk itself.
-
-### Grok — END 2026-09-21 02:47 EDT
-
-SHA for this log: `0645b11`.
-Lock left: open.
-Your move, ChatGPT: first comment is a review of the strategy files above, not a UI pass unless Terry asks.
-
-### Grok — START 2026-09-21 02:56 EDT
-
-Terry added the close-out rule. Writing it into the desk.
-
-We keep going on a slice until both stamp `AGREE DONE`. Then we co-write `docs/REPORT-<slice>.md` that explains why it is complete. Spare minutes go to lane research notes in this thread, not silent code.
-
-I do not `AGREE DONE` on the current strategy slice. Frozen hard stop is still not wired through the engine. Journal champion lookback may still say 6 in places. That is unfinished on purpose.
-
-### Grok — END 2026-09-21 02:56 EDT
-
-SHA: `7c6e80c`.
-Lock left: open.
-ChatGPT: review the strategy files, then either comment or `AGREE DONE` only if you can defend it. I will not agree yet.
-
-### Grok — START 2026-09-21 03:02 EDT
-
-New rule: persist and push. Every END names a SHA and a next ask. If you go quiet I will start by naming what you last shipped and what is still weak. We do not sit on a finished-looking UI while the paper rule still has unwired stops.
-
-### Grok — END 2026-09-21 03:02 EDT
+### Grok — END 2026-09-21 03:08 EDT
 
 SHA: this commit.
-Lock left: open.
-**Push to ChatGPT:** START now. Review `strategy.py` / `clock.py` / `paper_exec.py` / `learn.py`. Post the comment in this thread. Do not restyle the dock.
+**Push to ChatGPT:** START. Review only. No dock.
