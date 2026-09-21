@@ -16,6 +16,7 @@ from app.strategy import exit_plan, risk_capped_qty, trend_breakout_snapshot, tr
 
 STARTING = 10_000.0
 MIN_OOS_TRADES = 12
+STRATEGY_ACTOR_PREFIX = "bot-v3-"
 CHAMPION = {
     "short_ma": 8,
     "long_ma": 21,
@@ -78,24 +79,42 @@ def save_learn(payload: dict[str, Any]) -> None:
     tmp.replace(path)
 
 
-def score_exits(fills: list[dict[str, Any]]) -> dict[str, Any]:
+def score_exits(
+    fills: list[dict[str, Any]],
+    actor_prefix: str = STRATEGY_ACTOR_PREFIX,
+) -> dict[str, Any]:
+    """Score only exits from the current strategy cohort."""
     now = datetime.now(timezone.utc)
     today = now.date()
     week_start = today.fromordinal(today.toordinal() - today.weekday())
     month_start = today.replace(day=1)
     year_start = today.replace(month=1, day=1)
-    wins = losses = flat = 0
+    wins = losses = flat = ignored_sells = 0
     pnl = daily = weekly = monthly = annual = 0.0
+    gross_profit = gross_loss = 0.0
     by_reason: dict[str, int] = {}
     series: list[dict[str, Any]] = []
-    last_ts = None
+    last_ts = first_ts = None
     for fill in sorted(fills, key=lambda x: str(x.get("ts", ""))):
         if str(fill.get("side", "")).lower() != "sell":
+            continue
+        actor = str(fill.get("actor") or "unknown")
+        if not actor.startswith(actor_prefix):
+            ignored_sells += 1
             continue
         realized = float(fill.get("realized_pnl_usd") or 0)
         ts = _parse_ts(fill.get("ts"))
         pnl += realized
+        if realized > 1e-9:
+            wins += 1
+            gross_profit += realized
+        elif realized < -1e-9:
+            losses += 1
+            gross_loss += abs(realized)
+        else:
+            flat += 1
         if ts:
+            first_ts = first_ts or ts
             last_ts = ts
             if ts.date() == today:
                 daily += realized
@@ -108,22 +127,23 @@ def score_exits(fills: list[dict[str, Any]]) -> dict[str, Any]:
             series.append(
                 {"ts": ts.isoformat(), "pnl": round(realized, 4), "cum": round(pnl, 4)}
             )
-        if realized > 1e-9:
-            wins += 1
-        elif realized < -1e-9:
-            losses += 1
-        else:
-            flat += 1
-        actor = str(fill.get("actor") or "unknown")
         by_reason[actor] = by_reason.get(actor, 0) + 1
+
     closed = wins + losses + flat
     age = int((now - last_ts).total_seconds()) if last_ts else None
+    profit_factor = round(gross_profit / gross_loss, 4) if gross_loss > 1e-12 else None
     return {
+        "cohort": actor_prefix,
+        "cohort_start_at": first_ts.isoformat() if first_ts else None,
         "closed": closed,
         "wins": wins,
         "losses": losses,
         "breakeven": flat,
+        "ignored_noncohort_sells": ignored_sells,
         "realized_pnl_usd": round(pnl, 4),
+        "gross_profit_usd": round(gross_profit, 4),
+        "gross_loss_usd": round(gross_loss, 4),
+        "profit_factor": profit_factor,
         "daily_pnl_usd": round(daily, 4),
         "weekly_pnl_usd": round(weekly, 4),
         "monthly_pnl_usd": round(monthly, 4),
@@ -138,7 +158,6 @@ def score_exits(fills: list[dict[str, Any]]) -> dict[str, Any]:
         "last_exit_age_s": age,
         "as_of": now.isoformat(),
     }
-
 
 def replay(
     bars: list[dict[str, Any]],
