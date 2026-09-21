@@ -313,6 +313,23 @@ async def risk_calendar():
     return desk.risk_snapshot()
 
 
+@app.get("/api/v1/assets/{asset_id}/intelligence/history")
+async def intelligence_history(
+    asset_id: str,
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    if desk.asset_snapshot(asset_id) is None:
+        raise HTTPException(status_code=404, detail="unknown asset")
+    return {
+        "asset_id": asset_id.lower(),
+        "items": await db_store.history_intelligence(asset_id, limit),
+        "observations": await db_store.history_intelligence_observations(
+            asset_id,
+            limit,
+        ),
+    }
+
+
 @app.get("/api/v1/floor")
 async def floor():
     return desk.floor_snapshot()
