@@ -1,53 +1,61 @@
-/* Reorder Activity tables: first four columns are the live-trade fields. */
+/* Activity tables: critical columns first; P/L is green / red / white. */
+function pnlTone(value){
+  const n=Number(value);
+  if(!Number.isFinite(n) || Math.abs(n)<1e-9) return "#f5f3fb";
+  return n>0 ? "#28c77b" : "#ff5f6d";
+}
+function pnlCell(value){
+  return '<span style="color:'+pnlTone(value)+'">'+esc(money(value))+'</span>';
+}
 function renderLedger(){
   const rows=historyCache[activeLedger]||[];
   const specs={
     fills:[
-      ["Time",x=>clock(x.ts)],
-      ["Side",x=>x.side],
-      ["Price",x=>money(x.price_usd)],
-      ["Realized P/L",x=>money(x.realized_pnl_usd)],
-      ["Qty BTC",x=>num(x.qty_btc,8)],
-      ["Fee",x=>money(x.fee_usd)],
-      ["Actor",x=>x.actor],
-      ["Exec ID",x=>shortId(x.execution_id)]
+      ["Time",x=>esc(clock(x.ts))],
+      ["Side",x=>esc(x.side)],
+      ["Price",x=>esc(money(x.price_usd))],
+      ["Realized P/L",x=>pnlCell(x.realized_pnl_usd)],
+      ["Qty BTC",x=>esc(num(x.qty_btc,8))],
+      ["Fee",x=>esc(money(x.fee_usd))],
+      ["Actor",x=>esc(x.actor)],
+      ["Exec ID",x=>esc(shortId(x.execution_id))]
     ],
     orders:[
-      ["Time",x=>clock(x.ts)],
-      ["Side",x=>x.side],
-      ["Qty BTC",x=>num(x.requested_qty_btc,8)],
-      ["Status",x=>x.status],
-      ["Actor",x=>x.actor],
-      ["Exec ID",x=>shortId(x.execution_id)]
+      ["Time",x=>esc(clock(x.ts))],
+      ["Side",x=>esc(x.side)],
+      ["Qty BTC",x=>esc(num(x.requested_qty_btc,8))],
+      ["Status",x=>esc(x.status)],
+      ["Actor",x=>esc(x.actor)],
+      ["Exec ID",x=>esc(shortId(x.execution_id))]
     ],
     risk:[
-      ["Time",x=>clock(x.ts)],
-      ["Reason",x=>x.reason],
-      ["Qty",x=>num(x.context&&x.context.requested_qty_btc,8)],
-      ["Event",x=>shortId(x.event_key)]
+      ["Time",x=>esc(clock(x.ts))],
+      ["Reason",x=>esc(x.reason)],
+      ["Qty",x=>esc(num(x.context&&x.context.requested_qty_btc,8))],
+      ["Event",x=>esc(shortId(x.event_key))]
     ],
     account:[
-      ["Time",x=>clock(x.ts)],
-      ["Equity",x=>money(x.equity)],
-      ["Daily",x=>money(x.daily_realized)],
-      ["USD",x=>money(x.usd)],
-      ["BTC",x=>num(x.btc,8)]
+      ["Time",x=>esc(clock(x.ts))],
+      ["Equity",x=>esc(money(x.equity))],
+      ["Daily",x=>pnlCell(x.daily_realized)],
+      ["USD",x=>esc(money(x.usd))],
+      ["BTC",x=>esc(num(x.btc,8))]
     ],
     positions:[
-      ["Time",x=>clock(x.ts)],
-      ["Open P/L",x=>money(x.open_pnl)],
-      ["BTC",x=>num(x.btc,8)],
-      ["Mark",x=>money(x.mark)],
-      ["Avg entry",x=>money(x.avg_entry)],
-      ["State",x=>x.state]
+      ["Time",x=>esc(clock(x.ts))],
+      ["Open P/L",x=>pnlCell(x.open_pnl)],
+      ["BTC",x=>esc(num(x.btc,8))],
+      ["Mark",x=>esc(money(x.mark))],
+      ["Avg entry",x=>esc(money(x.avg_entry))],
+      ["State",x=>esc(x.state)]
     ],
     bot:[
-      ["Time",x=>clock(x.ts)],
-      ["State",x=>x.state],
-      ["Lock",x=>String(x.flatten_lock)],
-      ["Strategy",x=>x.strategy],
-      ["Short/Long",x=>x.short_ma+"/"+x.long_ma],
-      ["Stop %",x=>num(x.stop_loss_pct,2)]
+      ["Time",x=>esc(clock(x.ts))],
+      ["State",x=>esc(x.state)],
+      ["Lock",x=>esc(String(x.flatten_lock))],
+      ["Strategy",x=>esc(x.strategy)],
+      ["Short/Long",x=>esc(x.short_ma+"/"+x.long_ma)],
+      ["Stop %",x=>esc(num(x.stop_loss_pct,2))]
     ]
   };
   const cols=specs[activeLedger];
@@ -56,5 +64,5 @@ function renderLedger(){
     return;
   }
   els.ledger.innerHTML="<table><thead><tr>"+cols.map(c=>"<th>"+esc(c[0])+"</th>").join("")+"</tr></thead><tbody>"+
-    rows.map(r=>"<tr>"+cols.map(c=>"<td>"+esc(c[1](r))+"</td>").join("")+"</tr>").join("")+"</tbody></table>";
+    rows.map(r=>"<tr>"+cols.map(c=>"<td>"+c[1](r)+"</td>").join("")+"</tr>").join("")+"</tbody></table>";
 }
