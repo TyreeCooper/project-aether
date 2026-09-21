@@ -4,6 +4,7 @@ from __future__ import annotations
 import time
 
 from app.clock import allow_after_losses, is_new_five_minute
+from app.exits import stop_fill_price
 from app.fees import TAKER_FEE as KRAKEN_TAKER
 
 SLIPPAGE_BPS = 5.0
@@ -132,10 +133,10 @@ def install(engine) -> None:
         low = float(engine.bars_1m[-1]["low"])
         if low > stop:
             return False
-        raw = min(float(engine._fill_price("sell") or stop), stop)
+        raw = stop_fill_price(stop, SLIPPAGE_BPS)
         engine._log(
             "BOT",
-            f"Bar-low stop: low {low:.2f} <= {stop:.2f}.",
+            f"Bar-low stop: low {low:.2f} <= {stop:.2f} fill {raw:.2f}.",
         )
         return bool(
             engine._apply_fill("sell", engine.btc, raw, "bot-managed_stop")
@@ -143,7 +144,7 @@ def install(engine) -> None:
 
     def wrapped_eval(new_bar: bool = False) -> None:
         five, bucket = is_new_five_minute(list(engine.bars_1m), engine._last_5m_bucket)
-        if five:
+        if five or engine._last_5m_bucket is None:
             engine._last_5m_bucket = bucket
         if engine.btc > 0:
             if new_bar and bar_low_stop():
@@ -173,5 +174,5 @@ def install(engine) -> None:
     engine.tick = wrapped_tick
     engine._log(
         "INFO",
-        f"Harsh paper on. Frozen stop. Bar-low stop. Fee {KRAKEN_TAKER}. Live blocked.",
+        f"Harsh paper on. Frozen stop. Bar-low stop slip. Fee {KRAKEN_TAKER}. Live blocked.",
     )
