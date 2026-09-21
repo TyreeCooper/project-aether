@@ -65,6 +65,7 @@ def install(engine) -> None:
 
     engine_mod.POLL_SECONDS = 5
     engine_mod.STALE_MS = STALE_MS
+    engine_mod.BREAKOUT_BARS = 20
     original_tick = engine.tick
     original_eval = engine.evaluate_and_maybe_trade
     ticks = {"n": 0}
@@ -123,4 +124,4 @@ def install(engine) -> None:
     engine.evaluate_and_maybe_trade = wrapped_eval
     engine._fill_price = lambda side: slipped_price(side, engine.bid, engine.ask, engine.mark)
     engine.tick = wrapped_tick
-    engine._log("INFO", "Harsh paper on. Entries on closed 5m bars. Two-loss sit until 15m high.")
+    engine._log("INFO", "Harsh paper on. 20-bar 5m Donchian. ATR compress/expand. One-way trail.")
