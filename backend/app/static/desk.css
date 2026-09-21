@@ -1,0 +1,38 @@
+.brand{align-items:center}
+.logo{width:36px;height:36px;border-radius:11px}
+.brand-title{
+  font-size:15px;font-weight:720;letter-spacing:.18em;
+  background:linear-gradient(90deg,#f3a437,#c9b6ff);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+}
+.brand-sub{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.page-head h1{font-size:20px;font-weight:650;letter-spacing:-.03em}
+.page-head p{font-size:11px;color:var(--muted)}
+.card-head h2{letter-spacing:.12em}
+.hint{font-size:10px;color:var(--muted);font-weight:400}
+html[data-theme="light"]{
+  color-scheme:light;
+  --bg:#f3f0e8;--bg2:#ece7dc;--panel:#fffdf8;--panel2:#f7f3ea;
+  --line:#ddd4c4;--line2:#cfc3ae;--text:#1c1812;--muted:#6f675b;--muted2:#8a8173;
+  --accent:#5b43d6;--accent2:#7b61ff;
+}
+html[data-theme="light"] body{
+  background:linear-gradient(180deg,#f6f2e8 0%,#efe8d9 100%);
+  color:var(--text);
+}
+html[data-theme="light"] .topbar,
+html[data-theme="light"] .bottom-nav{
+  background:rgba(246,242,232,.92);
+}
+html[data-theme="light"] .card,
+html[data-theme="light"] .market-hero,
+html[data-theme="light"] .box,
+html[data-theme="light"] .quick,
+html[data-theme="light"] .trade-price{
+  background:#fffdf8;border-color:var(--line);color:var(--text);
+}
+html[data-theme="light"] .brand-title{
+  background:linear-gradient(90deg,#b86a10,#5b43d6);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+}
+html[data-theme="light"] .btn.secondary{color:#3b3429}
