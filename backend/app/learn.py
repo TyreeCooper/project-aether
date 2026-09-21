@@ -2,18 +2,18 @@
 from __future__ import annotations
 
 import json
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from app.clock import allow_after_losses
+from app.exits import time_stop_due
+from app.fees import TAKER_FEE
 from app.paper_exec import SLIPPAGE_BPS
 from app.persist import state_path
 from app.performance import summarize_backtest
 from app.strategy import exit_plan, risk_capped_qty, trend_breakout_snapshot, trend_exit_signal
 
-TAKER_FEE = float(os.getenv("AETHER_TAKER_FEE_RATE", "0.008"))
 STARTING = 10_000.0
 MIN_OOS_TRADES = 12
 CHAMPION = {
@@ -30,6 +30,8 @@ CANDIDATES = (
     {"short_ma": 10, "long_ma": 30, "stop_loss_pct": 2.2, "breakout_bars": 20, "efficiency_min": 0.40, "cost_multiple": 1.50},
     {"short_ma": 12, "long_ma": 36, "stop_loss_pct": 2.5, "breakout_bars": 30, "efficiency_min": 0.45, "cost_multiple": 1.60},
 )
+
+
 def _learn_path() -> Path:
     return state_path().with_name("learn_state.json")
 
@@ -168,8 +170,6 @@ def replay(
     wins = losses = flat = 0
     consecutive_losses = 0
     pnl = 0.0
-    peak = STARTING
-    max_dd = 0.0
     trades = 0
     cooldown_until_i = 0
     slip = SLIPPAGE_BPS / 10_000.0
@@ -187,9 +187,6 @@ def replay(
         px = float(bars[i]["close"])
         equity = usd + btc * px
         equity_curve.append({"ts": bars[i]["ts"], "equity": equity})
-        peak = max(peak, equity)
-        if peak > 0:
-            max_dd = max(max_dd, (peak - equity) / peak * 100)
 
         if btc > 0:
             highest = max(highest, px)
@@ -212,7 +209,9 @@ def replay(
                 frozen_hard_stop=position_stop,
             )
             position_stop = max(position_stop, float(plan["active_stop"]))
-            timed_out = entry_i is not None and i - entry_i >= 180
+            gain_pct = ((px / avg) - 1) * 100 if avg > 0 else 0.0
+            held = None if entry_i is None else i - entry_i
+            timed_out = time_stop_due(held, gain_pct, cost_pct)
             trend_failed = trend_exit_signal(
                 history,
                 int(config["short_ma"]),
@@ -356,6 +355,7 @@ def replay(
         "summary": summary,
         "trade_log": trade_log if detailed else None,
     }
+
 
 def review(
     bars: list[dict[str, Any]],
