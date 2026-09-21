@@ -116,6 +116,7 @@ class PairBook:
         return slipped_price(side, self.bid, self.ask, self.mark)
 
     def enter(self, risk_usd: float) -> dict[str, Any]:
+        reference = self.ask if self.ask is not None else self.mark
         px = self.fill_px("buy")
         if not px:
             return {"ok": False, "error": "no_mark", "pair": self.pair}
@@ -133,6 +134,18 @@ class PairBook:
             self.entry_at = _now()
             self.highest = px
             self.stop = px * 0.98
+            reference_px = float(reference or px)
+            slippage_usd = max(px - reference_px, 0.0) * qty
+            slippage_bps = (
+                (px / reference_px - 1) * 10_000
+                if reference_px > 0
+                else None
+            )
+            result["reference_price"] = reference_px
+            result["slippage_usd"] = round(slippage_usd, 8)
+            result["slippage_bps"] = (
+                None if slippage_bps is None else round(slippage_bps, 4)
+            )
             self.fills.append({**result, "side": "buy", "ts": self.entry_at})
         return result
 
@@ -145,15 +158,22 @@ class PairBook:
             entered_ts = int(entered.timestamp())
         except ValueError:
             return {"mfe_pct": None, "mae_pct": None, "available_move_pct": None}
-        rows = [x for x in self.bars if int(x.get("ts", 0)) >= entered_ts - 60]
+        entry_bucket = entered_ts // 60 * 60
+        rows = [x for x in self.bars if int(x.get("ts", 0)) >= entry_bucket]
         if not rows:
             return {"mfe_pct": None, "mae_pct": None, "available_move_pct": None}
         high = max(float(x["high"]) for x in rows)
         low = min(float(x["low"]) for x in rows)
         return {
+            "entry_price": round(entry, 8),
+            "trade_high": round(high, 8),
+            "trade_low": round(low, 8),
             "mfe_pct": round((high / entry - 1) * 100, 4),
             "mae_pct": round((low / entry - 1) * 100, 4),
-            "available_move_pct": round((high / low - 1) * 100, 4) if low > 0 else None,
+            "available_move_pct": round((high - low) / entry * 100, 4)
+            if entry > 0
+            else None,
+            "excursion_precision": "1m_bar_bounded",
         }
 
     def manage(self) -> dict[str, Any] | None:
@@ -188,26 +208,141 @@ class PairBook:
         timed = time_stop_due(held, gain, cost_pct)
         if not (hit or timed):
             return None
+        exit_reference = (
+            float(self.stop)
+            if hit and self.stop
+            else float(self.bid if self.bid is not None else self.mark)
+        )
         raw = stop_fill_price(self.stop) if hit and self.stop else self.fill_px("sell")
         if not raw:
             return None
-        excursion = self.current_excursion(avg)
+        buy_fill = next(
+            (
+                fill
+                for fill in reversed(self.fills)
+                if str(fill.get("side") or "").lower() == "buy"
+            ),
+            None,
+        )
+        entry_fill_price = float(
+            (buy_fill or {}).get("price")
+            or avg
+            or 0.0
+        )
+        entry_reference = float(
+            (buy_fill or {}).get("reference_price")
+            or entry_fill_price
+            or 0.0
+        )
+        entry_fee = float((buy_fill or {}).get("fee") or 0.0)
+        entry_slippage_usd = float(
+            (buy_fill or {}).get("slippage_usd") or 0.0
+        )
+        excursion = self.current_excursion(entry_fill_price)
         result = self.wallet.sell(self.id, qty, raw)
         result["pair"] = self.pair
         result.update(excursion)
-        entry_notional = avg * qty
+
+        exit_fee = float(result.get("fee") or 0.0)
+        exit_slippage_usd = max(exit_reference - raw, 0.0) * qty
+        exit_slippage_bps = (
+            (1 - raw / exit_reference) * 10_000
+            if exit_reference > 0
+            else None
+        )
+        entry_cost = entry_fill_price * qty + entry_fee
         net_return_pct = (
-            float(result.get("pnl") or 0) / entry_notional * 100
-            if entry_notional > 0
+            float(result.get("pnl") or 0) / entry_cost * 100
+            if entry_cost > 0
             else 0.0
         )
+        gross_return_pct = (
+            (raw / entry_fill_price - 1) * 100
+            if entry_fill_price > 0
+            else 0.0
+        )
+        reference_return_pct = (
+            (exit_reference / entry_reference - 1) * 100
+            if entry_reference > 0 and exit_reference > 0
+            else gross_return_pct
+        )
+        result["entry_fill_price"] = round(entry_fill_price, 8)
+        result["exit_fill_price"] = round(raw, 8)
+        result["entry_reference_price"] = round(entry_reference, 8)
+        result["exit_reference_price"] = round(exit_reference, 8)
+        result["entry_slippage_usd"] = round(entry_slippage_usd, 8)
+        result["exit_slippage_usd"] = round(exit_slippage_usd, 8)
+        result["slippage_usd"] = round(
+            entry_slippage_usd + exit_slippage_usd,
+            8,
+        )
+        result["exit_slippage_bps"] = (
+            None
+            if exit_slippage_bps is None
+            else round(exit_slippage_bps, 4)
+        )
+        result["fees_usd"] = round(entry_fee + exit_fee, 8)
+        result["gross_return_pct"] = round(gross_return_pct, 4)
+        result["reference_return_pct"] = round(reference_return_pct, 4)
         result["net_return_pct"] = round(net_return_pct, 4)
+        result["fee_drag_pct"] = round(gross_return_pct - net_return_pct, 4)
+        result["slippage_drag_pct"] = round(
+            reference_return_pct - gross_return_pct,
+            4,
+        )
+        result["cost_drag_pct"] = round(
+            reference_return_pct - net_return_pct,
+            4,
+        )
+
         mfe = excursion.get("mfe_pct")
         result["capture_efficiency_pct"] = (
             round(net_return_pct / float(mfe) * 100, 2)
             if mfe is not None and float(mfe) > 1e-9
             else None
         )
+        result["missed_opportunity_pct"] = (
+            round(max(float(mfe) - gross_return_pct, 0.0), 4)
+            if mfe is not None
+            else None
+        )
+        result["net_missed_opportunity_pct"] = (
+            round(max(float(mfe) - net_return_pct, 0.0), 4)
+            if mfe is not None
+            else None
+        )
+        high = excursion.get("trade_high")
+        low = excursion.get("trade_low")
+        if (
+            high is not None
+            and low is not None
+            and float(high) > float(low)
+        ):
+            span = float(high) - float(low)
+            result["entry_efficiency_pct"] = round(
+                max(
+                    0.0,
+                    min(
+                        100.0,
+                        (float(high) - entry_fill_price) / span * 100,
+                    ),
+                ),
+                2,
+            )
+            result["exit_efficiency_pct"] = round(
+                max(
+                    0.0,
+                    min(
+                        100.0,
+                        (raw - float(low)) / span * 100,
+                    ),
+                ),
+                2,
+            )
+        else:
+            result["entry_efficiency_pct"] = None
+            result["exit_efficiency_pct"] = None
+        result["net_capture_pct"] = result["net_return_pct"]
         result["actor"] = "bot-v3-managed_stop" if hit else "bot-v3-time_stop"
         if result.get("ok"):
             self.entry_at = None
@@ -218,11 +353,43 @@ class PairBook:
     def capture_snapshot(self) -> dict[str, Any]:
         current = self.current_excursion()
         if self.qty() > 0:
+            high = current.get("trade_high")
+            low = current.get("trade_low")
+            entry = current.get("entry_price")
+            entry_efficiency = None
+            if (
+                high is not None
+                and low is not None
+                and entry is not None
+                and float(high) > float(low)
+            ):
+                entry_efficiency = round(
+                    max(
+                        0.0,
+                        min(
+                            100.0,
+                            (float(high) - float(entry))
+                            / (float(high) - float(low))
+                            * 100,
+                        ),
+                    ),
+                    2,
+                )
             return {
                 "state": "open",
                 **current,
+                "entry_efficiency_pct": entry_efficiency,
+                "exit_efficiency_pct": None,
+                "gross_return_pct": None,
+                "reference_return_pct": None,
                 "net_return_pct": None,
+                "net_capture_pct": None,
                 "capture_efficiency_pct": None,
+                "missed_opportunity_pct": None,
+                "net_missed_opportunity_pct": None,
+                "fees_usd": None,
+                "slippage_usd": None,
+                "cost_drag_pct": None,
             }
         sells = [
             f for f in self.fills
@@ -234,8 +401,18 @@ class PairBook:
                 "mfe_pct": None,
                 "mae_pct": None,
                 "available_move_pct": None,
+                "entry_efficiency_pct": None,
+                "exit_efficiency_pct": None,
+                "gross_return_pct": None,
+                "reference_return_pct": None,
                 "net_return_pct": None,
+                "net_capture_pct": None,
                 "capture_efficiency_pct": None,
+                "missed_opportunity_pct": None,
+                "net_missed_opportunity_pct": None,
+                "fees_usd": None,
+                "slippage_usd": None,
+                "cost_drag_pct": None,
             }
         last = sells[-1]
         return {
@@ -243,8 +420,24 @@ class PairBook:
             "mfe_pct": last.get("mfe_pct"),
             "mae_pct": last.get("mae_pct"),
             "available_move_pct": last.get("available_move_pct"),
+            "entry_efficiency_pct": last.get("entry_efficiency_pct"),
+            "exit_efficiency_pct": last.get("exit_efficiency_pct"),
+            "gross_return_pct": last.get("gross_return_pct"),
+            "reference_return_pct": last.get("reference_return_pct"),
             "net_return_pct": last.get("net_return_pct"),
+            "net_capture_pct": last.get("net_capture_pct"),
             "capture_efficiency_pct": last.get("capture_efficiency_pct"),
+            "missed_opportunity_pct": last.get("missed_opportunity_pct"),
+            "net_missed_opportunity_pct": last.get(
+                "net_missed_opportunity_pct"
+            ),
+            "fees_usd": last.get("fees_usd"),
+            "slippage_usd": last.get("slippage_usd"),
+            "fee_drag_pct": last.get("fee_drag_pct"),
+            "slippage_drag_pct": last.get("slippage_drag_pct"),
+            "cost_drag_pct": last.get("cost_drag_pct"),
+            "entry_fill_price": last.get("entry_fill_price"),
+            "exit_fill_price": last.get("exit_fill_price"),
             "closed_at": last.get("ts"),
         }
 
