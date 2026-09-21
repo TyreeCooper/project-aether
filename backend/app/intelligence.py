@@ -132,6 +132,181 @@ def pearson_from_bars(target: list[dict[str, Any]], benchmark: list[dict[str, An
     den = sqrt(va * vb)
     return round(cov / den, 4) if den > 1e-18 else None
 
+
+def beta_from_bars(
+    target: list[dict[str, Any]],
+    benchmark: list[dict[str, Any]],
+    max_points: int = 240,
+) -> float | None:
+    a = {int(x.get("ts", 0)): _f(x.get("close")) for x in target[-max_points:]}
+    b = {int(x.get("ts", 0)): _f(x.get("close")) for x in benchmark[-max_points:]}
+    keys = sorted(set(a).intersection(b))
+    if len(keys) < 20:
+        return None
+    ra: list[float] = []
+    rb: list[float] = []
+    for prev, cur in zip(keys, keys[1:]):
+        if a[prev] > 0 and b[prev] > 0:
+            ra.append(a[cur] / a[prev] - 1)
+            rb.append(b[cur] / b[prev] - 1)
+    if len(ra) < 15:
+        return None
+    ma = sum(ra) / len(ra)
+    mb = sum(rb) / len(rb)
+    cov = sum((x - ma) * (y - mb) for x, y in zip(ra, rb))
+    vb = sum((y - mb) ** 2 for y in rb)
+    return round(cov / vb, 4) if vb > 1e-18 else None
+
+
+def market_quality(
+    bars: list[dict[str, Any]],
+    bars_1h: list[dict[str, Any]],
+    opportunity: dict[str, Any],
+) -> dict[str, Any]:
+    recent = bars[-60:]
+    returns: list[float] = []
+    for prev, cur in zip(recent, recent[1:]):
+        a = _f(prev.get("close"))
+        b = _f(cur.get("close"))
+        if a > 0 and b > 0:
+            returns.append(b / a - 1)
+    realized = None
+    if len(returns) >= 10:
+        mean = sum(returns) / len(returns)
+        variance = sum((x - mean) ** 2 for x in returns) / len(returns)
+        # Window-realized standard deviation; deliberately not annualized.
+        realized = sqrt(variance) * sqrt(len(returns)) * 100
+
+    atr_rows = bars[-15:]
+    true_ranges: list[float] = []
+    for prev, cur in zip(atr_rows, atr_rows[1:]):
+        prev_close = _f(prev.get("close"))
+        high = _f(cur.get("high"))
+        low = _f(cur.get("low"))
+        if prev_close > 0 and high > 0 and low > 0:
+            true_ranges.append(
+                max(
+                    high - low,
+                    abs(high - prev_close),
+                    abs(low - prev_close),
+                )
+            )
+    atr = (
+        sum(true_ranges[-14:]) / len(true_ranges[-14:])
+        if true_ranges
+        else None
+    )
+    last = _f(opportunity.get("current"))
+    atr_pct = atr / last * 100 if atr is not None and last > 0 else None
+
+    hourly = bars_1h[-168:]
+    hourly_volume = [
+        _f(row.get("volume"))
+        for row in hourly
+        if _f(row.get("volume")) >= 0
+    ]
+    avg_daily_volume = None
+    if len(hourly_volume) >= 24:
+        observed_days = len(hourly_volume) / 24
+        avg_daily_volume = sum(hourly_volume) / observed_days if observed_days > 0 else None
+    current_volume = _f(opportunity.get("volume"))
+    relative_volume = (
+        current_volume / avg_daily_volume
+        if current_volume > 0 and avg_daily_volume and avg_daily_volume > 0
+        else None
+    )
+
+    spread = opportunity.get("spread_bps")
+    liquidity_state = "unavailable"
+    if spread is not None:
+        value = float(spread)
+        liquidity_state = (
+            "normal"
+            if value <= 5
+            else "thin"
+            if value <= 20
+            else "stressed"
+        )
+
+    return {
+        "atr_14_1m": None if atr is None else round(atr, 8),
+        "atr_14_1m_pct": None if atr_pct is None else round(atr_pct, 4),
+        "realized_vol_60m_pct": (
+            None if realized is None else round(realized, 4)
+        ),
+        "relative_volume_24h": (
+            None if relative_volume is None else round(relative_volume, 4)
+        ),
+        "average_daily_volume_7d": (
+            None if avg_daily_volume is None else round(avg_daily_volume, 8)
+        ),
+        "liquidity_state": liquidity_state,
+        "liquidity_method": "provisional_spread_threshold_v1",
+    }
+
+
+def classify_regime(
+    opportunity: dict[str, Any],
+    windows: dict[str, dict[str, Any]],
+    quality: dict[str, Any],
+) -> dict[str, Any]:
+    move_1h = _f((windows.get("1h") or {}).get("change_pct"))
+    move_4h = _f((windows.get("4h") or {}).get("change_pct"))
+    range_4h = _f((windows.get("4h") or {}).get("range_pct"))
+    range_24h = _f(opportunity.get("opportunity_range_pct"))
+    pos = opportunity.get("range_position_pct")
+    liquidity = str(quality.get("liquidity_state") or "unavailable")
+
+    if liquidity == "stressed":
+        state = "low_liquidity"
+    elif range_24h >= 10 and abs(move_4h) >= 3:
+        state = "high_volatility_trend"
+    elif range_24h >= 10 and abs(move_4h) < 1:
+        state = "high_volatility_chop"
+    elif (
+        pos is not None
+        and (float(pos) >= 85 or float(pos) <= 15)
+        and abs(move_1h) >= 1.5
+    ):
+        state = "breakout"
+    elif abs(move_4h) >= 2:
+        state = "strong_trend"
+    elif range_4h <= 1 and abs(move_4h) <= 0.5:
+        state = "compression"
+    elif abs(move_4h) >= 1:
+        state = "weak_trend"
+    else:
+        state = "range"
+
+    return {
+        "state": state,
+        "method": "transparent_market_regime_v1",
+        "trade_influence_enabled": False,
+        "evidence": {
+            "change_1h_pct": round(move_1h, 4),
+            "change_4h_pct": round(move_4h, 4),
+            "range_4h_pct": round(range_4h, 4),
+            "range_24h_pct": round(range_24h, 4),
+            "range_position_pct": pos,
+            "liquidity_state": liquidity,
+        },
+    }
+
+
+def correlation_regime(value: float | None) -> str:
+    if value is None:
+        return "unavailable"
+    if value >= 0.7:
+        return "high_positive"
+    if value >= 0.3:
+        return "moderate_positive"
+    if value <= -0.7:
+        return "high_negative"
+    if value <= -0.3:
+        return "moderate_negative"
+    return "low"
+
+
 def _dt(value: Any) -> datetime | None:
     try:
         parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
@@ -337,27 +512,65 @@ def asset_context(
     bars = list(book.bars)
     bars_1h = list(getattr(book, "bars_1h", []))
     opp = opportunity_24h(view)
+    windows = {
+        "1h": window_stats(bars, 60),
+        "4h": window_stats(bars, 240),
+        "12h": window_stats(bars, 720),
+        "3d": counted_window_stats(bars_1h, 72, "3d"),
+        "7d": counted_window_stats(bars_1h, 168, "7d"),
+        "30d": counted_window_stats(bars_1h, 720, "30d"),
+    }
+    quality = market_quality(bars, bars_1h, opp)
+
     btc = next((b for b in books if str(getattr(b, "id", "")) == "btc"), None)
+    eth = next((b for b in books if str(getattr(b, "id", "")) == "eth"), None)
     btc_corr = None
+    btc_beta = None
     btc_relative = None
     if btc is not None and btc is not book:
         btc_corr = pearson_from_bars(bars, list(btc.bars))
+        btc_beta = beta_from_bars(bars, list(btc.bars))
         btc_opp = opportunity_24h(btc.view())
-        btc_relative = round(_f(opp.get("net_change_pct")) - _f(btc_opp.get("net_change_pct")), 4)
+        btc_relative = round(
+            _f(opp.get("net_change_pct"))
+            - _f(btc_opp.get("net_change_pct")),
+            4,
+        )
+    eth_corr = None
+    if eth is not None and eth is not book:
+        eth_corr = pearson_from_bars(bars, list(eth.bars))
+
+    desk_moves = []
+    for peer in books:
+        peer_opp = opportunity_24h(peer.view())
+        if peer_opp.get("open") is not None and peer_opp.get("current") is not None:
+            desk_moves.append(_f(peer_opp.get("net_change_pct")))
+    desk_mean = sum(desk_moves) / len(desk_moves) if desk_moves else None
+    desk_relative = (
+        round(_f(opp.get("net_change_pct")) - desk_mean, 4)
+        if desk_mean is not None
+        else None
+    )
+
+    effective_btc_corr = 1.0 if book.id == "btc" else btc_corr
     cross_asset = {
-        "btc_correlation_4h": 1.0 if book.id == "btc" else btc_corr,
-        "relative_strength_vs_btc_24h_pct": 0.0 if book.id == "btc" else btc_relative,
+        "btc_correlation_4h": effective_btc_corr,
+        "eth_correlation_4h": 1.0 if book.id == "eth" else eth_corr,
+        "beta_vs_btc_4h": 1.0 if book.id == "btc" else btc_beta,
+        "relative_strength_vs_btc_24h_pct": (
+            0.0 if book.id == "btc" else btc_relative
+        ),
+        "relative_strength_vs_desk_24h_pct": desk_relative,
+        "desk_mean_change_24h_pct": (
+            None if desk_mean is None else round(desk_mean, 4)
+        ),
+        "btc_correlation_regime": correlation_regime(effective_btc_corr),
     }
     return {
         "opportunity_24h": opp,
-        "windows": {
-            "1h": window_stats(bars, 60),
-            "4h": window_stats(bars, 240),
-            "12h": window_stats(bars, 720),
-            "3d": counted_window_stats(bars_1h, 72, "3d"),
-            "7d": counted_window_stats(bars_1h, 168, "7d"),
-            "30d": counted_window_stats(bars_1h, 720, "30d"),
-        },
+        "windows": windows,
+        "market_quality": quality,
+        "regime": classify_regime(opp, windows, quality),
         "cross_asset": cross_asset,
         "attribution": move_attribution(
             book,
@@ -411,7 +624,12 @@ def floor_intelligence(
             "price": opp.get("current"), "change_24h_pct": opp.get("net_change_pct"),
             "range_24h_pct": opp.get("opportunity_range_pct"), "range_24h": opp.get("opportunity_range"),
             "volume_24h": opp.get("volume"), "spread_bps": opp.get("spread_bps"),
+            "relative_volume_24h": ctx["market_quality"].get("relative_volume_24h"),
+            "realized_vol_60m_pct": ctx["market_quality"].get("realized_vol_60m_pct"),
+            "liquidity_state": ctx["market_quality"].get("liquidity_state"),
+            "regime": ctx["regime"].get("state"),
             "relative_strength_vs_btc_24h_pct": ctx["cross_asset"].get("relative_strength_vs_btc_24h_pct"),
+            "relative_strength_vs_desk_24h_pct": ctx["cross_asset"].get("relative_strength_vs_desk_24h_pct"),
             "risk_state": ctx["risk"]["state"],
         })
     return {
@@ -433,7 +651,9 @@ def floor_intelligence(
         ),
         "methodology": {
             "opportunity": "Kraken 24h high-low range; not claimed profit",
-            "cross_asset": "rolling 1m return correlation where enough common bars exist",
+            "cross_asset": "rolling 1m return correlation/beta over up to 4h where enough common bars exist",
+            "market_quality": "ATR(14) on 1m bars; 60m non-annualized realized volatility; 24h volume versus observed 7d daily average",
+            "regime": "transparent heuristic classification; shadow context only",
             "news_attribution": "not active until verified feeds are connected",
             "community": "not active until verified source bundles are connected",
         },
