@@ -1,9 +1,10 @@
-html,body,.app{width:100%;max-width:none;margin:0;padding:0;border:0}
+html,body{margin:0}
+.app{max-width:430px;margin:0 auto;width:100%}
 .topbar{
-  position:fixed;top:0;left:0;right:0;width:100vw;max-width:none;
-  margin:0;border:0;border-radius:0;box-shadow:none;
-  padding:calc(10px + env(safe-area-inset-top)) 12px 10px;
-  min-height:calc(62px + env(safe-area-inset-top));
+  position:sticky;top:0;left:0;right:0;width:100%;max-width:430px;margin:0 auto;
+  border:0;border-radius:0;box-shadow:none;
+  padding:calc(8px + env(safe-area-inset-top)) 12px 8px;
+  min-height:calc(56px + env(safe-area-inset-top));
   display:grid;grid-template-columns:28px 1fr auto;align-items:center;gap:8px;
   background:#08070c;
 }
@@ -17,8 +18,7 @@ html,body,.app{width:100%;max-width:none;margin:0;padding:0;border:0}
 .scrim{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:70;display:none}
 .scrim.open{display:block}
 .ticker{
-  width:100vw;max-width:none;margin:0;border:0;border-radius:0;
-  position:relative;left:50%;right:50%;margin-left:-50vw;margin-right:-50vw;
+  width:100%;max-width:430px;margin:0 auto;border:0;
   background:#131722;color:#d1d4dc;border-bottom:1px solid #2a2e39;
   font:600 12px/1.2 "Trebuchet MS",ui-sans-serif;padding:8px 0;
 }
@@ -40,13 +40,10 @@ html,body,.app{width:100%;max-width:none;margin:0;padding:0;border:0}
 .chart-shell .grid{stroke:rgba(255,255,255,.08);stroke-width:1}
 .chart-shell .dot{fill:#f3a437}
 .chart-shell .read{font:600 10px ui-sans-serif;fill:#d1d4dc}
-.nav-inner{position:relative;align-items:flex-end}
-.dock-slide{
-  position:absolute;height:48px;border-radius:16px;background:#4c38c4;
-  transition:left .2s ease,width .2s ease;pointer-events:none;bottom:10px;
-}
-.nav-btn{position:relative;z-index:1}
-.nav-btn[data-page="home"] svg{width:26px;height:26px}
+.bottom-nav,.nav-inner,.nav-btn,.dock-slide{all:revert-layer}
+.dock-slide{display:none !important}
+.nav-btn[data-page="home"]{transform:none !important;min-height:unset !important;min-width:unset !important}
+.nav-btn[data-page="home"] svg{width:22px !important;height:22px !important}
 html[data-theme="light"]{color-scheme:light}
 html[data-theme="light"] body,html[data-theme="light"] .app{background:#e8dcc8 !important;color:#2a241c !important}
 html[data-theme="light"] .topbar{background:#3b3226 !important;color:#f4ece0 !important}

@@ -33,25 +33,7 @@
   }
   const brandTitle=document.querySelector(".brand-title"); if(brandTitle) brandTitle.textContent="AETHER";
   const brandSub=document.querySelector(".brand-sub"); if(brandSub) brandSub.textContent="Paper desk";
-  const inner=document.querySelector(".nav-inner");
-  if(inner){
-    const order=["trade","activity","home","analytics","settings"];
-    const map={}; inner.querySelectorAll(".nav-btn").forEach(b=>map[b.getAttribute("data-page")]=b);
-    order.forEach(k=>{if(map[k]) inner.appendChild(map[k]);});
-    const labels={home:"Floor",trade:"Ticket",activity:"Blotter",analytics:"Book",settings:"Booth"};
-    inner.querySelectorAll(".nav-btn").forEach(b=>{const s=b.querySelector("span"); if(s&&labels[b.getAttribute("data-page")]) s.textContent=labels[b.getAttribute("data-page")];});
-    if(!inner.querySelector(".dock-slide")){
-      const slide=document.createElement("div");slide.className="dock-slide";inner.insertBefore(slide, inner.firstChild);
-      const move=()=>{
-        const on=inner.querySelector(".nav-btn.active")||map.home; if(!on) return;
-        const r=inner.getBoundingClientRect(), b=on.getBoundingClientRect();
-        const w=b.width; const left=b.left-r.left+(b.width-w)/2;
-        slide.style.width=w+"px"; slide.style.left=left+"px"; slide.style.bottom="12px";
-      };
-      inner.querySelectorAll(".nav-btn").forEach(b=>b.addEventListener("click",()=>setTimeout(move,20)));
-      setTimeout(move,80); window.addEventListener("resize",move);
-    }
-  }
+  document.querySelectorAll(".dock-slide").forEach(el=>el.remove());
   const settings=document.getElementById("page-settings");
   if(settings && !document.getElementById("themeCard")){
     const card=document.createElement("section");card.className="card full";card.id="themeCard";
@@ -63,7 +45,7 @@
   }
   function fmt(n){
     const v=Number(n);
-    if(!Number.isFinite(v)) return "—";
+    if(!Number.isFinite(v)) return "\u2014";
     return v.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:8});
   }
   function chart(el, values){
