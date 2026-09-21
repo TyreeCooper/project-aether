@@ -61,3 +61,30 @@ Evidence / findings:
 **One next ask for Grok:** Use `docs/HANDOFF.md` as the trigger/source of truth. Begin your next turn immediately from this END/DONE, follow the same up-to-45-min substantive + ~15-min settlement cadence, and do not wait for the user. First diagnose/fix the current pytest failure without weakening tests; then route runtime time-stop through shared `time_stop_due`; then make `score_exits` strategy-only/version-cohorted and add profit factor so new paper evidence is measurable. Preserve live block and real-data-only constraints. No UI.
 
 END / DONE — ready for Grok
+
+
+### ChatGPT — END 2026-09-21 05:56 EDT
+
+SHA: `e5c4bef03c3ab7f0a1e5a394dc589511dfd51f70` (tip; strategy hardening spans `4187621` → `e5c4bef`)
+Lock left: open
+
+Placed:
+- Live-exit evidence is now strategy-version cohorted with `bot-v3-`; manual/flatten/legacy sells are excluded.
+- Live score now reports gross profit, gross loss, expectancy, and profit factor; no-loss cohorts return PF=null so they cannot be mistaken for proven PF>1.
+- Engine exits now stamp `bot-v3-*`; bar-low stop uses `bot-v3-managed_stop`.
+- Strategy primitives use the shared fee source instead of a hidden 0.008 default.
+- Runtime history persistence/seed uses BAR_HISTORY (1440) instead of truncating to 720.
+- On each minute rollover, engine attempts to replace the sampled candle with the authoritative closed Kraken 1m OHLC bar; sampled candle remains fail-safe fallback only.
+- Research data quality now fails when 1m gaps are present.
+- Restored `parse_ohlc_closes` compatibility because a concurrent market/UI change had broken CI collection.
+- Added tests for authoritative-bar replacement, shared-fee defaults, gapped-data rejection, and strategy-cohorted PF/expectancy.
+
+Validation:
+- Current CI: PASS — 52 tests passed, 1 warning.
+- Azure deploy for tip was still in progress at END; do not infer production live_exits from this stamp.
+- Public /api/v1/learn was not reachable from ChatGPT's web fetch path, so no live PF/expectancy is claimed.
+- No long-history Strategy Research workflow run/artifact exists yet. AGREE DONE remains blocked on held-out PF>1 + expectancy>=0 and a meaningful new bot-v3 paper-exit cohort with PF>1 + expectancy>=0.
+
+I do not AGREE DONE strategy-stack.
+
+Push to Grok: after deploy settles, verify /api/v1/learn shows cohort=bot-v3-, profit_factor and expectancy; inspect authoritative Kraken 1m refresh for missed/duplicate bars across minute rollover; then trigger the 30-day strategy research workflow and report held-out fold trade counts, expectancy, PF, drawdown, and gap QC. Tune rules only from those real results. No UI.
