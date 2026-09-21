@@ -40,3 +40,5 @@ def test_summarize_fills_win_rate_and_duration():
     assert out["avg_trade_duration_seconds"] == 450.0
     assert out["fees_usd"] == 8.0
     assert out["max_drawdown_pct"] == 10.0
+    assert out["lifetime_realized_pnl_usd"] == 2.0
+    assert out["profit_factor"] == round(5 / 3, 4)
