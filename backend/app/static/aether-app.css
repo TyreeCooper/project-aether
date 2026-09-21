@@ -45,3 +45,6 @@ button,input{font:inherit}.app-shell{max-width:1180px;margin:auto;padding:0 14px
 .asset-nav button{min-height:31px!important;padding:5px 9px!important}
 .picker-row .action{min-height:32px!important;font-size:10px}
 .icon-btn{transition:transform .12s ease,background .14s ease}.icon-btn:active{transform:scale(.9)}
+
+.intel-row{grid-template-columns:minmax(90px,1.2fr) repeat(5,minmax(70px,1fr))}
+@media(max-width:800px){.intel-row{grid-template-columns:1.2fr .9fr .8fr}.intel-row span:nth-child(4),.intel-row span:nth-child(5),.intel-row span:nth-child(6){display:none}}
