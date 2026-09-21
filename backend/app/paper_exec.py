@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import time
 
+from app.clock import allow_after_losses, close_in_upper_third, is_new_five_minute
+
 SLIPPAGE_BPS = 5.0
 MAX_SPREAD_BPS = 10.0
 MAX_BASIS_USD = 80.0
@@ -59,20 +61,21 @@ def deny_microstructure(
 
 
 def install(engine) -> None:
-    """Install harsh fills without changing the restart-safe OFFLINE state."""
     import app.engine as engine_mod
 
     engine_mod.POLL_SECONDS = 5
     engine_mod.STALE_MS = STALE_MS
     original_tick = engine.tick
+    original_eval = engine.evaluate_and_maybe_trade
     ticks = {"n": 0}
+    engine._last_5m_bucket = getattr(engine, "_last_5m_bucket", None)
 
     def guard(side: str = "buy", protective: bool = False) -> str | None:
         stale = True
         last = getattr(engine, "_last_tick_mono", None)
         if last is not None:
             stale = int((time.monotonic() - last) * 1000) > STALE_MS
-        return deny_microstructure(
+        reason = deny_microstructure(
             side=side,
             bid=engine.bid,
             ask=engine.ask,
@@ -82,6 +85,25 @@ def install(engine) -> None:
             watch_last=getattr(engine, "watch_last", None),
             protective=protective,
         )
+        if reason:
+            return reason
+        if protective:
+            return None
+        bars = list(engine.bars_1m)
+        if bars and not close_in_upper_third(bars[-1]):
+            return "weak_close"
+        if not allow_after_losses(bars, int(getattr(engine, "consecutive_losses", 0) or 0)):
+            return "loss_budget"
+        return None
+
+    def wrapped_eval(new_bar: bool = False) -> None:
+        five, bucket = is_new_five_minute(list(engine.bars_1m), engine._last_5m_bucket)
+        if five:
+            engine._last_5m_bucket = bucket
+        if engine.btc > 0:
+            original_eval(new_bar=new_bar)
+            return
+        original_eval(new_bar=bool(five and new_bar))
 
     async def wrapped_tick():
         await original_tick()
@@ -98,6 +120,7 @@ def install(engine) -> None:
             engine._log("WARN", f"Journal pass skipped: {exc}")
 
     engine._paper_entry_guard = guard
+    engine.evaluate_and_maybe_trade = wrapped_eval
     engine._fill_price = lambda side: slipped_price(side, engine.bid, engine.ask, engine.mark)
     engine.tick = wrapped_tick
-    engine._log("INFO", "Harsh paper fills on. 5s tape; strategy uses completed 1m bars.")
+    engine._log("INFO", "Harsh paper on. Entries on closed 5m bars. Two-loss sit until 15m high.")
