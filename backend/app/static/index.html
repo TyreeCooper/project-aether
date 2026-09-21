@@ -22,58 +22,31 @@
       <span id="engineBadge" class="badge">ENGINE</span>
     </div>
   </header>
-
   <nav id="assetNav" class="asset-nav" aria-label="Asset pages"></nav>
-
   <main>
     <section id="view-floor" class="view">
-      <div class="page-title">
-        <div><p class="eyebrow">PORTFOLIO COMMAND</p><h1>The Floor</h1><p>One account. Independent Kraken asset books. Portfolio totals, P&amp;L, allocation, breadth and desk health.</p></div>
-        <div id="floorClock" class="clock"></div>
-      </div>
-
+      <div class="page-title"><div><p class="eyebrow">PORTFOLIO COMMAND</p><h1>The Floor</h1><p>One account. Independent Kraken asset books.</p></div><div id="floorClock" class="clock"></div></div>
       <section class="hero-grid">
         <article class="hero-card primary"><span>Portfolio Equity</span><strong id="floorEquity">—</strong><small id="floorPnl">—</small></article>
         <article class="hero-card"><span>Cash</span><strong id="floorCash">—</strong><small id="floorExposure">—</small></article>
         <article class="hero-card"><span>Invested</span><strong id="floorInvested">—</strong><small id="floorPositions">—</small></article>
-        <article class="hero-card"><span>Realized P&amp;L</span><strong id="floorRealized">—</strong><small id="floorTrades">—</small></article>
+        <article class="hero-card"><span>Realized P&L</span><strong id="floorRealized">—</strong><small id="floorTrades">—</small></article>
       </section>
-
       <section class="dashboard-grid">
-        <article class="panel span-2">
-          <header><div><p class="eyebrow">P&amp;L MAP</p><h2>Asset P&amp;L</h2></div><span class="panel-note">open + realized</span></header>
-          <div id="pnlBars" class="bar-chart"></div>
-        </article>
-        <article class="panel">
-          <header><div><p class="eyebrow">CAPITAL</p><h2>Allocation</h2></div><span id="allocationTotal" class="panel-note">—</span></header>
-          <div id="allocationBars" class="bar-chart compact"></div>
-        </article>
-        <article class="panel">
-          <header><div><p class="eyebrow">MARKET</p><h2>Breadth</h2></div><span class="panel-note">current book window</span></header>
-          <div id="breadthBars" class="bar-chart compact"></div>
-        </article>
-        <article class="panel span-2">
-          <header><div><p class="eyebrow">ACTIVE BOOKS</p><h2>Asset Board</h2></div><span class="panel-note">tap any row for its dedicated page</span></header>
-          <div id="assetBoard" class="asset-board"></div>
-        </article>
-        <article class="panel">
-          <header><div><p class="eyebrow">DESK HEALTH</p><h2>Operations</h2></div></header>
-          <div id="floorHealth" class="metric-list"></div>
-        </article>
-        <article class="panel">
-          <header><div><p class="eyebrow">PERFORMANCE</p><h2>Book Totals</h2></div></header>
-          <div id="floorPerformance" class="metric-list"></div>
-        </article>
+        <article class="panel span-2"><header><div><p class="eyebrow">P&L MAP</p><h2>Asset P&L</h2></div></header><div id="pnlBars" class="bar-chart"></div></article>
+        <article class="panel"><header><div><p class="eyebrow">CAPITAL</p><h2>Allocation</h2></div><span id="allocationTotal" class="panel-note">—</span></header><div id="allocationBars" class="bar-chart compact"></div></article>
+        <article class="panel"><header><div><p class="eyebrow">MARKET</p><h2>Breadth</h2></div></header><div id="breadthBars" class="bar-chart compact"></div></article>
+        <article class="panel span-2"><header><div><p class="eyebrow">ACTIVE BOOKS</p><h2>Asset Board</h2></div></header><div id="assetBoard" class="asset-board"></div></article>
+        <article class="panel"><header><div><p class="eyebrow">DESK HEALTH</p><h2>Operations</h2></div></header><div id="floorHealth" class="metric-list"></div></article>
+        <article class="panel"><header><div><p class="eyebrow">PERFORMANCE</p><h2>Book Totals</h2></div></header><div id="floorPerformance" class="metric-list"></div></article>
       </section>
     </section>
-
     <section id="view-asset" class="view hidden">
       <div class="asset-page-head">
         <button id="backFloor" class="text-btn" type="button">← Floor</button>
         <div class="asset-identity"><span id="assetSymbolBadge" class="symbol-badge">—</span><div><p id="assetName" class="eyebrow">—</p><h1 id="assetPair">—</h1></div></div>
         <span id="assetStateBadge" class="badge">—</span>
       </div>
-
       <section class="asset-hero">
         <div><p class="eyebrow">KRAKEN MARK</p><strong id="assetMark">—</strong><span id="assetChange" class="delta">—</span></div>
         <div class="quote-grid">
@@ -83,37 +56,77 @@
           <div><span>Basis</span><b id="assetBasis">—</b></div>
         </div>
       </section>
-
       <section class="panel asset-chart-panel">
         <header><div><p class="eyebrow">PRICE ACTION</p><h2 id="assetChartTitle">—</h2></div><span id="assetWindow" class="panel-note">—</span></header>
         <div id="assetChart" class="line-chart"></div>
       </section>
-
       <section class="dashboard-grid">
-        <article class="panel">
-          <header><div><p class="eyebrow">POSITION</p><h2>Asset Book</h2></div></header>
-          <div id="assetPosition" class="metric-list"></div>
-        </article>
-        <article class="panel">
-          <header><div><p class="eyebrow">PERFORMANCE</p><h2>Asset P&amp;L</h2></div></header>
-          <div id="assetPerformance" class="metric-list"></div>
-        </article>
-        <article class="panel">
-          <header><div><p class="eyebrow">AUTONOMOUS ENGINE</p><h2>Aether Vector Engine</h2></div><span id="assetSignal" class="badge">—</span></header>
-          <div id="assetStrategy" class="metric-list"></div>
-        </article>
-        <article class="panel">
-          <header><div><p class="eyebrow">RANGE</p><h2>Market Structure</h2></div></header>
-          <div id="assetRange" class="metric-list"></div>
-        </article>
-        <article class="panel span-2">
-          <header><div><p class="eyebrow">ASSET-ONLY LEDGER</p><h2 id="assetLedgerTitle">Fills</h2></div></header>
-          <div id="assetLedger" class="table-wrap"></div>
-        </article>
+        <article class="panel"><header><div><p class="eyebrow">POSITION</p><h2>Asset Book</h2></div></header><div id="assetPosition" class="metric-list"></div></article>
+        <article class="panel"><header><div><p class="eyebrow">PERFORMANCE</p><h2>Asset P&L</h2></div></header><div id="assetPerformance" class="metric-list"></div></article>
+        <article class="panel"><header><div><p class="eyebrow">AUTONOMOUS ENGINE</p><h2>Aether Vector Engine</h2></div><span id="assetSignal" class="badge">—</span></header><div id="assetStrategy" class="metric-list"></div></article>
+        <article class="panel"><header><div><p class="eyebrow">RANGE</p><h2>Market Structure</h2></div></header><div id="assetRange" class="metric-list"></div></article>
+        <article class="panel span-2"><header><div><p class="eyebrow">ASSET-ONLY LEDGER</p><h2 id="assetLedgerTitle">Fills</h2></div></header><div id="assetLedger" class="table-wrap"></div></article>
+      </section>
+    </section>
+    <section id="view-engine" class="view hidden">
+      <div class="page-title"><div><p class="eyebrow">AUTONOMOUS ENGINE</p><h1>Aether Vector Engine</h1></div></div>
+      <section class="hero-grid">
+        <article class="hero-card primary"><span>Engine State</span><strong id="engineState">—</strong></article>
+        <article class="hero-card"><span>Active Books</span><strong id="engineActive">—</strong></article>
+        <article class="hero-card"><span>Live Execution</span><strong>BLOCKED</strong></article>
+        <article class="hero-card"><span>Account Model</span><strong id="engineBookModel">—</strong></article>
+      </section>
+      <section class="panel"><header><div><p class="eyebrow">DECISION MATRIX</p><h2>Independent Asset Books</h2></div></header><div id="engineMatrix" class="asset-board"></div></section>
+    </section>
+    <section id="view-blotter" class="view hidden">
+      <div class="page-title"><div><p class="eyebrow">EXECUTION RECORD</p><h1>Blotter</h1></div></div>
+      <section class="panel"><div id="deskBlotter" class="table-wrap"></div></section>
+    </section>
+    <section id="view-booth" class="view hidden">
+      <div class="page-title"><div><p class="eyebrow">OPERATOR CONTROL</p><h1>Booth</h1></div></div>
+      <section class="dashboard-grid">
+        <article class="panel span-2"><header><div><p class="eyebrow">ACCESS</p><h2>Operator Authentication</h2></div><span id="authBadge" class="badge">LOCKED</span></header><div class="control-row"><input id="operatorToken" class="input" type="password" placeholder="Operator token" autocomplete="off"/><button id="connectOperator" class="action primary" type="button">Connect</button></div></article>
+        <article class="panel span-2"><header><div><p class="eyebrow">AETHER VECTOR ENGINE</p><h2>Global Paper Controls</h2></div></header><div class="control-row"><button id="armDesk" class="action primary" type="button">Arm Engine</button><button id="disarmDesk" class="action" type="button">Disarm Engine</button></div></article>
+      </section>
+    </section>
+    <section id="view-settings" class="view hidden">
+      <div class="page-title"><div><p class="eyebrow">APP CONFIGURATION</p><h1>Settings</h1></div></div>
+      <section class="dashboard-grid">
+        <article class="panel"><header><div><p class="eyebrow">ENGINE</p><h2>Runtime State</h2></div><span id="settingsArmedBadge" class="badge">—</span></header><div id="settingsEngineState" class="metric-list"></div><div class="control-row compact-controls"><button id="settingsArm" class="action primary" type="button">Arm</button><button id="settingsDisarm" class="action" type="button">Disarm</button></div></article>
+        <article class="panel"><header><div><p class="eyebrow">TRADING</p><h2>Desk Behavior</h2></div></header><label class="setting-field"><span>Allocation per new position</span><div><input id="settingAllocation" class="input mini-input" type="number" min="1" max="25" step="0.5"/><em>%</em></div></label><label class="setting-field"><span>Quote / decision poll</span><div><input id="settingPoll" class="input mini-input" type="number" min="5" max="120" step="1"/><em>sec</em></div></label><button id="saveDeskSettings" class="action primary small-action" type="button">Save Trading Settings</button></article>
+        <article class="panel"><header><div><p class="eyebrow">EXECUTION MODEL</p><h2>Cost & Guardrails</h2></div></header><div id="settingsExecution" class="metric-list"></div></article>
+        <article class="panel"><header><div><p class="eyebrow">DATA</p><h2>Market & Persistence</h2></div></header><div id="settingsData" class="metric-list"></div></article>
+        <article class="panel span-2"><header><div><p class="eyebrow">SECURITY</p><h2>Operator Access</h2></div><span id="settingsAuthBadge" class="badge">LOCKED</span></header><div class="control-row"><input id="settingsOperatorToken" class="input" type="password" placeholder="Operator token" autocomplete="off"/><button id="settingsConnectOperator" class="action primary" type="button">Connect</button><button id="settingsDisconnectOperator" class="action" type="button">Disconnect</button></div><div id="settingsSecurity" class="metric-list settings-inline-list"></div></article>
+        <article class="panel span-2"><header><div><p class="eyebrow">KRAKEN LIVE READINESS</p><h2>Execution Safety Gate</h2></div><span id="settingsLiveBadge" class="badge amber">BLOCKED</span></header><div id="settingsLive" class="metric-list"></div></article>
       </section>
     </section>
   </main>
+  <nav class="bottom-nav" aria-label="Primary">
+    <button data-route="floor" class="on"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V9m5 10V5m6 14v-7m5 7V3"/></svg><span>Floor</span></button>
+    <button data-route="assets"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="9" r="5"/><circle cx="15.5" cy="15.5" r="4.5"/></svg><span>Assets</span></button>
+    <button data-route="engine"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg><span>Engine</span></button>
+    <button data-route="blotter"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5"/></svg><span>Blotter</span></button>
+    <button data-route="booth"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 4.8-2.7 8-7 10-4.3-2-7-5.2-7-10V6l7-3z"/></svg><span>Booth</span></button>
+  </nav>
 </div>
+<div id="drawerScrim" class="drawer-scrim"></div>
+<aside id="drawer" class="drawer" aria-label="App menu">
+  <div class="drawer-head"><div><p class="eyebrow">AETHER</p><h2>Menu</h2></div><span id="drawerState" class="badge">—</span></div>
+  <button class="drawer-item" data-drawer-route="settings" type="button"><span class="drawer-icon">⚙</span><span><b>Settings</b><small>Engine, execution, security & data</small></span><span>›</span></button>
+  <button class="drawer-item" data-drawer-route="floor" type="button"><span class="drawer-icon">⌂</span><span><b>The Floor</b><small>Portfolio command overview</small></span><span>›</span></button>
+  <button class="drawer-item" data-drawer-route="engine" type="button"><span class="drawer-icon">⚡</span><span><b>Aether Vector Engine</b><small>Autonomous decision matrix</small></span><span>›</span></button>
+  <button class="drawer-item" data-drawer-route="blotter" type="button"><span class="drawer-icon">≡</span><span><b>Blotter</b><small>Desk execution record</small></span><span>›</span></button>
+  <div class="drawer-foot"><span>PAPER MODE</span><span>LIVE BLOCKED</span></div>
+</aside>
+<div id="assetPicker" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+  <section class="asset-picker">
+    <header><div><p class="eyebrow">KRAKEN ASSET LIBRARY</p><h2 id="assetPickerTitle">Add an asset book</h2></div><button id="closeAssetPicker" class="icon-btn" type="button" aria-label="Close">×</button></header>
+    <div class="picker-search"><input id="assetSearch" class="input" type="search" autocomplete="off" placeholder="Search symbol or pair"/></div>
+    <div id="assetSearchStatus" class="muted">Type to search Kraken.</div>
+    <div id="assetSearchResults" class="picker-results"></div>
+  </section>
+</div>
+<div id="toast" class="toast"></div>
 <script src="/static/aether-app.js"></script>
 <script src="/static/aether-chart.js"></script>
 </body>
