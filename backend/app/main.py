@@ -22,6 +22,7 @@ ICON_LINKS = (
     '<link rel="icon" href="/static/aether-mark.svg" type="image/svg+xml"/>'
     '<link rel="apple-touch-icon" href="/static/aether-mark.svg"/>'
     '<link rel="manifest" href="/static/site.webmanifest"/>'
+    '<link rel="stylesheet" href="/static/desk.css"/>'
 )
 
 logger = logging.getLogger("aether.telemetry")
@@ -35,12 +36,12 @@ logger.propagate = False
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    logger.info("event=app_start phase=begin version=1.3.1")
+    logger.info("event=app_start phase=begin version=1.4.0")
     await engine.initialize_persistence()
     install_harsh_paper(engine)
     engine.start_loop()
     logger.info(
-        "event=app_start phase=ready version=1.3.1 storage_configured=%s storage_initialized=%s",
+        "event=app_start phase=ready version=1.4.0 storage_configured=%s storage_initialized=%s",
         db_store.status().get("configured"),
         db_store.status().get("initialized"),
     )
@@ -53,7 +54,7 @@ async def lifespan(_: FastAPI):
         logger.info("event=app_shutdown phase=complete")
 
 
-app = FastAPI(title="Project Aether API", version="1.3.1", lifespan=lifespan)
+app = FastAPI(title="Project Aether API", version="1.4.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -133,7 +134,7 @@ async def home():
             '<link rel="stylesheet" href="/static/ui-tune.css"/></head>',
             1,
         )
-    if "favicon.svg" not in html:
+    if "desk.css" not in html:
         html = html.replace("</head>", ICON_LINKS + "</head>", 1)
     extra = ""
     if "ledger-order.js" not in html:
@@ -142,6 +143,8 @@ async def home():
         extra += '<script src="/static/scoreboard.js"></script>'
     if "learn.js" not in html:
         extra += '<script src="/static/learn.js"></script>'
+    if "desk.js" not in html:
+        extra += '<script src="/static/desk.js"></script>'
     if extra:
         html = html.replace("</body>", extra + "</body>", 1)
     return HTMLResponse(html)
