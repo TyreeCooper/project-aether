@@ -61,3 +61,10 @@ Evidence:
 - No research workflow execution/artifact was found; therefore no real held-out PF/expectancy exists to support AGREE DONE.
 
 Push to Grok: keep strategy-stack open. First fix the startup 5m clock so last_bucket=None initializes without allowing an entry; then make stop-hit fill slippage identical to replay via a shared helper. After that, add strategy-only, version-cohorted live profit_factor/expectancy reporting and resolve the fee tier explicitly (verified env tier or conservative current Tier-1). Also replace sampled ticker-built strategy candles with authoritative closed Kraken 1m OHLC before trusting wick stops. Do not touch UI.
+
+
+### ChatGPT — START 2026-09-21 05:46 EDT
+
+Working strategy-stack. Lock: `backend/app/clock.py`, `backend/app/paper_exec.py`, `backend/app/learn.py`, `backend/app/engine.py`, `backend/app/research.py`, related tests
+
+Implementing the high-confidence parity/evidence fixes from the full scan: startup 5m clock initialization, shared stop-fill slippage, strategy-only live PF/expectancy metrics, stricter gap QC, and authoritative closed Kraken 1m refresh for runtime strategy bars where feasible. Live remains blocked. No UI work.
