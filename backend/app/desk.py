@@ -8,6 +8,7 @@ import time
 from typing import Any
 
 from app import live, venue
+from app.asset_sources import merge_source_registry, registry_summary, set_trust_state
 from app.clock import is_new_five_minute
 from app.community import fetch_reddit
 from app.crypto_events import fetch_crypto_calendar
@@ -70,6 +71,15 @@ class MultiDesk:
         self._news_cursor = 0
         self._last_news_refresh = 0.0
         self._last_intelligence_persist = 0.0
+        restored_sources = (
+            restored.get("asset_source_registry")
+            if isinstance(restored, dict)
+            else None
+        )
+        self.asset_source_registry = merge_source_registry(
+            restored_sources if isinstance(restored_sources, list) else [],
+            [book.id for book in self.books],
+        )
         self._restore(restored)
 
     def marks(self) -> dict[str, float]:
@@ -95,6 +105,7 @@ class MultiDesk:
                     "risk_slice": self.risk_slice,
                     "poll_seconds": self.poll_seconds,
                 },
+                "asset_source_registry": self.asset_source_registry,
                 "saved_at": time.time(),
             }
         )
@@ -172,6 +183,25 @@ class MultiDesk:
             "resume_armed_after_restart": True,
             "state_persistence": True,
         }
+
+    def source_registry_snapshot(self) -> dict[str, Any]:
+        return {
+            "items": [dict(row) for row in self.asset_source_registry],
+            "summary": registry_summary(self.asset_source_registry),
+        }
+
+    def update_source_trust(
+        self,
+        source_id: str,
+        state: str,
+    ) -> dict[str, Any]:
+        self.asset_source_registry = set_trust_state(
+            self.asset_source_registry,
+            source_id,
+            state,
+        )
+        self.persist()
+        return self.source_registry_snapshot()
 
     def update_settings(
         self,
@@ -343,6 +373,10 @@ class MultiDesk:
             logger.warning("new asset seed failed %s %s", book.pair, exc)
         self.books.append(book)
         self.by_id[book.id] = book
+        self.asset_source_registry = merge_source_registry(
+            self.asset_source_registry,
+            [item.id for item in self.books],
+        )
         self.persist()
         return {
             "ok": True,
