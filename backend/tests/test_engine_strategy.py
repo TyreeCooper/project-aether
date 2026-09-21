@@ -27,3 +27,34 @@ def test_completed_bar_not_every_tick():
     before = len(engine.bars_1m)
     assert engine._update_forming_bar(100.1) is False
     assert len(engine.bars_1m) == before
+
+
+def test_authoritative_closed_bar_replaces_sampled_candle():
+    engine = PaperEngine()
+    engine._forming_bucket = 1_700_000_000
+    engine._forming_bar = {
+        "ts": 1_700_000_000,
+        "open": 100.0,
+        "high": 101.0,
+        "low": 99.0,
+        "close": 100.5,
+        "volume": 0.0,
+    }
+    authoritative = {
+        "ts": 1_700_000_000,
+        "open": 100.0,
+        "high": 103.0,
+        "low": 97.0,
+        "close": 102.0,
+        "volume": 12.0,
+    }
+    import app.engine as engine_mod
+    old_now = engine_mod._now_dt
+    try:
+        engine_mod._now_dt = lambda: datetime.fromtimestamp(1_700_000_060, tz=timezone.utc)
+        assert engine._update_forming_bar(102.5, authoritative_bar=authoritative) is True
+    finally:
+        engine_mod._now_dt = old_now
+    assert engine.bars_1m[-1]["high"] == 103.0
+    assert engine.bars_1m[-1]["low"] == 97.0
+    assert engine.bars_1m[-1]["volume"] == 12.0
