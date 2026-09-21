@@ -7,48 +7,34 @@ Read the whole file before touching code. Append a new entry when you start. App
 
 - **Place / ship:** one agent implements.
 - **Read / comment:** the other agent reviews that SHA only. No drive-by rewrites in the same files.
-- Capability, not idle time:
-  - **Grok** owns strategy, paper fills, journal, engine hooks, live-block, Azure API behavior.
-  - **ChatGPT** reviews and stress-tests that stack first; UI only after the open strategy slice has `AGREE DONE` from both, or Terry explicitly asks for UI.
-  - Cross the lane only if the owner writes `HANDOFF` and the lock is `open`.
-- **Lock:** list exact paths. If a path is locked, the other agent may only comment here.
-- **Stamps:** `START YYYY-MM-DD HH:MM TZ` and `END YYYY-MM-DD HH:MM TZ` plus the commit SHA you left.
-- If two starts overlap on the same path, the second start is invalid. Stop. Comment. Wait for their END.
+- **Grok** places strategy / paper / engine / journal / live-block.
+- **ChatGPT** reviews that stack first. UI waits until strategy-stack has both `AGREE DONE`, unless Terry asks.
+- **Lock + stamps:** START / END with time and SHA. Same path, two STARTs = second agent stops.
 
 ## Strategy stack first
 
-- Until both `AGREE DONE` on the current strategy slice, **do not** spend a turn on dock, theme, ticker, charts, or copy.
-- Order of work: rule → clock → fills → journal → engine wiring → then UI.
-- ChatGPT’s first output on an open strategy slice is a written review in this thread. Code in those files only after Grok ENDs a place and the lock is open, or Terry says to place.
-- A pretty desk on a leaking rule is out of order.
+Rule → clock → fills → journal → engine wiring → UI last.
+Do not spend a turn on dock or theme while this slice is open.
+
+## Paper must earn
+
+- The only goal of this slice is a **profitable paper book after fees and slip**. Not a nicer screen. Not a higher win rate with negative expectancy.
+- “All profit” means: closed trades, harsh fills, cost hurdle on, expectancy ≥ 0 and profit factor > 1 on the held Kraken 1m history *and* on new live paper exits. No fabricated fills. No hiding losses.
+- If the book is red, the slice stays open. Change the rule, the clock, the sit budget, or sit in cash. Do not flip losers into fake winners. Do not arm live to “make it back.”
+- Keep placing and reviewing until both can write `AGREE DONE strategy-stack` with numbers, not vibes. Persist. Push each other. Idle is failure.
 
 ## Done means both say done
 
-- A slice is not finished when one agent stops. It is finished when **both** write `AGREE DONE` on the same slice name, with SHA and time.
-- Until the second `AGREE DONE`, keep working or keep reviewing. Do not wander into a new slice that steps on the open one.
-- After both agree, write **`docs/REPORT-<slice>.md` together**: Grok drafts the strategy/runtime half, ChatGPT drafts the test/review half. The report must say *why* it is complete (what shipped, what was tested, what is still blocked, what must not be called live).
-- No solo “we are done.” If the other agent has not agreed, the slice is open.
+Both stamp `AGREE DONE` plus SHA. Then `docs/REPORT-strategy-stack.md` with the paper stats that justify it. Live stays blocked.
 
-## Persist and push each other
+## Persist and push
 
-- Every START that changes code must **push** before END. Unpushed work does not exist on this desk.
-- Every END must name the SHA and the next concrete ask for the *other* agent. Do not END with silence.
-- If the other agent goes quiet, the next START begins with: what they last shipped, what is still weak, and a direct push.
-- Idle is not a state. Spare time is strategy RESEARCH or a waiting review.
-- Push means a clearer rule and fewer bad entries. It does not mean arm live or break a lock.
-
-## Spare-time research
-
-- Research the strategy stack first (breakouts, ATR, cost hurdle, journal alignment).
-- UI research waits until the open strategy slice is agreed done.
-- Notes only. No code until Terry or the lane owner turns a note into a place.
-- Do not research a way to arm live money in this file.
+Push before END. END names SHA + next ask. Spare time = strategy RESEARCH or review.
 
 ## Board
 
-- Open slice: **strategy-stack** (review + frozen_hard_stop wiring + champion lookback 20). Not agreed done.
-- Live execution: **blocked**
-- Paper rule: 20-bar 5m Donchian, ATR compress/expand, cost hurdle, 5m entry clock, two-loss sit, one-way trail helper (helper not fully wired in engine)
+- Open slice: **strategy-stack**. Not agreed done. Paper still has to prove expectancy after costs.
+- Live: blocked.
 
 ## Locks
 
@@ -58,11 +44,11 @@ Read the whole file before touching code. Append a new entry when you start. App
 
 ## Thread
 
-### Grok — START 2026-09-21 03:08 EDT
+### Grok — START 2026-09-21 03:15 EDT
 
-Terry: strategy logic/stack first. UI waits. ChatGPT reviews the four strategy files this turn.
+Terry: persist until the paper strategy earns after costs. UI is not the job.
 
-### Grok — END 2026-09-21 03:08 EDT
+### Grok — END 2026-09-21 03:15 EDT
 
 SHA: this commit.
-**Push to ChatGPT:** START. Review only. No dock.
+**Push to ChatGPT:** Review the four strategy files. Say what is killing expectancy. Do not touch the dock.
