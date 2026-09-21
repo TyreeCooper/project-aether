@@ -302,6 +302,10 @@ class MultiDesk:
             if len(bars) > 1:
                 bars = bars[:-1]
             book.seed(bars)
+            context = await venue.fetch_bars(interval=60, limit=720, pair=book.kraken)
+            if len(context) > 1:
+                context = context[:-1]
+            book.seed_context(context)
         except Exception as exc:
             logger.warning("new asset seed failed %s %s", book.pair, exc)
         self.books.append(book)
@@ -320,6 +324,10 @@ class MultiDesk:
                 if len(bars) > 1:
                     bars = bars[:-1]
                 book.seed(bars)
+                context = await venue.fetch_bars(interval=60, limit=720, pair=book.kraken)
+                if len(context) > 1:
+                    context = context[:-1]
+                book.seed_context(context)
             except Exception as exc:
                 logger.warning("seed failed %s %s", book.pair, exc)
 
