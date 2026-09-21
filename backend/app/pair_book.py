@@ -9,7 +9,7 @@ from app.clock import is_new_five_minute
 from app.exits import stop_fill_price, time_stop_due
 from app.fees import TAKER_FEE
 from app.lots import size_ok, volume_min
-from app.paper_exec import SLIPPAGE_BPS, slipped_price
+from app.paper_exec import slipped_price
 from app.strategy import exit_plan, trend_breakout_snapshot
 
 BAR_HISTORY = 720
@@ -50,6 +50,21 @@ class PairBook:
         if item.get("watch_last") is not None:
             self.watch_last = float(item["watch_last"])
 
+    def push_px(self, ts: int) -> None:
+        if not self.mark:
+            return
+        bucket = int(ts) // 60 * 60
+        px = float(self.mark)
+        if self.bars and int(self.bars[-1]["ts"]) == bucket:
+            row = self.bars[-1]
+            row["high"] = max(float(row["high"]), px)
+            row["low"] = min(float(row["low"]), px)
+            row["close"] = px
+            return
+        self.bars.append(
+            {"ts": bucket, "open": px, "high": px, "low": px, "close": px, "volume": 0.0}
+        )
+
     def seed(self, bars: list[dict[str, Any]]) -> None:
         self.bars.clear()
         for bar in bars[-BAR_HISTORY:]:
@@ -86,10 +101,10 @@ class PairBook:
         px = self.fill_px("buy")
         if not px:
             return {"ok": False, "error": "no_mark", "pair": self.pair}
-        qty = risk_usd / px
+        qty = risk_usd / px if px else 0.0
         ok, why = size_ok(self.id, qty, px)
         if not ok:
-            qty = max(volume_min(self.id), (0.5 + 0.01) / px)
+            qty = max(volume_min(self.id), 0.51 / px)
             ok, why = size_ok(self.id, qty, px)
             if not ok:
                 return {"ok": False, "error": why, "pair": self.pair}
@@ -108,13 +123,14 @@ class PairBook:
         if qty <= 0 or not self.mark:
             return None
         self.highest = max(self.highest, float(self.mark))
+        cost_pct = TAKER_FEE * 200
         plan = exit_plan(
             list(self.bars),
             self.wallet.avg_entry(self.id),
             self.highest,
             self.mark,
             2.0,
-            TAKER_FEE * 200,
+            cost_pct,
             frozen_hard_stop=self.stop,
         )
         stop = float(plan.get("hard_stop") or self.stop or 0)
@@ -131,16 +147,15 @@ class PairBook:
                 held = None
         avg = self.wallet.avg_entry(self.id) or self.mark
         gain = ((self.mark / avg) - 1) * 100
-        timed = time_stop_due(held, gain, TAKER_FEE * 200)
-        weak = bool(plan.get("exit"))
-        if not (hit or timed or weak):
+        timed = time_stop_due(held, gain, cost_pct)
+        if not (hit or timed):
             return None
         raw = stop_fill_price(self.stop) if hit and self.stop else self.fill_px("sell")
         if not raw:
             return None
         result = self.wallet.sell(self.id, qty, raw)
         result["pair"] = self.pair
-        result["actor"] = "bot-v3-managed_stop" if hit else "bot-v3-time_stop" if timed else "bot-v3-exit"
+        result["actor"] = "bot-v3-managed_stop" if hit else "bot-v3-time_stop"
         if result.get("ok"):
             self.entry_at = None
             self.stop = 0.0
