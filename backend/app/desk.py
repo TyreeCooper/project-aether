@@ -11,6 +11,7 @@ from app import live, venue
 from app.clock import is_new_five_minute
 from app.community import fetch_reddit
 from app.crypto_events import fetch_crypto_calendar
+from app.db import db_store
 from app.intelligence import asset_context, floor_intelligence
 from app.news import fetch_asset_news
 from app.desk_persist import load_desk, save_desk
@@ -62,6 +63,7 @@ class MultiDesk:
         self.news_cache: dict[str, dict[str, Any]] = {}
         self._news_cursor = 0
         self._last_news_refresh = 0.0
+        self._last_intelligence_persist = 0.0
         self._restore(restored)
 
     def marks(self) -> dict[str, float]:
@@ -444,6 +446,128 @@ class MultiDesk:
             if isinstance(row, dict)
         ]
 
+    @staticmethod
+    def _summary_without_rows(
+        payload: dict[str, Any] | None,
+        row_key: str,
+    ) -> dict[str, Any]:
+        summary = dict(payload or {})
+        summary.pop(row_key, None)
+        return summary
+
+    def _intelligence_observations(
+        self,
+        book: PairBook,
+    ) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        news = self.news_cache.get(book.id) or {}
+        for article in news.get("articles") or []:
+            if not isinstance(article, dict):
+                continue
+            rows.append(
+                {
+                    "source_type": "news",
+                    "source_name": article.get("domain") or "GDELT",
+                    "external_id": article.get("url") or article.get("title"),
+                    "published_at": article.get("seen_at"),
+                    "payload": article,
+                }
+            )
+        community = self.community_cache.get(book.id) or {}
+        for post in community.get("posts") or []:
+            if not isinstance(post, dict):
+                continue
+            rows.append(
+                {
+                    "source_type": "community",
+                    "source_name": community.get("source") or "community",
+                    "external_id": post.get("permalink") or post.get("title"),
+                    "published_at": post.get("created_at"),
+                    "payload": post,
+                }
+            )
+        for event in self.risk_events:
+            if not isinstance(event, dict):
+                continue
+            rows.append(
+                {
+                    "source_type": "macro_event",
+                    "source_name": event.get("source") or "macro_calendar",
+                    "external_id": "|".join(
+                        (
+                            str(event.get("scheduled_at") or ""),
+                            str(event.get("title") or ""),
+                        )
+                    ),
+                    "published_at": None,
+                    "payload": event,
+                }
+            )
+        symbol = str(book.symbol).lower()
+        for event in self.crypto_events:
+            if not isinstance(event, dict):
+                continue
+            event_symbols = {
+                str(coin.get("symbol") or "").lower()
+                for coin in (event.get("coins") or [])
+                if isinstance(coin, dict)
+            }
+            if symbol not in event_symbols:
+                continue
+            rows.append(
+                {
+                    "source_type": "crypto_event",
+                    "source_name": event.get("provider") or "CoinMarketCal",
+                    "external_id": event.get("provider_event_id") or event.get("title"),
+                    "published_at": event.get("provider_verified_at"),
+                    "payload": event,
+                }
+            )
+        return rows
+
+    async def _persist_intelligence(self, force: bool = False) -> None:
+        now = time.time()
+        if not force and now - self._last_intelligence_persist < 300:
+            return
+        self._last_intelligence_persist = now
+        if not db_store.initialized:
+            return
+        batch: list[dict[str, Any]] = []
+        for book in self.books:
+            context = asset_context(
+                book,
+                self.books,
+                events=self.risk_events,
+                calendar_connected=self.risk_calendar_connected,
+                community=self.community_cache.get(book.id),
+                news=self.news_cache.get(book.id),
+            )
+            context = dict(context)
+            context["news"] = self._summary_without_rows(
+                context.get("news"),
+                "articles",
+            )
+            context["community"] = self._summary_without_rows(
+                context.get("community"),
+                "posts",
+            )
+            batch.append(
+                {
+                    "asset_id": book.id,
+                    "pair": book.pair,
+                    "price_usd": book.mark,
+                    "context": context,
+                    "capture": book.capture_snapshot(),
+                    "observations": self._intelligence_observations(book),
+                }
+            )
+        ok = await db_store.save_intelligence_snapshots(batch)
+        if not ok and db_store.last_error:
+            logger.warning(
+                "intelligence persistence failed %s",
+                db_store.last_error,
+            )
+
     async def _quotes(self) -> None:
         try:
             items = await venue.fetch_markets()
@@ -494,6 +618,7 @@ class MultiDesk:
         await self._refresh_one_community()
         await self._refresh_one_news()
         await self._quotes()
+        await self._persist_intelligence()
         exits = []
         for book in self.books:
             row = book.manage()
@@ -524,6 +649,8 @@ class MultiDesk:
             await self._refresh_crypto_calendar(force=True)
             await self._refresh_one_community(force=True)
             await self._refresh_one_news(force=True)
+            await self._quotes()
+            await self._persist_intelligence(force=True)
             while True:
                 try:
                     await self.tick()
