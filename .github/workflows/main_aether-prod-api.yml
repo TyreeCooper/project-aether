@@ -49,12 +49,12 @@ jobs:
           client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_530CF31F9C844B6BBFDBCED78DB6E9E4 }}
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_C8115A17EE8945578F04F145FD68F4CE }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_AD212BE4448A497488FE91D5E47F27B6 }}
-      - name: Configure Azure startup command
+      - name: Verify deployment package
         run: |
-          az webapp config set \
-            --resource-group aether-rg \
-            --name aether-prod-api \
-            --startup-file "bash startup.sh"
+          test -f startup.sh
+          test -f requirements.txt
+          test -f app/main.py
+          echo "Deployment package verified."
       - uses: azure/webapps-deploy@v3
         with:
           app-name: 'aether-prod-api'
