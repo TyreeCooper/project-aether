@@ -18,10 +18,10 @@ from app.paper_exec import install as install_harsh_paper
 
 STATIC = Path(__file__).parent / "static"
 ICON_LINKS = (
-    '<link rel="icon" href="/favicon.svg" type="image/svg+xml"/>'
-    '<link rel="icon" href="/static/aether-mark.svg" type="image/svg+xml"/>'
-    '<link rel="apple-touch-icon" href="/static/aether-mark.svg"/>'
-    '<link rel="manifest" href="/static/site.webmanifest"/>'
+    '<link rel="icon" href="/favicon.svg?v=3" type="image/svg+xml"/>'
+    '<link rel="icon" href="/static/aether-mark.svg?v=3" type="image/svg+xml"/>'
+    '<link rel="apple-touch-icon" href="/static/apple-touch-icon.svg?v=3"/>'
+    '<link rel="manifest" href="/static/site.webmanifest?v=3"/>'
     '<link rel="stylesheet" href="/static/desk.css"/>'
 )
 
@@ -36,12 +36,12 @@ logger.propagate = False
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    logger.info("event=app_start phase=begin version=1.5.0")
+    logger.info("event=app_start phase=begin version=1.5.1")
     await engine.initialize_persistence()
     install_harsh_paper(engine)
     engine.start_loop()
     logger.info(
-        "event=app_start phase=ready version=1.5.0 storage_configured=%s storage_initialized=%s live_ready=%s",
+        "event=app_start phase=ready version=1.5.1 storage_configured=%s storage_initialized=%s live_ready=%s",
         db_store.status().get("configured"),
         db_store.status().get("initialized"),
         live.status().get("live_ready"),
@@ -55,7 +55,7 @@ async def lifespan(_: FastAPI):
         logger.info("event=app_shutdown phase=complete")
 
 
-app = FastAPI(title="Project Aether API", version="1.5.0", lifespan=lifespan)
+app = FastAPI(title="Project Aether API", version="1.5.1", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
