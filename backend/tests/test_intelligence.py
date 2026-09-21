@@ -67,6 +67,14 @@ def test_asset_context_preserves_shadow_feeds_and_news_is_only_candidate_evidenc
         "articles_analyzed": 4,
         "independent_domains": 3,
         "claims_verified": False,
+        "verification_state": "corroborated_unverified",
+        "story_clusters": [
+            {
+                "representative_title": "SOL protocol upgrade",
+                "independent_domains": 3,
+                "corroborated": True,
+            }
+        ],
         "narratives": [{"term": "upgrade", "mentions": 2}],
     }
 
