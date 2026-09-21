@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import time
 from collections import deque
 from datetime import datetime, timedelta, timezone
@@ -13,6 +12,7 @@ import httpx
 
 from app import venue
 from app.db import db_store
+from app.fees import TAKER_FEE
 from app.persist import load_state, save_state
 from app.risk import deny_entry
 from app.strategy import (
@@ -25,7 +25,6 @@ from app.strategy import (
 )
 
 STARTING_USD = 10_000.0
-TAKER_FEE = float(os.getenv("AETHER_TAKER_FEE_RATE", "0.008"))
 POLL_SECONDS = 15
 SHORT_MA = 8
 LONG_MA = 21
@@ -269,8 +268,8 @@ class PaperEngine:
             "max_position_btc": self.max_position,
             "max_drawdown_pct": self.max_drawdown_pct,
             "daily_loss_cap": self.daily_loss_cap,
-            "bars_1m": list(self.bars_1m)[-720:],
-            "closes": list(self.closes)[-720:],
+            "bars_1m": list(self.bars_1m)[-BAR_HISTORY:],
+            "closes": list(self.closes)[-BAR_HISTORY:],
             "highest_since_entry": self.highest_since_entry,
             "position_stop": self.position_stop,
             "entry_at": self.entry_at,
@@ -455,12 +454,12 @@ class PaperEngine:
 
     async def seed_history(self) -> None:
         try:
-            bars = await venue.fetch_bars(interval=1, limit=720)
+            bars = await venue.fetch_bars(interval=1, limit=BAR_HISTORY)
             if len(bars) > 1:
                 bars = bars[:-1]
             self.bars_1m.clear()
             self.closes.clear()
-            for bar in bars[-720:]:
+            for bar in bars[-BAR_HISTORY:]:
                 clean = {
                     "ts": int(bar["ts"]),
                     "open": float(bar["open"]),
@@ -482,8 +481,12 @@ class PaperEngine:
         except Exception as exc:
             self._log("WARN", f"Kraken OHLC seed failed: {exc}")
 
-    def _update_forming_bar(self, price: float) -> bool:
-        """Return True when a completed 1m bar was appended."""
+    def _update_forming_bar(
+        self,
+        price: float,
+        authoritative_bar: dict[str, Any] | None = None,
+    ) -> bool:
+        """Append a completed 1m bar, preferring closed Kraken OHLC on rollover."""
         now = _now_dt()
         bucket = int(now.timestamp() // 60) * 60
         if self._forming_bucket is None or self._forming_bar is None:
@@ -504,6 +507,20 @@ class PaperEngine:
             return False
 
         completed = dict(self._forming_bar)
+        if authoritative_bar is not None:
+            try:
+                authoritative_ts = int(authoritative_bar["ts"])
+            except (KeyError, TypeError, ValueError):
+                authoritative_ts = -1
+            if authoritative_ts == int(self._forming_bucket):
+                completed = {
+                    "ts": authoritative_ts,
+                    "open": float(authoritative_bar["open"]),
+                    "high": float(authoritative_bar["high"]),
+                    "low": float(authoritative_bar["low"]),
+                    "close": float(authoritative_bar["close"]),
+                    "volume": float(authoritative_bar.get("volume", 0) or 0),
+                }
         self.bars_1m.append(completed)
         self.closes.append(float(completed["close"]))
         self._forming_bucket = bucket
@@ -708,7 +725,7 @@ class PaperEngine:
             "BOT",
             f"Managed exit: {reason} at {self.mark:.2f}; stop {self.position_stop:.2f}.",
         )
-        return self._apply_fill("sell", self.btc, px, f"bot-{reason}")
+        return self._apply_fill("sell", self.btc, px, f"bot-v3-{reason}")
 
     def evaluate_and_maybe_trade(self, new_bar: bool = False) -> None:
         if self.state not in ("IDLE", "IN_POSITION") or not self.mark:
@@ -786,6 +803,19 @@ class PaperEngine:
         if tick is None:
             return
         await self._refresh_watch()
+        authoritative_bar = None
+        minute_bucket = int(_now_dt().timestamp() // 60) * 60
+        if self._forming_bucket is not None and minute_bucket != self._forming_bucket:
+            try:
+                recent = await venue.fetch_bars(interval=1, limit=3)
+                closed = [b for b in recent if int(b.get("ts", 0)) < minute_bucket]
+                if closed:
+                    authoritative_bar = max(closed, key=lambda b: int(b["ts"]))
+            except Exception as exc:
+                self._log(
+                    "WARN",
+                    f"Closed Kraken 1m refresh failed; using sampled fallback: {exc}",
+                )
         async with self._lock:
             self.mark = float(tick["last"])
             self.bid = float(tick["bid"]) if tick.get("bid") is not None else None
@@ -793,7 +823,7 @@ class PaperEngine:
             self.mark_source = tick.get("source", self.mark_source)
             self._last_tick_mono = time.monotonic()
             self._roll_daily_if_needed()
-            new_bar = self._update_forming_bar(self.mark)
+            new_bar = self._update_forming_bar(self.mark, authoritative_bar=authoritative_bar)
             self.peak_equity = max(self.peak_equity, self.equity)
             self.evaluate_and_maybe_trade(new_bar=new_bar)
             if new_bar:
