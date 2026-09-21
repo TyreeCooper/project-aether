@@ -33,7 +33,27 @@
   }
   const brandTitle=document.querySelector(".brand-title"); if(brandTitle) brandTitle.textContent="AETHER";
   const brandSub=document.querySelector(".brand-sub"); if(brandSub) brandSub.textContent="Paper desk";
-  document.querySelectorAll(".dock-slide").forEach(el=>el.remove());
+
+  const inner=document.querySelector(".nav-inner");
+  if(inner && !inner.querySelector(".dock-slide")){
+    const ghost=document.createElement("div"); ghost.className="dock-ghost";
+    const slide=document.createElement("div"); slide.className="dock-slide";
+    inner.insertBefore(ghost, inner.firstChild);
+    inner.insertBefore(slide, inner.firstChild);
+    const move=()=>{
+      const on=inner.querySelector(".nav-btn.active")||inner.querySelector(".nav-btn");
+      if(!on) return;
+      const r=inner.getBoundingClientRect(), b=on.getBoundingClientRect();
+      const left=(b.left-r.left)+"px";
+      const width=b.width+"px";
+      ghost.style.left=left; ghost.style.width=width;
+      slide.style.left=left; slide.style.width=width;
+    };
+    inner.querySelectorAll(".nav-btn").forEach(b=>b.addEventListener("click",()=>setTimeout(move,30)));
+    setTimeout(move,80);
+    window.addEventListener("resize",move);
+  }
+
   const settings=document.getElementById("page-settings");
   if(settings && !document.getElementById("themeCard")){
     const card=document.createElement("section");card.className="card full";card.id="themeCard";
