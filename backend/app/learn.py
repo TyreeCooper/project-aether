@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from app.clock import allow_after_losses
-from app.exits import time_stop_due
+from app.exits import TIME_STOP_BARS, time_stop_due
 from app.fees import TAKER_FEE
 from app.paper_exec import SLIPPAGE_BPS
 from app.persist import state_path
@@ -230,7 +230,12 @@ def replay(
             position_stop = max(position_stop, float(plan["active_stop"]))
             gain_pct = ((px / avg) - 1) * 100 if avg > 0 else 0.0
             held = None if entry_i is None else i - entry_i
-            timed_out = time_stop_due(held, gain_pct, cost_pct)
+            timed_out = time_stop_due(
+                held,
+                gain_pct,
+                cost_pct,
+                limit=int(config.get("time_stop_bars", TIME_STOP_BARS)),
+            )
             trend_failed = trend_exit_signal(
                 history,
                 int(config["short_ma"]),

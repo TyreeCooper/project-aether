@@ -21,6 +21,10 @@ on:
         required: true
         default: "BTCUSD"
 
+concurrency:
+  group: aether-strategy-research
+  cancel-in-progress: true
+
 jobs:
   research:
     runs-on: ubuntu-latest

@@ -9,13 +9,62 @@ from typing import Any
 
 import httpx
 
-from app.learn import CANDIDATES, CHAMPION, STARTING, TAKER_FEE, replay
+from app.learn import CHAMPION, STARTING, TAKER_FEE, replay
 from app.paper_exec import SLIPPAGE_BPS
 from app.performance import summarize_backtest
 from app.strategy import resample_bars, sma
 
 BINANCE_US_KLINES = "https://api.binance.us/api/v3/klines"
 MAX_KLINES = 1000
+
+# Small, pre-declared horizon family. This is diagnostic only; no automatic
+# promotion is allowed. Longer horizons test whether Tier-1 friction makes the
+# existing 5m/3h book structurally too short-lived.
+RESEARCH_CANDIDATES = (
+    (
+        "champion-3h",
+        {
+            **CHAMPION,
+            "time_stop_bars": 180,
+        },
+    ),
+    (
+        "swing-6h",
+        {
+            "short_ma": 12,
+            "long_ma": 36,
+            "stop_loss_pct": 2.5,
+            "breakout_bars": 48,
+            "efficiency_min": 0.35,
+            "cost_multiple": 1.30,
+            "time_stop_bars": 360,
+        },
+    ),
+    (
+        "swing-12h",
+        {
+            "short_ma": 20,
+            "long_ma": 50,
+            "stop_loss_pct": 3.0,
+            "breakout_bars": 72,
+            "efficiency_min": 0.30,
+            "cost_multiple": 1.25,
+            "time_stop_bars": 720,
+        },
+    ),
+    (
+        "swing-24h",
+        {
+            "short_ma": 24,
+            "long_ma": 72,
+            "stop_loss_pct": 3.5,
+            "breakout_bars": 96,
+            "efficiency_min": 0.30,
+            "cost_multiple": 1.20,
+            "time_stop_bars": 1440,
+        },
+    ),
+)
 
 
 def _ms(dt: datetime) -> int:
@@ -81,6 +130,38 @@ async def fetch_binance_history(
             await asyncio.sleep(0.06)
 
     dedup = {int(b["ts"]): b for b in bars}
+    ordered = [dedup[k] for k in sorted(dedup)]
+
+    # Retry any observed missing minute ranges once. If the venue still omits a
+    # candle, leave the gap intact so validate_bars() fails the evidence gate.
+    gaps = [
+        (int(a["ts"]), int(b["ts"]))
+        for a, b in zip(ordered, ordered[1:])
+        if int(b["ts"]) - int(a["ts"]) > 60
+    ]
+    if gaps:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            for after_s, before_s in gaps[:20]:
+                missing = max((before_s - after_s) // 60 - 1, 0)
+                if missing <= 0 or missing > MAX_KLINES:
+                    continue
+                response = await client.get(
+                    BINANCE_US_KLINES,
+                    params={
+                        "symbol": symbol.upper(),
+                        "interval": interval,
+                        "startTime": (after_s + 60) * 1000,
+                        "endTime": (before_s - 60) * 1000,
+                        "limit": min(missing, MAX_KLINES),
+                    },
+                )
+                response.raise_for_status()
+                rows = response.json()
+                if isinstance(rows, list):
+                    for bar in parse_binance_klines(rows):
+                        dedup[int(bar["ts"])] = bar
+                await asyncio.sleep(0.06)
+
     return [dedup[k] for k in sorted(dedup)]
 
 
@@ -331,7 +412,7 @@ def _fold_aggregate(walk: dict[str, Any]) -> dict[str, Any]:
 
 def candidate_diagnostics(bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    for config in CANDIDATES:
+    for name, config in RESEARCH_CANDIDATES:
         full = replay(bars, dict(config), detailed=True)
         walk = walk_forward_v3(bars, dict(config))
         trade_log = list(full.get("trade_log") or [])
@@ -341,6 +422,7 @@ def candidate_diagnostics(bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
             reasons[reason] = reasons.get(reason, 0) + 1
         rows.append(
             {
+                "name": name,
                 "params": dict(config),
                 "full_sample": full["summary"],
                 "oos": _fold_aggregate(walk),
