@@ -37,10 +37,76 @@ STOP = {
     "your", "you", "are", "was", "will", "just", "into", "why", "how", "can",
     "crypto", "coin", "token", "price", "market",
 }
+PUMP_TERMS = {
+    "100x", "1000x", "moon", "mooning", "pump", "ape", "lambo", "guaranteed",
+    "sendit", "buybuybuy", "rocket",
+}
+RUMOR_TERMS = {
+    "rumor", "rumour", "unconfirmed", "leak", "leaked", "alleged", "apparently",
+    "hearing", "speculation",
+}
 
 
 def _tokens(text: str) -> list[str]:
-    return [x.lower() for x in re.findall(r"[A-Za-z][A-Za-z0-9_-]{2,}", text)]
+    return [x.lower() for x in re.findall(r"[A-Za-z0-9][A-Za-z0-9_-]{2,}", text)]
+
+
+def _fingerprint(text: str) -> str:
+    tokens = [x for x in _tokens(text) if x not in STOP]
+    return " ".join(tokens)
+
+
+def _coordination_metrics(posts: list[dict[str, Any]]) -> dict[str, Any]:
+    fingerprints = [
+        _fingerprint(str(post.get("title") or ""))
+        for post in posts
+    ]
+    fingerprints = [value for value in fingerprints if value]
+    counts = Counter(fingerprints)
+    duplicated = sum(count for count in counts.values() if count > 1)
+    duplicate_ratio = duplicated / len(fingerprints) if fingerprints else 0.0
+
+    pump_hits = 0
+    rumor_hits = 0
+    for post in posts:
+        tokens = set(_tokens(str(post.get("title") or "")))
+        pump_hits += len(tokens & PUMP_TERMS)
+        rumor_hits += len(tokens & RUMOR_TERMS)
+    pump_ratio = min(pump_hits / max(len(posts), 1), 1.0)
+    rumor_ratio = min(rumor_hits / max(len(posts), 1), 1.0)
+
+    authors = [
+        str(post.get("author") or "").strip().lower()
+        for post in posts
+        if str(post.get("author") or "").strip()
+    ]
+    unique_authors = len(set(authors))
+    author_concentration = (
+        1 - unique_authors / len(authors)
+        if authors
+        else None
+    )
+
+    score = duplicate_ratio * 60 + pump_ratio * 25
+    if author_concentration is not None:
+        score += max(author_concentration, 0.0) * 15
+    score = round(min(max(score, 0.0), 100.0), 2)
+    state = "high" if score >= 60 else "medium" if score >= 30 else "low"
+    return {
+        "coordination_risk": state,
+        "manipulation_risk_score": score,
+        "duplicate_message_ratio": round(duplicate_ratio, 4),
+        "pump_language_ratio": round(pump_ratio, 4),
+        "rumor_intensity": round(rumor_ratio * 100, 2),
+        "unique_authors": unique_authors if authors else None,
+        "author_concentration": (
+            None
+            if author_concentration is None
+            else round(author_concentration, 4)
+        ),
+        "method": "transparent_community_manipulation_heuristic_v1",
+        "note": "Heuristic risk indicators are not proof of bots or coordinated manipulation.",
+    }
 
 
 def analyze_posts(asset_id: str, posts: list[dict[str, Any]]) -> dict[str, Any]:
@@ -76,6 +142,7 @@ def analyze_posts(asset_id: str, posts: list[dict[str, Any]]) -> dict[str, Any]:
         "discussion_volume_ratio": None,
         "narratives": narratives,
         "newest_post_at": newest,
+        "manipulation": _coordination_metrics(posts),
         "source_tier": "B",
         "claims_verified": False,
         "trade_influence_enabled": False,
@@ -128,6 +195,7 @@ async def fetch_reddit(asset_id: str, limit: int = 25) -> dict[str, Any]:
                 "comments": int(data.get("num_comments") or 0),
                 "created_at": created_iso,
                 "permalink": str(data.get("permalink") or ""),
+                "author": str(data.get("author") or ""),
             }
         )
     out = analyze_posts(asset_id, posts)
