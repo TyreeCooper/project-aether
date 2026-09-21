@@ -13,9 +13,10 @@
   function setText(id,v,cls){const e=$(id);if(!e)return;e.textContent=v;if(cls)e.className=cls;}
   function navAssets(){
     const rows=state.floor?.assets||[];
-    $("assetNav").innerHTML='<button data-floor="1">FLOOR</button>'+rows.map(a=>'<button data-asset="'+a.id+'">'+esc(a.symbol)+'</button>').join("");
+    $("assetNav").innerHTML='<button data-floor="1">FLOOR</button>'+rows.map(a=>'<button data-asset="'+a.id+'">'+esc(a.symbol)+'</button>').join("")+'<button id="addAssetBtn" class="add-asset-btn" type="button" aria-label="Add Kraken asset">＋</button>';
     $("assetNav").querySelector("[data-floor]")?.addEventListener("click",()=>go("floor"));
     $("assetNav").querySelectorAll("[data-asset]").forEach(b=>b.addEventListener("click",()=>go("asset/"+b.dataset.asset)));
+    $("addAssetBtn")?.addEventListener("click",openAssetPicker);
     markNav();
   }
   function markNav(){
@@ -60,7 +61,7 @@
     $("allocationTotal").textContent=money(p.invested);
     $("assetBoard").innerHTML=rows.map(a=>'<div class="asset-row" data-id="'+a.id+'"><b class="pair">'+esc(a.pair)+'</b><span>'+money(a.mark)+'</span><span class="'+pnlClass(a.analytics?.change_pct)+'">'+pct(a.analytics?.change_pct)+'</span><span>'+money(a.position_value)+'</span><span class="'+pnlClass(a.open_pnl)+'">'+money(a.open_pnl)+'</span><span>'+esc((a.signal||a.reason||"watch").toUpperCase())+'</span></div>').join("");
     $("assetBoard").querySelectorAll(".asset-row").forEach(r=>r.onclick=()=>go("asset/"+r.dataset.id));
-    $("floorHealth").innerHTML=metric("Engine",f.armed?"ARMED":"DISARMED",f.armed?"up":"")+metric("Live execution",f.live_blocked?"BLOCKED":"READY",f.live_blocked?"up":"down")+metric("Books",String(p.assets||10))+metric("Active positions",String(p.active_positions||0))+metric("Exposure",pct(p.exposure_pct));
+    $("floorHealth").innerHTML=metric("Engine",f.armed?"ARMED":"DISARMED",f.armed?"up":"")+metric("Live execution",f.live_blocked?"BLOCKED":"READY",f.live_blocked?"up":"down")+metric("Books",String(p.assets||0))+metric("Active positions",String(p.active_positions||0))+metric("Exposure",pct(p.exposure_pct));
     $("floorPerformance").innerHTML=metric("Open P&L",money(p.open_pnl),pnlClass(p.open_pnl))+metric("Realized P&L",money(p.realized_pnl),pnlClass(p.realized_pnl))+metric("Fees",money(p.fees))+metric("Win rate",pct(p.win_rate_pct))+metric("W / L",(p.wins||0)+" / "+(p.losses||0));
     $("engineBadge").textContent=f.armed?"ARMED":"DISARMED";$("engineBadge").className="badge "+(f.armed?"good":"");
   }
@@ -84,7 +85,7 @@
   }
   function renderEngine(){
     const f=state.floor;if(!f)return;const p=f.portfolio||{},rows=f.assets||[];
-    setText("engineState",f.armed?"ARMED":"DISARMED");setText("engineActive",String(p.active_positions||0));
+    setText("engineState",f.armed?"ARMED":"DISARMED");setText("engineActive",String(p.active_positions||0));setText("engineBookModel","1 / "+String(p.assets||0));
     $("engineMatrix").innerHTML=rows.map(a=>'<div class="asset-row" data-id="'+a.id+'"><b class="pair">'+esc(a.pair)+'</b><span>'+esc(String(a.signal||"NONE").toUpperCase())+'</span><span>'+esc(a.reason||"warming")+'</span><span>'+money(a.open_pnl)+'</span><span>'+num(a.qty,8)+'</span><span>'+money(a.stop)+'</span></div>').join("");
     $("engineMatrix").querySelectorAll(".asset-row").forEach(r=>r.onclick=()=>go("asset/"+r.dataset.id));
   }
@@ -92,6 +93,46 @@
     const rows=state.blotter||[];
     $("deskBlotter").innerHTML=rows.length?'<table><thead><tr><th>Time</th><th>Asset</th><th>Side</th><th>Qty</th><th>Price</th><th>Fee</th><th>P&L</th><th>Actor</th></tr></thead><tbody>'+rows.map(f=>'<tr><td>'+esc(String(f.ts||"").replace("T"," ").slice(0,19))+'</td><td>'+esc(f.pair||f.symbol||"—")+'</td><td>'+esc(String(f.side||"").toUpperCase())+'</td><td>'+num(f.qty,8)+'</td><td>'+money(f.price)+'</td><td>'+money(f.fee)+'</td><td class="'+pnlClass(f.pnl)+'">'+money(f.pnl)+'</td><td>'+esc(f.actor||"—")+'</td></tr>').join("")+'</tbody></table>':'<div class="empty">The desk has no paper fills yet.</div>';
   }
+  function openAssetPicker(){
+    $("assetPicker").classList.remove("hidden");
+    $("assetSearch").value="";
+    $("assetSearchResults").innerHTML="";
+    $("assetSearchStatus").textContent="Type to search Kraken's live crypto/USD spot library.";
+    setTimeout(()=>$("assetSearch").focus(),30);
+  }
+  function closeAssetPicker(){$("assetPicker").classList.add("hidden");}
+  let assetSearchTimer=null;
+  async function searchKrakenAssets(query){
+    const q=String(query||"").trim();
+    if(!q){$("assetSearchResults").innerHTML="";$("assetSearchStatus").textContent="Type to search Kraken's live crypto/USD spot library.";return;}
+    $("assetSearchStatus").textContent="Searching Kraken…";
+    try{
+      const data=await get("/api/v1/kraken/assets?q="+encodeURIComponent(q)+"&limit=40");
+      const rows=data.items||[];
+      $("assetSearchStatus").textContent=rows.length?rows.length+" Kraken pair"+(rows.length===1?"":"s")+" found":"No matching online Kraken USD spot pairs.";
+      $("assetSearchResults").innerHTML=rows.map(a=>'<div class="picker-row"><div><b>'+esc(a.symbol)+'</b><span>'+esc(a.wsname||a.pair)+'</span><small>'+esc(a.kraken)+'</small></div><button type="button" class="action '+(a.already_added?"":"primary")+'" data-kraken="'+esc(a.kraken)+'" '+(a.already_added?"disabled":"")+'>'+(a.already_added?"Added":"Add")+'</button></div>').join("");
+      $("assetSearchResults").querySelectorAll("button[data-kraken]:not(:disabled)").forEach(btn=>btn.onclick=()=>addKrakenAsset(btn.dataset.kraken,btn));
+    }catch(e){$("assetSearchStatus").textContent="Kraken asset search is temporarily unavailable.";}
+  }
+  async function addKrakenAsset(pair,button){
+    if(!state.token){toast("Connect operator access in Booth before adding assets.");return;}
+    button.disabled=true;button.textContent="Adding…";
+    try{
+      const headers={"Content-Type":"application/json","X-Operator-Token":state.token};
+      const r=await fetch("/api/v1/assets",{method:"POST",headers,body:JSON.stringify({kraken_pair:pair})});
+      const d=await r.json().catch(()=>({}));
+      if(!r.ok)throw new Error(d.detail||d.error||"Could not add asset");
+      await loadFloor();
+      const id=d.asset?.asset?.id;
+      closeAssetPicker();
+      toast((d.already_added?"Already added: ":"Asset book added: ")+(d.asset?.asset?.pair||pair));
+      if(id)go("asset/"+id);
+    }catch(e){button.disabled=false;button.textContent="Add";toast(e.message||"Could not add asset");}
+  }
+  $("closeAssetPicker")?.addEventListener("click",closeAssetPicker);
+  $("assetPicker")?.addEventListener("click",e=>{if(e.target===$("assetPicker"))closeAssetPicker();});
+  $("assetSearch")?.addEventListener("input",e=>{clearTimeout(assetSearchTimer);assetSearchTimer=setTimeout(()=>searchKrakenAssets(e.target.value),250);});
+
   async function loadFloor(){state.floor=await get("/api/v1/floor");navAssets();renderFloor();renderEngine();}
   async function loadAsset(id){state.asset=await get("/api/v1/assets/"+encodeURIComponent(id));renderAsset();}
   async function loadBlotter(){const d=await get("/api/v1/desk/blotter?limit=300");state.blotter=d.items||[];renderBlotter();}

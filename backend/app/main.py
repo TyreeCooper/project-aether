@@ -93,6 +93,10 @@ async def request_telemetry(request: Request, call_next):
     return response
 
 
+class AddAssetBody(BaseModel):
+    kraken_pair: str = Field(min_length=2, max_length=40)
+
+
 class QtyBody(BaseModel):
     qty: float | None = Field(default=None, gt=0, le=1)
 
@@ -169,6 +173,25 @@ async def markets():
     except Exception:
         items = public_catalog()
     return {"items": items, "paper_symbols": [a["pair"] for a in public_catalog()]}
+
+
+@app.get("/api/v1/kraken/assets")
+async def kraken_assets(
+    q: str = Query(default="", max_length=40),
+    limit: int = Query(default=40, ge=1, le=100),
+):
+    return {"items": await venue.discover_kraken_assets(search=q, limit=limit)}
+
+
+@app.post("/api/v1/assets")
+async def add_asset(
+    body: AddAssetBody,
+    _: None = Depends(require_operator),
+):
+    asset = await venue.resolve_kraken_asset(body.kraken_pair)
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Kraken USD asset pair not found")
+    return await desk.add_asset(asset)
 
 
 @app.get("/api/v1/floor")

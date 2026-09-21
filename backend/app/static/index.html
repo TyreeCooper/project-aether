@@ -26,7 +26,7 @@
   <main>
     <section id="view-floor" class="view">
       <div class="page-title">
-        <div><p class="eyebrow">PORTFOLIO COMMAND</p><h1>The Floor</h1><p>One account. Ten autonomous books. Portfolio totals, P&amp;L, allocation, breadth and desk health.</p></div>
+        <div><p class="eyebrow">PORTFOLIO COMMAND</p><h1>The Floor</h1><p>One account. Independent Kraken asset books. Portfolio totals, P&amp;L, allocation, breadth and desk health.</p></div>
         <div id="floorClock" class="clock"></div>
       </div>
 
@@ -51,7 +51,7 @@
           <div id="breadthBars" class="bar-chart compact"></div>
         </article>
         <article class="panel span-2">
-          <header><div><p class="eyebrow">TEN BOOKS</p><h2>Asset Board</h2></div><span class="panel-note">tap any row for its dedicated page</span></header>
+          <header><div><p class="eyebrow">ACTIVE BOOKS</p><h2>Asset Board</h2></div><span class="panel-note">tap any row for its dedicated page</span></header>
           <div id="assetBoard" class="asset-board"></div>
         </article>
         <article class="panel">
@@ -112,12 +112,12 @@
     </section>
 
     <section id="view-engine" class="view hidden">
-      <div class="page-title"><div><p class="eyebrow">AUTONOMOUS ENGINE</p><h1>Aether Vector Engine</h1><p>Adaptive trend, breakout, cost and risk logic operating independently across all ten Kraken books.</p></div></div>
+      <div class="page-title"><div><p class="eyebrow">AUTONOMOUS ENGINE</p><h1>Aether Vector Engine</h1><p>Adaptive trend, breakout, cost and risk logic operating independently across every enabled Kraken book.</p></div></div>
       <section class="hero-grid engine-hero">
         <article class="hero-card primary"><span>Engine State</span><strong id="engineState">—</strong><small>global multi-asset allocator</small></article>
         <article class="hero-card"><span>Active Books</span><strong id="engineActive">—</strong><small>positions currently open</small></article>
         <article class="hero-card"><span>Live Execution</span><strong>BLOCKED</strong><small>paper only</small></article>
-        <article class="hero-card"><span>Account Model</span><strong>1 / 10</strong><small>one wallet, ten books</small></article>
+        <article class="hero-card"><span>Account Model</span><strong id="engineBookModel">—</strong><small>one wallet, expandable books</small></article>
       </section>
       <section class="panel">
         <header><div><p class="eyebrow">DECISION MATRIX</p><h2>Ten Independent Books</h2></div></header>
@@ -153,6 +153,17 @@
     <button data-route="blotter">Blotter</button>
     <button data-route="booth">Booth</button>
   </nav>
+</div>
+<div id="assetPicker" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="assetPickerTitle">
+  <section class="asset-picker">
+    <header>
+      <div><p class="eyebrow">KRAKEN ASSET LIBRARY</p><h2 id="assetPickerTitle">Add an asset book</h2><p>Search live Kraken crypto/USD spot pairs. Adding one creates a ready-to-go Aether paper book and dedicated asset page.</p></div>
+      <button id="closeAssetPicker" class="icon-btn" type="button" aria-label="Close">×</button>
+    </header>
+    <div class="picker-search"><input id="assetSearch" class="input" type="search" autocomplete="off" placeholder="Search symbol or pair, e.g. DOGE, LTC, DOT…"/></div>
+    <div id="assetSearchStatus" class="muted">Type to search Kraken.</div>
+    <div id="assetSearchResults" class="picker-results"></div>
+  </section>
 </div>
 <div id="toast" class="toast"></div>
 <script src="/static/aether-app.js"></script>

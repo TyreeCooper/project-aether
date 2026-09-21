@@ -5,10 +5,11 @@ from typing import Any
 
 import httpx
 
-from app.universe import ASSETS, BY_ID, KRAKEN_PAIRS
+from app.universe import ASSETS, BY_ID
 
 KRAKEN_TICKER = "https://api.kraken.com/0/public/Ticker"
 KRAKEN_OHLC = "https://api.kraken.com/0/public/OHLC"
+KRAKEN_ASSET_PAIRS = "https://api.kraken.com/0/public/AssetPairs"
 PAIR = "XBTUSD"
 BINANCE_US_BOOK = "https://api.binance.us/api/v3/ticker/bookTicker"
 BINANCE_US_LAST = "https://api.binance.us/api/v3/ticker/price"
@@ -128,6 +129,81 @@ def parse_binance_book(payload: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def parse_kraken_asset_library(
+    payload: dict[str, Any],
+    search: str = "",
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Return online Kraken spot crypto/USD pairs suitable for Aether books."""
+    result = payload.get("result") or {}
+    if not isinstance(result, dict):
+        return []
+    needle = str(search or "").strip().upper()
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for key, meta in result.items():
+        if not isinstance(meta, dict):
+            continue
+        wsname = str(meta.get("wsname") or "")
+        altname = str(meta.get("altname") or key)
+        status = str(meta.get("status") or "online").lower()
+        if not wsname.endswith("/USD") or status != "online" or ".d" in str(key):
+            continue
+        symbol = wsname.split("/", 1)[0].upper()
+        # Kraken uses XBT for Bitcoin internally; keep the familiar UI symbol.
+        ui_symbol = "BTC" if symbol == "XBT" else symbol
+        asset_id = ui_symbol.lower().replace(".", "-")
+        haystack = f"{ui_symbol} {wsname} {altname} {key}".upper()
+        if needle and needle not in haystack:
+            continue
+        if asset_id in seen:
+            continue
+        seen.add(asset_id)
+        rows.append(
+            {
+                "id": asset_id,
+                "name": ui_symbol,
+                "symbol": ui_symbol,
+                "pair": f"{ui_symbol}/USD",
+                "kraken": altname,
+                "kraken_key": str(key),
+                "wsname": wsname,
+                "tv": f"KRAKEN:{altname}",
+                "binance": f"{ui_symbol}USD",
+                "paper": True,
+                "status": status,
+                "already_added": asset_id in BY_ID,
+            }
+        )
+    rows.sort(key=lambda row: (bool(row["already_added"]), str(row["symbol"])))
+    return rows[: max(1, min(int(limit), 100))]
+
+
+async def discover_kraken_assets(
+    search: str = "",
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        res = await client.get(KRAKEN_ASSET_PAIRS)
+        res.raise_for_status()
+        return parse_kraken_asset_library(res.json(), search=search, limit=limit)
+
+
+async def resolve_kraken_asset(kraken_pair: str) -> dict[str, Any] | None:
+    pair = str(kraken_pair or "").strip().upper()
+    if not pair:
+        return None
+    rows = await discover_kraken_assets(search=pair, limit=100)
+    for row in rows:
+        if pair in {
+            str(row.get("kraken") or "").upper(),
+            str(row.get("kraken_key") or "").upper(),
+            str(row.get("wsname") or "").replace("/", "").upper(),
+        }:
+            return row
+    return None
+
+
 async def fetch_ticker() -> dict[str, Any] | None:
     async with httpx.AsyncClient(timeout=10.0) as client:
         res = await client.get(KRAKEN_TICKER, params={"pair": PAIR})
@@ -137,7 +213,8 @@ async def fetch_ticker() -> dict[str, Any] | None:
 
 async def fetch_markets() -> list[dict[str, Any]]:
     async with httpx.AsyncClient(timeout=12.0) as client:
-        res = await client.get(KRAKEN_TICKER, params={"pair": KRAKEN_PAIRS})
+        pairs = ",".join(str(a["kraken"]) for a in ASSETS)
+        res = await client.get(KRAKEN_TICKER, params={"pair": pairs})
         res.raise_for_status()
         items = parse_universe(res.json())
         try:

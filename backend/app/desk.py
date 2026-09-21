@@ -10,7 +10,7 @@ from typing import Any
 from app import live, venue
 from app.clock import is_new_five_minute
 from app.desk_persist import load_desk, save_desk
-from app.universe import ASSETS
+from app.universe import ASSETS, export_assets, register_asset
 from app.wallet import STARTING_USD, SpotWallet
 from app.pair_book import PairBook
 
@@ -21,13 +21,21 @@ POLL = 20
 
 class MultiDesk:
     def __init__(self) -> None:
+        restored = load_desk()
+        if isinstance(restored, dict):
+            for asset in restored.get("assets") or []:
+                if isinstance(asset, dict):
+                    try:
+                        register_asset(asset)
+                    except (KeyError, TypeError, ValueError):
+                        continue
         self.wallet = SpotWallet(STARTING_USD)
         self.books = [PairBook(asset, self.wallet) for asset in ASSETS]
         self.by_id = {b.id: b for b in self.books}
         self._task: asyncio.Task | None = None
         self.armed = os.getenv("AETHER_AUTO_RUN", "1").strip() not in {"0", "false", "FALSE"}
         self.live_blocked = True
-        self._restore()
+        self._restore(restored)
 
     def marks(self) -> dict[str, float]:
         return {b.id: float(b.mark or 0.0) for b in self.books}
@@ -45,14 +53,15 @@ class MultiDesk:
         save_desk(
             {
                 "wallet": self.wallet.payload(),
+                "assets": export_assets(),
                 "books": books,
                 "armed": self.armed,
                 "saved_at": time.time(),
             }
         )
 
-    def _restore(self) -> None:
-        data = load_desk()
+    def _restore(self, data: dict[str, Any] | None = None) -> None:
+        data = data if data is not None else load_desk()
         if not data:
             return
         wallet = data.get("wallet")
@@ -189,6 +198,34 @@ class MultiDesk:
                 )
         rows.sort(key=lambda row: str(row.get("ts") or ""), reverse=True)
         return rows[: max(1, int(limit))]
+
+    async def add_asset(self, asset: dict[str, Any]) -> dict[str, Any]:
+        asset_id = str(asset.get("id") or "").lower()
+        if not asset_id:
+            return {"ok": False, "error": "invalid_asset"}
+        if asset_id in self.by_id:
+            return {
+                "ok": True,
+                "already_added": True,
+                "asset": self.asset_snapshot(asset_id),
+            }
+        registered = register_asset(asset)
+        book = PairBook(registered, self.wallet)
+        try:
+            bars = await venue.fetch_bars(interval=1, limit=400, pair=book.kraken)
+            if len(bars) > 1:
+                bars = bars[:-1]
+            book.seed(bars)
+        except Exception as exc:
+            logger.warning("new asset seed failed %s %s", book.pair, exc)
+        self.books.append(book)
+        self.by_id[book.id] = book
+        self.persist()
+        return {
+            "ok": True,
+            "already_added": False,
+            "asset": self.asset_snapshot(book.id),
+        }
 
     async def seed(self) -> None:
         for book in self.books:

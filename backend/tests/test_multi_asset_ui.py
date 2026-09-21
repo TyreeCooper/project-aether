@@ -18,3 +18,33 @@ def test_floor_and_asset_views_are_multi_asset_and_isolated():
     assert btc["asset"]["pair"] == "BTC/USD"
     assert eth["asset"]["pair"] == "ETH/USD"
     assert desk.asset_snapshot("does-not-exist") is None
+
+
+def test_register_dynamic_asset_book_is_isolated():
+    desk = MultiDesk()
+    # Exercise runtime registration without network seeding.
+    from app.universe import register_asset
+    from app.pair_book import PairBook
+
+    asset = register_asset(
+        {
+            "id": "testcoin",
+            "name": "TEST",
+            "symbol": "TEST",
+            "pair": "TEST/USD",
+            "kraken": "TESTUSD",
+            "tv": "KRAKEN:TESTUSD",
+            "binance": "TESTUSD",
+            "paper": True,
+        }
+    )
+    if "testcoin" not in desk.by_id:
+        book = PairBook(asset, desk.wallet)
+        desk.books.append(book)
+        desk.by_id[book.id] = book
+
+    page = desk.asset_snapshot("testcoin")
+    assert page is not None
+    assert page["asset"]["pair"] == "TEST/USD"
+    assert page["asset"]["id"] == "testcoin"
+    assert desk.asset_snapshot("eth")["asset"]["pair"] == "ETH/USD"

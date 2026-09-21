@@ -30,3 +30,27 @@ def public_catalog() -> list[dict[str, str | bool]]:
         }
         for a in ASSETS
     ]
+
+
+def register_asset(asset: dict[str, str | bool]) -> dict[str, str | bool]:
+    """Register one verified Kraken USD asset in the runtime universe."""
+    asset_id = str(asset["id"]).strip().lower()
+    if asset_id in BY_ID:
+        return BY_ID[asset_id]
+    row = {
+        "id": asset_id,
+        "name": str(asset.get("name") or asset.get("symbol") or asset_id.upper()),
+        "symbol": str(asset["symbol"]).upper(),
+        "pair": str(asset["pair"]).upper(),
+        "kraken": str(asset["kraken"]),
+        "tv": str(asset.get("tv") or f"KRAKEN:{asset['kraken']}"),
+        "binance": str(asset.get("binance") or f"{asset['symbol']}USD").upper(),
+        "paper": bool(asset.get("paper", True)),
+    }
+    ASSETS.append(row)
+    BY_ID[asset_id] = row
+    return row
+
+
+def export_assets() -> list[dict[str, str | bool]]:
+    return [dict(asset) for asset in ASSETS]
