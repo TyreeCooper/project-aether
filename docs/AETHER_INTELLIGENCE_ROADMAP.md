@@ -41,7 +41,7 @@ source of truth for implementation status.
 | 23 | Community manipulation | PARTIAL | Duplicate messaging, pump language, author concentration, heuristic risk score; platform-level bot evidence remains |
 | 24 | Community lead/lag | IMPLEMENTED-RESEARCH | Generic observation timing study covers community observations |
 | 25 | Automatic source discovery | NOT STARTED | Must require operator approval before trust |
-| 26-29 | Floor intelligence boards | PARTIAL | Opportunity ranking, macro/crypto risk, sources; dedicated catalyst/risk radar expansion remains |
+| 26-29 | Floor intelligence boards | SUBSTANTIAL | Opportunity ranking, dedicated catalyst board, event/liquidity risk radar, and source health are mounted in live markup |
 | 30-35 | Asset intelligence panels | SUBSTANTIAL | Opportunity, windows, quality/regime, cross-asset, attribution/news, community, risk, capture are visible |
 | 36 | Intelligence history | IMPLEMENTED | 5-minute asset snapshots + deduplicated observation ledger |
 | 37 | Intelligence score | NOT STARTED | Subscores must remain visible if added |
@@ -53,11 +53,11 @@ source of truth for implementation status.
 | 43 | Time-aware event storage | IMPLEMENTED-FOUNDATION | first_seen, published/source times, scheduled event times retained where available |
 | 44 | Historical event reaction DB | PARTIAL | Snapshots + observations support reaction research; dedicated materialized event-reaction rollups remain |
 | 45 | Historical community evaluation | IMPLEMENTED-FOUNDATION | Lead/lag research can score community observations as history accumulates |
-| 46 | Asset-specific source profiles | PARTIAL | Current Reddit map only; full official/developer/governance bundles remain |
-| 47 | Data-quality controls | PARTIAL | connected/degraded/unavailable states exist; full stale/conflicting health across every feed remains |
+| 46 | Asset-specific source profiles | PARTIAL | Persisted per-asset source trust registry exists; current seeded coverage is Reddit only; official/developer/governance bundles remain |
+| 47 | Data-quality controls | SUBSTANTIAL | healthy/partial/stale/degraded/unavailable/unconfigured states and rotating-feed coverage now exist; cross-source conflict scoring remains |
 | 48 | API layer | PARTIAL | floor/assets/sources/risk/crypto-events/history/research endpoints exist |
 | 49 | Storage model | PARTIAL | Generic research-grade snapshot + observation tables; specialized normalized tables can be added when queries justify them |
-| 50-51 | Settings/source registry | PARTIAL | Intelligence status/source health visible; trust editing and per-source operator controls remain |
+| 50-51 | Settings/source registry | SUBSTANTIAL | Intelligence/feed health visible; per-asset source trust is persisted and operator-controlled by protected API; richer in-app editing remains |
 | 52 | Asset onboarding expansion | PARTIAL | Kraken add + history seed exists; source/community discovery and event sensitivity remain |
 | 53 | Notifications | NOT STARTED | In-app intelligence alerts remain |
 | 54 | Intelligence audit trail | FOUNDATION | Observations are recorded; decision-change audit becomes relevant only after intelligence is allowed influence |
