@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import venue
+from app import learn, venue
 from app.db import db_store
 from app.engine import engine
 from app.paper_exec import install as install_harsh_paper
@@ -29,12 +29,12 @@ logger.propagate = False
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    logger.info("event=app_start phase=begin version=1.2.0")
+    logger.info("event=app_start phase=begin version=1.3.0")
     await engine.initialize_persistence()
     install_harsh_paper(engine)
     engine.start_loop()
     logger.info(
-        "event=app_start phase=ready version=1.2.0 storage_configured=%s storage_initialized=%s",
+        "event=app_start phase=ready version=1.3.0 storage_configured=%s storage_initialized=%s",
         db_store.status().get("configured"),
         db_store.status().get("initialized"),
     )
@@ -47,7 +47,7 @@ async def lifespan(_: FastAPI):
         logger.info("event=app_shutdown phase=complete")
 
 
-app = FastAPI(title="Project Aether API", version="1.2.0", lifespan=lifespan)
+app = FastAPI(title="Project Aether API", version="1.3.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -132,6 +132,8 @@ async def home():
         extra += '<script src="/static/ledger-order.js"></script>'
     if "scoreboard.js" not in html:
         extra += '<script src="/static/scoreboard.js"></script>'
+    if "learn.js" not in html:
+        extra += '<script src="/static/learn.js"></script>'
     if extra:
         html = html.replace("</body>", extra + "</body>", 1)
     return HTMLResponse(html)
@@ -175,6 +177,23 @@ async def auth_verify(_: None = Depends(require_operator)):
 @app.get("/api/v1/analytics")
 async def analytics(limit: int = Query(default=5000, ge=1, le=5000)):
     return await db_store.analytics(limit)
+
+
+@app.get("/api/v1/learn")
+async def learn_status():
+    state = learn.load_learn()
+    fills = await db_store.history_fills(500)
+    state["live_exits"] = learn.score_exits(fills)
+    state["bars_used"] = len(engine.closes)
+    champ = state.get("champion") or learn.CHAMPION
+    state["champion"] = champ
+    return state
+
+
+@app.post("/api/v1/learn/review")
+async def learn_review():
+    fills = await db_store.history_fills(500)
+    return learn.review(list(engine.closes), fills)
 
 
 @app.get("/api/v1/config")
