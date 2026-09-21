@@ -1,3 +1,4 @@
+from app.fees import TAKER_FEE
 from app.strategy import (
     atr,
     crossover_signal,
@@ -57,9 +58,10 @@ def test_efficiency_distinguishes_trend_from_chop():
     assert efficiency_ratio(chop, 10) < 0.2
 
 
-def test_cost_model_includes_round_trip_fees_and_slip():
+def test_cost_model_uses_shared_fee_and_round_trip_slip():
     cost = round_trip_cost_pct(100, 99.99, 100.01)
-    assert cost >= 1.70
+    expected = TAKER_FEE * 2 * 100 + 0.10 + 0.02
+    assert abs(cost - expected) < 0.001
 
 
 def test_atr_and_exit_plan_are_finite():
