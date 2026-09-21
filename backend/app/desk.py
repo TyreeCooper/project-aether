@@ -11,6 +11,7 @@ from app import live, venue
 from app.clock import is_new_five_minute
 from app.intelligence import asset_context, floor_intelligence
 from app.desk_persist import load_desk, save_desk
+from app.events import active_risk, fetch_calendar
 from app.universe import ASSETS, export_assets, register_asset
 from app.wallet import STARTING_USD, SpotWallet
 from app.pair_book import PairBook
@@ -44,6 +45,9 @@ class MultiDesk:
             min(int(os.getenv("AETHER_DESK_POLL_SECONDS", str(POLL))), 120),
         )
         self.live_blocked = True
+        self.risk_events: list[dict[str, Any]] = []
+        self.risk_calendar_connected = False
+        self._last_risk_refresh = 0.0
         self._restore(restored)
 
     def marks(self) -> dict[str, float]:
@@ -168,7 +172,12 @@ class MultiDesk:
             view = book.view()
             stats = book.analytics()
             view["analytics"] = stats
-            view["intelligence"] = asset_context(book, self.books)
+            view["intelligence"] = asset_context(
+                book,
+                self.books,
+                events=self.risk_events,
+                calendar_connected=self.risk_calendar_connected,
+            )
             rows.append(view)
             realized += float(stats["realized_pnl"])
             fees += float(stats["fees"])
@@ -205,7 +214,11 @@ class MultiDesk:
                 "win_rate_pct": round(wins / max(wins + losses, 1) * 100, 2),
             },
             "assets": rows,
-            "intelligence": floor_intelligence(self.books),
+            "intelligence": floor_intelligence(
+                self.books,
+                events=self.risk_events,
+                calendar_connected=self.risk_calendar_connected,
+            ),
         }
 
     def asset_snapshot(self, asset_id: str) -> dict[str, Any] | None:
@@ -246,7 +259,12 @@ class MultiDesk:
                 "low": low,
             },
             "fills": list(book.fills)[-50:],
-            "intelligence": asset_context(book, self.books),
+            "intelligence": asset_context(
+                book,
+                self.books,
+                events=self.risk_events,
+                calendar_connected=self.risk_calendar_connected,
+            ),
             "capture": book.current_excursion(),
         }
 
@@ -303,6 +321,31 @@ class MultiDesk:
             except Exception as exc:
                 logger.warning("seed failed %s %s", book.pair, exc)
 
+    async def _refresh_risk_calendar(self, force: bool = False) -> None:
+        now = time.time()
+        if not force and now - self._last_risk_refresh < 300:
+            return
+        self._last_risk_refresh = now
+        try:
+            self.risk_events = await fetch_calendar()
+            self.risk_calendar_connected = True
+        except Exception as exc:
+            self.risk_calendar_connected = False
+            logger.warning("risk calendar refresh failed %s", exc)
+
+    def risk_snapshot(self) -> dict[str, Any]:
+        state = active_risk(self.risk_events)
+        return {
+            **state,
+            "calendar_connected": self.risk_calendar_connected,
+            "events": self.risk_events,
+            "policy": {
+                "mode": "observe_only",
+                "automatic_entry_block": False,
+                "note": "Risk windows are visible now; strategy enforcement remains disabled until validated.",
+            },
+        }
+
     async def _quotes(self) -> None:
         try:
             items = await venue.fetch_markets()
@@ -348,6 +391,7 @@ class MultiDesk:
         return out
 
     async def tick(self) -> None:
+        await self._refresh_risk_calendar()
         await self._quotes()
         exits = []
         for book in self.books:
@@ -375,6 +419,7 @@ class MultiDesk:
 
         async def loop():
             await self.seed()
+            await self._refresh_risk_calendar(force=True)
             while True:
                 try:
                     await self.tick()
