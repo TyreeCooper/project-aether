@@ -142,6 +142,8 @@ async def home():
         extra += '<script src="/static/ledger-order.js"></script>'
     if "scoreboard.js" not in html:
         extra += '<script src="/static/scoreboard.js"></script>'
+    if "strategy-status.js" not in html:
+        extra += '<script src="/static/strategy-status.js"></script>'
     if "learn.js" not in html:
         extra += '<script src="/static/learn.js"></script>'
     if "desk.js" not in html:
