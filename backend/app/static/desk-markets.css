@@ -1,0 +1,14 @@
+.asset-rail{display:flex;gap:6px;overflow-x:auto;padding:8px 12px;max-width:430px;margin:0 auto}
+.asset-pill{flex:0 0 auto;border:1px solid rgba(243,164,55,.35);background:#16141c;color:#f4ece0;border-radius:999px;padding:6px 10px;font-size:11px}
+.asset-pill em{display:block;font-style:normal;color:#26a69a;font-size:10px}
+.asset-pill.on{background:#4c38c4;border-color:#4c38c4}
+.asset-profile .price{font-size:28px;font-weight:700}
+.asset-quote{display:flex;justify-content:space-between;font-size:12px;margin-top:6px}
+.asset-chip{font-size:10px;letter-spacing:.06em}
+.spark{height:120px;margin-top:10px}
+.spark svg{width:100%;height:100%;display:block}
+.desk-totals{display:flex;gap:10px;flex-wrap:wrap;font-size:11px;opacity:.8}
+.desk-list{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+.desk-row{display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;background:#16141c;border:1px solid rgba(255,255,255,.06);color:inherit;padding:8px 10px;border-radius:10px;text-align:left}
+.desk-row .up{color:#26a69a}.desk-row .dn{color:#ef5350}
+html[data-theme="light"] .asset-pill,html[data-theme="light"] .desk-row{background:#d2c2a8;color:#2a241c}
