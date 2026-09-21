@@ -125,11 +125,29 @@ def install(engine) -> None:
             return "loss_budget"
         return None
 
+    def bar_low_stop() -> bool:
+        stop = float(getattr(engine, "position_stop", 0) or 0)
+        if engine.btc <= 0 or stop <= 0 or not engine.bars_1m:
+            return False
+        low = float(engine.bars_1m[-1]["low"])
+        if low > stop:
+            return False
+        raw = min(float(engine._fill_price("sell") or stop), stop)
+        engine._log(
+            "BOT",
+            f"Bar-low stop: low {low:.2f} <= {stop:.2f}.",
+        )
+        return bool(
+            engine._apply_fill("sell", engine.btc, raw, "bot-managed_stop")
+        )
+
     def wrapped_eval(new_bar: bool = False) -> None:
         five, bucket = is_new_five_minute(list(engine.bars_1m), engine._last_5m_bucket)
         if five:
             engine._last_5m_bucket = bucket
         if engine.btc > 0:
+            if new_bar and bar_low_stop():
+                return
             original_eval(new_bar=new_bar)
             return
         original_eval(new_bar=bool(five and new_bar))
@@ -155,5 +173,5 @@ def install(engine) -> None:
     engine.tick = wrapped_tick
     engine._log(
         "INFO",
-        f"Harsh paper on. Frozen stop. Fee {KRAKEN_TAKER}. Journal fee bound. Live blocked.",
+        f"Harsh paper on. Frozen stop. Bar-low stop. Fee {KRAKEN_TAKER}. Live blocked.",
     )
