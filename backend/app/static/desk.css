@@ -63,3 +63,105 @@ html[data-theme="light"] .card,html[data-theme="light"] .market-hero,html[data-t
 }
 html[data-theme="light"] .logo{background:#2a241c url("/static/aether-mark.svg") center/cover no-repeat}
 html[data-theme="light"] .brand-title{color:#f4ece0}
+
+
+/* Mobile-first bottom dock: compact, thumb-reachable, and bounded to the phone viewport. */
+.bottom-nav{
+  left:50% !important;
+  right:auto !important;
+  bottom:max(6px,env(safe-area-inset-bottom)) !important;
+  transform:translateX(-50%) !important;
+  width:min(calc(100vw - 18px),412px) !important;
+  padding:4px !important;
+  border:1px solid rgba(153,146,171,.16) !important;
+  border-radius:18px !important;
+  background:rgba(10,8,15,.96) !important;
+  box-shadow:0 10px 30px rgba(0,0,0,.34) !important;
+  backdrop-filter:blur(18px) !important;
+}
+.bottom-nav .nav-inner{
+  width:100% !important;
+  max-width:none !important;
+  grid-template-columns:repeat(5,minmax(0,1fr)) !important;
+  gap:1px !important;
+  align-items:center !important;
+}
+.bottom-nav .nav-btn{
+  min-width:0 !important;
+  min-height:46px !important;
+  height:46px !important;
+  padding:3px 2px !important;
+  border-radius:12px !important;
+  gap:2px !important;
+  font-size:8px !important;
+  line-height:1 !important;
+  font-weight:650 !important;
+}
+.bottom-nav .nav-btn svg{
+  width:18px !important;
+  height:18px !important;
+  flex:0 0 18px !important;
+}
+.bottom-nav .nav-btn span{
+  max-width:100%;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.bottom-nav .nav-btn[data-page="home"]{
+  min-height:48px !important;
+  height:48px !important;
+}
+.bottom-nav .nav-btn[data-page="home"] svg{
+  width:20px !important;
+  height:20px !important;
+}
+.bottom-nav .dock-ghost{
+  height:42px !important;
+  bottom:2px !important;
+  border-radius:12px !important;
+}
+.bottom-nav .dock-slide{
+  height:36px !important;
+  bottom:5px !important;
+  border-radius:11px !important;
+}
+.app{
+  padding-bottom:calc(72px + env(safe-area-inset-bottom)) !important;
+}
+.toast{
+  bottom:calc(76px + env(safe-area-inset-bottom)) !important;
+}
+
+@media(max-width:380px){
+  .bottom-nav{
+    width:calc(100vw - 12px) !important;
+    border-radius:16px !important;
+    padding:3px !important;
+  }
+  .bottom-nav .nav-btn{
+    min-height:43px !important;
+    height:43px !important;
+    font-size:7.5px !important;
+  }
+  .bottom-nav .nav-btn[data-page="home"]{
+    min-height:45px !important;
+    height:45px !important;
+  }
+  .bottom-nav .nav-btn svg{
+    width:17px !important;
+    height:17px !important;
+  }
+  .bottom-nav .nav-btn[data-page="home"] svg{
+    width:19px !important;
+    height:19px !important;
+  }
+  .bottom-nav .dock-ghost{height:39px !important}
+  .bottom-nav .dock-slide{height:33px !important}
+}
+
+@media(min-width:721px){
+  .bottom-nav{
+    width:min(430px,calc(100vw - 24px)) !important;
+  }
+}
