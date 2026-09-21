@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import time
+
 SLIPPAGE_BPS = 5.0
 MAX_SPREAD_BPS = 10.0
 MAX_BASIS_USD = 80.0
+STALE_MS = 15_000
 
 
 def slipped_price(side: str, bid: float | None, ask: float | None, mark: float | None) -> float | None:
@@ -50,3 +53,32 @@ def deny_microstructure(
     if slipped_price(side, bid, ask, mark) is None:
         return "no_mark"
     return None
+
+
+def install(engine) -> None:
+    """Slip fills and block dirty entries on the live paper singleton."""
+    import app.engine as engine_mod
+
+    inner_deny = engine_mod.deny_entry
+
+    def wrapped_deny(**kwargs):
+        reason = inner_deny(**kwargs)
+        if reason:
+            return reason
+        stale = True
+        last = getattr(engine, "_last_tick_mono", None)
+        if last is not None:
+            stale = int((time.monotonic() - last) * 1000) > STALE_MS
+        return deny_microstructure(
+            side="buy",
+            bid=engine.bid,
+            ask=engine.ask,
+            mark=engine.mark,
+            source=engine.mark_source,
+            stale=stale,
+            watch_last=getattr(engine, "watch_last", None),
+        )
+
+    engine_mod.deny_entry = wrapped_deny
+    engine._fill_price = lambda side: slipped_price(side, engine.bid, engine.ask, engine.mark)
+    engine._log("INFO", "Harsh paper execution on: +5bps slip, spread/stale/fallback gates.")
