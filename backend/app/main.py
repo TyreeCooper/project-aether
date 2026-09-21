@@ -145,6 +145,22 @@ def _basis(exec_last, watch_last):
     return round(float(watch_last) - float(exec_last), 2)
 
 
+def _intelligence_sources_snapshot():
+    return source_registry(
+        calendar_connected=desk.risk_calendar_connected,
+        crypto_calendar_connected=desk.crypto_calendar_connected,
+        crypto_calendar_configured=desk.crypto_calendar_configured,
+        news_connected=any(
+            str(row.get("status") or "") == "shadow"
+            for row in desk.news_cache.values()
+        ),
+        community_connected=any(
+            str(row.get("status") or "") == "shadow"
+            for row in desk.community_cache.values()
+        ),
+    )
+
+
 @app.get("/")
 async def home():
     return HTMLResponse((STATIC / "index.html").read_text(encoding="utf-8"))
@@ -237,10 +253,16 @@ async def settings():
         },
         "assets": len(desk.books),
         "intelligence": {
-            "sources": source_registry(
-                calendar_connected=desk.risk_calendar_connected,
-            ),
+            "sources": _intelligence_sources_snapshot(),
             "macro_calendar_connected": desk.risk_calendar_connected,
+            "crypto_calendar": {
+                "provider": "CoinMarketCal",
+                "configured": desk.crypto_calendar_configured,
+                "connected": desk.crypto_calendar_connected,
+                "status": desk.crypto_calendar_status,
+                "events_loaded": len(desk.crypto_events),
+                "trade_influence_enabled": False,
+            },
             "community_assets_configured": sorted(SUBREDDITS),
             "community_trade_influence_enabled": False,
             "event_policy": desk.risk_snapshot().get("policy"),
@@ -278,11 +300,12 @@ async def asset_intelligence(asset_id: str):
 
 @app.get("/api/v1/intelligence/sources")
 async def intelligence_sources():
-    return {
-        "items": source_registry(
-            calendar_connected=desk.risk_calendar_connected,
-        )
-    }
+    return {"items": _intelligence_sources_snapshot()}
+
+
+@app.get("/api/v1/crypto-events")
+async def crypto_events():
+    return desk.risk_snapshot().get("crypto_calendar", {})
 
 
 @app.get("/api/v1/risk-calendar")
