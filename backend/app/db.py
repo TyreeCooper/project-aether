@@ -144,7 +144,7 @@ def summarize_fills(
         "profit_factor": (
             round(gross_profit / gross_loss, 4)
             if gross_loss > 1e-12
-            else (None if gross_profit <= 1e-12 else float("inf"))
+            else None
         ),
         "fees_usd": round(total_fees, 6),
         "volume_btc": round(total_volume, 8),

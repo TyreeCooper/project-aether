@@ -191,7 +191,7 @@ async def learn_status():
 
 
 @app.post("/api/v1/learn/review")
-async def learn_review():
+async def learn_review(_: None = Depends(require_operator)):
     fills = await db_store.history_fills(500)
     return learn.review(list(engine.closes), fills)
 

@@ -42,3 +42,19 @@ def test_summarize_fills_win_rate_and_duration():
     assert out["max_drawdown_pct"] == 10.0
     assert out["lifetime_realized_pnl_usd"] == 2.0
     assert out["profit_factor"] == round(5 / 3, 4)
+
+
+def test_profit_factor_is_json_safe_without_losses():
+    fills = [
+        {
+            "ts": "2026-09-20T20:00:00+00:00",
+            "side": "sell",
+            "qty_btc": 0.01,
+            "fee_usd": 1.0,
+            "realized_pnl_usd": 5.0,
+        }
+    ]
+    out = summarize_fills(fills, [])
+    assert out["gross_profit_usd"] == 5.0
+    assert out["gross_loss_usd"] == 0.0
+    assert out["profit_factor"] is None
