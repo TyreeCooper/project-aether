@@ -6,6 +6,7 @@ as unavailable, never silently as neutral.
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from math import sqrt
 from typing import Any
 
@@ -129,24 +130,141 @@ def pearson_from_bars(target: list[dict[str, Any]], benchmark: list[dict[str, An
     den = sqrt(va * vb)
     return round(cov / den, 4) if den > 1e-18 else None
 
+def _dt(value: Any) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
 def risk_state(
     events: list[dict[str, Any]] | None = None,
     *,
     calendar_connected: bool = False,
 ) -> dict[str, Any]:
     rows = list(events or [])
-    active = [x for x in rows if str(x.get("state")) in {"blackout", "restricted"}]
-    caution = [x for x in rows if str(x.get("state")) == "caution"]
-    state = "restricted" if active else "caution" if caution else "normal"
+    now = datetime.now(timezone.utc)
+    active: list[dict[str, Any]] = []
+    for event in rows:
+        if str(event.get("state")) not in {"blackout", "restricted", "caution"}:
+            continue
+        start = _dt(event.get("window_start"))
+        end = _dt(event.get("window_end"))
+        if start and end and start <= now <= end:
+            active.append(event)
+    state = (
+        "restricted"
+        if any(str(x.get("state")) in {"blackout", "restricted"} for x in active)
+        else "caution"
+        if active
+        else "normal"
+    )
     return {
         "state": state,
-        "active_events": active + caution,
-        "new_entries_allowed": not bool(active),
+        "active_events": active,
+        "new_entries_allowed": state != "restricted",
         "calendar_connected": bool(calendar_connected),
         "note": (
             "No macro/crypto event calendar connected yet; state is market-data-only."
             if not calendar_connected
             else None
+        ),
+    }
+
+
+def move_attribution(
+    book: Any,
+    books: list[Any],
+    opportunity: dict[str, Any],
+    cross_asset: dict[str, Any],
+    events: list[dict[str, Any]] | None,
+    calendar_connected: bool,
+) -> dict[str, Any]:
+    drivers: list[dict[str, Any]] = []
+    now = datetime.now(timezone.utc)
+    move = _f(opportunity.get("net_change_pct"))
+
+    if book.id != "btc":
+        btc = next((b for b in books if getattr(b, "id", "") == "btc"), None)
+        if btc is not None:
+            btc_move = _f(opportunity_24h(btc.view()).get("net_change_pct"))
+            corr = cross_asset.get("btc_correlation_4h")
+            if (
+                corr is not None
+                and float(corr) >= 0.4
+                and move * btc_move > 0
+                and abs(btc_move) >= 0.5
+            ):
+                drivers.append(
+                    {
+                        "type": "broad_market",
+                        "label": "Broad crypto / BTC-aligned move",
+                        "confidence_pct": min(90, round(50 + float(corr) * 40)),
+                        "evidence": {
+                            "btc_change_24h_pct": round(btc_move, 4),
+                            "btc_correlation_4h": corr,
+                        },
+                    }
+                )
+
+    if calendar_connected:
+        for event in events or []:
+            scheduled = _dt(event.get("scheduled_at"))
+            if not scheduled or not (now - timedelta(hours=24) <= scheduled <= now):
+                continue
+            if str(event.get("country")) != "USD":
+                continue
+            impact = str(event.get("impact") or "").lower()
+            if impact not in {"high", "medium"}:
+                continue
+            hours = max((now - scheduled).total_seconds() / 3600, 0.0)
+            base = 72 if impact == "high" else 52
+            confidence = max(30, round(base - min(hours, 24) * 1.2))
+            drivers.append(
+                {
+                    "type": "macro_event",
+                    "label": str(event.get("title") or "USD macro event"),
+                    "confidence_pct": confidence,
+                    "evidence": {
+                        "impact": str(event.get("impact") or ""),
+                        "scheduled_at": event.get("scheduled_at"),
+                        "source": event.get("source"),
+                        "officially_verified": bool(event.get("verified_official")),
+                    },
+                }
+            )
+
+    pos = opportunity.get("range_position_pct")
+    rng = _f(opportunity.get("opportunity_range_pct"))
+    if pos is not None and rng >= 2.0:
+        if float(pos) >= 80 and move > 0:
+            drivers.append(
+                {
+                    "type": "technical",
+                    "label": "Price holding near 24h range high",
+                    "confidence_pct": 45,
+                    "evidence": {"range_position_pct": pos, "range_24h_pct": rng},
+                }
+            )
+        elif float(pos) <= 20 and move < 0:
+            drivers.append(
+                {
+                    "type": "technical",
+                    "label": "Price holding near 24h range low",
+                    "confidence_pct": 45,
+                    "evidence": {"range_position_pct": pos, "range_24h_pct": rng},
+                }
+            )
+
+    drivers.sort(key=lambda x: int(x.get("confidence_pct") or 0), reverse=True)
+    return {
+        "status": "candidate_drivers" if drivers else "unavailable",
+        "drivers": drivers[:6],
+        "note": (
+            "Candidate explanations are timing/correlation evidence, not claims of causation."
+            if drivers
+            else "No evidence-backed driver candidates are available yet."
         ),
     }
 
@@ -175,6 +293,10 @@ def asset_context(
         btc_corr = pearson_from_bars(bars, list(btc.bars))
         btc_opp = opportunity_24h(btc.view())
         btc_relative = round(_f(opp.get("net_change_pct")) - _f(btc_opp.get("net_change_pct")), 4)
+    cross_asset = {
+        "btc_correlation_4h": 1.0 if book.id == "btc" else btc_corr,
+        "relative_strength_vs_btc_24h_pct": 0.0 if book.id == "btc" else btc_relative,
+    }
     return {
         "opportunity_24h": opp,
         "windows": {
@@ -185,11 +307,15 @@ def asset_context(
             "7d": counted_window_stats(bars_1h, 168, "7d"),
             "30d": counted_window_stats(bars_1h, 720, "30d"),
         },
-        "cross_asset": {
-            "btc_correlation_4h": 1.0 if book.id == "btc" else btc_corr,
-            "relative_strength_vs_btc_24h_pct": 0.0 if book.id == "btc" else btc_relative,
-        },
-        "attribution": {"status": "unavailable", "drivers": [], "note": "No verified news/macro attribution feed is connected yet."},
+        "cross_asset": cross_asset,
+        "attribution": move_attribution(
+            book,
+            books,
+            opp,
+            cross_asset,
+            events,
+            calendar_connected,
+        ),
         "community": {
             "status": "unavailable", "sentiment": None, "velocity": None,
             "discussion_volume_ratio": None, "narratives": [],
