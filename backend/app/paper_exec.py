@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import time
 
-from app.clock import allow_after_losses, close_in_upper_third, is_new_five_minute
+from app.clock import allow_after_losses, is_new_five_minute
 
 SLIPPAGE_BPS = 5.0
 MAX_SPREAD_BPS = 10.0
@@ -65,7 +65,6 @@ def install(engine) -> None:
 
     engine_mod.POLL_SECONDS = 5
     engine_mod.STALE_MS = STALE_MS
-    engine_mod.BREAKOUT_BARS = 20
     original_tick = engine.tick
     original_eval = engine.evaluate_and_maybe_trade
     ticks = {"n": 0}
@@ -91,8 +90,6 @@ def install(engine) -> None:
         if protective:
             return None
         bars = list(engine.bars_1m)
-        if bars and not close_in_upper_third(bars[-1]):
-            return "weak_close"
         if not allow_after_losses(bars, int(getattr(engine, "consecutive_losses", 0) or 0)):
             return "loss_budget"
         return None
@@ -124,4 +121,4 @@ def install(engine) -> None:
     engine.evaluate_and_maybe_trade = wrapped_eval
     engine._fill_price = lambda side: slipped_price(side, engine.bid, engine.ask, engine.mark)
     engine.tick = wrapped_tick
-    engine._log("INFO", "Harsh paper on. 20-bar 5m Donchian. ATR compress/expand. One-way trail.")
+    engine._log("INFO", "Harsh paper on. Closed 5m/15m bars, 20-bar Donchian, momentum/cost gates, Chandelier trail.")

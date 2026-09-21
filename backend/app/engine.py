@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from collections import deque
 from datetime import datetime, timedelta, timezone
@@ -16,6 +17,7 @@ from app.persist import load_state, save_state
 from app.risk import deny_entry
 from app.strategy import (
     exit_plan,
+    risk_capped_qty,
     round_trip_cost_pct,
     sma,
     trend_breakout_snapshot,
@@ -23,7 +25,7 @@ from app.strategy import (
 )
 
 STARTING_USD = 10_000.0
-TAKER_FEE = 0.0026
+TAKER_FEE = float(os.getenv("AETHER_TAKER_FEE_RATE", "0.008"))
 POLL_SECONDS = 15
 SHORT_MA = 8
 LONG_MA = 21
@@ -34,7 +36,7 @@ MAX_DRAWDOWN_PCT = 8.0
 DAILY_LOSS_CAP = 250.0
 STALE_MS = 15_000
 BAR_HISTORY = 1440
-BREAKOUT_BARS = 6
+BREAKOUT_BARS = 20
 EFFICIENCY_MIN = 0.35
 COST_MULTIPLE = 1.4
 COOLDOWN_MINUTES = 15
@@ -259,7 +261,7 @@ class PaperEngine:
             "bid": self.bid,
             "ask": self.ask,
             "mark_source": self.mark_source,
-            "strategy": "sma_trend_breakout_v2",
+            "strategy": "sma_trend_breakout_v3",
             "short_ma": self.short_ma,
             "long_ma": self.long_ma,
             "stop_loss_pct": self.stop_loss_pct,
@@ -340,6 +342,7 @@ class PaperEngine:
                 breakout_bars=BREAKOUT_BARS,
                 efficiency_min=EFFICIENCY_MIN,
                 cost_multiple=COST_MULTIPLE,
+                stop_loss_pct=self.stop_loss_pct,
                 mark=self.mark,
                 bid=self.bid,
                 ask=self.ask,
@@ -366,7 +369,7 @@ class PaperEngine:
             "paper_mode": self.paper_mode,
             "live_blocked": self.live_blocked,
             "flatten_lock": self.flatten_lock,
-            "strategy": "sma_trend_breakout_v2",
+            "strategy": "sma_trend_breakout_v3",
             "short_ma": self.short_ma,
             "long_ma": self.long_ma,
             "stop_loss_pct": self.stop_loss_pct,
@@ -402,6 +405,7 @@ class PaperEngine:
             "cooldown_active": self._cooldown_active(),
             "consecutive_losses": self.consecutive_losses,
             "round_trip_cost_pct": cost_pct,
+            "taker_fee_pct": round(TAKER_FEE * 100, 4),
             "regime": self.last_strategy.get("regime"),
             "strategy_reason": self.last_strategy.get("reason"),
             "strategy_metrics": self.last_strategy,
@@ -721,11 +725,33 @@ class PaperEngine:
         if self.last_strategy.get("signal") != "buy":
             return
 
+        trade_qty = risk_capped_qty(
+            equity=self.equity,
+            price=float(self._fill_price("buy") or self.mark),
+            configured_qty=self.position_size,
+            stop_pct=float(
+                self.last_strategy.get("suggested_initial_stop_pct")
+                or self.stop_loss_pct
+            ),
+            cost_pct=float(
+                self.last_strategy.get("cost_pct")
+                or round_trip_cost_pct(
+                    self.mark,
+                    self.bid,
+                    self.ask,
+                    fee_rate=TAKER_FEE,
+                )
+            ),
+        )
+        if trade_qty <= 0:
+            self._risk_denied("risk_budget_zero", self.position_size, "bot")
+            return
+
         reason = deny_entry(
             flatten_lock=self.flatten_lock,
             paper_mode=self.paper_mode,
             live_blocked=self.live_blocked,
-            qty=self.position_size,
+            qty=trade_qty,
             position_btc=self.btc,
             max_position_btc=self.max_position,
             equity=self.equity,
@@ -737,21 +763,23 @@ class PaperEngine:
         if not reason:
             reason = self._paper_entry_guard(side="buy", protective=False)
         if reason:
-            self._risk_denied(reason, self.position_size, "bot")
+            self._risk_denied(reason, trade_qty, "bot")
             return
 
         px = self._fill_price("buy")
         self._log(
             "BOT",
             (
-                "Qualified SMA trend breakout. "
+                "Qualified trend breakout. "
+                f"quality={self.last_strategy.get('quality_score')} "
                 f"eff={self.last_strategy.get('efficiency')} "
-                f"edge={self.last_strategy.get('opportunity_pct')}% "
-                f"cost={self.last_strategy.get('cost_pct')}%."
+                f"coverage={self.last_strategy.get('cost_coverage')}x "
+                f"cost={self.last_strategy.get('cost_pct')}% "
+                f"qty={trade_qty}."
             ),
         )
         if px:
-            self._apply_fill("buy", self.position_size, px, "bot")
+            self._apply_fill("buy", trade_qty, px, "bot")
 
     async def tick(self) -> None:
         tick = await self.fetch_mark()

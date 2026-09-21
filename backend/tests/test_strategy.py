@@ -3,7 +3,9 @@ from app.strategy import (
     crossover_signal,
     efficiency_ratio,
     exit_plan,
+    multi_horizon_momentum,
     resample_bars,
+    risk_capped_qty,
     round_trip_cost_pct,
     sma,
     trend_breakout_snapshot,
@@ -57,7 +59,7 @@ def test_efficiency_distinguishes_trend_from_chop():
 
 def test_cost_model_includes_round_trip_fees_and_slip():
     cost = round_trip_cost_pct(100, 99.99, 100.01)
-    assert cost >= 0.62
+    assert cost >= 1.70
 
 
 def test_atr_and_exit_plan_are_finite():
@@ -83,3 +85,46 @@ def test_trend_breakout_rejects_flat_market():
         "low_efficiency",
         "no_breakout",
     }
+
+
+def test_complete_resample_drops_partial_bucket():
+    bars = [
+        {"ts": 1_700_000_100 + i * 60, "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1}
+        for i in range(6)
+    ]
+    partial_ok = resample_bars(bars, 5, require_complete=False)
+    complete = resample_bars(bars, 5, require_complete=True)
+    assert len(partial_ok) >= len(complete)
+    assert all(row["ts"] % 300 == 0 for row in complete)
+
+
+def test_multi_horizon_momentum_votes():
+    closes = [100 + i * 0.2 for i in range(80)]
+    out = multi_horizon_momentum(closes)
+    assert out["momentum_confirmed"] is True
+    assert out["momentum_votes"] >= 2
+
+
+def test_risk_cap_never_increases_configured_size():
+    qty = risk_capped_qty(
+        equity=10_000,
+        price=100_000,
+        configured_qty=0.01,
+        stop_pct=2.0,
+        cost_pct=1.7,
+    )
+    assert 0 < qty <= 0.01
+
+
+def test_trend_snapshot_uses_completed_higher_timeframe_bars():
+    bars = _bars(500, start=100, step=0.1)
+    snap = trend_breakout_snapshot(
+        bars,
+        breakout_bars=20,
+        mark=150,
+        bid=149.99,
+        ask=150.01,
+        fee_rate=0.008,
+    )
+    assert snap["bars_5m"] <= len(bars) // 5
+    assert snap["bars_15m"] <= len(bars) // 15

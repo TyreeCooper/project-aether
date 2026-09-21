@@ -2,34 +2,33 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from app.clock import allow_after_losses
 from app.paper_exec import SLIPPAGE_BPS
 from app.persist import state_path
-from app.strategy import exit_plan, trend_breakout_snapshot, trend_exit_signal
+from app.strategy import exit_plan, risk_capped_qty, trend_breakout_snapshot, trend_exit_signal
 
-TAKER_FEE = 0.0026
+TAKER_FEE = float(os.getenv("AETHER_TAKER_FEE_RATE", "0.008"))
 STARTING = 10_000.0
-MIN_OOS_TRADES = 8
+MIN_OOS_TRADES = 12
 CHAMPION = {
     "short_ma": 8,
     "long_ma": 21,
     "stop_loss_pct": 2.0,
-    "breakout_bars": 6,
+    "breakout_bars": 20,
     "efficiency_min": 0.35,
     "cost_multiple": 1.4,
 }
 CANDIDATES = (
-    {"short_ma": 6, "long_ma": 18, "stop_loss_pct": 1.5, "breakout_bars": 4, "efficiency_min": 0.30, "cost_multiple": 1.35},
-    {"short_ma": 8, "long_ma": 21, "stop_loss_pct": 1.5, "breakout_bars": 6, "efficiency_min": 0.35, "cost_multiple": 1.4},
-    {"short_ma": 8, "long_ma": 21, "stop_loss_pct": 2.0, "breakout_bars": 6, "efficiency_min": 0.35, "cost_multiple": 1.4},
-    {"short_ma": 10, "long_ma": 30, "stop_loss_pct": 2.0, "breakout_bars": 6, "efficiency_min": 0.40, "cost_multiple": 1.5},
-    {"short_ma": 12, "long_ma": 36, "stop_loss_pct": 2.5, "breakout_bars": 8, "efficiency_min": 0.45, "cost_multiple": 1.6},
+    {"short_ma": 6, "long_ma": 18, "stop_loss_pct": 1.8, "breakout_bars": 15, "efficiency_min": 0.30, "cost_multiple": 1.35},
+    {"short_ma": 8, "long_ma": 21, "stop_loss_pct": 2.0, "breakout_bars": 20, "efficiency_min": 0.35, "cost_multiple": 1.40},
+    {"short_ma": 10, "long_ma": 30, "stop_loss_pct": 2.2, "breakout_bars": 20, "efficiency_min": 0.40, "cost_multiple": 1.50},
+    {"short_ma": 12, "long_ma": 36, "stop_loss_pct": 2.5, "breakout_bars": 30, "efficiency_min": 0.45, "cost_multiple": 1.60},
 )
-
-
 def _learn_path() -> Path:
     return state_path().with_name("learn_state.json")
 
@@ -139,7 +138,7 @@ def score_exits(fills: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def replay(bars: list[dict[str, Any]], config: dict[str, Any]) -> dict[str, Any]:
-    if len(bars) < 360:
+    if len(bars) < 720:
         return {
             **config,
             "trades": 0,
@@ -149,14 +148,17 @@ def replay(bars: list[dict[str, Any]], config: dict[str, Any]) -> dict[str, Any]
             "pnl_usd": 0.0,
             "expectancy_usd": 0.0,
             "max_drawdown_pct": 0.0,
+            "insufficient_history": True,
         }
 
     usd = STARTING
     btc = 0.0
     avg = 0.0
     highest = 0.0
+    position_stop = 0.0
     entry_i: int | None = None
     wins = losses = flat = 0
+    consecutive_losses = 0
     pnl = 0.0
     peak = STARTING
     max_dd = 0.0
@@ -182,19 +184,19 @@ def replay(bars: list[dict[str, Any]], config: dict[str, Any]) -> dict[str, Any]
                 px,
                 float(config["stop_loss_pct"]),
                 cost_pct,
+                frozen_hard_stop=position_stop,
             )
+            position_stop = max(position_stop, float(plan["active_stop"]))
             timed_out = entry_i is not None and i - entry_i >= 180
             trend_failed = trend_exit_signal(
                 history,
                 int(config["short_ma"]),
                 int(config["long_ma"]),
             )
-            if (
-                float(bars[i]["low"]) <= float(plan["active_stop"])
-                or trend_failed
-                or timed_out
-            ):
-                fill = px * (1 - slip)
+            stop_hit = float(bars[i]["low"]) <= position_stop
+            if stop_hit or trend_failed or timed_out:
+                raw_exit = position_stop if stop_hit else px
+                fill = raw_exit * (1 - slip)
                 fee = fill * btc * TAKER_FEE
                 realized = (fill - avg) * btc - fee
                 usd += fill * btc - fee
@@ -202,19 +204,25 @@ def replay(bars: list[dict[str, Any]], config: dict[str, Any]) -> dict[str, Any]
                 trades += 1
                 if realized > 1e-9:
                     wins += 1
+                    consecutive_losses = 0
                 elif realized < -1e-9:
                     losses += 1
+                    consecutive_losses += 1
                 else:
                     flat += 1
                 btc = 0.0
                 avg = 0.0
                 highest = 0.0
+                position_stop = 0.0
                 entry_i = None
-                cooldown_until_i = i + 15
+                cooldown_until_i = i + (30 if consecutive_losses >= 2 else 15)
             continue
 
         if i < cooldown_until_i:
             continue
+        if not allow_after_losses(history, consecutive_losses):
+            continue
+
         snap = trend_breakout_snapshot(
             history,
             short_len=int(config["short_ma"]),
@@ -222,6 +230,7 @@ def replay(bars: list[dict[str, Any]], config: dict[str, Any]) -> dict[str, Any]
             breakout_bars=int(config["breakout_bars"]),
             efficiency_min=float(config["efficiency_min"]),
             cost_multiple=float(config["cost_multiple"]),
+            stop_loss_pct=float(config["stop_loss_pct"]),
             mark=px,
             bid=px * 0.9999,
             ask=px * 1.0001,
@@ -230,8 +239,21 @@ def replay(bars: list[dict[str, Any]], config: dict[str, Any]) -> dict[str, Any]
         )
         if snap.get("signal") != "buy":
             continue
+
         fill = px * (1 + slip)
-        qty = 0.01
+        fee_pct = TAKER_FEE * 2 * 100 + SLIPPAGE_BPS * 2 / 100
+        qty = risk_capped_qty(
+            equity=equity,
+            price=fill,
+            configured_qty=0.01,
+            stop_pct=float(
+                snap.get("suggested_initial_stop_pct")
+                or config["stop_loss_pct"]
+            ),
+            cost_pct=fee_pct,
+        )
+        if qty <= 0:
+            continue
         fee = fill * qty * TAKER_FEE
         cost = fill * qty + fee
         if cost <= usd:
@@ -240,6 +262,15 @@ def replay(bars: list[dict[str, Any]], config: dict[str, Any]) -> dict[str, Any]
             btc = qty
             highest = px
             entry_i = i
+            plan = exit_plan(
+                history,
+                avg,
+                highest,
+                px,
+                float(config["stop_loss_pct"]),
+                fee_pct,
+            )
+            position_stop = float(plan["active_stop"])
 
     return {
         **config,
@@ -250,8 +281,8 @@ def replay(bars: list[dict[str, Any]], config: dict[str, Any]) -> dict[str, Any]
         "pnl_usd": round(pnl, 4),
         "expectancy_usd": round(pnl / trades, 4) if trades else 0.0,
         "max_drawdown_pct": round(max_dd, 4),
+        "insufficient_history": False,
     }
-
 
 def review(
     bars: list[dict[str, Any]],
@@ -263,7 +294,7 @@ def review(
     champ.update(champion or state.get("champion") or {})
     live_score = score_exits(fills)
 
-    split = max(len(bars) // 2, 360)
+    split = max(len(bars) // 2, 720)
     train = bars[:split]
     test = bars[split:]
     ranked: list[dict[str, Any]] = []
@@ -305,6 +336,10 @@ def review(
         "promote_ready": bool(challenger),
         "live_exits": live_score,
         "bars_used": len(bars),
+        "history_warning": (
+            None if len(bars) >= 1440
+            else "Short research window: do not treat challenger performance as proof of profitability."
+        ),
         "candidates": ranked[:5],
         "last_review_at": datetime.now(timezone.utc).isoformat(),
         "note": (

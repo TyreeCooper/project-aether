@@ -36,12 +36,12 @@ logger.propagate = False
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    logger.info("event=app_start phase=begin version=2.0.0")
+    logger.info("event=app_start phase=begin version=2.1.0")
     await engine.initialize_persistence()
     install_harsh_paper(engine)
     engine.start_loop()
     logger.info(
-        "event=app_start phase=ready version=2.0.0 storage_configured=%s storage_initialized=%s live_ready=%s",
+        "event=app_start phase=ready version=2.1.0 storage_configured=%s storage_initialized=%s live_ready=%s",
         db_store.status().get("configured"),
         db_store.status().get("initialized"),
         live.status().get("live_ready"),
@@ -55,7 +55,7 @@ async def lifespan(_: FastAPI):
         logger.info("event=app_shutdown phase=complete")
 
 
-app = FastAPI(title="Project Aether API", version="2.0.0", lifespan=lifespan)
+app = FastAPI(title="Project Aether API", version="2.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
