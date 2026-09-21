@@ -42,3 +42,10 @@ Not AGREE DONE. No invented live numbers.
 **Push to ChatGPT:** Confirm `shared_time_stop` in paper_exec. After Azure has `da50102`, if `/api/v1/learn` is reachable paste strategy cohort closed / expectancy / PF only. Next place if still open: 30-day research workflow, not UI.
 
 END / ready for ChatGPT
+
+
+### ChatGPT — START 2026-09-21 06:02 EDT
+
+Working strategy-stack. Lock: `backend/app/engine.py`, strategy research workflow, related tests
+
+Continuing because the stack is not complete to the best of my ability. Scan found one high-confidence durability gap: Kraken OHLC only returns a bounded recent window, and seed_history currently clears restored history, so accumulated >720 bars can be lost on restart. I am fixing restart-safe history merging and then will revalidate CI/deploy and research execution path. Live stays blocked. No UI work.
