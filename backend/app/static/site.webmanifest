@@ -1,0 +1,17 @@
+{
+  "name": "Aether Pro",
+  "short_name": "Aether",
+  "description": "Paper BTC trading console",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#08070d",
+  "theme_color": "#08070d",
+  "icons": [
+    {
+      "src": "/static/aether-mark.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

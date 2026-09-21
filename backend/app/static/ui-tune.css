@@ -2,8 +2,7 @@
 
 .logo{
   width:34px;height:34px;border-radius:10px;font-size:0;color:transparent;
-  background:
-    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='%23f3a437'/><stop offset='1' stop-color='%237b61ff'/></linearGradient></defs><rect width='64' height='64' rx='16' fill='%23110f1a'/><circle cx='32' cy='32' r='20' fill='none' stroke='url(%23g)' stroke-width='3'/><path d='M28 18v28M24 22h14c5 0 8 2.4 8 6.2 0 2.6-1.6 4.6-4.4 5.5 3.2.8 5.2 3 5.2 6.1 0 4.2-3.4 6.2-9 6.2H24' fill='none' stroke='%23f5f3fb' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'/></svg>") center/cover no-repeat;
+  background:#110f1a url("/static/aether-mark.svg") center/cover no-repeat;
   box-shadow:0 0 0 1px rgba(243,164,55,.35),0 8px 18px rgba(0,0,0,.28);
 }
 .brand-title{font-size:13px;font-weight:700;letter-spacing:.14em}
