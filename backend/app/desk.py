@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 from app import live, venue
@@ -22,7 +23,7 @@ class MultiDesk:
         self.books = [PairBook(asset, self.wallet) for asset in ASSETS]
         self.by_id = {b.id: b for b in self.books}
         self._task: asyncio.Task | None = None
-        self.armed = False
+        self.armed = True
         self.live_blocked = True
 
     def marks(self) -> dict[str, float]:
@@ -55,10 +56,13 @@ class MultiDesk:
         except Exception as exc:
             logger.warning("markets failed %s", exc)
             return
+        ts = int(time.time())
         for item in items:
             book = self.by_id.get(str(item.get("id")))
-            if book:
-                book.apply_quote(item)
+            if not book:
+                continue
+            book.apply_quote(item)
+            book.push_px(ts)
 
     def _allocate(self) -> list[dict[str, Any]]:
         if not self.armed:
@@ -68,17 +72,25 @@ class MultiDesk:
         out: list[dict[str, Any]] = []
         for book in self.books:
             fresh, bucket = is_new_five_minute(list(book.bars), book.last_5m)
+            if book.last_5m is None and bucket is not None:
+                book.last_5m = bucket
+                continue
             if bucket is not None:
                 book.last_5m = bucket
             if not fresh:
                 continue
             if not book.wants_entry():
                 continue
-            result = book.enter(min(slice_usd, self.wallet.usd * 0.95))
+            result = book.enter(min(slice_usd, max(self.wallet.usd * 0.95, 0.0)))
             out.append(result)
-            live.place_order(  # noqa: already blocked
-                pair=book.kraken, side="buy", volume=result.get("qty") or 0
-            )
+            if result.get("ok"):
+                asyncio.create_task(
+                    live.place_order(
+                        pair=book.kraken,
+                        side="buy",
+                        volume=float(result.get("qty") or 0),
+                    )
+                )
         return out
 
     async def tick(self) -> None:
@@ -89,11 +101,18 @@ class MultiDesk:
             if row:
                 exits.append(row)
                 await live.place_order(
-                    pair=book.kraken, side="sell", volume=row.get("qty") or 0
+                    pair=book.kraken,
+                    side="sell",
+                    volume=float(row.get("qty") or 0),
                 )
         entries = self._allocate()
         if entries or exits:
-            logger.info("desk entries=%s exits=%s usd=%.2f", len(entries), len(exits), self.wallet.usd)
+            logger.info(
+                "desk entries=%s exits=%s usd=%.2f",
+                len(entries),
+                len(exits),
+                self.wallet.usd,
+            )
 
     def start(self) -> None:
         if self._task:
