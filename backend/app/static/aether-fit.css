@@ -1,0 +1,81 @@
+/* Phone shell: nothing on an asset page may leak past 430px. */
+html,body{
+  width:100%;
+  max-width:100%;
+  overflow-x:hidden !important;
+}
+.app-shell{
+  width:100% !important;
+  max-width:430px !important;
+  min-width:0 !important;
+  margin:0 auto !important;
+  padding-left:10px !important;
+  padding-right:10px !important;
+  padding-bottom:calc(78px + env(safe-area-inset-bottom)) !important;
+  overflow-x:hidden !important;
+}
+.topbar,
+.asset-nav,
+.view,
+.panel,
+.asset-hero,
+.dashboard-grid,
+.hero-grid,
+.page-title,
+.asset-page-head,
+.asset-chart-panel,
+.table-wrap,
+.line-chart,
+.asset-board,
+.metric-list{
+  min-width:0 !important;
+  max-width:100% !important;
+  box-sizing:border-box;
+}
+.page-title,
+.asset-page-head,
+.asset-hero,
+.asset-identity{
+  display:flex !important;
+  flex-wrap:wrap !important;
+}
+.page-title{align-items:flex-start !important;gap:8px !important}
+.page-title h1,.asset-page-head h1,.asset-identity h1{font-size:22px !important;letter-spacing:-.03em}
+.asset-hero{
+  flex-direction:column !important;
+  align-items:stretch !important;
+  gap:12px !important;
+  padding:12px !important;
+}
+.asset-hero strong{font-size:28px !important;word-break:break-word}
+.quote-grid{grid-template-columns:repeat(2,minmax(0,1fr)) !important}
+.hero-grid{grid-template-columns:repeat(2,minmax(0,1fr)) !important}
+.dashboard-grid{grid-template-columns:1fr !important}
+.span-2{grid-column:1 !important}
+.asset-row{
+  grid-template-columns:minmax(0,1.1fr) minmax(0,.8fr) minmax(0,.7fr) !important;
+}
+.asset-row span:nth-child(4),
+.asset-row span:nth-child(5),
+.asset-row span:nth-child(6){display:none !important}
+.line-chart{
+  width:100% !important;
+  height:168px !important;
+  overflow:hidden !important;
+}
+.line-chart svg{width:100% !important;height:100% !important;display:block}
+.table-wrap{overflow-x:auto !important;-webkit-overflow-scrolling:touch}
+.table-wrap table{min-width:520px}
+.bottom-nav{
+  left:50% !important;
+  right:auto !important;
+  transform:translateX(-50%) !important;
+  width:min(calc(100vw - 16px),412px) !important;
+  max-width:412px !important;
+  border-radius:16px !important;
+  bottom:max(6px,env(safe-area-inset-bottom)) !important;
+}
+.asset-nav{max-width:430px;margin:0 auto}
+.picker-row>div{grid-template-columns:minmax(0,1fr) !important}
+.control-row{flex-wrap:wrap}
+.toast{max-width:min(92vw,390px)}
