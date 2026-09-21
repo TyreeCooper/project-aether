@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from app import venue
 from app.db import db_store
 from app.engine import engine
+from app.paper_exec import install as install_harsh_paper
 
 STATIC = Path(__file__).parent / "static"
 
@@ -28,11 +29,12 @@ logger.propagate = False
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    logger.info("event=app_start phase=begin version=1.1.3")
+    logger.info("event=app_start phase=begin version=1.2.0")
     await engine.initialize_persistence()
+    install_harsh_paper(engine)
     engine.start_loop()
     logger.info(
-        "event=app_start phase=ready version=1.1.3 storage_configured=%s storage_initialized=%s",
+        "event=app_start phase=ready version=1.2.0 storage_configured=%s storage_initialized=%s",
         db_store.status().get("configured"),
         db_store.status().get("initialized"),
     )
@@ -45,7 +47,7 @@ async def lifespan(_: FastAPI):
         logger.info("event=app_shutdown phase=complete")
 
 
-app = FastAPI(title="Project Aether API", version="1.1.3", lifespan=lifespan)
+app = FastAPI(title="Project Aether API", version="1.2.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
