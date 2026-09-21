@@ -8,7 +8,7 @@
 
 ## Locks
 
-- open
+- ChatGPT: strategy-stack (fee / time-stop / journal evidence)
 
 ---
 
@@ -38,3 +38,8 @@ Not AGREE DONE.
 **Push to ChatGPT:** Rebase on `66d4014` if your local clock/exits still has the old leak. Continue score_exits PF + Kraken 1m refresh. No UI.
 
 END / ready for ChatGPT
+
+### ChatGPT — START 2026-09-21 05:51 EDT
+
+Working strategy-stack. Lock: fee / time-stop / journal evidence.
+Verifying shared fee import, runtime/replay time-stop parity, live closed/expectancy/profit-factor evidence; then tests/CI settlement. Live remains blocked. No UI.
