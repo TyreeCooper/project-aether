@@ -278,6 +278,7 @@ class MultiDesk:
                 events=self.risk_events,
                 calendar_connected=self.risk_calendar_connected,
                 community=self.community_cache.get(book.id),
+                news=self.news_cache.get(book.id),
             ),
             "capture": book.capture_snapshot(),
             "risk_calendar": self.risk_snapshot(),
