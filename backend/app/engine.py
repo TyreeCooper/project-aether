@@ -78,6 +78,31 @@ def fee_inclusive_avg_entry(
     return (prior_cost + new_cost) / new_qty
 
 
+def merge_bar_history(
+    existing: list[dict[str, Any]],
+    incoming: list[dict[str, Any]],
+    limit: int = BAR_HISTORY,
+) -> list[dict[str, Any]]:
+    """Merge restored and fresh OHLC without throwing away older valid history."""
+    merged: dict[int, dict[str, Any]] = {}
+    for source in (existing, incoming):
+        for row in source:
+            try:
+                clean = {
+                    "ts": int(row["ts"]),
+                    "open": float(row["open"]),
+                    "high": float(row["high"]),
+                    "low": float(row["low"]),
+                    "close": float(row["close"]),
+                    "volume": float(row.get("volume", 0) or 0),
+                }
+            except (KeyError, TypeError, ValueError):
+                continue
+            merged[clean["ts"]] = clean
+    ordered = [merged[ts] for ts in sorted(merged)]
+    return ordered[-max(1, int(limit)):]
+
+
 class PaperEngine:
     def __init__(self) -> None:
         self.paper_mode = True
@@ -457,25 +482,18 @@ class PaperEngine:
             bars = await venue.fetch_bars(interval=1, limit=BAR_HISTORY)
             if len(bars) > 1:
                 bars = bars[:-1]
+            merged = merge_bar_history(list(self.bars_1m), bars, BAR_HISTORY)
             self.bars_1m.clear()
             self.closes.clear()
-            for bar in bars[-BAR_HISTORY:]:
-                clean = {
-                    "ts": int(bar["ts"]),
-                    "open": float(bar["open"]),
-                    "high": float(bar["high"]),
-                    "low": float(bar["low"]),
-                    "close": float(bar["close"]),
-                    "volume": float(bar.get("volume", 0) or 0),
-                }
+            for clean in merged:
                 self.bars_1m.append(clean)
-                self.closes.append(clean["close"])
+                self.closes.append(float(clean["close"]))
             if self.bars_1m:
                 self.mark = float(self.bars_1m[-1]["close"])
                 self.mark_source = "kraken"
             self._log(
                 "INFO",
-                f"Seeded {len(self.bars_1m)} completed Kraken 1m bars.",
+                f"Seeded/merged {len(self.bars_1m)} completed Kraken 1m bars.",
             )
             self._persist()
         except Exception as exc:

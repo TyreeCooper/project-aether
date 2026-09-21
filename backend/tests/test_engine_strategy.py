@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from app.engine import PaperEngine
+from app.engine import BAR_HISTORY, PaperEngine, merge_bar_history
 
 
 def test_daily_realized_resets_on_new_utc_day():
@@ -58,3 +58,35 @@ def test_authoritative_closed_bar_replaces_sampled_candle():
     assert engine.bars_1m[-1]["high"] == 103.0
     assert engine.bars_1m[-1]["low"] == 97.0
     assert engine.bars_1m[-1]["volume"] == 12.0
+
+
+def test_merge_history_preserves_restored_bars_beyond_kraken_window():
+    existing = [
+        {
+            "ts": 1_700_000_000 + i * 60,
+            "open": 100 + i,
+            "high": 101 + i,
+            "low": 99 + i,
+            "close": 100.5 + i,
+            "volume": 1,
+        }
+        for i in range(900)
+    ]
+    incoming = [
+        {
+            "ts": 1_700_000_000 + i * 60,
+            "open": 200 + i,
+            "high": 201 + i,
+            "low": 199 + i,
+            "close": 200.5 + i,
+            "volume": 2,
+        }
+        for i in range(500, 1220)
+    ]
+    merged = merge_bar_history(existing, incoming, BAR_HISTORY)
+    assert len(merged) == 1220
+    assert merged[0]["ts"] == existing[0]["ts"]
+    assert merged[-1]["ts"] == incoming[-1]["ts"]
+    overlap = next(row for row in merged if row["ts"] == incoming[0]["ts"])
+    assert overlap["close"] == incoming[0]["close"]
+    assert overlap["volume"] == 2
