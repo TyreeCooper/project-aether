@@ -27,7 +27,7 @@ async def lifespan(_: FastAPI):
         await db_store.close()
 
 
-app = FastAPI(title="Project Aether API", version="1.1.0", lifespan=lifespan)
+app = FastAPI(title="Project Aether API", version="1.1.1", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -79,6 +79,12 @@ async def home():
         html = html.replace(
             "</head>",
             '<link rel="stylesheet" href="/static/ui-tune.css"/></head>',
+            1,
+        )
+    if "ledger-order.js" not in html:
+        html = html.replace(
+            "</body>",
+            '<script src="/static/ledger-order.js"></script></body>',
             1,
         )
     return HTMLResponse(html)
