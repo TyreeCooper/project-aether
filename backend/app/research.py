@@ -9,7 +9,7 @@ from typing import Any
 
 import httpx
 
-from app.learn import CHAMPION, STARTING, TAKER_FEE, replay
+from app.learn import CANDIDATES, CHAMPION, STARTING, TAKER_FEE, replay
 from app.paper_exec import SLIPPAGE_BPS
 from app.performance import summarize_backtest
 from app.strategy import resample_bars, sma
@@ -89,7 +89,12 @@ def validate_bars(bars: list[dict[str, Any]]) -> dict[str, Any]:
         return {"ok": False, "bars": 0, "gaps": 0, "duplicates": 0}
     ts = [int(b["ts"]) for b in bars]
     duplicates = len(ts) - len(set(ts))
-    gaps = sum(1 for a, b in zip(ts, ts[1:]) if b - a > 60)
+    gap_samples = [
+        {"after": a, "before": b, "missing_minutes": max((b - a) // 60 - 1, 0)}
+        for a, b in zip(ts, ts[1:])
+        if b - a > 60
+    ]
+    gaps = len(gap_samples)
     backwards = sum(1 for a, b in zip(ts, ts[1:]) if b <= a)
     return {
         "ok": duplicates == 0 and backwards == 0 and gaps == 0,
@@ -97,6 +102,7 @@ def validate_bars(bars: list[dict[str, Any]]) -> dict[str, Any]:
         "gaps": gaps,
         "duplicates": duplicates,
         "backwards": backwards,
+        "gap_samples": gap_samples[:10],
         "start": datetime.fromtimestamp(ts[0], tz=timezone.utc).isoformat(),
         "end": datetime.fromtimestamp(ts[-1], tz=timezone.utc).isoformat(),
     }
@@ -259,18 +265,19 @@ def walk_forward_v3(
 
     warm = 1_440
     remaining = n - warm
-    fold_size = max(720, remaining // max(1, folds))
+    fold_count = max(1, int(folds))
     results: list[dict[str, Any]] = []
-    cursor = warm
-    while cursor < n:
-        end = min(n, cursor + fold_size)
-        segment = bars[max(0, cursor - 1_440) : end]
-        warm_count = min(1_440, cursor)
+    for fold_idx in range(fold_count):
+        cursor = warm + (remaining * fold_idx) // fold_count
+        end = warm + (remaining * (fold_idx + 1)) // fold_count
+        if end <= cursor:
+            continue
+        segment = bars[max(0, cursor - warm) : end]
         result = replay(
             segment,
             config,
             detailed=True,
-            start_index=warm_count,
+            start_index=warm,
         )
         results.append(
             {
@@ -279,7 +286,6 @@ def walk_forward_v3(
                 "summary": result["summary"],
             }
         )
-        cursor = end
 
     profitable = sum(
         1 for x in results if float(x["summary"]["net_pnl_usd"]) > 0
@@ -296,10 +302,60 @@ def walk_forward_v3(
     }
 
 
+def _fold_aggregate(walk: dict[str, Any]) -> dict[str, Any]:
+    folds = list(walk.get("folds") or [])
+    summaries = [f.get("summary") or {} for f in folds]
+    trades = sum(int(s.get("trades") or 0) for s in summaries)
+    net = sum(float(s.get("net_pnl_usd") or 0) for s in summaries)
+    gross_profit = sum(float(s.get("gross_profit_usd") or 0) for s in summaries)
+    gross_loss = sum(float(s.get("gross_loss_usd") or 0) for s in summaries)
+    return {
+        "trades": trades,
+        "net_pnl_usd": round(net, 4),
+        "expectancy_usd": round(net / trades, 4) if trades else 0.0,
+        "gross_profit_usd": round(gross_profit, 4),
+        "gross_loss_usd": round(gross_loss, 4),
+        "profit_factor": (
+            round(gross_profit / gross_loss, 6)
+            if gross_loss > 1e-12
+            else None
+        ),
+        "max_fold_drawdown_pct": round(
+            max((float(s.get("max_drawdown_pct") or 0) for s in summaries), default=0.0),
+            6,
+        ),
+        "profitable_folds": int(walk.get("profitable_folds") or 0),
+        "total_folds": int(walk.get("total_folds") or 0),
+    }
+
+
+def candidate_diagnostics(bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for config in CANDIDATES:
+        full = replay(bars, dict(config), detailed=True)
+        walk = walk_forward_v3(bars, dict(config))
+        trade_log = list(full.get("trade_log") or [])
+        reasons: dict[str, int] = {}
+        for trade in trade_log:
+            reason = str(trade.get("exit_reason") or "unknown")
+            reasons[reason] = reasons.get(reason, 0) + 1
+        rows.append(
+            {
+                "params": dict(config),
+                "full_sample": full["summary"],
+                "oos": _fold_aggregate(walk),
+                "exit_reasons": reasons,
+            }
+        )
+    return rows
+
+
 def compare_strategies(bars: list[dict[str, Any]]) -> dict[str, Any]:
     v3 = replay(bars, dict(CHAMPION), detailed=True)
+    quality = validate_bars(bars)
     return {
-        "data_quality": validate_bars(bars),
+        "data_quality": quality,
+        "valid_for_profitability_gate": bool(quality.get("ok")),
         "assumptions": {
             "taker_fee_rate": TAKER_FEE,
             "slippage_bps_each_side": SLIPPAGE_BPS,
@@ -313,6 +369,7 @@ def compare_strategies(bars: list[dict[str, Any]]) -> dict[str, Any]:
             "donchian_20_10": donchian_baseline(bars)["summary"],
         },
         "walk_forward_v3": walk_forward_v3(bars),
+        "candidate_diagnostics": candidate_diagnostics(bars),
     }
 
 
