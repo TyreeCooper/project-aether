@@ -5,7 +5,8 @@ import os
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app import venue
@@ -26,7 +27,7 @@ async def lifespan(_: FastAPI):
         await db_store.close()
 
 
-app = FastAPI(title="Project Aether API", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="Project Aether API", version="1.0.1", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -73,7 +74,14 @@ def _basis(exec_last, watch_last):
 
 @app.get("/")
 async def home():
-    return FileResponse(STATIC / "index.html")
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    if "ui-tune.css" not in html:
+        html = html.replace(
+            "</head>",
+            '<link rel="stylesheet" href="/static/ui-tune.css"/></head>',
+            1,
+        )
+    return HTMLResponse(html)
 
 
 @app.get("/api/v1/health")
@@ -180,8 +188,6 @@ async def audit():
     return {"events": list(engine.audit)}
 
 
-
-
 @app.get("/api/v1/history/orders")
 async def history_orders(limit: int = Query(default=100, ge=1, le=500)):
     return {"items": await db_store.history_orders(limit), "limit": limit}
@@ -243,3 +249,6 @@ async def flatten(_: None = Depends(require_operator)):
 @app.post("/api/v1/risk/unlock")
 async def unlock(_: None = Depends(require_operator)):
     return await engine.unlock()
+
+
+app.mount("/static", StaticFiles(directory=STATIC), name="static")
