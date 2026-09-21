@@ -14,6 +14,7 @@ from app.crypto_events import fetch_crypto_calendar
 from app.db import db_store
 from app.intelligence import asset_context, floor_intelligence
 from app.news import fetch_asset_news
+from app.official_macro import verify_macro_events
 from app.desk_persist import load_desk, save_desk
 from app.events import active_risk, fetch_calendar
 from app.universe import ASSETS, export_assets, register_asset
@@ -51,6 +52,11 @@ class MultiDesk:
         self.live_blocked = True
         self.risk_events: list[dict[str, Any]] = []
         self.risk_calendar_connected = False
+        self.official_macro_sources: dict[str, dict[str, Any]] = {
+            "bls": {"connected": False, "status": "unavailable"},
+            "federal_reserve": {"connected": False, "status": "planned"},
+            "bea": {"connected": False, "status": "planned"},
+        }
         self._last_risk_refresh = 0.0
         self.crypto_events: list[dict[str, Any]] = []
         self.crypto_calendar_connected = False
@@ -240,6 +246,9 @@ class MultiDesk:
                 news_cache=self.news_cache,
                 crypto_calendar_connected=self.crypto_calendar_connected,
                 crypto_calendar_configured=self.crypto_calendar_configured,
+                bls_connected=bool(
+                    (self.official_macro_sources.get("bls") or {}).get("connected")
+                ),
             ),
             "risk_calendar": self.risk_snapshot(),
         }
@@ -405,8 +414,29 @@ class MultiDesk:
             return
         self._last_risk_refresh = now
         try:
-            self.risk_events = await fetch_calendar()
+            events = await fetch_calendar()
             self.risk_calendar_connected = True
+            try:
+                events, official = await verify_macro_events(events)
+                self.official_macro_sources = official
+            except Exception as exc:
+                self.official_macro_sources = {
+                    "bls": {
+                        "connected": False,
+                        "status": "degraded",
+                        "note": f"Official verification failed: {type(exc).__name__}",
+                    },
+                    "federal_reserve": {
+                        "connected": False,
+                        "status": "planned",
+                    },
+                    "bea": {
+                        "connected": False,
+                        "status": "planned",
+                    },
+                }
+                logger.warning("official macro verification failed %s", exc)
+            self.risk_events = events
         except Exception as exc:
             self.risk_calendar_connected = False
             logger.warning("risk calendar refresh failed %s", exc)
@@ -416,6 +446,7 @@ class MultiDesk:
         return {
             **state,
             "calendar_connected": self.risk_calendar_connected,
+            "official_sources": self.official_macro_sources,
             "events": self.risk_events,
             "crypto_calendar": {
                 "provider": "CoinMarketCal",
