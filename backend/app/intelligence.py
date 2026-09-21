@@ -419,21 +419,33 @@ def move_attribution(
     # candidate explanation, but cannot establish causality or create an order.
     news_row = news or {}
     if str(news_row.get("status") or "") == "shadow":
-        domains = int(_f(news_row.get("independent_domains")))
         articles = int(_f(news_row.get("articles_analyzed")))
         narratives = list(news_row.get("narratives") or [])
-        if articles > 0 and domains >= 2:
+        clusters = list(news_row.get("story_clusters") or [])
+        corroborated = [
+            row for row in clusters
+            if bool(row.get("corroborated"))
+        ]
+        if articles > 0 and corroborated:
+            strongest = max(
+                corroborated,
+                key=lambda row: int(row.get("independent_domains") or 0),
+            )
+            domains = int(strongest.get("independent_domains") or 0)
             confidence = min(55, 30 + min(domains, 5) * 5)
             drivers.append(
                 {
                     "type": "asset_news",
-                    "label": "Asset-specific news cluster",
+                    "label": "Corroborated asset-news story",
                     "confidence_pct": confidence,
                     "evidence": {
                         "articles_analyzed": articles,
+                        "story_title": strongest.get("representative_title"),
                         "independent_domains": domains,
+                        "corroborated_story_clusters": len(corroborated),
                         "top_narratives": narratives[:3],
                         "claims_verified": bool(news_row.get("claims_verified")),
+                        "verification_state": news_row.get("verification_state"),
                         "source_mode": "discovery_shadow",
                     },
                 }
