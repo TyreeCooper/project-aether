@@ -1,6 +1,7 @@
 """Conservative paper execution and market-quality guards."""
 from __future__ import annotations
 
+import os
 import time
 
 from app.clock import allow_after_losses, is_new_five_minute
@@ -10,6 +11,7 @@ MAX_SPREAD_BPS = 10.0
 MAX_BASIS_USD = 80.0
 STALE_MS = 8_000
 REVIEW_EVERY_TICKS = 60
+KRAKEN_TAKER = float(os.getenv("AETHER_TAKER_FEE_RATE", "0.0026"))
 
 
 def slipped_price(
@@ -62,13 +64,41 @@ def deny_microstructure(
 
 def install(engine) -> None:
     import app.engine as engine_mod
+    from app.strategy import exit_plan as real_exit
 
     engine_mod.POLL_SECONDS = 5
     engine_mod.STALE_MS = STALE_MS
+    engine_mod.BREAKOUT_BARS = 20
+    engine_mod.TAKER_FEE = KRAKEN_TAKER
     original_tick = engine.tick
     original_eval = engine.evaluate_and_maybe_trade
     ticks = {"n": 0}
     engine._last_5m_bucket = getattr(engine, "_last_5m_bucket", None)
+
+    def bound_exit(
+        bars,
+        entry_price,
+        highest_price,
+        mark,
+        configured_stop_pct,
+        cost_pct,
+        frozen_hard_stop: float = 0.0,
+        **kwargs,
+    ):
+        freeze = max(
+            float(frozen_hard_stop or 0),
+            float(getattr(engine, "position_stop", 0) or 0),
+        )
+        return real_exit(
+            bars,
+            entry_price,
+            highest_price,
+            mark,
+            configured_stop_pct,
+            cost_pct,
+            frozen_hard_stop=freeze,
+            **kwargs,
+        )
 
     def guard(side: str = "buy", protective: bool = False) -> str | None:
         stale = True
@@ -117,8 +147,12 @@ def install(engine) -> None:
         except Exception as exc:
             engine._log("WARN", f"Journal pass skipped: {exc}")
 
+    engine_mod.exit_plan = bound_exit
     engine._paper_entry_guard = guard
     engine.evaluate_and_maybe_trade = wrapped_eval
     engine._fill_price = lambda side: slipped_price(side, engine.bid, engine.ask, engine.mark)
     engine.tick = wrapped_tick
-    engine._log("INFO", "Harsh paper on. Closed 5m/15m bars, 20-bar Donchian, momentum/cost gates, Chandelier trail.")
+    engine._log(
+        "INFO",
+        f"Harsh paper on. Frozen stop. Fee {KRAKEN_TAKER}. 20-bar 5m Donchian. Live blocked.",
+    )
