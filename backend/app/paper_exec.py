@@ -8,6 +8,7 @@ SLIPPAGE_BPS = 5.0
 MAX_SPREAD_BPS = 10.0
 MAX_BASIS_USD = 80.0
 STALE_MS = 15_000
+REVIEW_EVERY_TICKS = 40
 
 
 def slipped_price(side: str, bid: float | None, ask: float | None, mark: float | None) -> float | None:
@@ -56,10 +57,12 @@ def deny_microstructure(
 
 
 def install(engine) -> None:
-    """Slip fills and block dirty entries on the live paper singleton."""
+    """Slip fills, block dirty entries, and keep a quiet journal."""
     import app.engine as engine_mod
 
     inner_deny = engine_mod.deny_entry
+    original_tick = engine.tick
+    ticks = {"n": 0}
 
     def wrapped_deny(**kwargs):
         reason = inner_deny(**kwargs)
@@ -79,6 +82,22 @@ def install(engine) -> None:
             watch_last=getattr(engine, "watch_last", None),
         )
 
+    async def wrapped_tick():
+        await original_tick()
+        ticks["n"] += 1
+        if ticks["n"] % REVIEW_EVERY_TICKS:
+            return
+        try:
+            from app import learn
+            from app.db import db_store
+
+            fills = await db_store.history_fills(300)
+            learn.review(list(engine.closes), fills)
+            engine._log("INFO", "Journal wrote a quiet pass.")
+        except Exception as exc:
+            engine._log("WARN", f"Journal pass skipped: {exc}")
+
     engine_mod.deny_entry = wrapped_deny
     engine._fill_price = lambda side: slipped_price(side, engine.bid, engine.ask, engine.mark)
-    engine._log("INFO", "Harsh paper execution on: +5bps slip, spread/stale/fallback gates.")
+    engine.tick = wrapped_tick
+    engine._log("INFO", "Harsh paper on. Journal reviews in the background.")
