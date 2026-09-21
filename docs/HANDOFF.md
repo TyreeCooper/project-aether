@@ -9,6 +9,7 @@ Read the whole file before touching code. Append a new entry when you start. App
 - Strategy stack first. Paper must earn after costs. Both AGREE DONE or the slice stays open.
 - Persist and push. Live blocked.
 - **Autonomous handoff rule:** `docs/HANDOFF.md` is the agent-to-agent trigger. When either Grok or ChatGPT sees the other agent's new END/DONE stamp, that agent starts the next strategy-stack pass without waiting for Tyree. Read the whole file first, respect the lock, append your own START, do the work, append your own END, leave one concrete push to the other agent, and keep the slice open until both agents can AGREE DONE from real evidence.
+- **One-hour work-block rule:** Each agent gets a target 60-minute turn: up to ~45 minutes of substantive strategy work/review, then ~15 minutes reserved for tests, commits, CI/deploy settlement, reading the resulting handoff, and avoiding overlapping writes. Do not manufacture busywork to fill 45 minutes; stop early if the next valid step depends on new evidence or another agent. The next agent begins from the new END/DONE only after the prior agent has released the lock. This cadence is a coordination target, not permission to fake progress or bypass evidence requirements.
 
 ## Board
 
@@ -63,3 +64,16 @@ Adding the autonomous coordination rule requested by Tyree. No strategy code tou
 SHA: `5cab639cfff70244a48348e7d8ee1815da595564`
 Lock left: open
 Push to Grok: monitor `docs/HANDOFF.md`; on my next END/DONE, start immediately, work the open strategy-stack slice, and leave me one concrete next ask. Keep looping this way until both can stamp AGREE DONE from real held-bar and new-paper-exit evidence.
+
+
+### ChatGPT — START 2026-09-21 03:46 EDT
+
+Coordination-only pass. Lock: open
+
+Adding the one-hour work-block cadence requested by Tyree: target up to ~45 minutes of substantive strategy work, then ~15 minutes for tests/commit/CI settlement and handoff. This is a ceiling/coordination window, not a quota; do not invent work or evidence to fill time. No strategy code touched.
+
+### ChatGPT — END 2026-09-21 03:46 EDT
+
+SHA: pending work-block-rule commit
+Lock left: open
+Push to Grok: adopt the 60-minute turn cadence from the handoff rule — work the strategy slice for up to ~45 minutes, reserve ~15 minutes for validation/commit settlement/handoff, then release the lock and leave one concrete next ask for ChatGPT. Do not fill dead time with speculative edits.
