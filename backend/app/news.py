@@ -36,6 +36,84 @@ def _domain(url: str) -> str:
         return ""
 
 
+def _title_token_set(title: str) -> set[str]:
+    return set(_tokens(title))
+
+
+def _jaccard(a: set[str], b: set[str]) -> float:
+    union = a | b
+    return len(a & b) / len(union) if union else 0.0
+
+
+def cluster_articles(
+    articles: list[dict[str, Any]],
+    *,
+    similarity_threshold: float = 0.55,
+) -> list[dict[str, Any]]:
+    clusters: list[dict[str, Any]] = []
+    for article in articles:
+        title = str(article.get("title") or "")
+        tokens = _title_token_set(title)
+        if not tokens:
+            continue
+        best_index = None
+        best_score = 0.0
+        for index, cluster in enumerate(clusters):
+            score = _jaccard(tokens, set(cluster["_tokens"]))
+            if score > best_score:
+                best_score = score
+                best_index = index
+        if best_index is None or best_score < similarity_threshold:
+            clusters.append(
+                {
+                    "representative_title": title,
+                    "_tokens": sorted(tokens),
+                    "articles": [article],
+                }
+            )
+        else:
+            clusters[best_index]["articles"].append(article)
+            clusters[best_index]["_tokens"] = sorted(
+                set(clusters[best_index]["_tokens"]) | tokens
+            )
+
+    out: list[dict[str, Any]] = []
+    for cluster in clusters:
+        rows = list(cluster["articles"])
+        domains = sorted(
+            {
+                str(row.get("domain") or "")
+                for row in rows
+                if str(row.get("domain") or "")
+            }
+        )
+        seen = sorted(
+            str(row.get("seen_at") or "")
+            for row in rows
+            if row.get("seen_at")
+        )
+        out.append(
+            {
+                "representative_title": cluster["representative_title"],
+                "article_count": len(rows),
+                "independent_domains": len(domains),
+                "domains": domains,
+                "first_seen_at": seen[0] if seen else None,
+                "last_seen_at": seen[-1] if seen else None,
+                "corroborated": len(domains) >= 2,
+            }
+        )
+    out.sort(
+        key=lambda row: (
+            bool(row.get("corroborated")),
+            int(row.get("independent_domains") or 0),
+            int(row.get("article_count") or 0),
+        ),
+        reverse=True,
+    )
+    return out
+
+
 def analyze_articles(asset_id: str, articles: list[dict[str, Any]]) -> dict[str, Any]:
     terms: list[str] = []
     domains: set[str] = set()
@@ -48,6 +126,11 @@ def analyze_articles(asset_id: str, articles: list[dict[str, Any]]) -> dict[str,
         {"term": term, "mentions": count}
         for term, count in Counter(terms).most_common(8)
     ]
+    story_clusters = cluster_articles(articles)
+    corroborated = [
+        row for row in story_clusters
+        if bool(row.get("corroborated"))
+    ]
     return {
         "asset_id": asset_id,
         "status": "shadow" if articles else "unavailable",
@@ -55,11 +138,21 @@ def analyze_articles(asset_id: str, articles: list[dict[str, Any]]) -> dict[str,
         "trade_influence_enabled": False,
         "articles_analyzed": len(articles),
         "independent_domains": len(domains),
+        "unique_story_clusters": len(story_clusters),
+        "corroborated_story_clusters": len(corroborated),
+        "verification_state": (
+            "corroborated_unverified"
+            if corroborated
+            else "unconfirmed"
+            if articles
+            else "unavailable"
+        ),
+        "story_clusters": story_clusters[:10],
         "narratives": narratives,
         "articles": articles[:10],
         "claims_verified": False,
         "note": (
-            "News headlines are discovery context only; causal claims require corroboration."
+            "Near-duplicate headlines are collapsed into story clusters. Cross-domain corroboration is not the same as primary-source verification."
             if articles
             else "No asset-specific news context is currently available."
         ),
