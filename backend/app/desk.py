@@ -51,6 +51,8 @@ class MultiDesk:
             min(int(os.getenv("AETHER_DESK_POLL_SECONDS", str(POLL))), 120),
         )
         self.live_blocked = True
+        self._last_market_success = 0.0
+        self._last_market_error: str | None = None
         self.risk_events: list[dict[str, Any]] = []
         self.risk_calendar_connected = False
         self.official_macro_sources: dict[str, dict[str, Any]] = {
@@ -182,6 +184,104 @@ class MultiDesk:
             "quote_poll_seconds": int(self.poll_seconds),
             "resume_armed_after_restart": True,
             "state_persistence": True,
+        }
+
+    @staticmethod
+    def _age_seconds(timestamp: float, now: float) -> float | None:
+        return round(now - timestamp, 2) if timestamp > 0 else None
+
+    def intelligence_health_snapshot(self) -> dict[str, Any]:
+        now = time.time()
+        market_age = self._age_seconds(self._last_market_success, now)
+        market_state = (
+            "offline"
+            if self._last_market_success <= 0 and self._last_market_error
+            else "unavailable"
+            if self._last_market_success <= 0
+            else "stale"
+            if market_age is not None
+            and market_age > max(self.poll_seconds * 3, 180)
+            else "healthy"
+        )
+
+        def rotating_feed(
+            cache: dict[str, dict[str, Any]],
+            per_asset_seconds: int,
+        ) -> dict[str, Any]:
+            expected = max(len(self.books), 1)
+            coverage = len(cache) / expected
+            fetched = [
+                float(row.get("fetched_at") or 0)
+                for row in cache.values()
+                if float(row.get("fetched_at") or 0) > 0
+            ]
+            oldest_age = (
+                max(now - value for value in fetched)
+                if fetched
+                else None
+            )
+            cycle = per_asset_seconds * expected
+            degraded = any(
+                str(row.get("status") or "") == "degraded"
+                for row in cache.values()
+            )
+            if degraded:
+                state = "degraded"
+            elif coverage < 1:
+                state = "partial" if cache else "unavailable"
+            elif oldest_age is not None and oldest_age > cycle * 2.5:
+                state = "stale"
+            else:
+                state = "healthy"
+            return {
+                "state": state,
+                "coverage_pct": round(min(coverage, 1.0) * 100, 2),
+                "oldest_age_seconds": (
+                    None if oldest_age is None else round(oldest_age, 2)
+                ),
+                "expected_cycle_seconds": cycle,
+            }
+
+        macro_age = self._age_seconds(self._last_risk_refresh, now)
+        macro_state = (
+            "healthy"
+            if self.risk_calendar_connected
+            and macro_age is not None
+            and macro_age <= 900
+            else "stale"
+            if self.risk_calendar_connected
+            else "degraded"
+        )
+        crypto_age = self._age_seconds(self._last_crypto_refresh, now)
+        crypto_state = (
+            "unconfigured"
+            if not self.crypto_calendar_configured
+            else "healthy"
+            if self.crypto_calendar_connected
+            and crypto_age is not None
+            and crypto_age <= 2700
+            else "stale"
+            if self.crypto_calendar_connected
+            else "degraded"
+        )
+        return {
+            "market": {
+                "state": market_state,
+                "last_success_age_seconds": market_age,
+                "last_error": self._last_market_error,
+            },
+            "macro_calendar": {
+                "state": macro_state,
+                "last_refresh_age_seconds": macro_age,
+            },
+            "crypto_calendar": {
+                "state": crypto_state,
+                "last_refresh_age_seconds": crypto_age,
+            },
+            "news": rotating_feed(self.news_cache, 45),
+            "community": rotating_feed(self.community_cache, 30),
+            "official_macro": self.official_macro_sources,
+            "note": "Unavailable, partial, degraded, stale, and healthy are distinct states.",
         }
 
     def source_registry_snapshot(self) -> dict[str, Any]:
@@ -408,11 +508,13 @@ class MultiDesk:
         book = self.books[self._news_cursor % len(self.books)]
         self._news_cursor = (self._news_cursor + 1) % max(len(self.books), 1)
         try:
-            self.news_cache[book.id] = await fetch_asset_news(
+            result = await fetch_asset_news(
                 book.id,
                 name=book.name,
                 symbol=book.symbol,
             )
+            result["fetched_at"] = now
+            self.news_cache[book.id] = result
         except Exception as exc:
             self.news_cache[book.id] = {
                 "asset_id": book.id,
@@ -420,6 +522,7 @@ class MultiDesk:
                 "shadow_only": True,
                 "trade_influence_enabled": False,
                 "note": f"News refresh failed: {type(exc).__name__}",
+                "fetched_at": now,
             }
 
     async def _refresh_one_community(self, force: bool = False) -> None:
@@ -432,7 +535,9 @@ class MultiDesk:
         book = self.books[self._community_cursor % len(self.books)]
         self._community_cursor = (self._community_cursor + 1) % max(len(self.books), 1)
         try:
-            self.community_cache[book.id] = await fetch_reddit(book.id)
+            result = await fetch_reddit(book.id)
+            result["fetched_at"] = now
+            self.community_cache[book.id] = result
         except Exception as exc:
             self.community_cache[book.id] = {
                 "asset_id": book.id,
@@ -440,6 +545,7 @@ class MultiDesk:
                 "shadow_only": True,
                 "trade_influence_enabled": False,
                 "note": f"Community refresh failed: {type(exc).__name__}",
+                "fetched_at": now,
             }
 
     async def _refresh_risk_calendar(self, force: bool = False) -> None:
@@ -637,8 +743,11 @@ class MultiDesk:
         try:
             items = await venue.fetch_markets()
         except Exception as exc:
+            self._last_market_error = f"{type(exc).__name__}: {exc}"
             logger.warning("markets failed %s", exc)
             return
+        self._last_market_success = time.time()
+        self._last_market_error = None
         ts = int(time.time())
         for item in items:
             book = self.by_id.get(str(item.get("id")))
