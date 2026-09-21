@@ -21,3 +21,4 @@ def test_validate_bars_detects_gaps():
     ]
     out = validate_bars(bars)
     assert out["gaps"] == 1
+    assert out["ok"] is False
