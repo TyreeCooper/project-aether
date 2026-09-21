@@ -47,3 +47,22 @@
 th{font-weight:600}
 .toast{padding:10px 12px;font-weight:500}
 @media(max-width:720px){.price{font-size:24px}.portfolio-balance{font-size:19px}}
+
+.asset-rail{
+  display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;
+  padding:8px 12px 6px;scrollbar-width:none;
+}
+.asset-rail::-webkit-scrollbar{display:none}
+.asset-pill{
+  flex:0 0 auto;min-height:28px;border-radius:999px;padding:0 10px;
+  font-size:11px;font-weight:550;letter-spacing:.02em;color:#c9c3d6;
+  border:1px solid rgba(255,255,255,.08);
+  background:linear-gradient(180deg,#1c1a26,#14121c);
+}
+.asset-pill em{font-style:normal;margin-left:6px;font-weight:500;color:#8f889e;font-size:10px}
+.asset-pill.on{color:#efe8d6;border-color:rgba(243,164,55,.45);box-shadow:0 0 0 1px rgba(243,164,55,.12)}
+.asset-card-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.asset-name{margin:2px 0 0;font-size:11px;color:#8f889e}
+.asset-chip{font-size:9px;letter-spacing:.08em;padding:4px 7px;border-radius:999px;border:1px solid rgba(255,255,255,.1)}
+.asset-quote{display:flex;gap:16px;margin-top:8px;font-size:11px;color:#8f889e}
+.asset-quote b{font-weight:600;color:#efe8d6}

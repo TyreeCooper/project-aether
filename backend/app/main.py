@@ -15,6 +15,7 @@ from app import learn, live, venue
 from app.db import db_store
 from app.engine import engine
 from app.paper_exec import install as install_harsh_paper
+from app.universe import public_catalog
 
 STATIC = Path(__file__).parent / "static"
 ICON_LINKS = (
@@ -148,6 +149,8 @@ async def home():
         extra += '<script src="/static/learn.js"></script>'
     if "desk.js" not in html:
         extra += '<script src="/static/desk.js"></script>'
+    if "markets.js" not in html:
+        extra += '<script src="/static/markets.js"></script>'
     if extra:
         html = html.replace("</body>", extra + "</body>", 1)
     return HTMLResponse(html)
@@ -172,6 +175,7 @@ async def health():
         "venue": snap.get("mark_source"),
         "watch": "binance.us",
         "symbol": "BTC/USD",
+        "universe": [a["symbol"] for a in public_catalog()],
         "last_tick_age_ms": snap["last_tick_age_ms"],
         "stale": snap.get("stale"),
         "paper_mode": True,
@@ -179,6 +183,15 @@ async def health():
         "live": live.status(),
         "storage": db_store.status(),
     }
+
+
+@app.get("/api/v1/markets")
+async def markets():
+    try:
+        items = await venue.fetch_markets()
+    except Exception:
+        items = public_catalog()
+    return {"items": items, "paper_symbol": "BTC/USD"}
 
 
 @app.get("/api/v1/live")

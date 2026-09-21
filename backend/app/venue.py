@@ -5,6 +5,8 @@ from typing import Any
 
 import httpx
 
+from app.universe import ASSETS, KRAKEN_PAIRS
+
 KRAKEN_TICKER = "https://api.kraken.com/0/public/Ticker"
 KRAKEN_OHLC = "https://api.kraken.com/0/public/OHLC"
 PAIR = "XBTUSD"
@@ -26,6 +28,53 @@ def parse_ticker(payload: dict[str, Any]) -> dict[str, Any] | None:
     except (KeyError, IndexError, TypeError, ValueError):
         return None
     return {"last": last, "bid": bid, "ask": ask, "source": "kraken"}
+
+
+def _book_quote(book: dict[str, Any]) -> dict[str, float] | None:
+    try:
+        return {
+            "last": float(book["c"][0]),
+            "bid": float(book["b"][0]),
+            "ask": float(book["a"][0]),
+        }
+    except (KeyError, IndexError, TypeError, ValueError):
+        return None
+
+
+def parse_universe(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    result = payload.get("result") or {}
+    if not isinstance(result, dict):
+        return []
+    keys = list(result.keys())
+    out: list[dict[str, Any]] = []
+    for asset in ASSETS:
+        pair = str(asset["kraken"])
+        book = result.get(pair)
+        if book is None:
+            needle = pair.replace("XBT", "BTC")
+            book = next(
+                (
+                    result[k]
+                    for k in keys
+                    if pair in k or needle in k or k.endswith(pair) or pair.endswith(k[-6:])
+                ),
+                None,
+            )
+        quote = _book_quote(book) if isinstance(book, dict) else None
+        item = {
+            "id": asset["id"],
+            "name": asset["name"],
+            "symbol": asset["symbol"],
+            "pair": asset["pair"],
+            "tv": asset["tv"],
+            "paper": bool(asset["paper"]),
+            "source": "kraken" if quote else None,
+            "last": quote["last"] if quote else None,
+            "bid": quote["bid"] if quote else None,
+            "ask": quote["ask"] if quote else None,
+        }
+        out.append(item)
+    return out
 
 
 def parse_ohlc_bars(payload: dict[str, Any], limit: int = 720) -> list[dict[str, float | int]]:
@@ -78,6 +127,13 @@ async def fetch_ticker() -> dict[str, Any] | None:
         res = await client.get(KRAKEN_TICKER, params={"pair": PAIR})
         res.raise_for_status()
         return parse_ticker(res.json())
+
+
+async def fetch_markets() -> list[dict[str, Any]]:
+    async with httpx.AsyncClient(timeout=12.0) as client:
+        res = await client.get(KRAKEN_TICKER, params={"pair": KRAKEN_PAIRS})
+        res.raise_for_status()
+        return parse_universe(res.json())
 
 
 async def fetch_bars(interval: int = 1, limit: int = 720) -> list[dict[str, float | int]]:
