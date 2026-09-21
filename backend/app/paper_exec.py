@@ -1,5 +1,4 @@
 """Harsh paper execution. Worse than mid-price; still not a live broker."""
-
 from __future__ import annotations
 
 import time
@@ -7,7 +6,7 @@ import time
 SLIPPAGE_BPS = 5.0
 MAX_SPREAD_BPS = 10.0
 MAX_BASIS_USD = 80.0
-STALE_MS = 15_000
+STALE_MS = 8_000
 REVIEW_EVERY_TICKS = 40
 
 
@@ -57,9 +56,10 @@ def deny_microstructure(
 
 
 def install(engine) -> None:
-    """Slip fills, block dirty entries, and keep a quiet journal."""
     import app.engine as engine_mod
 
+    engine_mod.POLL_SECONDS = 5
+    engine_mod.STALE_MS = STALE_MS
     inner_deny = engine_mod.deny_entry
     original_tick = engine.tick
     ticks = {"n": 0}
@@ -90,14 +90,16 @@ def install(engine) -> None:
         try:
             from app import learn
             from app.db import db_store
-
             fills = await db_store.history_fills(300)
             learn.review(list(engine.closes), fills)
-            engine._log("INFO", "Journal wrote a quiet pass.")
         except Exception as exc:
             engine._log("WARN", f"Journal pass skipped: {exc}")
 
     engine_mod.deny_entry = wrapped_deny
     engine._fill_price = lambda side: slipped_price(side, engine.bid, engine.ask, engine.mark)
     engine.tick = wrapped_tick
-    engine._log("INFO", "Harsh paper on. Journal reviews in the background.")
+    if not engine.flatten_lock:
+        engine.state = "IN_POSITION" if engine.btc > 0 else "IDLE"
+        engine._log("INFO", "Paper loop armed. 5s tape. Journal runs in the background.")
+    else:
+        engine._log("INFO", "Flatten lock holds. Loop still marks the tape.")
