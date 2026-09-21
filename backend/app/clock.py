@@ -22,7 +22,7 @@ def is_new_five_minute(bars_1m: list[dict[str, Any]], last_bucket: int | None) -
 def allow_after_losses(bars_1m: list[dict[str, Any]], consecutive_losses: int) -> bool:
     if consecutive_losses < 2:
         return True
-    bars15 = resample_bars(bars_1m, 15)
+    bars15 = resample_bars(bars_1m, 15, require_complete=True)
     if len(bars15) < 4:
         return False
     prior = bars15[:-1][-8:]

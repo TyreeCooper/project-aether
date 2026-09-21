@@ -128,3 +128,14 @@ def test_trend_snapshot_uses_completed_higher_timeframe_bars():
     )
     assert snap["bars_5m"] <= len(bars) // 5
     assert snap["bars_15m"] <= len(bars) // 15
+
+
+def test_round_trip_cost_matches_conservative_tier_one_fee():
+    cost = round_trip_cost_pct(
+        100.0,
+        100.0,
+        100.0,
+        fee_rate=0.008,
+        slippage_bps=5.0,
+    )
+    assert round(cost, 2) == 1.70

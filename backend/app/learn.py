@@ -10,6 +10,7 @@ from typing import Any
 from app.clock import allow_after_losses
 from app.paper_exec import SLIPPAGE_BPS
 from app.persist import state_path
+from app.performance import summarize_backtest
 from app.strategy import exit_plan, risk_capped_qty, trend_breakout_snapshot, trend_exit_signal
 
 TAKER_FEE = float(os.getenv("AETHER_TAKER_FEE_RATE", "0.008"))
@@ -137,7 +138,11 @@ def score_exits(fills: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def replay(bars: list[dict[str, Any]], config: dict[str, Any]) -> dict[str, Any]:
+def replay(
+    bars: list[dict[str, Any]],
+    config: dict[str, Any],
+    detailed: bool = False,
+) -> dict[str, Any]:
     if len(bars) < 720:
         return {
             **config,
@@ -149,6 +154,8 @@ def replay(bars: list[dict[str, Any]], config: dict[str, Any]) -> dict[str, Any]
             "expectancy_usd": 0.0,
             "max_drawdown_pct": 0.0,
             "insufficient_history": True,
+            "summary": summarize_backtest([], [], STARTING),
+            "trade_log": [] if detailed else None,
         }
 
     usd = STARTING
@@ -165,17 +172,33 @@ def replay(bars: list[dict[str, Any]], config: dict[str, Any]) -> dict[str, Any]
     trades = 0
     cooldown_until_i = 0
     slip = SLIPPAGE_BPS / 10_000.0
+    trade_log: list[dict[str, Any]] = []
+    equity_curve: list[dict[str, Any]] = []
+    entry_price = 0.0
+    entry_ts: Any = None
+    trade_low = 0.0
+    trade_high = 0.0
+    last_entry_bucket: int | None = None
 
     for i in range(330, len(bars)):
-        history = bars[: i + 1]
+        history = bars[max(0, i - 1439) : i + 1]
         px = float(bars[i]["close"])
         equity = usd + btc * px
+        equity_curve.append({"ts": bars[i]["ts"], "equity": equity})
         peak = max(peak, equity)
         if peak > 0:
             max_dd = max(max_dd, (peak - equity) / peak * 100)
 
         if btc > 0:
             highest = max(highest, px)
+            trade_low = min(
+                trade_low or float(bars[i]["low"]),
+                float(bars[i]["low"]),
+            )
+            trade_high = max(
+                trade_high or float(bars[i]["high"]),
+                float(bars[i]["high"]),
+            )
             cost_pct = TAKER_FEE * 2 * 100 + SLIPPAGE_BPS * 2 / 100
             plan = exit_plan(
                 history,
@@ -202,6 +225,32 @@ def replay(bars: list[dict[str, Any]], config: dict[str, Any]) -> dict[str, Any]
                 usd += fill * btc - fee
                 pnl += realized
                 trades += 1
+                trade_log.append(
+                    {
+                        "entry_ts": entry_ts,
+                        "exit_ts": bars[i]["ts"],
+                        "entry_price": entry_price,
+                        "exit_price": fill,
+                        "pnl_usd": realized,
+                        "mae_pct": (
+                            (trade_low / entry_price - 1) * 100
+                            if entry_price > 0 and trade_low > 0
+                            else 0.0
+                        ),
+                        "mfe_pct": (
+                            (trade_high / entry_price - 1) * 100
+                            if entry_price > 0 and trade_high > 0
+                            else 0.0
+                        ),
+                        "exit_reason": (
+                            "stop"
+                            if stop_hit
+                            else "trend_failure"
+                            if trend_failed
+                            else "time_stop"
+                        ),
+                    }
+                )
                 if realized > 1e-9:
                     wins += 1
                     consecutive_losses = 0
@@ -215,8 +264,17 @@ def replay(bars: list[dict[str, Any]], config: dict[str, Any]) -> dict[str, Any]
                 highest = 0.0
                 position_stop = 0.0
                 entry_i = None
+                entry_price = 0.0
+                entry_ts = None
+                trade_low = 0.0
+                trade_high = 0.0
                 cooldown_until_i = i + (30 if consecutive_losses >= 2 else 15)
             continue
+
+        bucket = int(bars[i]["ts"]) // 300
+        if last_entry_bucket == bucket:
+            continue
+        last_entry_bucket = bucket
 
         if i < cooldown_until_i:
             continue
@@ -262,6 +320,10 @@ def replay(bars: list[dict[str, Any]], config: dict[str, Any]) -> dict[str, Any]
             btc = qty
             highest = px
             entry_i = i
+            entry_price = avg
+            entry_ts = bars[i]["ts"]
+            trade_low = float(bars[i]["low"])
+            trade_high = float(bars[i]["high"])
             plan = exit_plan(
                 history,
                 avg,
@@ -272,6 +334,7 @@ def replay(bars: list[dict[str, Any]], config: dict[str, Any]) -> dict[str, Any]
             )
             position_stop = float(plan["active_stop"])
 
+    summary = summarize_backtest(trade_log, equity_curve, STARTING)
     return {
         **config,
         "trades": trades,
@@ -280,8 +343,16 @@ def replay(bars: list[dict[str, Any]], config: dict[str, Any]) -> dict[str, Any]
         "breakeven": flat,
         "pnl_usd": round(pnl, 4),
         "expectancy_usd": round(pnl / trades, 4) if trades else 0.0,
-        "max_drawdown_pct": round(max_dd, 4),
+        "max_drawdown_pct": summary["max_drawdown_pct"],
+        "profit_factor": summary["profit_factor"],
+        "payoff_ratio": summary["payoff_ratio"],
+        "avg_mae_pct": summary["avg_mae_pct"],
+        "avg_mfe_pct": summary["avg_mfe_pct"],
+        "sharpe_365": summary["sharpe_365"],
+        "sortino_365": summary["sortino_365"],
         "insufficient_history": False,
+        "summary": summary,
+        "trade_log": trade_log if detailed else None,
     }
 
 def review(
