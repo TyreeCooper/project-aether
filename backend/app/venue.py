@@ -103,6 +103,11 @@ def parse_ohlc_bars(payload: dict[str, Any], limit: int = 720) -> list[dict[str,
     return bars
 
 
+def parse_ohlc_closes(payload: dict[str, Any]) -> list[float]:
+    """Backward-compatible close-only view used by existing tests/callers."""
+    return [float(bar["close"]) for bar in parse_ohlc_bars(payload)]
+
+
 def parse_binance_book(payload: dict[str, Any]) -> dict[str, Any] | None:
     try:
         bid = float(payload["bidPrice"])
