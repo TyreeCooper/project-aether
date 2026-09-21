@@ -175,7 +175,7 @@ class MultiDesk:
             view["intelligence"] = asset_context(
                 book,
                 self.books,
-                events=self.risk_events,
+                events=self.risk_snapshot()["active_events"],
                 calendar_connected=self.risk_calendar_connected,
             )
             rows.append(view)
@@ -216,7 +216,7 @@ class MultiDesk:
             "assets": rows,
             "intelligence": floor_intelligence(
                 self.books,
-                events=self.risk_events,
+                events=self.risk_snapshot()["active_events"],
                 calendar_connected=self.risk_calendar_connected,
             ),
         }
@@ -262,7 +262,7 @@ class MultiDesk:
             "intelligence": asset_context(
                 book,
                 self.books,
-                events=self.risk_events,
+                events=self.risk_snapshot()["active_events"],
                 calendar_connected=self.risk_calendar_connected,
             ),
             "capture": book.current_excursion(),
