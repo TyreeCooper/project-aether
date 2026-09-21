@@ -5,7 +5,7 @@ from typing import Any
 
 import httpx
 
-from app.universe import ASSETS, KRAKEN_PAIRS
+from app.universe import ASSETS, BY_ID, KRAKEN_PAIRS
 
 KRAKEN_TICKER = "https://api.kraken.com/0/public/Ticker"
 KRAKEN_OHLC = "https://api.kraken.com/0/public/OHLC"
@@ -56,24 +56,29 @@ def parse_universe(payload: dict[str, Any]) -> list[dict[str, Any]]:
                 (
                     result[k]
                     for k in keys
-                    if pair in k or needle in k or k.endswith(pair) or pair.endswith(k[-6:])
+                    if pair in k or needle in k or k.endswith(pair)
                 ),
                 None,
             )
         quote = _book_quote(book) if isinstance(book, dict) else None
-        item = {
-            "id": asset["id"],
-            "name": asset["name"],
-            "symbol": asset["symbol"],
-            "pair": asset["pair"],
-            "tv": asset["tv"],
-            "paper": bool(asset["paper"]),
-            "source": "kraken" if quote else None,
-            "last": quote["last"] if quote else None,
-            "bid": quote["bid"] if quote else None,
-            "ask": quote["ask"] if quote else None,
-        }
-        out.append(item)
+        out.append(
+            {
+                "id": asset["id"],
+                "name": asset["name"],
+                "symbol": asset["symbol"],
+                "pair": asset["pair"],
+                "tv": asset["tv"],
+                "binance": asset["binance"],
+                "paper": bool(asset["paper"]),
+                "source": "kraken" if quote else None,
+                "last": quote["last"] if quote else None,
+                "bid": quote["bid"] if quote else None,
+                "ask": quote["ask"] if quote else None,
+                "watch_last": None,
+                "watch_bid": None,
+                "watch_ask": None,
+            }
+        )
     return out
 
 
@@ -96,10 +101,6 @@ def parse_ohlc_bars(payload: dict[str, Any], limit: int = 720) -> list[dict[str,
         except (IndexError, TypeError, ValueError):
             continue
     return bars
-
-
-def parse_ohlc_closes(payload: dict[str, Any], limit: int = 120) -> list[float]:
-    return [float(b["close"]) for b in parse_ohlc_bars(payload, limit)]
 
 
 def parse_binance_book(payload: dict[str, Any]) -> dict[str, Any] | None:
@@ -133,14 +134,57 @@ async def fetch_markets() -> list[dict[str, Any]]:
     async with httpx.AsyncClient(timeout=12.0) as client:
         res = await client.get(KRAKEN_TICKER, params={"pair": KRAKEN_PAIRS})
         res.raise_for_status()
-        return parse_universe(res.json())
+        items = parse_universe(res.json())
+        try:
+            books = await client.get(BINANCE_US_BOOK)
+            if books.status_code == 200:
+                rows = books.json()
+                by_sym = {
+                    str(r.get("symbol")): r
+                    for r in rows
+                    if isinstance(r, dict)
+                }
+                for item in items:
+                    raw = by_sym.get(str(item.get("binance")))
+                    parsed = parse_binance_book(raw) if raw else None
+                    if parsed:
+                        item["watch_last"] = parsed["last"]
+                        item["watch_bid"] = parsed["bid"]
+                        item["watch_ask"] = parsed["ask"]
+        except Exception:
+            pass
+        return items
 
 
-async def fetch_bars(interval: int = 1, limit: int = 720) -> list[dict[str, float | int]]:
+async def fetch_bars(
+    interval: int = 1,
+    limit: int = 720,
+    pair: str = PAIR,
+) -> list[dict[str, float | int]]:
     async with httpx.AsyncClient(timeout=15.0) as client:
-        res = await client.get(KRAKEN_OHLC, params={"pair": PAIR, "interval": interval})
+        res = await client.get(
+            KRAKEN_OHLC, params={"pair": pair, "interval": interval}
+        )
         res.raise_for_status()
         return parse_ohlc_bars(res.json(), limit)
+
+
+async def fetch_asset(asset_id: str) -> dict[str, Any]:
+    asset = BY_ID.get(asset_id)
+    if not asset:
+        return {}
+    items = await fetch_markets()
+    item = next((x for x in items if x["id"] == asset_id), None) or {
+        "id": asset["id"],
+        "name": asset["name"],
+        "symbol": asset["symbol"],
+        "pair": asset["pair"],
+        "tv": asset["tv"],
+        "paper": bool(asset["paper"]),
+    }
+    bars = await fetch_bars(interval=5, limit=80, pair=str(asset["kraken"]))
+    closes = [float(b["close"]) for b in bars]
+    return {"item": item, "closes": closes[-48:], "bars": len(bars)}
 
 
 async def fetch_closes() -> list[float]:
