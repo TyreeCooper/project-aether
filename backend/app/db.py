@@ -305,6 +305,44 @@ class DatabaseStore:
                         max_position_btc DOUBLE PRECISION NOT NULL,
                         flatten_lock BOOLEAN NOT NULL
                     );
+
+                    CREATE TABLE IF NOT EXISTS aether_asset_intelligence_snapshot (
+                        id BIGSERIAL PRIMARY KEY,
+                        ts TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        asset_id TEXT NOT NULL,
+                        pair TEXT,
+                        price_usd DOUBLE PRECISION,
+                        opportunity JSONB NOT NULL,
+                        windows JSONB NOT NULL,
+                        cross_asset JSONB NOT NULL,
+                        attribution JSONB,
+                        risk JSONB,
+                        news JSONB,
+                        community JSONB,
+                        capture JSONB,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    );
+                    CREATE INDEX IF NOT EXISTS
+                        idx_aether_intelligence_asset_ts
+                    ON aether_asset_intelligence_snapshot (asset_id, ts DESC);
+
+                    CREATE TABLE IF NOT EXISTS aether_intelligence_observation (
+                        observation_key TEXT PRIMARY KEY,
+                        first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        asset_id TEXT,
+                        source_type TEXT NOT NULL,
+                        source_name TEXT,
+                        external_id TEXT,
+                        published_at TIMESTAMPTZ,
+                        payload JSONB NOT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS
+                        idx_aether_observation_asset_first_seen
+                    ON aether_intelligence_observation (asset_id, first_seen_at DESC);
+                    CREATE INDEX IF NOT EXISTS
+                        idx_aether_observation_type_first_seen
+                    ON aether_intelligence_observation (source_type, first_seen_at DESC);
                     """
                 )
             finally:
@@ -519,6 +557,177 @@ class DatabaseStore:
             conn = await self._connect()
             try:
                 rows = await conn.fetch(sql, safe_limit)
+            finally:
+                await conn.close()
+            self.last_error = None
+            return [self._row_to_dict(row) for row in rows]
+        except Exception as exc:
+            self.last_error = f"{type(exc).__name__}: {exc}"
+            return []
+
+    async def save_intelligence_snapshots(
+        self,
+        rows: list[dict[str, Any]],
+    ) -> bool:
+        """Persist a throttled intelligence batch plus deduplicated observations.
+
+        Snapshot payloads should contain summaries, not repeated raw article/post
+        arrays. Observations preserve Aether first_seen_at independently so later
+        lead/lag research cannot backdate information.
+        """
+        if not self.initialized or not rows:
+            return False
+        safe_rows = json.loads(json.dumps(rows))
+        try:
+            async with self._lock:
+                conn = await self._connect()
+                try:
+                    async with conn.transaction():
+                        for row in safe_rows:
+                            context = row.get("context") or {}
+                            await conn.execute(
+                                """
+                                INSERT INTO aether_asset_intelligence_snapshot
+                                    (asset_id, pair, price_usd, opportunity,
+                                     windows, cross_asset, attribution, risk,
+                                     news, community, capture)
+                                VALUES (
+                                    $1, $2, $3, $4::jsonb, $5::jsonb,
+                                    $6::jsonb, $7::jsonb, $8::jsonb,
+                                    $9::jsonb, $10::jsonb, $11::jsonb
+                                )
+                                """,
+                                str(row.get("asset_id") or ""),
+                                str(row.get("pair") or "") or None,
+                                (
+                                    float(row["price_usd"])
+                                    if row.get("price_usd") is not None
+                                    else None
+                                ),
+                                json.dumps(context.get("opportunity_24h") or {}),
+                                json.dumps(context.get("windows") or {}),
+                                json.dumps(context.get("cross_asset") or {}),
+                                json.dumps(context.get("attribution") or {}),
+                                json.dumps(context.get("risk") or {}),
+                                json.dumps(context.get("news") or {}),
+                                json.dumps(context.get("community") or {}),
+                                json.dumps(row.get("capture") or {}),
+                            )
+                            for obs in row.get("observations") or []:
+                                external_id = str(
+                                    obs.get("external_id")
+                                    or json.dumps(
+                                        obs.get("payload") or {},
+                                        sort_keys=True,
+                                    )
+                                )
+                                raw_key = "|".join(
+                                    (
+                                        str(row.get("asset_id") or ""),
+                                        str(obs.get("source_type") or "unknown"),
+                                        external_id,
+                                    )
+                                )
+                                observation_key = hashlib.sha256(
+                                    raw_key.encode("utf-8")
+                                ).hexdigest()
+                                published_at = obs.get("published_at")
+                                await conn.execute(
+                                    """
+                                    INSERT INTO aether_intelligence_observation
+                                        (observation_key, asset_id, source_type,
+                                         source_name, external_id, published_at,
+                                         payload)
+                                    VALUES (
+                                        $1, $2, $3, $4, $5,
+                                        CASE
+                                            WHEN $6::text IS NULL THEN NULL
+                                            ELSE $6::timestamptz
+                                        END,
+                                        $7::jsonb
+                                    )
+                                    ON CONFLICT (observation_key)
+                                    DO UPDATE SET
+                                        last_seen_at = NOW(),
+                                        payload = EXCLUDED.payload
+                                    """,
+                                    observation_key,
+                                    str(row.get("asset_id") or "") or None,
+                                    str(obs.get("source_type") or "unknown"),
+                                    str(obs.get("source_name") or "") or None,
+                                    external_id or None,
+                                    (
+                                        str(published_at)
+                                        if published_at is not None
+                                        else None
+                                    ),
+                                    json.dumps(obs.get("payload") or {}),
+                                )
+                finally:
+                    await conn.close()
+            self.last_write_at = datetime.now(timezone.utc).isoformat()
+            self.last_error = None
+            return True
+        except Exception as exc:
+            self.last_error = f"{type(exc).__name__}: {exc}"
+            return False
+
+    async def history_intelligence(
+        self,
+        asset_id: str,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        if not self.initialized:
+            return []
+        safe_limit = max(1, min(int(limit), 500))
+        try:
+            conn = await self._connect()
+            try:
+                rows = await conn.fetch(
+                    """
+                    SELECT id, ts, asset_id, pair, price_usd, opportunity,
+                           windows, cross_asset, attribution, risk, news,
+                           community, capture, created_at
+                    FROM aether_asset_intelligence_snapshot
+                    WHERE asset_id = $1
+                    ORDER BY ts DESC
+                    LIMIT $2
+                    """,
+                    str(asset_id).lower(),
+                    safe_limit,
+                )
+            finally:
+                await conn.close()
+            self.last_error = None
+            return [self._row_to_dict(row) for row in rows]
+        except Exception as exc:
+            self.last_error = f"{type(exc).__name__}: {exc}"
+            return []
+
+    async def history_intelligence_observations(
+        self,
+        asset_id: str,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        if not self.initialized:
+            return []
+        safe_limit = max(1, min(int(limit), 500))
+        try:
+            conn = await self._connect()
+            try:
+                rows = await conn.fetch(
+                    """
+                    SELECT observation_key, first_seen_at, last_seen_at,
+                           asset_id, source_type, source_name, external_id,
+                           published_at, payload
+                    FROM aether_intelligence_observation
+                    WHERE asset_id = $1
+                    ORDER BY first_seen_at DESC
+                    LIMIT $2
+                    """,
+                    str(asset_id).lower(),
+                    safe_limit,
+                )
             finally:
                 await conn.close()
             self.last_error = None
