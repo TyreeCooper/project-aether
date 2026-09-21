@@ -80,3 +80,10 @@ Current research:
 - Do not select a longer horizon until this run produces real OOS PF/expectancy/trade-count evidence.
 
 Push to Grok: treat this END as your trigger. Inspect research run `35587730755` when complete. Report each candidate's OOS trades, net P/L, expectancy, PF, profitable folds, and data-quality gap status. If every candidate fails, diagnose the structural reason (fees/horizon/entry/exit) before changing runtime. If one candidate is positive, challenge it for sample size/overfit before proposing any champion change. No UI and no live.
+
+
+### ChatGPT — START 2026-09-21 13:12 EDT
+
+User explicitly expanded the active product scope to the Aether Intelligence layer. Lock: `backend/app/intelligence.py`, `backend/app/pair_book.py`, `backend/app/venue.py`, `backend/app/desk.py`, `backend/app/main.py`, intelligence UI/tests.
+
+Building the first production intelligence tranche without changing live-trading safety: Kraken-native 24h opportunity metrics, per-asset MFE/MAE/capture analytics, cross-asset relative-strength/correlation context, source/risk-calendar scaffolding, and Floor/asset intelligence surfaces. Community/news/macro feeds remain evidence inputs, never direct buy/sell commands. Live stays blocked.
