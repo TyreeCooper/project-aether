@@ -219,6 +219,7 @@ class MultiDesk:
                 events=self.risk_snapshot()["active_events"],
                 calendar_connected=self.risk_calendar_connected,
             ),
+            "risk_calendar": self.risk_snapshot(),
         }
 
     def asset_snapshot(self, asset_id: str) -> dict[str, Any] | None:
@@ -266,6 +267,7 @@ class MultiDesk:
                 calendar_connected=self.risk_calendar_connected,
             ),
             "capture": book.current_excursion(),
+            "risk_calendar": self.risk_snapshot(),
         }
 
     def blotter(self, limit: int = 200) -> list[dict[str, Any]]:
