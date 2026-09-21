@@ -29,6 +29,7 @@ class PairBook:
         self.tv = str(asset.get("tv") or "")
         self.wallet = wallet
         self.bars: deque[dict[str, Any]] = deque(maxlen=BAR_HISTORY)
+        self.bars_1h: deque[dict[str, Any]] = deque(maxlen=720)
         self.last_5m: int | None = None
         self.mark: float | None = None
         self.bid: float | None = None
@@ -84,6 +85,11 @@ class PairBook:
         if self.bars:
             self.mark = float(self.bars[-1]["close"])
             _, self.last_5m = is_new_five_minute(list(self.bars), None)
+
+    def seed_context(self, bars_1h: list[dict[str, Any]]) -> None:
+        self.bars_1h.clear()
+        for bar in bars_1h[-720:]:
+            self.bars_1h.append(bar)
 
     def qty(self) -> float:
         return self.wallet.qty(self.id)
@@ -261,6 +267,7 @@ class PairBook:
             "position_value": qty * float(self.mark or 0.0),
             "open_pnl": (self.mark - avg) * qty if qty and self.mark else 0.0,
             "bars": len(self.bars),
+            "context_bars_1h": len(self.bars_1h),
             "signal": self.signal,
             "reason": self.last_reason,
             "paper": True,
