@@ -1,17 +1,16 @@
 """Conservative paper execution and market-quality guards."""
 from __future__ import annotations
 
-import os
 import time
 
 from app.clock import allow_after_losses, is_new_five_minute
+from app.fees import TAKER_FEE as KRAKEN_TAKER
 
 SLIPPAGE_BPS = 5.0
 MAX_SPREAD_BPS = 10.0
 MAX_BASIS_USD = 80.0
 STALE_MS = 8_000
 REVIEW_EVERY_TICKS = 60
-KRAKEN_TAKER = float(os.getenv("AETHER_TAKER_FEE_RATE", "0.0026"))
 
 
 def slipped_price(
@@ -64,12 +63,14 @@ def deny_microstructure(
 
 def install(engine) -> None:
     import app.engine as engine_mod
+    from app import learn as learn_mod
     from app.strategy import exit_plan as real_exit
 
     engine_mod.POLL_SECONDS = 5
     engine_mod.STALE_MS = STALE_MS
     engine_mod.BREAKOUT_BARS = 20
     engine_mod.TAKER_FEE = KRAKEN_TAKER
+    learn_mod.TAKER_FEE = KRAKEN_TAKER
     original_tick = engine.tick
     original_eval = engine.evaluate_and_maybe_trade
     ticks = {"n": 0}
@@ -154,5 +155,5 @@ def install(engine) -> None:
     engine.tick = wrapped_tick
     engine._log(
         "INFO",
-        f"Harsh paper on. Frozen stop. Fee {KRAKEN_TAKER}. 20-bar 5m Donchian. Live blocked.",
+        f"Harsh paper on. Frozen stop. Fee {KRAKEN_TAKER}. Journal fee bound. Live blocked.",
     )
