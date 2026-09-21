@@ -1,9 +1,11 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 import hmac
+import logging
 import os
+import time
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -15,19 +17,35 @@ from app.engine import engine
 
 STATIC = Path(__file__).parent / "static"
 
+logger = logging.getLogger("aether.telemetry")
+logger.setLevel(logging.INFO)
+if not logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+    logger.addHandler(_handler)
+logger.propagate = False
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    logger.info("event=app_start phase=begin version=1.1.2")
     await engine.initialize_persistence()
     engine.start_loop()
+    logger.info(
+        "event=app_start phase=ready version=1.1.2 storage_configured=%s storage_initialized=%s",
+        db_store.status().get("configured"),
+        db_store.status().get("initialized"),
+    )
     try:
         yield
     finally:
+        logger.info("event=app_shutdown phase=begin")
         await engine.shutdown()
         await db_store.close()
+        logger.info("event=app_shutdown phase=complete")
 
 
-app = FastAPI(title="Project Aether API", version="1.1.1", lifespan=lifespan)
+app = FastAPI(title="Project Aether API", version="1.1.2", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -35,6 +53,33 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+
+@app.middleware("http")
+async def request_telemetry(request: Request, call_next):
+    started = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        duration_ms = (time.perf_counter() - started) * 1000
+        logger.exception(
+            "event=http_request method=%s path=%s status=500 duration_ms=%.2f",
+            request.method,
+            request.url.path,
+            duration_ms,
+        )
+        raise
+
+    duration_ms = (time.perf_counter() - started) * 1000
+    logger.info(
+        "event=http_request method=%s path=%s status=%s duration_ms=%.2f",
+        request.method,
+        request.url.path,
+        response.status_code,
+        duration_ms,
+    )
+    return response
 
 
 class QtyBody(BaseModel):
