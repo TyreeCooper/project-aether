@@ -215,6 +215,39 @@ class PairBook:
             self.fills.append({**result, "side": "sell", "ts": _now()})
         return result
 
+    def capture_snapshot(self) -> dict[str, Any]:
+        current = self.current_excursion()
+        if self.qty() > 0:
+            return {
+                "state": "open",
+                **current,
+                "net_return_pct": None,
+                "capture_efficiency_pct": None,
+            }
+        sells = [
+            f for f in self.fills
+            if str(f.get("side", "")).lower() == "sell"
+        ]
+        if not sells:
+            return {
+                "state": "none",
+                "mfe_pct": None,
+                "mae_pct": None,
+                "available_move_pct": None,
+                "net_return_pct": None,
+                "capture_efficiency_pct": None,
+            }
+        last = sells[-1]
+        return {
+            "state": "last_closed",
+            "mfe_pct": last.get("mfe_pct"),
+            "mae_pct": last.get("mae_pct"),
+            "available_move_pct": last.get("available_move_pct"),
+            "net_return_pct": last.get("net_return_pct"),
+            "capture_efficiency_pct": last.get("capture_efficiency_pct"),
+            "closed_at": last.get("ts"),
+        }
+
     def analytics(self) -> dict[str, Any]:
         sells = [f for f in self.fills if str(f.get("side", "")).lower() == "sell"]
         wins = sum(1 for f in sells if float(f.get("pnl") or 0) > 1e-9)
