@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app import learn, live, venue
+from app.community import SUBREDDITS
 from app.db import db_store
 from app.desk import desk
 from app.engine import engine
@@ -235,6 +236,15 @@ async def settings():
             "reason": live_state.get("reason"),
         },
         "assets": len(desk.books),
+        "intelligence": {
+            "sources": source_registry(
+                calendar_connected=desk.risk_calendar_connected,
+            ),
+            "macro_calendar_connected": desk.risk_calendar_connected,
+            "community_assets_configured": sorted(SUBREDDITS),
+            "community_trade_influence_enabled": False,
+            "event_policy": desk.risk_snapshot().get("policy"),
+        },
     }
 
 
