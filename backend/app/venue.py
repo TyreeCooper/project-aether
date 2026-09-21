@@ -37,6 +37,12 @@ def _book_quote(book: dict[str, Any]) -> dict[str, float] | None:
             "last": float(book["c"][0]),
             "bid": float(book["b"][0]),
             "ask": float(book["a"][0]),
+            "volume_24h": float(book["v"][1]),
+            "vwap_24h": float(book["p"][1]),
+            "trades_24h": int(book["t"][1]),
+            "low_24h": float(book["l"][1]),
+            "high_24h": float(book["h"][1]),
+            "open_24h": float(book["o"]),
         }
     except (KeyError, IndexError, TypeError, ValueError):
         return None
@@ -75,6 +81,12 @@ def parse_universe(payload: dict[str, Any]) -> list[dict[str, Any]]:
                 "last": quote["last"] if quote else None,
                 "bid": quote["bid"] if quote else None,
                 "ask": quote["ask"] if quote else None,
+                "open_24h": quote["open_24h"] if quote else None,
+                "high_24h": quote["high_24h"] if quote else None,
+                "low_24h": quote["low_24h"] if quote else None,
+                "volume_24h": quote["volume_24h"] if quote else None,
+                "vwap_24h": quote["vwap_24h"] if quote else None,
+                "trades_24h": quote["trades_24h"] if quote else None,
                 "watch_last": None,
                 "watch_bid": None,
                 "watch_ask": None,
