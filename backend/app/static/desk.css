@@ -34,20 +34,30 @@ html,body{margin:0}
 #homeBid{color:#4f8cff !important}
 #homeAsk{color:#ff5f6d !important}
 .chart-shell{height:108px;margin-top:8px}
-.chart-shell svg{width:100%;height:100%;display:block}
-.chart-shell path.line{fill:none;stroke:#26a69a;stroke-width:1.15}
-.chart-shell path.area{fill:url(#eqFill);opacity:.2}
-.chart-shell .grid{stroke:rgba(255,255,255,.08);stroke-width:1}
-.chart-shell .dot{fill:#f3a437}
-.chart-shell .read{font:600 10px ui-sans-serif;fill:#d1d4dc}
-.bottom-nav,.nav-inner,.nav-btn,.dock-slide{all:revert-layer}
-.dock-slide{display:none !important}
-.nav-btn[data-page="home"]{transform:none !important;min-height:unset !important;min-width:unset !important}
-.nav-btn[data-page="home"] svg{width:22px !important;height:22px !important}
+.nav-inner{position:relative}
+.nav-btn{position:relative;z-index:2}
+.dock-slide,
+.dock-ghost{
+  position:absolute;left:0;width:56px;border-radius:16px;pointer-events:none;
+  transition:left .2s ease,width .2s ease;
+}
+.dock-ghost{
+  height:46px;bottom:4px;
+  background:rgba(255,255,255,.08);
+  border:1px solid rgba(255,255,255,.12);
+  z-index:0;
+}
+.dock-slide{
+  height:40px;bottom:12px;
+  background:#4c38c4;
+  z-index:1;
+}
+html[data-theme="light"] .dock-ghost{background:rgba(42,36,28,.08);border-color:rgba(42,36,28,.12)}
+html[data-theme="light"] .dock-slide{background:#5b43d6}
 html[data-theme="light"]{color-scheme:light}
 html[data-theme="light"] body,html[data-theme="light"] .app{background:#e8dcc8 !important;color:#2a241c !important}
 html[data-theme="light"] .topbar{background:#3b3226 !important;color:#f4ece0 !important}
-html[data-theme="light"] .ticker{background:#4a3f31 !important;color:#f4ece0 !important;border-bottom-color:#6a5a44}
+html[data-theme="light"] .ticker{background:#4a3f31 !important;color:#f4ece0 !important}
 html[data-theme="light"] .bottom-nav,html[data-theme="light"] .drawer{background:#d9cbb4 !important;color:#2a241c !important}
 html[data-theme="light"] .card,
 html[data-theme="light"] .market-hero,
@@ -58,18 +68,11 @@ html[data-theme="light"] .trade-price,
 html[data-theme="light"] .log,
 html[data-theme="light"] .tablewrap,
 html[data-theme="light"] .input,
-html[data-theme="light"] input,
-html[data-theme="light"] select,
-html[data-theme="light"] textarea{
+html[data-theme="light"] input{
   background:#d2c2a8 !important;color:#2a241c !important;border-color:#b9a88a !important;
 }
-html[data-theme="light"] .btn{background:#c4b192 !important;color:#2a241c !important;border-color:#b9a88a !important}
+html[data-theme="light"] .btn{background:#c4b192 !important;color:#2a241c !important}
 html[data-theme="light"] .btn.primary{background:#5b43d6 !important;color:#f4ece0 !important}
-html[data-theme="light"] .btn.buy{background:#1e8f5c !important;color:#fff !important}
-html[data-theme="light"] .btn.sell,html[data-theme="light"] .btn.danger{background:#8a303a !important;color:#fff !important}
-html[data-theme="light"] th{background:#c4b192 !important;color:#5a4d3c !important}
-html[data-theme="light"] td,html[data-theme="light"] .helper,html[data-theme="light"] .muted{color:#2a241c !important}
-html[data-theme="light"] .chart-shell .grid{stroke:rgba(42,36,28,.12)}
-html[data-theme="light"] .chart-shell .read{fill:#2a241c}
-html[data-theme="light"] .brand-title{color:#f4ece0}
+html[data-theme="light"] th{background:#c4b192 !important}
 html[data-theme="light"] .logo{background:#2a241c url("/static/aether-mark.svg") center/cover no-repeat}
+html[data-theme="light"] .brand-title{color:#f4ece0}
