@@ -10,6 +10,7 @@ from typing import Any
 from app import live, venue
 from app.clock import is_new_five_minute
 from app.community import fetch_reddit
+from app.crypto_events import fetch_crypto_calendar
 from app.intelligence import asset_context, floor_intelligence
 from app.news import fetch_asset_news
 from app.desk_persist import load_desk, save_desk
@@ -50,6 +51,11 @@ class MultiDesk:
         self.risk_events: list[dict[str, Any]] = []
         self.risk_calendar_connected = False
         self._last_risk_refresh = 0.0
+        self.crypto_events: list[dict[str, Any]] = []
+        self.crypto_calendar_connected = False
+        self.crypto_calendar_configured = False
+        self.crypto_calendar_status = "unconfigured"
+        self._last_crypto_refresh = 0.0
         self.community_cache: dict[str, dict[str, Any]] = {}
         self._community_cursor = 0
         self._last_community_refresh = 0.0
@@ -230,6 +236,8 @@ class MultiDesk:
                 calendar_connected=self.risk_calendar_connected,
                 community_cache=self.community_cache,
                 news_cache=self.news_cache,
+                crypto_calendar_connected=self.crypto_calendar_connected,
+                crypto_calendar_configured=self.crypto_calendar_configured,
             ),
             "risk_calendar": self.risk_snapshot(),
         }
@@ -407,12 +415,34 @@ class MultiDesk:
             **state,
             "calendar_connected": self.risk_calendar_connected,
             "events": self.risk_events,
+            "crypto_calendar": {
+                "provider": "CoinMarketCal",
+                "configured": self.crypto_calendar_configured,
+                "connected": self.crypto_calendar_connected,
+                "status": self.crypto_calendar_status,
+                "events": self.crypto_events,
+            },
             "policy": {
                 "mode": "observe_only",
                 "automatic_entry_block": False,
+                "crypto_event_enforcement": False,
                 "note": "Risk windows are visible now; strategy enforcement remains disabled until validated.",
             },
         }
+
+    async def _refresh_crypto_calendar(self, force: bool = False) -> None:
+        now = time.time()
+        if not force and now - self._last_crypto_refresh < 900:
+            return
+        self._last_crypto_refresh = now
+        feed = await fetch_crypto_calendar([book.symbol for book in self.books])
+        self.crypto_calendar_configured = bool(feed.get("configured"))
+        self.crypto_calendar_connected = bool(feed.get("connected"))
+        self.crypto_calendar_status = str(feed.get("status") or "unavailable")
+        self.crypto_events = [
+            row for row in (feed.get("events") or [])
+            if isinstance(row, dict)
+        ]
 
     async def _quotes(self) -> None:
         try:
@@ -460,6 +490,7 @@ class MultiDesk:
 
     async def tick(self) -> None:
         await self._refresh_risk_calendar()
+        await self._refresh_crypto_calendar()
         await self._refresh_one_community()
         await self._refresh_one_news()
         await self._quotes()
@@ -490,6 +521,7 @@ class MultiDesk:
         async def loop():
             await self.seed()
             await self._refresh_risk_calendar(force=True)
+            await self._refresh_crypto_calendar(force=True)
             await self._refresh_one_community(force=True)
             await self._refresh_one_news(force=True)
             while True:
