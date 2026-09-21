@@ -1,41 +1,88 @@
-.topbar{gap:8px}
-.menu-btn{
-  width:36px;height:36px;border:1px solid var(--line);border-radius:10px;
-  background:#110f1a;color:var(--text);display:grid;place-items:center;padding:0;
+html,body{width:100%}
+.topbar{
+  left:0;right:0;margin:0;padding:8px 10px calc(8px + env(safe-area-inset-top));
+  width:100%;max-width:none;gap:8px;
 }
-.menu-btn span,.menu-btn i{display:block;width:14px;height:1.5px;background:currentColor;margin:2px 0;border-radius:2px}
+.topbar .brand{margin:0 auto}
+.topstate .pill{min-height:18px;padding:0 6px;font-size:8px;letter-spacing:.04em;font-weight:600}
+.menu-btn{
+  width:28px;height:28px;border:0;background:transparent;color:var(--text);
+  display:flex;flex-direction:column;justify-content:center;align-items:center;gap:3px;padding:0;flex:0 0 auto;
+}
+.menu-btn span{display:block;width:13px;height:1.5px;background:currentColor;border-radius:2px}
 .drawer{
   position:fixed;inset:0 auto 0 0;width:min(78vw,280px);z-index:80;
   background:rgba(12,10,18,.96);border-right:1px solid var(--line);
   transform:translateX(-105%);transition:transform .2s ease;padding:18px 14px;
 }
 .drawer.open{transform:none}
-.drawer a{display:block;color:var(--text);text-decoration:none;padding:12px 6px;font-size:13px;opacity:.7}
+.drawer a{display:block;color:var(--text);text-decoration:none;padding:12px 6px;font-size:13px;opacity:.75}
 .scrim{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:70;display:none}
 .scrim.open{display:block}
-.brand{align-items:center}
-.logo{width:36px;height:36px;border-radius:11px}
+.ticker{
+  overflow:hidden;white-space:nowrap;border-bottom:1px solid var(--line);
+  background:rgba(8,7,13,.9);color:#d7c7a5;font-size:11px;letter-spacing:.04em;
+  padding:6px 0;
+}
+.ticker b{display:inline-block;padding-left:100%;animation:tick 28s linear infinite}
+@keyframes tick{to{transform:translateX(-100%)}}
+.logo{width:36px;height:36px;border-radius:11px;background:#110f1a url("/static/aether-mark.svg") center/cover no-repeat}
 .brand-title{
   font-size:15px;font-weight:720;letter-spacing:.18em;
   background:linear-gradient(90deg,#f3a437,#c9b6ff);
   -webkit-background-clip:text;background-clip:text;color:transparent;
 }
 .brand-sub{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
-.page-head h1{font-size:20px;font-weight:650;letter-spacing:-.03em}
-.page-head p{font-size:11px;color:var(--muted)}
-.fresh{font-size:10px;color:var(--muted);letter-spacing:.04em}
-.spark{width:100%;height:56px;margin-top:8px;display:block}
-.spark path{fill:none;stroke:#7b61ff;stroke-width:1.8;stroke-linecap:round}
-.hint{font-size:10px;color:var(--muted);font-weight:400}
+.quick-metrics{
+  background:rgba(243,164,55,.08);border:1px solid rgba(243,164,55,.35);
+  border-radius:12px;padding:8px;margin-top:10px;
+}
+#homeBid,.bid{color:#4f8cff !important}
+#homeAsk,.ask{color:#ff5f6d !important}
+.spark{width:100%;height:64px;display:block;touch-action:none}
+.spark path{fill:none;stroke:#7b61ff;stroke-width:1.7;stroke-linecap:round}
+.spark .dot{fill:#f3a437;stroke:#110f1a;stroke-width:1}
+.fresh{font-size:10px;color:var(--muted)}
+.nav-inner{align-items:end}
+.nav-btn[data-page="home"]{
+  min-height:68px;transform:translateY(-6px);background:rgba(123,97,255,.16);
+  color:#efe8ff;border-radius:16px;
+}
+.nav-btn[data-page="home"] svg{width:24px;height:24px}
+.nav-btn[data-page="home"] span{font-size:10px}
 html[data-theme="light"]{
   color-scheme:light;
-  --bg:#f3f0e8;--line:#ddd4c4;--text:#1c1812;--muted:#6f675b;--accent:#5b43d6;
+  --bg:#f3f0e8;--bg2:#ece7dc;--panel:#fffdf8;--panel2:#f7f3ea;
+  --line:#ddd4c4;--line2:#cfc3ae;--text:#1c1812;--muted:#6f675b;--muted2:#8a8173;
+  --accent:#5b43d6;
 }
-html[data-theme="light"] body{background:#f6f2e8;color:var(--text)}
-html[data-theme="light"] .topbar,html[data-theme="light"] .bottom-nav,html[data-theme="light"] .drawer{
-  background:rgba(246,242,232,.94);color:var(--text);
+html[data-theme="light"] body{
+  background:#f6f2e8 !important;color:#1c1812 !important;
 }
-html[data-theme="light"] .card,html[data-theme="light"] .market-hero,html[data-theme="light"] .box{
-  background:#fffdf8;border-color:var(--line);color:var(--text);
+html[data-theme="light"] .topbar,
+html[data-theme="light"] .bottom-nav,
+html[data-theme="light"] .drawer,
+html[data-theme="light"] .ticker{
+  background:#f3eee3 !important;color:#1c1812 !important;
 }
-html[data-theme="light"] .menu-btn{background:#fffdf8}
+html[data-theme="light"] .card,
+html[data-theme="light"] .market-hero,
+html[data-theme="light"] .box,
+html[data-theme="light"] .quick,
+html[data-theme="light"] .trade-price,
+html[data-theme="light"] .input,
+html[data-theme="light"] .log,
+html[data-theme="light"] .tablewrap,
+html[data-theme="light"] .pill{
+  background:#fffdf8 !important;border-color:#ddd4c4 !important;color:#1c1812 !important;
+}
+html[data-theme="light"] .logo{
+  background:#f6efe3 url("/static/aether-mark.svg") center/cover no-repeat;
+  filter:none;box-shadow:0 0 0 1px #d7b07a;
+}
+html[data-theme="light"] .brand-title{
+  background:linear-gradient(90deg,#b86a10,#5b43d6);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+}
+html[data-theme="light"] .btn.secondary{color:#3b3429}
+html[data-theme="light"] th{background:#efe8d9;color:#6f675b}
