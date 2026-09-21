@@ -34,6 +34,12 @@ class PairBook:
         self.bid: float | None = None
         self.ask: float | None = None
         self.watch_last: float | None = None
+        self.open_24h: float | None = None
+        self.high_24h: float | None = None
+        self.low_24h: float | None = None
+        self.volume_24h: float | None = None
+        self.vwap_24h: float | None = None
+        self.trades_24h: int | None = None
         self.stop = 0.0
         self.highest = 0.0
         self.entry_at: str | None = None
@@ -50,6 +56,11 @@ class PairBook:
             self.ask = float(item["ask"])
         if item.get("watch_last") is not None:
             self.watch_last = float(item["watch_last"])
+        for attr in ("open_24h", "high_24h", "low_24h", "volume_24h", "vwap_24h"):
+            if item.get(attr) is not None:
+                setattr(self, attr, float(item[attr]))
+        if item.get("trades_24h") is not None:
+            self.trades_24h = int(item["trades_24h"])
 
     def push_px(self, ts: int) -> None:
         if not self.mark:
@@ -119,6 +130,26 @@ class PairBook:
             self.fills.append({**result, "side": "buy", "ts": self.entry_at})
         return result
 
+    def current_excursion(self, entry_price: float | None = None) -> dict[str, Any]:
+        entry = float(entry_price or self.wallet.avg_entry(self.id) or 0.0)
+        if entry <= 0 or not self.entry_at:
+            return {"mfe_pct": None, "mae_pct": None, "available_move_pct": None}
+        try:
+            entered = datetime.fromisoformat(self.entry_at.replace("Z", "+00:00"))
+            entered_ts = int(entered.timestamp())
+        except ValueError:
+            return {"mfe_pct": None, "mae_pct": None, "available_move_pct": None}
+        rows = [x for x in self.bars if int(x.get("ts", 0)) >= entered_ts - 60]
+        if not rows:
+            return {"mfe_pct": None, "mae_pct": None, "available_move_pct": None}
+        high = max(float(x["high"]) for x in rows)
+        low = min(float(x["low"]) for x in rows)
+        return {
+            "mfe_pct": round((high / entry - 1) * 100, 4),
+            "mae_pct": round((low / entry - 1) * 100, 4),
+            "available_move_pct": round((high / low - 1) * 100, 4) if low > 0 else None,
+        }
+
     def manage(self) -> dict[str, Any] | None:
         qty = self.qty()
         if qty <= 0 or not self.mark:
@@ -154,8 +185,23 @@ class PairBook:
         raw = stop_fill_price(self.stop) if hit and self.stop else self.fill_px("sell")
         if not raw:
             return None
+        excursion = self.current_excursion(avg)
         result = self.wallet.sell(self.id, qty, raw)
         result["pair"] = self.pair
+        result.update(excursion)
+        entry_notional = avg * qty
+        net_return_pct = (
+            float(result.get("pnl") or 0) / entry_notional * 100
+            if entry_notional > 0
+            else 0.0
+        )
+        result["net_return_pct"] = round(net_return_pct, 4)
+        mfe = excursion.get("mfe_pct")
+        result["capture_efficiency_pct"] = (
+            round(net_return_pct / float(mfe) * 100, 2)
+            if mfe is not None and float(mfe) > 1e-9
+            else None
+        )
         result["actor"] = "bot-v3-managed_stop" if hit else "bot-v3-time_stop"
         if result.get("ok"):
             self.entry_at = None
@@ -203,6 +249,12 @@ class PairBook:
             "bid": self.bid,
             "ask": self.ask,
             "watch_last": self.watch_last,
+            "open_24h": self.open_24h,
+            "high_24h": self.high_24h,
+            "low_24h": self.low_24h,
+            "volume_24h": self.volume_24h,
+            "vwap_24h": self.vwap_24h,
+            "trades_24h": self.trades_24h,
             "qty": qty,
             "avg": avg,
             "stop": self.stop or None,
