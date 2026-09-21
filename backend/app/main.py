@@ -274,6 +274,7 @@ async def settings():
             },
             "community_assets_configured": sorted(SUBREDDITS),
             "asset_source_registry": desk.source_registry_snapshot().get("summary"),
+            "health": desk.intelligence_health_snapshot(),
             "community_trade_influence_enabled": False,
             "event_policy": desk.risk_snapshot().get("policy"),
         },
@@ -316,6 +317,11 @@ async def intelligence_sources():
 @app.get("/api/v1/intelligence/assets/sources")
 async def asset_intelligence_sources():
     return desk.source_registry_snapshot()
+
+
+@app.get("/api/v1/intelligence/health")
+async def intelligence_health():
+    return desk.intelligence_health_snapshot()
 
 
 @app.post("/api/v1/intelligence/assets/sources/{source_id}/trust")
