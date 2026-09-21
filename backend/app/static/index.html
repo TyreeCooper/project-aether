@@ -11,6 +11,7 @@
 <body>
 <div class="app-shell">
   <header class="topbar">
+    <button id="menuBtn" class="menu-btn" type="button" aria-label="Open menu" aria-expanded="false"><span></span><span></span><span></span></button>
     <div class="brand">
       <img src="/static/aether-mark.svg" alt="" class="brand-mark"/>
       <div><strong>AETHER</strong><span>Autonomous multi-asset paper desk</span></div>
@@ -120,7 +121,7 @@
         <article class="hero-card"><span>Account Model</span><strong id="engineBookModel">—</strong><small>one wallet, expandable books</small></article>
       </section>
       <section class="panel">
-        <header><div><p class="eyebrow">DECISION MATRIX</p><h2>Ten Independent Books</h2></div></header>
+        <header><div><p class="eyebrow">DECISION MATRIX</p><h2>Independent Asset Books</h2></div></header>
         <div id="engineMatrix" class="asset-board"></div>
       </section>
     </section>
@@ -140,20 +141,77 @@
         </article>
         <article class="panel span-2">
           <header><div><p class="eyebrow">AETHER VECTOR ENGINE</p><h2>Global Paper Controls</h2></div><span class="badge amber">LIVE BLOCKED</span></header>
-          <div class="control-row"><button id="armDesk" class="action primary" type="button">Arm Ten-Asset Engine</button><button id="disarmDesk" class="action" type="button">Disarm Engine</button></div>
+          <div class="control-row"><button id="armDesk" class="action primary" type="button">Arm Engine</button><button id="disarmDesk" class="action" type="button">Disarm Engine</button></div>
         </article>
       </section>
     </section>
+    <section id="view-settings" class="view hidden">
+      <div class="page-title"><div><p class="eyebrow">APP CONFIGURATION</p><h1>Settings</h1><p>Engine behavior, execution assumptions, security, data cadence and live-readiness status.</p></div></div>
+      <section class="dashboard-grid">
+        <article class="panel">
+          <header><div><p class="eyebrow">ENGINE</p><h2>Runtime State</h2></div><span id="settingsArmedBadge" class="badge">—</span></header>
+          <div id="settingsEngineState" class="metric-list"></div>
+          <div class="control-row compact-controls">
+            <button id="settingsArm" class="action primary" type="button">Arm</button>
+            <button id="settingsDisarm" class="action" type="button">Disarm</button>
+          </div>
+        </article>
+
+        <article class="panel">
+          <header><div><p class="eyebrow">TRADING</p><h2>Desk Behavior</h2></div></header>
+          <label class="setting-field"><span>Allocation per new position</span><div><input id="settingAllocation" class="input mini-input" type="number" min="1" max="25" step="0.5"/><em>%</em></div></label>
+          <label class="setting-field"><span>Quote / decision poll</span><div><input id="settingPoll" class="input mini-input" type="number" min="5" max="120" step="1"/><em>sec</em></div></label>
+          <button id="saveDeskSettings" class="action primary small-action" type="button">Save Trading Settings</button>
+        </article>
+
+        <article class="panel">
+          <header><div><p class="eyebrow">EXECUTION MODEL</p><h2>Cost & Guardrails</h2></div><span class="badge amber">PAPER</span></header>
+          <div id="settingsExecution" class="metric-list"></div>
+          <p class="muted">These values define the conservative paper-execution model. Fee assumptions remain environment-controlled so the UI cannot silently make backtests look better.</p>
+        </article>
+
+        <article class="panel">
+          <header><div><p class="eyebrow">DATA</p><h2>Market & Persistence</h2></div></header>
+          <div id="settingsData" class="metric-list"></div>
+        </article>
+
+        <article class="panel span-2">
+          <header><div><p class="eyebrow">SECURITY</p><h2>Operator Access</h2></div><span id="settingsAuthBadge" class="badge">LOCKED</span></header>
+          <div class="control-row">
+            <input id="settingsOperatorToken" class="input" type="password" placeholder="Operator token" autocomplete="off"/>
+            <button id="settingsConnectOperator" class="action primary" type="button">Connect</button>
+            <button id="settingsDisconnectOperator" class="action" type="button">Disconnect</button>
+          </div>
+          <div id="settingsSecurity" class="metric-list settings-inline-list"></div>
+        </article>
+
+        <article class="panel span-2">
+          <header><div><p class="eyebrow">KRAKEN LIVE READINESS</p><h2>Execution Safety Gate</h2></div><span id="settingsLiveBadge" class="badge amber">BLOCKED</span></header>
+          <div id="settingsLive" class="metric-list"></div>
+          <p class="muted">Real orders remain blocked. This page reports readiness only; it does not arm live trading.</p>
+        </article>
+      </section>
+    </section>
+
   </main>
 
   <nav class="bottom-nav" aria-label="Primary">
-    <button data-route="floor" class="on">Floor</button>
-    <button data-route="assets">Assets</button>
-    <button data-route="engine">Engine</button>
-    <button data-route="blotter">Blotter</button>
-    <button data-route="booth">Booth</button>
+    <button data-route="floor" class="on"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V9m5 10V5m6 14v-7m5 7V3"/></svg><span>Floor</span></button>
+    <button data-route="assets"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="9" r="5"/><circle cx="15.5" cy="15.5" r="4.5"/></svg><span>Assets</span></button>
+    <button data-route="engine"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4m6-4v4M9 18v4m6-4v4M2 9h4m-4 6h4m12-6h4m-4 6h4M10 10h4v4h-4z"/></svg><span>Engine</span></button>
+    <button data-route="blotter"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5"/></svg><span>Blotter</span></button>
+    <button data-route="booth"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 4.8-2.7 8-7 10-4.3-2-7-5.2-7-10V6l7-3zM9 12h6"/></svg><span>Booth</span></button>
   </nav>
 </div>
+<div id="drawerScrim" class="drawer-scrim"></div>
+<aside id="drawer" class="drawer" aria-label="App menu">
+  <div class="drawer-head"><div><p class="eyebrow">AETHER</p><h2>Menu</h2></div><span id="drawerState" class="badge">—</span></div>
+  <button class="drawer-item" data-drawer-route="settings" type="button"><span class="drawer-icon">⚙</span><span><b>Settings</b><small>Engine, execution, security & data</small></span><span>›</span></button>
+  <button class="drawer-item" data-drawer-route="floor" type="button"><span class="drawer-icon">⌂</span><span><b>The Floor</b><small>Portfolio command overview</small></span><span>›</span></button>
+  <button class="drawer-item" data-drawer-route="engine" type="button"><span class="drawer-icon">⚡</span><span><b>Aether Vector Engine</b><small>Autonomous decision matrix</small></span><span>›</span></button>
+  <button class="drawer-item" data-drawer-route="blotter" type="button"><span class="drawer-icon">≡</span><span><b>Blotter</b><small>Desk execution record</small></span><span>›</span></button>
+  <div class="drawer-foot"><span>PAPER MODE</span><span>LIVE BLOCKED</span></div>
+</aside>
 <div id="assetPicker" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="assetPickerTitle">
   <section class="asset-picker">
     <header>

@@ -34,6 +34,14 @@ class MultiDesk:
         self.by_id = {b.id: b for b in self.books}
         self._task: asyncio.Task | None = None
         self.armed = os.getenv("AETHER_AUTO_RUN", "1").strip() not in {"0", "false", "FALSE"}
+        self.risk_slice = max(
+            0.01,
+            min(float(os.getenv("AETHER_RISK_SLICE", str(RISK_SLICE))), 0.25),
+        )
+        self.poll_seconds = max(
+            5,
+            min(int(os.getenv("AETHER_DESK_POLL_SECONDS", str(POLL))), 120),
+        )
         self.live_blocked = True
         self._restore(restored)
 
@@ -56,6 +64,10 @@ class MultiDesk:
                 "assets": export_assets(),
                 "books": books,
                 "armed": self.armed,
+                "settings": {
+                    "risk_slice": self.risk_slice,
+                    "poll_seconds": self.poll_seconds,
+                },
                 "saved_at": time.time(),
             }
         )
@@ -82,6 +94,22 @@ class MultiDesk:
                     book.fills = [f for f in fills[-200:] if isinstance(f, dict)]
         if "armed" in data:
             self.armed = bool(data["armed"])
+        settings = data.get("settings") or {}
+        if isinstance(settings, dict):
+            try:
+                self.risk_slice = max(
+                    0.01,
+                    min(float(settings.get("risk_slice", self.risk_slice)), 0.25),
+                )
+            except (TypeError, ValueError):
+                pass
+            try:
+                self.poll_seconds = max(
+                    5,
+                    min(int(settings.get("poll_seconds", self.poll_seconds)), 120),
+                )
+            except (TypeError, ValueError):
+                pass
         logger.info(
             "desk restored usd=%.4f holdings=%s",
             self.wallet.usd,
@@ -99,6 +127,35 @@ class MultiDesk:
             "model": "one_kraken_spot_account",
             "persists": True,
         }
+
+    def engine_status(self) -> dict[str, Any]:
+        running = bool(self._task and not self._task.done())
+        return {
+            "armed": bool(self.armed),
+            "running": running,
+            "accepting_entries": bool(self.armed and running),
+            "live_blocked": True,
+            "source": "multi_asset_desk",
+        }
+
+    def settings_snapshot(self) -> dict[str, Any]:
+        return {
+            "allocation_per_entry_pct": round(self.risk_slice * 100, 2),
+            "quote_poll_seconds": int(self.poll_seconds),
+            "resume_armed_after_restart": True,
+            "state_persistence": True,
+        }
+
+    def update_settings(
+        self,
+        *,
+        allocation_per_entry_pct: float,
+        quote_poll_seconds: int,
+    ) -> dict[str, Any]:
+        self.risk_slice = max(0.01, min(float(allocation_per_entry_pct) / 100.0, 0.25))
+        self.poll_seconds = max(5, min(int(quote_poll_seconds), 120))
+        self.persist()
+        return self.settings_snapshot()
 
     def floor_snapshot(self) -> dict[str, Any]:
         marks = self.marks()
@@ -119,10 +176,14 @@ class MultiDesk:
             wins += int(stats["wins"])
             losses += int(stats["losses"])
         equity = float(wallet["equity"])
+        engine_status = self.engine_status()
         return {
             "strategy_name": "Aether Vector Engine",
             "strategy_internal": "sma_trend_breakout_v3",
-            "armed": self.armed,
+            "armed": engine_status["armed"],
+            "running": engine_status["running"],
+            "accepting_entries": engine_status["accepting_entries"],
+            "engine": engine_status,
             "live_blocked": True,
             "model": "one_kraken_spot_account",
             "portfolio": {
@@ -255,7 +316,7 @@ class MultiDesk:
         if not self.armed:
             return []
         equity = max(self.wallet.equity(self.marks()), 1.0)
-        slice_usd = equity * RISK_SLICE
+        slice_usd = equity * self.risk_slice
         out: list[dict[str, Any]] = []
         for book in self.books:
             fresh, bucket = is_new_five_minute(list(book.bars), book.last_5m)
@@ -304,7 +365,7 @@ class MultiDesk:
             )
 
     def start(self) -> None:
-        if self._task:
+        if self._task and not self._task.done():
             return
 
         async def loop():
@@ -314,19 +375,24 @@ class MultiDesk:
                     await self.tick()
                 except Exception:
                     logger.exception("desk tick")
-                await asyncio.sleep(POLL)
+                await asyncio.sleep(self.poll_seconds)
 
         self._task = asyncio.create_task(loop())
 
     def arm(self) -> dict[str, Any]:
         self.armed = True
+        self.start()
         self.persist()
-        return self.snapshot()
+        data = self.snapshot()
+        data["engine"] = self.engine_status()
+        return data
 
     def disarm(self) -> dict[str, Any]:
         self.armed = False
         self.persist()
-        return self.snapshot()
+        data = self.snapshot()
+        data["engine"] = self.engine_status()
+        return data
 
 
 desk = MultiDesk()

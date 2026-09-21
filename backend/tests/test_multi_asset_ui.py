@@ -48,3 +48,29 @@ def test_register_dynamic_asset_book_is_isolated():
     assert page["asset"]["pair"] == "TEST/USD"
     assert page["asset"]["id"] == "testcoin"
     assert desk.asset_snapshot("eth")["asset"]["pair"] == "ETH/USD"
+
+
+def test_armed_status_tracks_multi_asset_allocator():
+    desk = MultiDesk()
+    desk.armed = False
+    state = desk.engine_status()
+    assert state["armed"] is False
+    assert state["accepting_entries"] is False
+
+    desk.armed = True
+    state = desk.engine_status()
+    assert state["armed"] is True
+    # A desk is only reported as accepting entries when its loop is actually alive.
+    assert state["accepting_entries"] is bool(state["running"])
+
+
+def test_desk_settings_are_bounded_and_reported():
+    desk = MultiDesk()
+    out = desk.update_settings(
+        allocation_per_entry_pct=12.5,
+        quote_poll_seconds=30,
+    )
+    assert out["allocation_per_entry_pct"] == 12.5
+    assert out["quote_poll_seconds"] == 30
+    assert desk.risk_slice == 0.125
+    assert desk.poll_seconds == 30

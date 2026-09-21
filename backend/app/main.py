@@ -15,7 +15,13 @@ from app import learn, live, venue
 from app.db import db_store
 from app.desk import desk
 from app.engine import engine
-from app.paper_exec import install as install_harsh_paper
+from app.fees import TAKER_FEE
+from app.paper_exec import (
+    MAX_BASIS_USD,
+    MAX_SPREAD_BPS,
+    SLIPPAGE_BPS,
+    install as install_harsh_paper,
+)
 from app.universe import public_catalog
 
 STATIC = Path(__file__).parent / "static"
@@ -91,6 +97,11 @@ async def request_telemetry(request: Request, call_next):
         duration_ms,
     )
     return response
+
+
+class DeskSettingsBody(BaseModel):
+    allocation_per_entry_pct: float = Field(ge=1, le=25)
+    quote_poll_seconds: int = Field(ge=5, le=120)
 
 
 class AddAssetBody(BaseModel):
@@ -192,6 +203,53 @@ async def add_asset(
     if asset is None:
         raise HTTPException(status_code=404, detail="Kraken USD asset pair not found")
     return await desk.add_asset(asset)
+
+
+@app.get("/api/v1/settings")
+async def settings():
+    live_state = live.status()
+    return {
+        "strategy_name": "Aether Vector Engine",
+        "mode": "paper",
+        "venue": "Kraken",
+        "watch_venue": "Binance.US",
+        "desk": desk.settings_snapshot(),
+        "engine": desk.engine_status(),
+        "execution": {
+            "taker_fee_rate": TAKER_FEE,
+            "taker_fee_pct": round(TAKER_FEE * 100, 4),
+            "slippage_bps": SLIPPAGE_BPS,
+            "max_spread_bps": MAX_SPREAD_BPS,
+            "max_basis_usd": MAX_BASIS_USD,
+        },
+        "security": {
+            "operator_token_configured": bool(OPERATOR_TOKEN),
+            "mutations_protected": bool(OPERATOR_TOKEN),
+        },
+        "live": {
+            "keys_present": bool(live_state.get("keys_present")),
+            "live_flag": bool(live_state.get("live_flag")),
+            "orders_enabled": bool(live_state.get("orders_enabled")),
+            "live_blocked": True,
+            "reason": live_state.get("reason"),
+        },
+        "assets": len(desk.books),
+    }
+
+
+@app.post("/api/v1/settings")
+async def update_settings(
+    body: DeskSettingsBody,
+    _: None = Depends(require_operator),
+):
+    return {
+        "ok": True,
+        "desk": desk.update_settings(
+            allocation_per_entry_pct=body.allocation_per_entry_pct,
+            quote_poll_seconds=body.quote_poll_seconds,
+        ),
+        "engine": desk.engine_status(),
+    }
 
 
 @app.get("/api/v1/floor")
