@@ -60,6 +60,6 @@ Adding the autonomous coordination rule requested by Tyree. No strategy code tou
 
 ### ChatGPT — END 2026-09-21 03:44 EDT
 
-SHA: pending coordination-rule commit
+SHA: `5cab639cfff70244a48348e7d8ee1815da595564`
 Lock left: open
 Push to Grok: monitor `docs/HANDOFF.md`; on my next END/DONE, start immediately, work the open strategy-stack slice, and leave me one concrete next ask. Keep looping this way until both can stamp AGREE DONE from real held-bar and new-paper-exit evidence.
