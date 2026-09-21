@@ -22,6 +22,17 @@ def _learn_path() -> Path:
     return state_path().with_name("learn_state.json")
 
 
+def _parse_ts(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return None
+
+
 def load_learn() -> dict[str, Any]:
     path = _learn_path()
     if not path.exists():
@@ -46,14 +57,36 @@ def save_learn(payload: dict[str, Any]) -> None:
 
 
 def score_exits(fills: list[dict[str, Any]]) -> dict[str, Any]:
+    now = datetime.now(timezone.utc)
+    today = now.date()
+    week_start = today.fromordinal(today.toordinal() - today.weekday())
+    month_start = today.replace(day=1)
+    year_start = today.replace(month=1, day=1)
     wins = losses = flat = 0
-    pnl = 0.0
+    pnl = daily = weekly = monthly = annual = 0.0
+    invert = 0.0
     by_reason: dict[str, int] = {}
-    for fill in fills:
+    series: list[dict[str, Any]] = []
+    last_ts = None
+    for fill in sorted(fills, key=lambda x: str(x.get("ts", ""))):
         if str(fill.get("side", "")).lower() != "sell":
             continue
         realized = float(fill.get("realized_pnl_usd") or 0)
+        fee = float(fill.get("fee_usd") or 0)
+        ts = _parse_ts(fill.get("ts"))
         pnl += realized
+        invert += -realized - (2 * fee)
+        if ts:
+            last_ts = ts
+            if ts.date() == today:
+                daily += realized
+            if ts.date() >= week_start:
+                weekly += realized
+            if ts.date() >= month_start:
+                monthly += realized
+            if ts.date() >= year_start:
+                annual += realized
+            series.append({"ts": ts.isoformat(), "pnl": round(realized, 4), "cum": round(pnl, 4)})
         if realized > 1e-9:
             wins += 1
         elif realized < -1e-9:
@@ -63,16 +96,27 @@ def score_exits(fills: list[dict[str, Any]]) -> dict[str, Any]:
         actor = str(fill.get("actor") or "unknown")
         by_reason[actor] = by_reason.get(actor, 0) + 1
     closed = wins + losses + flat
-    expectancy = pnl / closed if closed else 0.0
+    age = None
+    if last_ts:
+        age = int((now - last_ts).total_seconds())
     return {
         "closed": closed,
         "wins": wins,
         "losses": losses,
         "breakeven": flat,
         "realized_pnl_usd": round(pnl, 4),
-        "expectancy_usd": round(expectancy, 4),
+        "daily_pnl_usd": round(daily, 4),
+        "weekly_pnl_usd": round(weekly, 4),
+        "monthly_pnl_usd": round(monthly, 4),
+        "annual_pnl_usd": round(annual, 4),
+        "invert_pnl_usd": round(invert, 4),
+        "expectancy_usd": round(pnl / closed, 4) if closed else 0.0,
         "win_rate_pct": round(wins / (wins + losses) * 100, 2) if wins + losses else 0.0,
         "exits_by_actor": by_reason,
+        "series": series[-60:],
+        "last_exit_at": last_ts.isoformat() if last_ts else None,
+        "last_exit_age_s": age,
+        "as_of": now.isoformat(),
     }
 
 
@@ -179,6 +223,9 @@ def review(closes: list[float], fills: list[dict[str, Any]], champion: dict[str,
             if best["test_drawdown_pct"] <= champ_test["max_drawdown_pct"] + 1.5:
                 promote = True
     challenger = best if promote else None
+    invert_note = "Flip book is a check only. Long-only paper stays on."
+    if live_score["closed"] and live_score["invert_pnl_usd"] > live_score["realized_pnl_usd"] + 1:
+        invert_note = "Opposite side looked better on this sample. Still a note, not a live short."
     report = {
         "champion": champ,
         "champion_replay": champ_test,
@@ -189,7 +236,7 @@ def review(closes: list[float], fills: list[dict[str, Any]], champion: dict[str,
         "bars_used": len(closes),
         "candidates": ranked[:5],
         "last_review_at": datetime.now(timezone.utc).isoformat(),
-        "note": "Challenger is a proposal only. Operator must promote while OFFLINE and flat.",
+        "note": invert_note,
     }
     state["champion"] = champ
     state["challenger"] = report["challenger"]
