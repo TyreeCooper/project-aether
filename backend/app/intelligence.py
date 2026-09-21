@@ -479,11 +479,14 @@ def source_registry(
     crypto_calendar_configured: bool = False,
     news_connected: bool = False,
     community_connected: bool = False,
+    bls_connected: bool = False,
 ) -> list[dict[str, Any]]:
     rows = [dict(x) for x in SOURCE_REGISTRY]
     for row in rows:
         source_id = row["id"]
         if source_id == "forex_factory" and calendar_connected:
+            row["status"] = "connected"
+        elif source_id == "bls" and bls_connected:
             row["status"] = "connected"
         elif source_id == "coinmarketcal":
             row["status"] = (
@@ -607,6 +610,7 @@ def floor_intelligence(
     news_cache: dict[str, dict[str, Any]] | None = None,
     crypto_calendar_connected: bool = False,
     crypto_calendar_configured: bool = False,
+    bls_connected: bool = False,
 ) -> dict[str, Any]:
     rows = []
     for book in books:
@@ -648,6 +652,7 @@ def floor_intelligence(
                 str(row.get("status") or "") == "shadow"
                 for row in (community_cache or {}).values()
             ),
+            bls_connected=bls_connected,
         ),
         "methodology": {
             "opportunity": "Kraken 24h high-low range; not claimed profit",
