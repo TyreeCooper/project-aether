@@ -8,6 +8,8 @@ MAX_SPREAD_BPS = 10.0
 MAX_BASIS_USD = 80.0
 STALE_MS = 8_000
 REVIEW_EVERY_TICKS = 40
+CHOP_LOOKBACK = 21
+CHOP_RANGE_PCT = 0.35
 
 
 def slipped_price(side: str, bid: float | None, ask: float | None, mark: float | None) -> float | None:
@@ -20,6 +22,19 @@ def slipped_price(side: str, bid: float | None, ask: float | None, mark: float |
     if side == "buy":
         return raw + slip
     return raw - slip
+
+
+def deny_chop(closes: list[float], mark: float | None) -> str | None:
+    if mark is None or len(closes) < CHOP_LOOKBACK:
+        return None
+    window = list(closes)[-CHOP_LOOKBACK:]
+    high = max(window)
+    low = min(window)
+    if mark <= 0:
+        return None
+    if (high - low) / mark * 100 < CHOP_RANGE_PCT:
+        return "chop"
+    return None
 
 
 def deny_microstructure(
@@ -72,7 +87,7 @@ def install(engine) -> None:
         last = getattr(engine, "_last_tick_mono", None)
         if last is not None:
             stale = int((time.monotonic() - last) * 1000) > STALE_MS
-        return deny_microstructure(
+        reason = deny_microstructure(
             side="buy",
             bid=engine.bid,
             ask=engine.ask,
@@ -81,6 +96,9 @@ def install(engine) -> None:
             stale=stale,
             watch_last=getattr(engine, "watch_last", None),
         )
+        if reason:
+            return reason
+        return deny_chop(list(engine.closes), engine.mark)
 
     async def wrapped_tick():
         await original_tick()
@@ -100,6 +118,6 @@ def install(engine) -> None:
     engine.tick = wrapped_tick
     if not engine.flatten_lock:
         engine.state = "IN_POSITION" if engine.btc > 0 else "IDLE"
-        engine._log("INFO", "Paper loop armed. 5s tape. Journal runs in the background.")
+        engine._log("INFO", "Paper armed. Chop filter on. 5s tape.")
     else:
         engine._log("INFO", "Flatten lock holds. Loop still marks the tape.")
