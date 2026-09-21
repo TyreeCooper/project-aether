@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import time
+from datetime import datetime, timezone
 
 from app.clock import allow_after_losses, is_new_five_minute
-from app.exits import stop_fill_price
+from app.exits import stop_fill_price, time_stop_due
 from app.fees import TAKER_FEE as KRAKEN_TAKER
+from app.strategy import round_trip_cost_pct
 
 SLIPPAGE_BPS = 5.0
 MAX_SPREAD_BPS = 10.0
@@ -142,12 +144,42 @@ def install(engine) -> None:
             engine._apply_fill("sell", engine.btc, raw, "bot-v3-managed_stop")
         )
 
+    def shared_time_stop() -> bool:
+        if engine.btc <= 0 or not engine.mark or not engine.avg_entry:
+            return False
+        raw_entry = getattr(engine, "entry_at", None)
+        if not raw_entry:
+            return False
+        try:
+            entered = datetime.fromisoformat(str(raw_entry).replace("Z", "+00:00"))
+            if entered.tzinfo is None:
+                entered = entered.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return False
+        held = int((datetime.now(timezone.utc) - entered).total_seconds() // 60)
+        gain = ((float(engine.mark) / float(engine.avg_entry)) - 1) * 100
+        cost = float(
+            round_trip_cost_pct(
+                engine.mark, engine.bid, engine.ask, fee_rate=KRAKEN_TAKER
+            )
+            or 0.0
+        )
+        if not time_stop_due(held, gain, cost):
+            return False
+        px = engine._fill_price("sell")
+        if not px:
+            return False
+        engine._log("BOT", f"Shared time-stop after {held}m.")
+        return bool(engine._apply_fill("sell", engine.btc, px, "bot-v3-time_stop"))
+
     def wrapped_eval(new_bar: bool = False) -> None:
         five, bucket = is_new_five_minute(list(engine.bars_1m), engine._last_5m_bucket)
         if five or engine._last_5m_bucket is None:
             engine._last_5m_bucket = bucket
         if engine.btc > 0:
             if new_bar and bar_low_stop():
+                return
+            if shared_time_stop():
                 return
             original_eval(new_bar=new_bar)
             return
@@ -174,5 +206,5 @@ def install(engine) -> None:
     engine.tick = wrapped_tick
     engine._log(
         "INFO",
-        f"Harsh paper on. Frozen stop. Bar-low stop slip. Fee {KRAKEN_TAKER}. Live blocked.",
+        f"Harsh paper on. Shared time-stop. Fee {KRAKEN_TAKER}. Live blocked.",
     )
