@@ -16,6 +16,7 @@ from app.db import db_store
 from app.desk import desk
 from app.engine import engine
 from app.fees import TAKER_FEE
+from app.intelligence import source_registry
 from app.paper_exec import (
     MAX_BASIS_USD,
     MAX_SPREAD_BPS,
@@ -250,6 +251,24 @@ async def update_settings(
         ),
         "engine": desk.engine_status(),
     }
+
+
+@app.get("/api/v1/intelligence/floor")
+async def intelligence_floor():
+    return desk.floor_snapshot().get("intelligence", {})
+
+
+@app.get("/api/v1/assets/{asset_id}/intelligence")
+async def asset_intelligence(asset_id: str):
+    row = desk.asset_snapshot(asset_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="unknown asset")
+    return row.get("intelligence", {})
+
+
+@app.get("/api/v1/intelligence/sources")
+async def intelligence_sources():
+    return {"items": source_registry()}
 
 
 @app.get("/api/v1/floor")
