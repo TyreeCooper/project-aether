@@ -17,6 +17,7 @@ SOURCE_REGISTRY: tuple[dict[str, Any], ...] = (
     {"id": "bls", "name": "U.S. Bureau of Labor Statistics", "type": "macro_official", "tier": "A", "status": "planned"},
     {"id": "bea", "name": "U.S. Bureau of Economic Analysis", "type": "macro_official", "tier": "A", "status": "planned"},
     {"id": "forex_factory", "name": "Forex Factory", "type": "calendar_aggregator", "tier": "B", "status": "planned"},
+    {"id": "gdelt", "name": "GDELT", "type": "news_discovery", "tier": "B", "status": "planned"},
     {"id": "asset_official", "name": "Official asset/project channels", "type": "asset_official", "tier": "A", "status": "planned"},
     {"id": "community", "name": "Verified asset communities", "type": "community", "tier": "B", "status": "planned"},
 )
@@ -143,6 +144,7 @@ def risk_state(
     *,
     calendar_connected: bool = False,
     community: dict[str, Any] | None = None,
+    news: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     rows = list(events or [])
     now = datetime.now(timezone.utc)
@@ -332,6 +334,7 @@ def floor_intelligence(
     events: list[dict[str, Any]] | None = None,
     calendar_connected: bool = False,
     community_cache: dict[str, dict[str, Any]] | None = None,
+    news_cache: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     rows = []
     for book in books:
@@ -341,6 +344,7 @@ def floor_intelligence(
             events=events,
             calendar_connected=calendar_connected,
             community=(community_cache or {}).get(str(book.id)),
+            news=(news_cache or {}).get(str(book.id)),
         )
         opp = ctx["opportunity_24h"]
         rows.append({
