@@ -103,7 +103,11 @@ def pearson_from_bars(target: list[dict[str, Any]], benchmark: list[dict[str, An
     den = sqrt(va * vb)
     return round(cov / den, 4) if den > 1e-18 else None
 
-def risk_state(events: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def risk_state(
+    events: list[dict[str, Any]] | None = None,
+    *,
+    calendar_connected: bool = False,
+) -> dict[str, Any]:
     rows = list(events or [])
     active = [x for x in rows if str(x.get("state")) in {"blackout", "restricted"}]
     caution = [x for x in rows if str(x.get("state")) == "caution"]
@@ -112,14 +116,28 @@ def risk_state(events: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         "state": state,
         "active_events": active + caution,
         "new_entries_allowed": not bool(active),
-        "calendar_connected": False,
-        "note": "No macro/crypto event calendar connected yet; state is market-data-only." if not rows else None,
+        "calendar_connected": bool(calendar_connected),
+        "note": (
+            "No macro/crypto event calendar connected yet; state is market-data-only."
+            if not calendar_connected
+            else None
+        ),
     }
 
-def source_registry() -> list[dict[str, Any]]:
-    return [dict(x) for x in SOURCE_REGISTRY]
+def source_registry(calendar_connected: bool = False) -> list[dict[str, Any]]:
+    rows = [dict(x) for x in SOURCE_REGISTRY]
+    for row in rows:
+        if row["id"] == "forex_factory" and calendar_connected:
+            row["status"] = "connected"
+    return rows
 
-def asset_context(book: Any, books: list[Any]) -> dict[str, Any]:
+def asset_context(
+    book: Any,
+    books: list[Any],
+    *,
+    events: list[dict[str, Any]] | None = None,
+    calendar_connected: bool = False,
+) -> dict[str, Any]:
     view = book.view()
     bars = list(book.bars)
     opp = opportunity_24h(view)
@@ -143,13 +161,23 @@ def asset_context(book: Any, books: list[Any]) -> dict[str, Any]:
             "discussion_volume_ratio": None, "narratives": [],
             "note": "Verified community sources are not connected yet; unavailable is not neutral.",
         },
-        "risk": risk_state(),
+        "risk": risk_state(events, calendar_connected=calendar_connected),
     }
 
-def floor_intelligence(books: list[Any]) -> dict[str, Any]:
+def floor_intelligence(
+    books: list[Any],
+    *,
+    events: list[dict[str, Any]] | None = None,
+    calendar_connected: bool = False,
+) -> dict[str, Any]:
     rows = []
     for book in books:
-        ctx = asset_context(book, books)
+        ctx = asset_context(
+            book,
+            books,
+            events=events,
+            calendar_connected=calendar_connected,
+        )
         opp = ctx["opportunity_24h"]
         rows.append({
             "id": book.id, "symbol": book.symbol, "pair": book.pair,
@@ -162,8 +190,8 @@ def floor_intelligence(books: list[Any]) -> dict[str, Any]:
     return {
         "assets": rows,
         "opportunity_ranking": sorted(rows, key=lambda x: _f(x.get("range_24h_pct")), reverse=True),
-        "risk": risk_state(),
-        "sources": source_registry(),
+        "risk": risk_state(events, calendar_connected=calendar_connected),
+        "sources": source_registry(calendar_connected=calendar_connected),
         "methodology": {
             "opportunity": "Kraken 24h high-low range; not claimed profit",
             "cross_asset": "rolling 1m return correlation where enough common bars exist",
