@@ -26,5 +26,18 @@ def status() -> dict[str, Any]:
     }
 
 
-async def place_order(*_args, **_kwargs) -> dict[str, Any]:
-    return {"ok": False, "error": "live_orders_blocked", **status()}
+async def place_order(
+    *,
+    pair: str = "XBTUSD",
+    side: str = "buy",
+    volume: float = 0.0,
+    **_kwargs: Any,
+) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "error": "live_orders_blocked",
+        "pair": pair,
+        "side": side,
+        "volume": volume,
+        **status(),
+    }
