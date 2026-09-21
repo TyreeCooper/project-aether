@@ -92,7 +92,7 @@ def validate_bars(bars: list[dict[str, Any]]) -> dict[str, Any]:
     gaps = sum(1 for a, b in zip(ts, ts[1:]) if b - a > 60)
     backwards = sum(1 for a, b in zip(ts, ts[1:]) if b <= a)
     return {
-        "ok": duplicates == 0 and backwards == 0,
+        "ok": duplicates == 0 and backwards == 0 and gaps == 0,
         "bars": len(bars),
         "gaps": gaps,
         "duplicates": duplicates,
