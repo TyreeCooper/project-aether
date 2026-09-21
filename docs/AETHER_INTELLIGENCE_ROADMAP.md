@@ -24,7 +24,7 @@ source of truth for implementation status.
 |---|---|---|---|
 | 1 | 24h Opportunity Envelope | IMPLEMENTED | Kraken current/open/high/low/net/range/range position/volume/spread + ATR(14) 1m, 60m realized vol, relative volume, liquidity state |
 | 2 | Multi-window opportunity | IMPLEMENTED | 1h, 4h, 12h, 3d, 7d, 30d |
-| 3 | Opportunity Capture Analytics | PARTIAL | MFE, MAE, available move, net return, capture efficiency; explicit entry/exit efficiency and missed-opportunity decomposition remain |
+| 3 | Opportunity Capture Analytics | IMPLEMENTED | MFE, MAE, available move, entry/exit efficiency, gross/net capture, missed favorable move, fees, slippage, and cost drag are recorded per closed paper trade |
 | 4 | Asset Intelligence State | PARTIAL | Canonical per-asset context exists; support/resistance and complete catalyst/source profile remain |
 | 5 | Cross-asset relationships | PARTIAL | BTC corr, ETH corr, BTC beta, relative strength vs BTC and desk; desk-index correlation remains |
 | 6 | Market regime classification | IMPLEMENTED-SHADOW | Transparent heuristic regime; no trade influence |
