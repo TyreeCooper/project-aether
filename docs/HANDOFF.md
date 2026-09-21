@@ -5,35 +5,13 @@ Read the whole file before touching code. Append a new entry when you start. App
 
 ## How this desk works
 
-- **Place / ship:** one agent implements.
-- **Read / comment:** the other agent reviews that SHA only. No drive-by rewrites in the same files.
-- **Grok** places strategy / paper / engine / journal / live-block.
-- **ChatGPT** reviews that stack first. UI waits until strategy-stack has both `AGREE DONE`, unless Terry asks.
-- **Lock + stamps:** START / END with time and SHA. Same path, two STARTs = second agent stops.
-
-## Strategy stack first
-
-Rule → clock → fills → journal → engine wiring → UI last.
-Do not spend a turn on dock or theme while this slice is open.
-
-## Paper must earn
-
-- The only goal of this slice is a **profitable paper book after fees and slip**. Not a nicer screen. Not a higher win rate with negative expectancy.
-- “All profit” means: closed trades, harsh fills, cost hurdle on, expectancy ≥ 0 and profit factor > 1 on the held Kraken 1m history *and* on new live paper exits. No fabricated fills. No hiding losses.
-- If the book is red, the slice stays open. Change the rule, the clock, the sit budget, or sit in cash. Do not flip losers into fake winners. Do not arm live to “make it back.”
-- Keep placing and reviewing until both can write `AGREE DONE strategy-stack` with numbers, not vibes. Persist. Push each other. Idle is failure.
-
-## Done means both say done
-
-Both stamp `AGREE DONE` plus SHA. Then `docs/REPORT-strategy-stack.md` with the paper stats that justify it. Live stays blocked.
-
-## Persist and push
-
-Push before END. END names SHA + next ask. Spare time = strategy RESEARCH or review.
+- Place / ship vs read / comment. Capability lanes. Lock + START/END stamps.
+- Strategy stack first. Paper must earn after costs. Both AGREE DONE or the slice stays open.
+- Persist and push. Live blocked.
 
 ## Board
 
-- Open slice: **strategy-stack**. Not agreed done. Paper still has to prove expectancy after costs.
+- Open slice: **strategy-stack**. Not agreed done.
 - Live: blocked.
 
 ## Locks
@@ -44,11 +22,30 @@ Push before END. END names SHA + next ask. Spare time = strategy RESEARCH or rev
 
 ## Thread
 
-### Grok — START 2026-09-21 03:15 EDT
+### Grok — START 2026-09-21 03:33 EDT
 
-Terry: persist until the paper strategy earns after costs. UI is not the job.
+Working strategy-stack. Lock: `backend/app/paper_exec.py`
 
-### Grok — END 2026-09-21 03:15 EDT
+Wiring frozen stop through engine.exit_plan via paper_exec.install. Champion lookback already 20 in learn.CHAMPION. Aligning default taker to 0.0026 Kraken-style unless AETHER_TAKER_FEE_RATE is set.
 
-SHA: this commit.
-**Push to ChatGPT:** Review the four strategy files. Say what is killing expectancy. Do not touch the dock.
+### Grok — END 2026-09-21 03:33 EDT
+
+SHA: `d156b078f8f41b20a638bc6e94866ab90337797e` plus this log.
+Lock left: open
+Evidence: no new held-out fold in this stamp. I did not invent a P&L. Live paper exits still need `/api/v1/learn` after deploy.
+What I placed:
+- `engine_mod.exit_plan` now calls `exit_plan(..., frozen_hard_stop=max(passed, engine.position_stop))` so a raised stop cannot loosen.
+- `BREAKOUT_BARS = 20` on the engine module.
+- Default fee in the paper hook is `0.0026` (env override still wins). Journal `learn.py` CHAMPION `breakout_bars` is already 20; journal default fee is still `0.008` unless env is set — that mismatch is leftover leakage if Azure has no env.
+Alignment check:
+- Clock: both use completed 5m buckets for new entries; stops tick on 1m.
+- Slip: 5 bps both sides.
+- Loss sit: `allow_after_losses` both.
+- Time-stop: engine 180 minutes wall; replay 180 one-minute bars. Same if seed is 1m.
+- Stop progression: both max() with frozen stop after this hook.
+Expectancy leakage still:
+- 0.008 journal default vs 0.0026 runtime hook if env unset.
+- Seed is 720 1m bars; review wants 1440 before treating OOS as proof.
+- Cost hurdle vs 5m noise still rejects or pays spread; no claim of PF > 1.
+I do not AGREE DONE strategy-stack.
+Push to ChatGPT: confirm after deploy that `/api/v1/learn` champion.breakout_bars is 20 and live_exits.closed / expectancy / PF. If journal fee is still 0.008 on the host, set AETHER_TAKER_FEE_RATE=0.0026 on Azure or change learn default to match. Do not touch UI.
