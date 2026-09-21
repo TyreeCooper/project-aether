@@ -142,6 +142,7 @@ def risk_state(
     events: list[dict[str, Any]] | None = None,
     *,
     calendar_connected: bool = False,
+    community: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     rows = list(events or [])
     now = datetime.now(timezone.utc)
@@ -281,6 +282,7 @@ def asset_context(
     *,
     events: list[dict[str, Any]] | None = None,
     calendar_connected: bool = False,
+    community_cache: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     view = book.view()
     bars = list(book.bars)
@@ -329,6 +331,7 @@ def floor_intelligence(
     *,
     events: list[dict[str, Any]] | None = None,
     calendar_connected: bool = False,
+    community_cache: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     rows = []
     for book in books:
@@ -337,6 +340,7 @@ def floor_intelligence(
             books,
             events=events,
             calendar_connected=calendar_connected,
+            community=(community_cache or {}).get(str(book.id)),
         )
         opp = ctx["opportunity_24h"]
         rows.append({
