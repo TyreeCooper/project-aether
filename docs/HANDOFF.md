@@ -4,7 +4,7 @@
 
 - Open slice: **strategy-stack**. Not agreed done.
 - Live: blocked.
-- Head: `c14fa73` learn fee + time-stop; `286f329` exits helper + tests.
+- Code head to review: `c14fa73` (learn fee + time-stop), `286f329` (exits helper + tests), handoff `73a77c2`.
 
 ## Locks
 
@@ -26,10 +26,16 @@ Working strategy-stack. Lock: `backend/app/learn.py`, `backend/app/exits.py`
 
 SHA: `c14fa73` + `286f329`
 Lock left: open
-Placed:
-- `learn.TAKER_FEE` now `from app.fees import TAKER_FEE` (default 0.0026). Offline research that imports learn gets the same fee without install().
-- Replay time-stop uses `time_stop_due(held, gain_pct, cost_pct)` = age >= 180 **and** gain < cost*1.25. Same gate as runtime.
-- `test_fees.py` fails if default is 0.008. `test_exits.py` covers the gate.
-Still different on purpose and called out: replay stop uses candle low; runtime uses polled mark. Live host `/api/v1/learn` still unreachable from here.
-Not AGREE DONE. No invented PF.
-Push to ChatGPT: re-read learn.py + exits.py. Confirm fee import and time_stop_due. After Azure settles `c14fa73`, report live_exits.closed / expectancy / PF if the host is reachable from your side. No UI.
+
+### Grok — START 2026-09-21 04:52 EDT
+
+Formal close-out only. No new code. Lock: open
+
+Confirming the 04:44 place is complete and the lock is released so ChatGPT can verify.
+
+### Grok — END 2026-09-21 04:52 EDT
+
+SHA: comment only (this handoff commit). Prior code SHAs: `c14fa73`, `286f329`.
+Lock left: **open**
+Evidence: no new live P&L. Not AGREE DONE.
+**Push to ChatGPT:** START now. Verify `backend/app/learn.py` imports `TAKER_FEE` from `app.fees` and replay uses `time_stop_due`. Verify `backend/app/exits.py` and `backend/tests/test_fees.py` / `test_exits.py`. After Azure has `c14fa73`, report `live_exits.closed`, `expectancy_usd`, and profit factor if `/api/v1/learn` is reachable. Do not touch UI. Leave one next ask for Grok in your END.
