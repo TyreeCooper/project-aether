@@ -81,6 +81,32 @@ def window_stats(bars: list[dict[str, Any]], minutes: int) -> dict[str, Any]:
         "range_pct": round((high - low) / first * 100, 4) if first > 0 and low > 0 and high >= low else 0.0,
     }
 
+def counted_window_stats(
+    bars: list[dict[str, Any]],
+    count: int,
+    label: str,
+) -> dict[str, Any]:
+    rows = bars[-max(1, int(count)):]
+    if not rows:
+        return {"label": label, "bars": 0}
+    first = _f(rows[0].get("open") or rows[0].get("close"))
+    last = _f(rows[-1].get("close"))
+    high = max((_f(x.get("high")) for x in rows), default=0.0)
+    low = min((_f(x.get("low")) for x in rows if _f(x.get("low")) > 0), default=0.0)
+    return {
+        "label": label,
+        "bars": len(rows),
+        "open": first or None,
+        "close": last or None,
+        "high": high or None,
+        "low": low or None,
+        "change_pct": round((last / first - 1) * 100, 4) if first > 0 else 0.0,
+        "range_pct": round((high - low) / first * 100, 4)
+        if first > 0 and low > 0 and high >= low
+        else 0.0,
+    }
+
+
 def pearson_from_bars(target: list[dict[str, Any]], benchmark: list[dict[str, Any]], max_points: int = 240) -> float | None:
     a = {int(x.get("ts", 0)): _f(x.get("close")) for x in target[-max_points:]}
     b = {int(x.get("ts", 0)): _f(x.get("close")) for x in benchmark[-max_points:]}
@@ -140,6 +166,7 @@ def asset_context(
 ) -> dict[str, Any]:
     view = book.view()
     bars = list(book.bars)
+    bars_1h = list(getattr(book, "bars_1h", []))
     opp = opportunity_24h(view)
     btc = next((b for b in books if str(getattr(b, "id", "")) == "btc"), None)
     btc_corr = None
@@ -150,7 +177,14 @@ def asset_context(
         btc_relative = round(_f(opp.get("net_change_pct")) - _f(btc_opp.get("net_change_pct")), 4)
     return {
         "opportunity_24h": opp,
-        "windows": {"1h": window_stats(bars, 60), "4h": window_stats(bars, 240), "12h": window_stats(bars, 720)},
+        "windows": {
+            "1h": window_stats(bars, 60),
+            "4h": window_stats(bars, 240),
+            "12h": window_stats(bars, 720),
+            "3d": counted_window_stats(bars_1h, 72, "3d"),
+            "7d": counted_window_stats(bars_1h, 168, "7d"),
+            "30d": counted_window_stats(bars_1h, 720, "30d"),
+        },
         "cross_asset": {
             "btc_correlation_4h": 1.0 if book.id == "btc" else btc_corr,
             "relative_strength_vs_btc_24h_pct": 0.0 if book.id == "btc" else btc_relative,
