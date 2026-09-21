@@ -67,6 +67,7 @@ def deny_microstructure(
 def install(engine) -> None:
     import app.engine as engine_mod
     from app import learn as learn_mod
+    from app.desk_boot import attach
     from app.strategy import exit_plan as real_exit
 
     engine_mod.POLL_SECONDS = 5
@@ -204,7 +205,8 @@ def install(engine) -> None:
     engine.evaluate_and_maybe_trade = wrapped_eval
     engine._fill_price = lambda side: slipped_price(side, engine.bid, engine.ask, engine.mark)
     engine.tick = wrapped_tick
+    attach(engine)
     engine._log(
         "INFO",
-        f"Harsh paper on. Shared time-stop. Fee {KRAKEN_TAKER}. Live blocked.",
+        f"Harsh paper on. Shared time-stop. Multi-desk. Fee {KRAKEN_TAKER}. Live blocked.",
     )
