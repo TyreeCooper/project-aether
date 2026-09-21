@@ -35,23 +35,34 @@
   const brandSub=document.querySelector(".brand-sub"); if(brandSub) brandSub.textContent="Paper desk";
 
   const inner=document.querySelector(".nav-inner");
-  if(inner && !inner.querySelector(".dock-slide")){
-    const ghost=document.createElement("div"); ghost.className="dock-ghost";
-    const slide=document.createElement("div"); slide.className="dock-slide";
-    inner.insertBefore(ghost, inner.firstChild);
-    inner.insertBefore(slide, inner.firstChild);
-    const move=()=>{
-      const on=inner.querySelector(".nav-btn.active")||inner.querySelector(".nav-btn");
-      if(!on) return;
-      const r=inner.getBoundingClientRect(), b=on.getBoundingClientRect();
-      const left=(b.left-r.left)+"px";
-      const width=b.width+"px";
-      ghost.style.left=left; ghost.style.width=width;
-      slide.style.left=left; slide.style.width=width;
-    };
-    inner.querySelectorAll(".nav-btn").forEach(b=>b.addEventListener("click",()=>setTimeout(move,30)));
-    setTimeout(move,80);
-    window.addEventListener("resize",move);
+  if(inner){
+    const order=["trade","activity","home","analytics","settings"];
+    const map={};
+    inner.querySelectorAll(".nav-btn").forEach(b=>map[b.getAttribute("data-page")]=b);
+    order.forEach(k=>{ if(map[k]) inner.appendChild(map[k]); });
+    const labels={home:"Floor",trade:"Ticket",activity:"Blotter",analytics:"Book",settings:"Booth"};
+    inner.querySelectorAll(".nav-btn").forEach(b=>{
+      const s=b.querySelector("span");
+      if(s && labels[b.getAttribute("data-page")]) s.textContent=labels[b.getAttribute("data-page")];
+    });
+    if(!inner.querySelector(".dock-slide")){
+      const ghost=document.createElement("div"); ghost.className="dock-ghost";
+      const slide=document.createElement("div"); slide.className="dock-slide";
+      inner.insertBefore(ghost, inner.firstChild);
+      inner.insertBefore(slide, inner.firstChild);
+      const move=()=>{
+        const on=inner.querySelector(".nav-btn.active")||map.home||inner.querySelector(".nav-btn");
+        if(!on) return;
+        const r=inner.getBoundingClientRect(), b=on.getBoundingClientRect();
+        const left=(b.left-r.left)+"px";
+        const width=b.width+"px";
+        ghost.style.left=left; ghost.style.width=width;
+        slide.style.left=left; slide.style.width=width;
+      };
+      inner.querySelectorAll(".nav-btn").forEach(b=>b.addEventListener("click",()=>setTimeout(move,30)));
+      setTimeout(move,80);
+      window.addEventListener("resize",move);
+    }
   }
 
   const settings=document.getElementById("page-settings");
