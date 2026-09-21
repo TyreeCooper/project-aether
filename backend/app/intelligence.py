@@ -183,6 +183,7 @@ def move_attribution(
     cross_asset: dict[str, Any],
     events: list[dict[str, Any]] | None,
     calendar_connected: bool,
+    news: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     drivers: list[dict[str, Any]] = []
     now = datetime.now(timezone.utc)
@@ -234,6 +235,30 @@ def move_attribution(
                         "scheduled_at": event.get("scheduled_at"),
                         "source": event.get("source"),
                         "officially_verified": bool(event.get("verified_official")),
+                    },
+                }
+            )
+
+    # News remains shadow context. Multiple independent domains can support a
+    # candidate explanation, but cannot establish causality or create an order.
+    news_row = news or {}
+    if str(news_row.get("status") or "") == "shadow":
+        domains = int(_f(news_row.get("independent_domains")))
+        articles = int(_f(news_row.get("articles_analyzed")))
+        narratives = list(news_row.get("narratives") or [])
+        if articles > 0 and domains >= 2:
+            confidence = min(55, 30 + min(domains, 5) * 5)
+            drivers.append(
+                {
+                    "type": "asset_news",
+                    "label": "Asset-specific news cluster",
+                    "confidence_pct": confidence,
+                    "evidence": {
+                        "articles_analyzed": articles,
+                        "independent_domains": domains,
+                        "top_narratives": narratives[:3],
+                        "claims_verified": bool(news_row.get("claims_verified")),
+                        "source_mode": "discovery_shadow",
                     },
                 }
             )
@@ -320,11 +345,21 @@ def asset_context(
             cross_asset,
             events,
             calendar_connected,
+            news=news,
         ),
-        "community": {
+        "community": community or {
             "status": "unavailable", "sentiment": None, "velocity": None,
             "discussion_volume_ratio": None, "narratives": [],
             "note": "Verified community sources are not connected yet; unavailable is not neutral.",
+        },
+        "news": news or {
+            "status": "unavailable",
+            "shadow_only": True,
+            "trade_influence_enabled": False,
+            "articles_analyzed": 0,
+            "independent_domains": 0,
+            "narratives": [],
+            "note": "Asset-specific news context is not available; unavailable is not neutral.",
         },
         "risk": risk_state(events, calendar_connected=calendar_connected),
     }
