@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import learn, venue
+from app import learn, live, venue
 from app.db import db_store
 from app.engine import engine
 from app.paper_exec import install as install_harsh_paper
@@ -36,14 +36,15 @@ logger.propagate = False
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    logger.info("event=app_start phase=begin version=1.4.0")
+    logger.info("event=app_start phase=begin version=1.5.0")
     await engine.initialize_persistence()
     install_harsh_paper(engine)
     engine.start_loop()
     logger.info(
-        "event=app_start phase=ready version=1.4.0 storage_configured=%s storage_initialized=%s",
+        "event=app_start phase=ready version=1.5.0 storage_configured=%s storage_initialized=%s live_ready=%s",
         db_store.status().get("configured"),
         db_store.status().get("initialized"),
+        live.status().get("live_ready"),
     )
     try:
         yield
@@ -54,7 +55,7 @@ async def lifespan(_: FastAPI):
         logger.info("event=app_shutdown phase=complete")
 
 
-app = FastAPI(title="Project Aether API", version="1.4.0", lifespan=lifespan)
+app = FastAPI(title="Project Aether API", version="1.5.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -173,8 +174,14 @@ async def health():
         "stale": snap.get("stale"),
         "paper_mode": True,
         "live_blocked": True,
+        "live": live.status(),
         "storage": db_store.status(),
     }
+
+
+@app.get("/api/v1/live")
+async def live_status():
+    return live.status()
 
 
 @app.get("/api/v1/storage")
@@ -273,6 +280,7 @@ async def account():
         "watch_bid": watch.get("bid") if watch else None,
         "watch_ask": watch.get("ask") if watch else None,
         "watch_basis_usd": _basis(snap.get("mark"), watch_last),
+        "live": live.status(),
     }
 
 
