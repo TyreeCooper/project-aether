@@ -1302,6 +1302,24 @@ class MultiDesk:
                 group_counts[group] = (
                     group_counts.get(group, 0) + 1
                 )
+                self._record_event(
+                    "entry_filled",
+                    book,
+                    {
+                        "trade_id": result.get("trade_id"),
+                        "side": result.get("position_side"),
+                        "mode": result.get("entry_mode"),
+                        "price": result.get("price"),
+                        "quantity": result.get("qty"),
+                        "stop_price": book.stop or None,
+                        "risk_budget_usd": result.get(
+                            "risk_budget_usd"
+                        ),
+                        "quality_score": result.get(
+                            "quality_score"
+                        ),
+                    },
+                )
                 self.persist()
 
                 if book.kraken:
@@ -1337,12 +1355,53 @@ class MultiDesk:
             # Re-read the BTC gate before every managed book. If BTC exits
             # earlier in this tick, ETH sees the closed rider gate immediately.
             btc_bias, btc_long = self._btc_gate()
+            before_stop = float(book.stop or 0.0)
+            before_trade = self.wallet.position(book.id)
             row = book.manage(
                 btc_bias_on=btc_bias,
                 btc_in_position=btc_long,
             )
+            after_stop = float(book.stop or 0.0)
+            if (
+                row is None
+                and before_trade
+                and after_stop > 0
+                and abs(after_stop - before_stop) > 1e-10
+            ):
+                self._record_event(
+                    "stop_moved",
+                    book,
+                    {
+                        "trade_id": before_trade.get(
+                            "trade_id"
+                        ),
+                        "side": before_trade.get("side"),
+                        "from_price": (
+                            before_stop
+                            if before_stop > 0
+                            else None
+                        ),
+                        "to_price": after_stop,
+                    },
+                )
+                self.persist()
             if row:
                 exits.append(row)
+                self._record_event(
+                    "position_closed",
+                    book,
+                    {
+                        "trade_id": row.get("trade_id"),
+                        "side": row.get("position_side"),
+                        "mode": row.get("entry_mode"),
+                        "price": row.get("price"),
+                        "realized_pnl_usd": row.get("pnl"),
+                        "duration_seconds": row.get(
+                            "duration_seconds"
+                        ),
+                        "exit_reason": row.get("exit_reason"),
+                    },
+                )
                 self.persist()
                 if book.kraken:
                     await live.place_order(
