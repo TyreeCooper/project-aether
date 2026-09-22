@@ -250,6 +250,13 @@ class PairBook:
                 else None
             ),
             reference_price=float(reference or px),
+            metadata={
+                "entry_reason": snap.get("reason"),
+                "quality_score": snap.get("quality_score"),
+                "entry_clock": snap.get("entry_clock"),
+                "bias_clock": snap.get("bias_clock"),
+                "cluster": playbook_profile(self.id).get("cluster"),
+            },
         )
         result["pair"] = self.pair
         result["actor"] = "bot-playbook-entry"
@@ -696,6 +703,43 @@ class PairBook:
             result["exit_efficiency_pct"] = None
 
         result["net_capture_pct"] = result["net_return_pct"]
+        annotate = getattr(
+            self.wallet,
+            "annotate_closed_trade",
+            None,
+        )
+        if callable(annotate):
+            annotate(
+                str(result.get("trade_id") or ""),
+                {
+                    "mfe_pct": result.get("mfe_pct"),
+                    "mae_pct": result.get("mae_pct"),
+                    "available_move_pct": result.get("available_move_pct"),
+                    "capture_efficiency_pct": result.get(
+                        "capture_efficiency_pct"
+                    ),
+                    "entry_efficiency_pct": result.get(
+                        "entry_efficiency_pct"
+                    ),
+                    "exit_efficiency_pct": result.get(
+                        "exit_efficiency_pct"
+                    ),
+                    "gross_return_pct": result.get("gross_return_pct"),
+                    "net_return_pct": result.get("net_return_pct"),
+                    "reference_return_pct": result.get(
+                        "reference_return_pct"
+                    ),
+                    "cost_drag_pct": result.get("cost_drag_pct"),
+                    "slippage_usd": result.get("slippage_usd"),
+                    "entry_slippage_usd": result.get(
+                        "entry_slippage_usd"
+                    ),
+                    "exit_slippage_usd": result.get(
+                        "exit_slippage_usd"
+                    ),
+                    "actor": f"bot-playbook-{reason.replace('_', '-')}",
+                },
+            )
         result["actor"] = f"bot-playbook-{reason.replace('_', '-')}"
         result["entry_mode"] = mode
         result["position_side"] = side
