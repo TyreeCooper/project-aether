@@ -18,12 +18,16 @@ from app.news import fetch_asset_news
 from app.official_macro import verify_macro_events
 from app.desk_persist import load_desk, save_desk
 from app.events import active_risk, fetch_calendar
+from app.fees import fee_rate
+from app.playbooks import playbook_profile
 from app.universe import ASSETS, export_assets, register_asset
 from app.wallet import STARTING_USD, SpotWallet
 from app.pair_book import PairBook
 
 logger = logging.getLogger("aether.desk")
 RISK_SLICE = 0.08
+TRADE_RISK_FRACTION = 0.0075
+MAX_ACTIVE_POSITIONS = 4
 POLL = 20
 
 
@@ -53,6 +57,8 @@ class MultiDesk:
         self.live_blocked = True
         self._last_market_success = 0.0
         self._last_market_error: str | None = None
+        self._last_context_refresh = 0.0
+        self._last_daily_refresh = 0.0
         self.risk_events: list[dict[str, Any]] = []
         self.risk_calendar_connected = False
         self.official_macro_sources: dict[str, dict[str, Any]] = {
@@ -87,6 +93,17 @@ class MultiDesk:
     def marks(self) -> dict[str, float]:
         return {b.id: float(b.mark or 0.0) for b in self.books}
 
+    def _btc_gate(self) -> tuple[bool, bool]:
+        btc = self.by_id.get("btc")
+        if btc is None:
+            return False, False
+        btc_long = btc.qty() > 0
+        try:
+            btc_bias = btc.snapshot_strategy().get("direction") == "long"
+        except Exception:
+            btc_bias = False
+        return bool(btc_bias), bool(btc_long)
+
     def persist(self) -> None:
         books = {}
         for book in self.books:
@@ -94,6 +111,7 @@ class MultiDesk:
                 "stop": book.stop,
                 "highest": book.highest,
                 "entry_at": book.entry_at,
+                "entry_mode": book.entry_mode,
                 "last_reason": book.last_reason,
                 "fills": list(book.fills)[-200:],
             }
@@ -128,6 +146,7 @@ class MultiDesk:
                 book.stop = float(row.get("stop") or 0)
                 book.highest = float(row.get("highest") or 0)
                 book.entry_at = row.get("entry_at")
+                book.entry_mode = row.get("entry_mode")
                 book.last_reason = str(row.get("last_reason") or book.last_reason)
                 fills = row.get("fills") or []
                 if isinstance(fills, list):
@@ -164,7 +183,7 @@ class MultiDesk:
             "armed": self.armed,
             "live": live.status(),
             "live_blocked": True,
-            "model": "one_kraken_spot_account",
+            "model": "multi_market_paper_portfolio",
             "persists": True,
         }
 
@@ -344,13 +363,13 @@ class MultiDesk:
         engine_status = self.engine_status()
         return {
             "strategy_name": "Aether Vector Engine",
-            "strategy_internal": "sma_trend_breakout_v3",
+            "strategy_internal": "asset_class_grain_playbooks_v1",
             "armed": engine_status["armed"],
             "running": engine_status["running"],
             "accepting_entries": engine_status["accepting_entries"],
             "engine": engine_status,
             "live_blocked": True,
-            "model": "one_kraken_spot_account",
+            "model": "multi_market_paper_portfolio",
             "portfolio": {
                 "equity": round(equity, 4),
                 "cash": round(float(wallet["usd"]), 4),
@@ -389,8 +408,12 @@ class MultiDesk:
             return None
         view = book.view()
         stats = book.analytics()
+        btc_bias, btc_long = self._btc_gate()
         try:
-            strategy = book.snapshot_strategy()
+            strategy = book.snapshot_strategy(
+                btc_bias_on=btc_bias,
+                btc_in_position=btc_long,
+            )
         except Exception as exc:
             strategy = {"signal": None, "reason": f"strategy_error:{exc}"}
         bars = list(book.bars)
@@ -486,17 +509,88 @@ class MultiDesk:
 
     async def seed(self) -> None:
         for book in self.books:
+            source = book.kraken or book.id
             try:
-                bars = await venue.fetch_bars(interval=1, limit=400, pair=book.kraken)
+                bars = await venue.fetch_bars(
+                    interval=1,
+                    limit=400,
+                    pair=source,
+                )
                 if len(bars) > 1:
                     bars = bars[:-1]
                 book.seed(bars)
-                context = await venue.fetch_bars(interval=60, limit=720, pair=book.kraken)
+
+                context = await venue.fetch_bars(
+                    interval=60,
+                    limit=720,
+                    pair=source,
+                )
                 if len(context) > 1:
                     context = context[:-1]
                 book.seed_context(context)
+
+                daily = await venue.fetch_bars(
+                    interval=1440,
+                    limit=260,
+                    pair=source,
+                )
+                if len(daily) > 1:
+                    daily = daily[:-1]
+                book.seed_daily(daily)
             except Exception as exc:
                 logger.warning("seed failed %s %s", book.pair, exc)
+
+    async def _refresh_context_bars(
+        self,
+        force: bool = False,
+    ) -> None:
+        now = time.time()
+        hourly_due = (
+            force
+            or now - self._last_context_refresh >= 1800
+        )
+        daily_due = (
+            force
+            or now - self._last_daily_refresh >= 14400
+        )
+        if not hourly_due and not daily_due:
+            return
+
+        if hourly_due:
+            self._last_context_refresh = now
+        if daily_due:
+            self._last_daily_refresh = now
+
+        for book in self.books:
+            source = book.kraken or book.id
+            try:
+                if hourly_due:
+                    context = await venue.fetch_bars(
+                        interval=60,
+                        limit=720,
+                        pair=source,
+                    )
+                    if len(context) > 1:
+                        context = context[:-1]
+                    if context:
+                        book.seed_context(context)
+
+                if daily_due:
+                    daily = await venue.fetch_bars(
+                        interval=1440,
+                        limit=260,
+                        pair=source,
+                    )
+                    if len(daily) > 1:
+                        daily = daily[:-1]
+                    if daily:
+                        book.seed_daily(daily)
+            except Exception as exc:
+                logger.warning(
+                    "context refresh failed %s %s",
+                    book.pair,
+                    exc,
+                )
 
     async def _refresh_one_news(self, force: bool = False) -> None:
         now = time.time()
@@ -759,11 +853,36 @@ class MultiDesk:
     def _allocate(self) -> list[dict[str, Any]]:
         if not self.armed:
             return []
+
         equity = max(self.wallet.equity(self.marks()), 1.0)
         slice_usd = equity * self.risk_slice
-        out: list[dict[str, Any]] = []
+        btc_bias, btc_long = self._btc_gate()
+
+        open_books = [
+            book
+            for book in self.books
+            if book.qty() > 0
+        ]
+        group_counts: dict[str, int] = {}
+        for book in open_books:
+            group = str(
+                playbook_profile(book.id)["cluster"]
+            )
+            group_counts[group] = (
+                group_counts.get(group, 0) + 1
+            )
+
+        candidates: list[
+            tuple[int, PairBook, dict[str, Any]]
+        ] = []
         for book in self.books:
-            fresh, bucket = is_new_five_minute(list(book.bars), book.last_5m)
+            if book.qty() > 0:
+                continue
+
+            fresh, bucket = is_new_five_minute(
+                list(book.bars),
+                book.last_5m,
+            )
             if book.last_5m is None and bucket is not None:
                 book.last_5m = bucket
                 continue
@@ -771,19 +890,105 @@ class MultiDesk:
                 book.last_5m = bucket
             if not fresh:
                 continue
-            if not book.wants_entry():
+
+            snap = book.snapshot_strategy(
+                btc_bias_on=btc_bias,
+                btc_in_position=btc_long,
+            )
+            if snap.get("executable_signal") != "buy":
                 continue
-            result = book.enter(min(slice_usd, max(self.wallet.usd * 0.95, 0.0)))
-            out.append(result)
-            if result.get("ok"):
-                self.persist()
-                asyncio.create_task(
-                    live.place_order(
-                        pair=book.kraken,
-                        side="buy",
-                        volume=float(result.get("qty") or 0),
-                    )
+            candidates.append(
+                (
+                    int(snap.get("quality_score") or 0),
+                    book,
+                    snap,
                 )
+            )
+
+        out: list[dict[str, Any]] = []
+        candidates.sort(
+            key=lambda row: row[0],
+            reverse=True,
+        )
+        active_count = len(open_books)
+
+        for _, book, snap in candidates:
+            if active_count >= MAX_ACTIVE_POSITIONS:
+                break
+
+            profile = playbook_profile(book.id)
+            group = str(profile["cluster"])
+            if (
+                group_counts.get(group, 0)
+                >= int(profile["cluster_cap"])
+            ):
+                continue
+
+            mark = float(book.mark or 0.0)
+            if mark <= 0:
+                continue
+
+            stop_pct = max(
+                float(
+                    snap.get("risk_stop_pct")
+                    or profile["min_stop_pct"]
+                ),
+                0.01,
+            )
+            rate = fee_rate(
+                book.id,
+                qty=1.0,
+                price=mark,
+                side="buy",
+            )
+            cost_pct = max(
+                float(snap.get("cost_pct") or 0.0),
+                rate * 200,
+            )
+            modeled_loss_fraction = max(
+                (stop_pct + cost_pct) / 100.0,
+                1e-6,
+            )
+            risk_notional = (
+                equity
+                * TRADE_RISK_FRACTION
+                / modeled_loss_fraction
+            )
+            notional = min(
+                slice_usd,
+                risk_notional,
+                max(self.wallet.usd * 0.95, 0.0),
+            )
+            if notional <= 0:
+                continue
+
+            result = book.enter(
+                notional,
+                strategy_snapshot=snap,
+            )
+            result["playbook"] = snap.get("mode")
+            result["quality_score"] = snap.get(
+                "quality_score"
+            )
+            out.append(result)
+
+            if result.get("ok"):
+                active_count += 1
+                group_counts[group] = (
+                    group_counts.get(group, 0) + 1
+                )
+                self.persist()
+
+                if book.kraken:
+                    asyncio.create_task(
+                        live.place_order(
+                            pair=book.kraken,
+                            side="buy",
+                            volume=float(
+                                result.get("qty") or 0
+                            ),
+                        )
+                    )
         return out
 
     async def tick(self) -> None:
@@ -792,18 +997,27 @@ class MultiDesk:
         await self._refresh_one_community()
         await self._refresh_one_news()
         await self._quotes()
+        await self._refresh_context_bars()
         await self._persist_intelligence()
+
+        btc_bias, btc_long = self._btc_gate()
         exits = []
         for book in self.books:
-            row = book.manage()
+            row = book.manage(
+                btc_bias_on=btc_bias,
+                btc_in_position=btc_long,
+            )
             if row:
                 exits.append(row)
                 self.persist()
-                await live.place_order(
-                    pair=book.kraken,
-                    side="sell",
-                    volume=float(row.get("qty") or 0),
-                )
+                if book.kraken:
+                    await live.place_order(
+                        pair=book.kraken,
+                        side="sell",
+                        volume=float(
+                            row.get("qty") or 0
+                        ),
+                    )
         entries = self._allocate()
         if entries or exits:
             logger.info(
@@ -824,6 +1038,7 @@ class MultiDesk:
             await self._refresh_one_community(force=True)
             await self._refresh_one_news(force=True)
             await self._quotes()
+            await self._refresh_context_bars(force=True)
             await self._persist_intelligence(force=True)
             while True:
                 try:
