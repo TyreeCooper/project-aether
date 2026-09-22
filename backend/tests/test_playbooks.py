@@ -2,7 +2,7 @@ from app.desk import completed_bars
 from app.pair_book import PairBook
 from app.playbooks import playbook_profile, playbook_snapshot
 from app.universe import BY_ID
-from app.wallet import SpotWallet
+from app.paper_portfolio import PaperPortfolio
 
 
 def _daily(count=240, start=100.0, step=1.0):
@@ -129,7 +129,7 @@ def test_eth_rider_requires_btc_long():
     assert allowed["signal"] == "buy"
 
 
-def test_intraday_playbook_follows_aligned_grain_without_fake_future_fill():
+def test_intraday_playbook_follows_aligned_grain_and_is_paper_executable():
     daily = _daily(100, start=50.0, step=0.5)
     hourly = _hourly(240, start=80.0, step=0.25)
     minute = _minutes(900, start=120.0, step=0.03)
@@ -145,11 +145,11 @@ def test_intraday_playbook_follows_aligned_grain_without_fake_future_fill():
     assert snap["four_hour_grain"] == "long"
     assert snap["one_hour_grain"] == "long"
     assert snap["signal"] == "buy"
-    assert snap["executable_signal"] is None
-    assert snap["execution_status"] == "long_adapter_required"
+    assert snap["executable_signal"] == "buy"
+    assert snap["execution_status"] == "paper_long_ready"
 
 
-def test_bearish_setup_is_detected_but_not_fake_executed():
+def test_bearish_setup_is_detected_and_paper_executable():
     daily = _daily(100, start=200.0, step=-0.5)
     hourly = _hourly(240, start=180.0, step=-0.25)
     minute = _minutes(900, start=150.0, step=-0.03)
@@ -163,8 +163,8 @@ def test_bearish_setup_is_detected_but_not_fake_executed():
     )
     assert snap["signal"] == "short"
     assert snap["short_setup_detected"] is True
-    assert snap["executable_signal"] is None
-    assert snap["execution_status"] == "short_adapter_required"
+    assert snap["executable_signal"] == "short"
+    assert snap["execution_status"] == "paper_short_ready"
 
 
 def test_intraday_entry_is_blocked_outside_required_session():
@@ -200,22 +200,30 @@ def test_cash_equity_long_can_execute_when_setup_qualifies():
     assert snap["execution_status"] == "paper_long_ready"
 
 
-def test_direct_future_entry_is_blocked_until_contract_adapter_exists():
-    book = PairBook(BY_ID["mes"], SpotWallet())
+def test_direct_future_entry_uses_contract_adapter_math():
+    book = PairBook(BY_ID["mes"], PaperPortfolio(10_000))
     book.mark = 5000.0
     book.bid = 4999.75
     book.ask = 5000.25
     out = book.enter(
         500.0,
-        strategy_snapshot={"mode": "intraday", "risk_stop_pct": 1.0},
+        strategy_snapshot={
+            "executable_signal": "buy",
+            "mode": "intraday",
+            "risk_stop_pct": 1.0,
+            "signal_key": "mes-test",
+        },
+        max_capital_usd=3_000,
     )
-    assert out["ok"] is False
-    assert out["error"] == "execution_adapter_required"
+    assert out["ok"] is True
+    assert out["position_side"] == "long"
+    assert book.wallet.side("mes") == "long"
+    assert book.qty() >= 1
 
 
 def test_completed_daily_signal_is_consumed_once():
     bars = _daily(240, step=1.0)
-    book = PairBook(BY_ID["btc"], SpotWallet())
+    book = PairBook(BY_ID["btc"], PaperPortfolio())
     book.seed_daily(bars)
     book.mark = float(bars[-1]["close"])
     book.bid = book.mark - 0.1
@@ -223,12 +231,16 @@ def test_completed_daily_signal_is_consumed_once():
 
     first = book.snapshot_strategy()
     assert first["executable_signal"] == "buy"
-    result = book.enter(100.0, strategy_snapshot=first)
+    result = book.enter(
+        100.0,
+        strategy_snapshot=first,
+        max_capital_usd=1_000,
+    )
     assert result["ok"] is True
     consumed_key = first["signal_key"]
     assert book.last_entry_signal_key == consumed_key
 
-    book.wallet.sell("btc", book.qty(), book.mark)
+    book.wallet.close_position("btc", price=book.mark)
     second = book.snapshot_strategy()
     assert second["signal"] == "buy"
     assert second["signal_key"] == consumed_key
@@ -246,3 +258,43 @@ def test_completed_bar_filter_keeps_closed_tail_and_drops_forming_tail():
 
     closed = completed_bars(rows, 60, now_ts=260)
     assert closed == rows
+
+
+def test_pair_book_can_open_and_close_short_future():
+    book = PairBook(BY_ID["mnq"], PaperPortfolio(20_000))
+    book.mark = 20_000.0
+    book.bid = 19_999.75
+    book.ask = 20_000.25
+    out = book.enter(
+        200.0,
+        strategy_snapshot={
+            "executable_signal": "short",
+            "mode": "intraday",
+            "risk_stop_pct": 0.5,
+            "signal_key": "mnq-short-test",
+        },
+        max_capital_usd=5_000,
+    )
+    assert out["ok"] is True
+    assert book.position_side() == "short"
+    assert book.stop > book.wallet.avg_entry("mnq")
+
+    book.bars.append(
+        {
+            "ts": 1_800_000_000,
+            "open": 20_000.0,
+            "high": 20_000.0,
+            "low": 19_900.0,
+            "close": 19_900.0,
+            "volume": 1.0,
+        }
+    )
+    book.mark = 19_900.0
+    book.bid = 19_899.75
+    book.ask = 19_900.25
+    # Force a protective close through the current stop for deterministic coverage.
+    book.stop = 19_900.0
+    closed = book.manage()
+    assert closed is not None
+    assert closed["position_side"] == "short"
+    assert book.qty() == 0
