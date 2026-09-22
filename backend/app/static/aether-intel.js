@@ -14,14 +14,24 @@
     if(!host || !intel) return;
     const skin=broker||{};
     const cards=intel.cards||[];
-    const chip=skin.label?'<p class="broker-chip"><i></i> '+esc(skin.label)+' book</p>':'';
-    host.innerHTML=chip+cards.map(c=>{
+    const logo=skin.logo?'<div class="broker-mark"><img src="'+esc(skin.logo)+'" alt="'+esc(skin.label||"broker")+'"/></div>':'';
+    host.innerHTML=logo+cards.map(c=>{
       return '<article class="intel-card '+(c.tone||'')+'"><p class="intel-kicker">'+esc(c.title)+'</p><h3>'+esc(String(c.headline??c.slang??""))+'</h3><p class="intel-plain"><b>'+esc(c.slang||"")+'.</b> '+esc(c.plain||"")+'</p>'+(c.fields||[]).map(f=>'<div class="intel-row"><span>'+esc(f.label)+'<small>'+esc(f.means)+'</small></span><b>'+esc(show(f.value))+(f.unit?" "+esc(f.unit):"")+'</b></div>').join("")+'</article>';
     }).join("")+'<p class="intel-note">Same pack the bot reads. Signal '+esc(String(intel.call||""))+' \u00b7 reason '+esc(String(intel.reason||""))+'.</p>';
     const page=document.getElementById("view-asset");
     if(page && skin.id){
       page.setAttribute("data-broker", skin.id);
-      page.style.setProperty("--broker", skin.hex||"#5741d9");
+      page.style.removeProperty("--broker");
+    }
+    const head=document.querySelector(".asset-page-head") || document.querySelector(".asset-identity");
+    if(head && skin.logo && !head.querySelector(".broker-mark")){
+      const wrap=document.createElement("div");
+      wrap.className="broker-mark";
+      wrap.innerHTML='<img src="'+esc(skin.logo)+'" alt="'+esc(skin.label||"broker")+'"/>';
+      head.appendChild(wrap);
+    }else if(head && skin.logo){
+      const img=head.querySelector(".broker-mark img");
+      if(img) img.src=skin.logo;
     }
   }
   function ensure(){
