@@ -79,3 +79,7 @@ html,body{
 .picker-row>div{grid-template-columns:minmax(0,1fr) !important}
 .control-row{flex-wrap:wrap}
 .toast{max-width:min(92vw,390px)}
+.add-asset-btn,
+#addAssetBtn,
+.asset-picker,
+#assetPicker{display:none !important}
