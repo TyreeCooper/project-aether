@@ -20,6 +20,7 @@ def test_operator_trust_state_is_explicit_and_preserved():
 
 
 def test_invalid_trust_state_fails_closed():
-    rows = merge_source_registry([], ["sol"])
+    rows = merge_source_registry([], ["btc"])
+    assert rows
     with pytest.raises(ValueError):
         set_trust_state(rows, rows[0]["source_id"], "auto_buy")

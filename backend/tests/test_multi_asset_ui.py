@@ -5,9 +5,20 @@ def test_floor_and_asset_views_are_multi_asset_and_isolated():
     desk = MultiDesk()
     floor = desk.floor_snapshot()
     assert floor["strategy_name"] == "Aether Vector Engine"
-    assert len(floor["assets"]) == 10
+    assert len(floor["assets"]) == 12
     assert {row["id"] for row in floor["assets"]} == {
-        "btc", "eth", "sol", "xrp", "bnb", "ada", "link", "ton", "avax", "sui"
+        "eurusd",
+        "usdjpy",
+        "mes",
+        "mnq",
+        "mgc",
+        "mcl",
+        "us10y",
+        "nvda",
+        "tsla",
+        "pltr",
+        "btc",
+        "eth",
     }
 
     btc = desk.asset_snapshot("btc")
