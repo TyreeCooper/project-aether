@@ -465,6 +465,44 @@ class PaperPortfolio:
             for k, v in positions.items()
             if isinstance(v, dict)
         }
+
+        # One-time compatibility with the former SpotWallet payload.
+        # Its cash balance already reflected the purchase debit, so migration
+        # reconstructs long inventory without debiting cash a second time.
+        if not self.positions and isinstance(data.get("units"), dict):
+            units = data.get("units") or {}
+            avgs = data.get("avg") or {}
+            for raw_aid, raw_qty in units.items():
+                aid = str(raw_aid).lower()
+                qty = abs(float(raw_qty or 0.0))
+                entry = float(avgs.get(raw_aid, avgs.get(aid, 0.0)) or 0.0)
+                if qty <= 0 or entry <= 0:
+                    continue
+                try:
+                    spec = instrument_spec(aid)
+                except KeyError:
+                    continue
+                if spec["product_type"] not in {"crypto_spot", "equity"}:
+                    continue
+                self.positions[aid] = {
+                    "trade_id": f"legacy-{aid}",
+                    "asset_id": aid,
+                    "product_type": spec["product_type"],
+                    "side": "long",
+                    "quantity": qty,
+                    "quantity_unit": spec["quantity_unit"],
+                    "entry_price": entry,
+                    "entry_reference_price": entry,
+                    "entry_fee_usd": 0.0,
+                    "margin_reserved_usd": qty * entry,
+                    "opened_at": None,
+                    "mode": None,
+                    "signal_key": None,
+                    "initial_stop": None,
+                    "current_stop": None,
+                    "legacy_migrated": True,
+                }
+
         closed = data.get("closed_trades") or []
         self.closed_trades = [
             dict(row)
