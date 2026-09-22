@@ -9,13 +9,41 @@
     return String(v);
   };
   function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&","<":"<",">":">",'"':""","'":"&#39;"}[m]));}
-  function paint(intel, broker){
+  function sessionRows(rows){
+    return (rows||[]).map(s=>{
+      const on=!!s.active;
+      return '<div class="sess-row '+(on?"on":"off")+'"><b>'+esc(s.name)+'</b><span>'+esc(s.window||"")+'</span><em>'+(on?"ACTIVE":"closed")+'</em><small>'+esc(s.plain||"")+'</small></div>';
+    }).join("");
+  }
+  function paintFloor(board){
+    let host=document.getElementById("sessionBoard");
+    if(!host){
+      const floor=document.getElementById("view-floor");
+      if(!floor || !board) return;
+      host=document.createElement("section");
+      host.id="sessionBoard";
+      host.className="session-board panel";
+      const hero=floor.querySelector(".hero-grid")||floor.querySelector(".dashboard-grid")||floor.firstElementChild;
+      if(hero) hero.after(host); else floor.prepend(host);
+    }
+    if(!board) return;
+    host.innerHTML='<div class="session-head"><h2>Sessions</h2><span>'+esc(board.clock||"")+'</span></div>'
+      +'<p class="intel-plain">Same clock the bot reads. Crypto is 24/7. FX, futures, and stocks use Eastern cash windows.</p>'
+      +'<h3>FX</h3>'+sessionRows(board.fx)
+      +'<h3>US stocks</h3>'+sessionRows(board.equity)
+      +'<h3>Micros</h3>'+sessionRows(board.futures)
+      +'<h3>Crypto</h3><div class="sess-row on"><b>BTC / ETH</b><span>24/7</span><em>ACTIVE</em><small>Spot crypto has no cash session.</small></div>'
+      +'<h3>Clocks the bot uses</h3>'+(board.timeframes||[]).map(t=>'<div class="sess-row clock"><b>'+esc(t.name)+'</b><span>'+esc(t.role)+'</span><small>'+esc(t.plain)+'</small></div>').join("");
+  }
+  function paint(intel, broker, sessions){
     const host=document.getElementById("assetIntel");
     if(!host || !intel) return;
     const skin=broker||{};
     const cards=intel.cards||[];
     const logo=skin.logo?'<div class="broker-mark"><img src="'+esc(skin.logo)+'" alt="'+esc(skin.label||"broker")+'"/></div>':'';
-    host.innerHTML=logo+cards.map(c=>{
+    const sess=sessions||intel.sessions;
+    const strip=sess?'<div class="session-strip">'+sessionRows(sess.sessions)+'<div class="sess-clocks">'+(sess.timeframes||[]).map(t=>'<span><b>'+esc(t.id)+'</b> '+esc(t.role)+'</span>').join("")+'</div></div>':'';
+    host.innerHTML=logo+strip+cards.map(c=>{
       return '<article class="intel-card '+(c.tone||'')+'"><p class="intel-kicker">'+esc(c.title)+'</p><h3>'+esc(String(c.headline??c.slang??""))+'</h3><p class="intel-plain"><b>'+esc(c.slang||"")+'.</b> '+esc(c.plain||"")+'</p>'+(c.fields||[]).map(f=>'<div class="intel-row"><span>'+esc(f.label)+'<small>'+esc(f.means)+'</small></span><b>'+esc(show(f.value))+(f.unit?" "+esc(f.unit):"")+'</b></div>').join("")+'</article>';
     }).join("")+'<p class="intel-note">Same pack the bot reads. Signal '+esc(String(intel.call||""))+' \u00b7 reason '+esc(String(intel.reason||""))+'.</p>';
     const page=document.getElementById("view-asset");
@@ -48,7 +76,10 @@
       try{
         const url=typeof input==="string"?input:(input&&input.url)||"";
         if(url.indexOf("/api/v1/assets/")!==-1){
-          res.clone().json().then(data=>{ ensure(); if(data&&data.intel) paint(data.intel, data.broker); }).catch(()=>{});
+          res.clone().json().then(data=>{ ensure(); if(data&&data.intel) paint(data.intel, data.broker, data.sessions); }).catch(()=>{});
+        }
+        if(url.indexOf("/api/v1/floor")!==-1){
+          res.clone().json().then(data=>{ if(data&&data.sessions) paintFloor(data.sessions); }).catch(()=>{});
         }
       }catch(e){}
       return res;
@@ -60,4 +91,5 @@
   }
   link("intelCss","/static/aether-intel.css");
   link("brokerCss","/static/aether-broker.css");
+  link("sessionCss","/static/aether-sessions.css");
 })();
