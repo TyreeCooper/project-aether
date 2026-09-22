@@ -31,6 +31,22 @@ MAX_ACTIVE_POSITIONS = 4
 POLL = 20
 
 
+def completed_bars(
+    rows: list[dict[str, Any]],
+    interval_seconds: int,
+    *,
+    now_ts: int | None = None,
+) -> list[dict[str, Any]]:
+    """Return only candles whose full interval has elapsed."""
+    if not rows:
+        return []
+    now = int(time.time()) if now_ts is None else int(now_ts)
+    last_ts = int(rows[-1].get("ts") or 0)
+    if last_ts > 0 and last_ts + int(interval_seconds) > now:
+        return rows[:-1]
+    return rows
+
+
 class MultiDesk:
     def __init__(self) -> None:
         restored = load_desk()
@@ -487,12 +503,10 @@ class MultiDesk:
         book = PairBook(registered, self.wallet)
         try:
             bars = await venue.fetch_bars(interval=1, limit=400, pair=book.kraken)
-            if len(bars) > 1:
-                bars = bars[:-1]
+            bars = completed_bars(bars, 60)
             book.seed(bars)
             context = await venue.fetch_bars(interval=60, limit=720, pair=book.kraken)
-            if len(context) > 1:
-                context = context[:-1]
+            context = completed_bars(context, 3600)
             book.seed_context(context)
         except Exception as exc:
             logger.warning("new asset seed failed %s %s", book.pair, exc)
@@ -518,8 +532,7 @@ class MultiDesk:
                     limit=400,
                     pair=source,
                 )
-                if len(bars) > 1:
-                    bars = bars[:-1]
+                bars = completed_bars(bars, 60)
                 book.seed(bars)
 
                 context = await venue.fetch_bars(
@@ -527,8 +540,7 @@ class MultiDesk:
                     limit=720,
                     pair=source,
                 )
-                if len(context) > 1:
-                    context = context[:-1]
+                context = completed_bars(context, 3600)
                 book.seed_context(context)
 
                 daily = await venue.fetch_bars(
@@ -536,8 +548,7 @@ class MultiDesk:
                     limit=260,
                     pair=source,
                 )
-                if len(daily) > 1:
-                    daily = daily[:-1]
+                daily = completed_bars(daily, 86400)
                 book.seed_daily(daily)
             except Exception as exc:
                 logger.warning("seed failed %s %s", book.pair, exc)
@@ -575,8 +586,7 @@ class MultiDesk:
                         limit=720,
                         pair=source,
                     )
-                    if len(context) > 1:
-                        context = context[:-1]
+                    context = completed_bars(context, 3600)
                     if context:
                         book.seed_context(context)
 
@@ -586,8 +596,7 @@ class MultiDesk:
                         limit=260,
                         pair=source,
                     )
-                    if len(daily) > 1:
-                        daily = daily[:-1]
+                    daily = completed_bars(daily, 86400)
                     if daily:
                         book.seed_daily(daily)
             except Exception as exc:
