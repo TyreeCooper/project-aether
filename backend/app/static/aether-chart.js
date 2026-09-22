@@ -1,7 +1,7 @@
 (function(){
   function money(n){
     const v=Number(n);
-    if(!Number.isFinite(v)) return "—";
+    if(!Number.isFinite(v)) return "\u2014";
     const d=Math.abs(v)<1?4:v>=1000?2:2;
     return v.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:d});
   }
@@ -59,4 +59,9 @@
       return res;
     });
   };
+  if(!document.querySelector('script[src="/static/aether-intel.js"]')){
+    const s=document.createElement("script");
+    s.src="/static/aether-intel.js";
+    document.head.appendChild(s);
+  }
 })();
