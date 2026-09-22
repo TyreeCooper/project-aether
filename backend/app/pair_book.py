@@ -1,4 +1,4 @@
-"""One Kraken pair book. Own bars and position, shared wallet."""
+"""One Aether asset book. Own bars and strategy state, shared paper portfolio."""
 from __future__ import annotations
 
 from collections import deque
@@ -8,7 +8,6 @@ from typing import Any
 from app.clock import is_new_five_minute
 from app.exits import stop_fill_price, time_stop_due
 from app.fees import fee_rate
-from app.lots import size_ok, volume_min
 from app.paper_exec import slipped_price
 from app.playbooks import playbook_profile, playbook_snapshot
 from app.sessions import for_asset
@@ -48,6 +47,7 @@ class PairBook:
         self.trades_24h: int | None = None
         self.stop = 0.0
         self.highest = 0.0
+        self.lowest = 0.0
         self.entry_at: str | None = None
         self.entry_mode: str | None = None
         self.last_entry_signal_key: str | None = None
@@ -106,6 +106,10 @@ class PairBook:
     def qty(self) -> float:
         return self.wallet.qty(self.id)
 
+    def position_side(self) -> str | None:
+        side = getattr(self.wallet, "side", None)
+        return side(self.id) if callable(side) else ("long" if self.qty() > 0 else None)
+
     def snapshot_strategy(
         self,
         *,
@@ -137,9 +141,10 @@ class PairBook:
             in_position=self.qty() > 0,
             btc_bias_on=btc_bias_on,
             btc_in_position=btc_in_position,
+            position_side=self.position_side(),
         )
         if (
-            snap.get("executable_signal") == "buy"
+            snap.get("executable_signal") in {"buy", "short"}
             and snap.get("signal_key")
             and str(snap.get("signal_key")) == str(self.last_entry_signal_key)
         ):
@@ -161,7 +166,7 @@ class PairBook:
             btc_bias_on=btc_bias_on,
             btc_in_position=btc_in_position,
         )
-        return snap.get("executable_signal") == "buy"
+        return snap.get("executable_signal") in {"buy", "short"}
 
     def fill_px(self, side: str) -> float | None:
         return slipped_price(side, self.bid, self.ask, self.mark)
@@ -172,47 +177,112 @@ class PairBook:
         *,
         strategy_snapshot: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        profile = playbook_profile(self.id)
-        if not bool(profile.get("paper_long_execution_supported")):
+        snap = dict(strategy_snapshot or {})
+        executable = str(snap.get("executable_signal") or "").lower()
+        if executable not in {"buy", "short"}:
             return {
                 "ok": False,
-                "error": "execution_adapter_required",
+                "error": "no_executable_signal",
                 "pair": self.pair,
             }
-        reference = self.ask if self.ask is not None else self.mark
-        px = self.fill_px("buy")
+        position_side = "short" if executable == "short" else "long"
+        fill_side = "sell" if position_side == "short" else "buy"
+        reference = (
+            self.bid
+            if position_side == "short" and self.bid is not None
+            else self.ask
+            if position_side == "long" and self.ask is not None
+            else self.mark
+        )
+        px = self.fill_px(fill_side)
         if not px:
             return {"ok": False, "error": "no_mark", "pair": self.pair}
-        qty = risk_usd / px if px else 0.0
-        ok, why = size_ok(self.id, qty, px)
-        if not ok:
-            qty = max(volume_min(self.id), 0.51 / px)
-            ok, why = size_ok(self.id, qty, px)
-            if not ok:
-                return {"ok": False, "error": why, "pair": self.pair}
-        result = self.wallet.buy(self.id, qty, px)
+
+        stop_pct = max(float(snap.get("risk_stop_pct") or 2.0), 0.01)
+        stop_price = (
+            px * (1 + stop_pct / 100)
+            if position_side == "short"
+            else px * (1 - stop_pct / 100)
+        )
+        size_for_risk = getattr(self.wallet, "size_for_risk", None)
+        if not callable(size_for_risk):
+            return {
+                "ok": False,
+                "error": "paper_portfolio_required",
+                "pair": self.pair,
+            }
+        qty = float(
+            size_for_risk(
+                self.id,
+                side=position_side,
+                risk_usd=float(risk_usd),
+                entry_price=px,
+                stop_price=stop_price,
+            )
+            or 0.0
+        )
+        if qty <= 0:
+            return {
+                "ok": False,
+                "error": "risk_size_below_minimum",
+                "pair": self.pair,
+            }
+
+        open_position = getattr(self.wallet, "open_position", None)
+        if not callable(open_position):
+            return {
+                "ok": False,
+                "error": "paper_portfolio_required",
+                "pair": self.pair,
+            }
+        result = open_position(
+            self.id,
+            side=position_side,
+            quantity=qty,
+            price=px,
+            stop_price=stop_price,
+            mode=str(snap.get("mode") or "intraday"),
+            signal_key=(
+                str(snap.get("signal_key"))
+                if snap.get("signal_key") is not None
+                else None
+            ),
+            reference_price=float(reference or px),
+        )
         result["pair"] = self.pair
-        result["actor"] = "bot-v3-entry"
+        result["actor"] = "bot-playbook-entry"
+        result["position_side"] = position_side
+        result["execution_side"] = fill_side
+        result["event"] = "entry"
         if result.get("ok"):
-            self.entry_at = _now()
-            self.entry_mode = str(
-                (strategy_snapshot or {}).get("mode") or "intraday"
-            )
+            self.entry_at = str(result.get("opened_at") or _now())
+            self.entry_mode = str(snap.get("mode") or "intraday")
             self.highest = px
-            stop_pct = float(
-                (strategy_snapshot or {}).get("risk_stop_pct") or 2.0
-            )
-            self.stop = px * (1 - max(stop_pct, 0.01) / 100)
+            self.lowest = px
+            self.stop = stop_price
             result["entry_mode"] = self.entry_mode
             result["risk_stop_pct"] = stop_pct
-            signal_key = (strategy_snapshot or {}).get("signal_key")
+            signal_key = snap.get("signal_key")
             if signal_key:
                 self.last_entry_signal_key = str(signal_key)
                 result["signal_key"] = self.last_entry_signal_key
             reference_px = float(reference or px)
-            slippage_usd = max(px - reference_px, 0.0) * qty
+            move_pnl = getattr(self.wallet, "move_pnl", None)
+            if callable(move_pnl):
+                adverse = float(
+                    move_pnl(
+                        self.id,
+                        side=position_side,
+                        quantity=qty,
+                        entry_price=reference_px,
+                        mark=px,
+                    )
+                )
+                slippage_usd = max(-adverse, 0.0)
+            else:
+                slippage_usd = 0.0
             slippage_bps = (
-                (px / reference_px - 1) * 10_000
+                abs(px / reference_px - 1) * 10_000
                 if reference_px > 0
                 else None
             )
@@ -221,7 +291,13 @@ class PairBook:
             result["slippage_bps"] = (
                 None if slippage_bps is None else round(slippage_bps, 4)
             )
-            self.fills.append({**result, "side": "buy", "ts": self.entry_at})
+            self.fills.append(
+                {
+                    **result,
+                    "side": fill_side,
+                    "ts": self.entry_at,
+                }
+            )
         return result
 
     def current_excursion(self, entry_price: float | None = None) -> dict[str, Any]:
@@ -239,15 +315,23 @@ class PairBook:
             return {"mfe_pct": None, "mae_pct": None, "available_move_pct": None}
         high = max(float(x["high"]) for x in rows)
         low = min(float(x["low"]) for x in rows)
+        side = self.position_side() or "long"
+        if side == "short":
+            mfe = (entry - low) / entry * 100
+            mae = (entry - high) / entry * 100
+        else:
+            mfe = (high / entry - 1) * 100
+            mae = (low / entry - 1) * 100
         return {
             "entry_price": round(entry, 8),
             "trade_high": round(high, 8),
             "trade_low": round(low, 8),
-            "mfe_pct": round((high / entry - 1) * 100, 4),
-            "mae_pct": round((low / entry - 1) * 100, 4),
+            "mfe_pct": round(mfe, 4),
+            "mae_pct": round(mae, 4),
             "available_move_pct": round((high - low) / entry * 100, 4)
             if entry > 0
             else None,
+            "position_side": side,
             "excursion_precision": "1m_bar_bounded",
         }
 
