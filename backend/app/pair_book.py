@@ -756,8 +756,14 @@ class PairBook:
                 "cost_drag_pct": None,
             }
         closes = [
-            f for f in self.fills
+            f
+            for f in self.fills
             if str(f.get("event") or "") == "exit"
+            or (
+                not f.get("event")
+                and str(f.get("side") or "").lower() == "sell"
+                and f.get("pnl") is not None
+            )
         ]
         if not closes:
             return {
@@ -811,6 +817,18 @@ class PairBook:
             for row in getattr(self.wallet, "closed_trades", [])
             if str(row.get("asset_id") or "") == self.id
         ]
+        legacy_closed = [
+            {
+                "realized_pnl_usd": float(row.get("pnl") or 0.0),
+                "fees_usd": float(row.get("fee") or 0.0),
+                "duration_seconds": row.get("duration_seconds"),
+            }
+            for row in self.fills
+            if not row.get("event")
+            and str(row.get("side") or "").lower() == "sell"
+            and row.get("pnl") is not None
+        ]
+        closed = closed + legacy_closed
         wins = sum(
             1
             for row in closed
