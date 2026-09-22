@@ -13,15 +13,18 @@ from typing import Any
 import httpx
 
 SUBREDDITS: dict[str, str] = {
+    "eurusd": "Forex",
+    "usdjpy": "Forex",
+    "mes": "Daytrading",
+    "mnq": "Daytrading",
+    "mgc": "Gold",
+    "mcl": "Commodities",
+    "us10y": "bonds",
+    "nvda": "NVDA_Stock",
+    "tsla": "teslainvestorsclub",
+    "pltr": "PLTR",
     "btc": "Bitcoin",
     "eth": "ethereum",
-    "sol": "solana",
-    "xrp": "XRP",
-    "bnb": "bnbchainofficial",
-    "ada": "cardano",
-    "link": "Chainlink",
-    "avax": "Avax",
-    "sui": "sui",
 }
 
 POSITIVE = {
