@@ -23,15 +23,30 @@ def _field(key: str, slang: str, plain: str, value: Any, unit: str = "") -> dict
     }
 
 
-def _call_plain(signal: str | None, in_pos: bool) -> tuple[str, str, str]:
+def _call_plain(
+    signal: str | None,
+    in_pos: bool,
+    execution_status: str | None = None,
+) -> tuple[str, str, str]:
     if in_pos:
         return (
             "IN POSITION",
             "Already long",
             "The book owns this asset. Its playbook manages the exit, not a new entry.",
         )
+    if signal == "buy" and execution_status == "long_adapter_required":
+        return (
+            "LONG SETUP",
+            "Grain is up",
+            "The setup qualifies, but this instrument still needs its broker-specific "
+            "paper execution adapter. Aether will not fabricate a fill.",
+        )
     if signal == "buy":
-        return "BUY", "Green light", "The same rule the bot uses says this tape qualifies for a paper buy."
+        return (
+            "BUY",
+            "Green light",
+            "The same rule the bot uses says this tape qualifies for a paper buy.",
+        )
     if signal == "sell":
         return "FLAT / EXIT", "Get out", "The rule wants this book flat."
     if signal == "short":
@@ -59,7 +74,12 @@ def build_intel(
     qty = float(view.get("qty") or 0)
     in_pos = qty > 0
     signal = strategy.get("signal")
-    call, slang, plain = _call_plain(str(signal) if signal else None, in_pos)
+    execution_status = str(strategy.get("execution_status") or "")
+    call, slang, plain = _call_plain(
+        str(signal) if signal else None,
+        in_pos,
+        execution_status,
+    )
     mark = _n(view.get("mark"), 8)
     bid = _n(view.get("bid"), 8)
     ask = _n(view.get("ask"), 8)
