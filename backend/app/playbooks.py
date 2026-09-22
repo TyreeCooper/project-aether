@@ -229,6 +229,20 @@ def playbook_profile(asset_id: str) -> dict[str, Any]:
     base["asset_id"] = aid
     base["short_setup_detection"] = aid not in {"btc", "eth"}
     base["short_execution_supported"] = False
+    base["paper_long_execution_supported"] = aid in {
+        "btc",
+        "eth",
+        "nvda",
+        "tsla",
+        "pltr",
+    }
+    base["execution_adapter"] = (
+        "cash_spot"
+        if aid in {"btc", "eth"}
+        else "cash_equity"
+        if aid in {"nvda", "tsla", "pltr"}
+        else "required"
+    )
     clock_mode = (
         "daily"
         if base["primary"] == "daily_swing"
@@ -406,9 +420,15 @@ def _mode_snapshot(
             profile,
             cost_pct,
         )
+        signal_key = (
+            f"{mode}:{int(trigger_bars[-1]['ts'])}"
+            if trigger_bars
+            else None
+        )
         return {
             "mode": mode,
             "signal": signal,
+            "signal_key": signal_key,
             "reason": reason,
             "direction": direction or "flat",
             "daily_grain": daily,
@@ -453,9 +473,15 @@ def _mode_snapshot(
         profile,
         cost_pct,
     )
+    signal_key = (
+        f"{mode}:{int(normalize_bar(bars_1h[-1])['ts'])}"
+        if bars_1h
+        else None
+    )
     return {
         "mode": mode,
         "signal": signal,
+        "signal_key": signal_key,
         "reason": reason,
         "direction": direction or "flat",
         "daily_grain": daily,
@@ -498,6 +524,7 @@ def _crypto_daily(
         "daily_only": True,
         "cost_pct": cost_pct,
         "playbook": profile,
+        "signal_key": None,
         "opportunities": [],
     }
     if len(clean) < 200:
@@ -574,6 +601,7 @@ def _crypto_daily(
         "reason": reason,
         "quality_score": score,
         "risk_stop_pct": round(risk_stop, 6),
+        "signal_key": f"daily_swing:{int(clean[-1]['ts'])}",
         "daily_close": round(current, 8),
         "sma_200": round(float(ma200), 8),
         "prior_20d_close_high": round(prior_high, 8),
@@ -661,7 +689,14 @@ def playbook_snapshot(
         opportunities[0],
     )
     signal = selected.get("signal")
-    executable = "buy" if signal == "buy" else None
+    long_adapter_ready = bool(
+        profile.get("paper_long_execution_supported")
+    )
+    executable = (
+        "buy"
+        if signal == "buy" and long_adapter_ready
+        else None
+    )
 
     major_flip = (
         selected.get("daily_grain") == "short"
@@ -692,6 +727,8 @@ def playbook_snapshot(
             if executable == "buy"
             else "short_adapter_required"
             if signal == "short"
+            else "long_adapter_required"
+            if signal == "buy" and not long_adapter_ready
             else "no_trade"
         ),
     }
