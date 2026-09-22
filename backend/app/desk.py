@@ -179,6 +179,17 @@ class MultiDesk:
             position = self.wallet.position(book.id)
             if not position:
                 continue
+
+            # Legacy SpotWallet migrations may have preserved the original
+            # book entry timestamp even though the migrated portfolio position
+            # has opened_at=None. Promote that known timestamp into the
+            # canonical position rather than inventing a new trade start time.
+            if not position.get("opened_at") and book.entry_at:
+                stored_position = self.wallet.positions.get(book.id)
+                if stored_position is not None:
+                    stored_position["opened_at"] = book.entry_at
+                    position["opened_at"] = book.entry_at
+
             book.entry_at = (
                 book.entry_at
                 or position.get("opened_at")
@@ -446,6 +457,7 @@ class MultiDesk:
                     if side == "short" and mark > 0
                     else 0.0
                 )
+                opened_at = position.get("opened_at") or book.entry_at
                 items.append(
                     {
                         "trade_id": position.get("trade_id"),
@@ -458,9 +470,9 @@ class MultiDesk:
                         ),
                         "side": side,
                         "mode": position.get("mode"),
-                        "opened_at": position.get("opened_at"),
+                        "opened_at": opened_at,
                         "duration_seconds": self._duration_seconds(
-                            position.get("opened_at")
+                            opened_at
                         ),
                         "entry_price": entry,
                         "current_price": mark,

@@ -143,3 +143,45 @@ def test_activity_event_has_trade_and_asset_context():
     assert row["asset_id"] == "mes"
     assert row["event_type"] == "entry_filled"
     assert desk.trade_events(1)[0]["event_id"] == row["event_id"]
+
+def test_restore_backfills_legacy_open_timestamp_for_live_timer():
+    desk = _fresh_desk()
+    book = desk.by_id["btc"]
+    book.mark = 87_000.0
+
+    opened_at = "2020-01-01T12:00:00+00:00"
+    opened = desk.wallet.open_position(
+        "btc",
+        side="long",
+        quantity=0.001,
+        price=86_000.0,
+        opened_at=opened_at,
+        mode="daily_swing",
+    )
+    assert opened["ok"] is True
+
+    wallet = desk.wallet.payload()
+    wallet["positions"]["btc"]["opened_at"] = None
+    desk._restore(
+        {
+            "wallet": wallet,
+            "books": {
+                "btc": {
+                    "entry_at": opened_at,
+                    "entry_mode": "daily_swing",
+                    "fills": [],
+                }
+            },
+        }
+    )
+
+    restored = desk.wallet.position("btc")
+    assert restored is not None
+    assert restored["opened_at"] == opened_at
+
+    live = desk.live_trades()
+    trade = next(row for row in live["items"] if row["asset_id"] == "btc")
+    assert trade["opened_at"] == opened_at
+    assert trade["duration_seconds"] is not None
+    assert trade["duration_seconds"] > 0
+
