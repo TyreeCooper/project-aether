@@ -525,6 +525,8 @@ def _crypto_daily(
         "cost_pct": cost_pct,
         "playbook": profile,
         "signal_key": None,
+        "execution_status": "no_trade",
+        "short_execution_supported": False,
         "opportunities": [],
     }
     if len(clean) < 200:
@@ -612,6 +614,11 @@ def _crypto_daily(
         ),
         "atr_14_pct": round(atr_pct, 6),
         "btc_rider_gate_open": rider_ok,
+        "execution_status": (
+            "paper_long_ready"
+            if signal == "buy"
+            else "no_trade"
+        ),
         "opportunities": [
             {
                 "mode": "daily_swing",
