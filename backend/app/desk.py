@@ -1,4 +1,4 @@
-"""Kraken-style desk: one USD stack, ten pair books, one rule."""
+"""Aether multi-market paper desk: one risk account, twelve tailored books."""
 from __future__ import annotations
 
 import asyncio
@@ -18,10 +18,10 @@ from app.news import fetch_asset_news
 from app.official_macro import verify_macro_events
 from app.desk_persist import load_desk, save_desk
 from app.events import active_risk, fetch_calendar
-from app.fees import fee_rate
 from app.playbooks import playbook_profile
 from app.universe import ASSETS, export_assets, register_asset
-from app.wallet import STARTING_USD, SpotWallet
+from app.wallet import STARTING_USD
+from app.paper_portfolio import PaperPortfolio
 from app.pair_book import PairBook
 
 logger = logging.getLogger("aether.desk")
@@ -57,7 +57,7 @@ class MultiDesk:
                         register_asset(asset)
                     except (KeyError, TypeError, ValueError):
                         continue
-        self.wallet = SpotWallet(STARTING_USD)
+        self.wallet = PaperPortfolio(STARTING_USD)
         self.books = [PairBook(asset, self.wallet) for asset in ASSETS]
         self.by_id = {b.id: b for b in self.books}
         self._task: asyncio.Task | None = None
@@ -126,6 +126,7 @@ class MultiDesk:
             books[book.id] = {
                 "stop": book.stop,
                 "highest": book.highest,
+                "lowest": book.lowest,
                 "entry_at": book.entry_at,
                 "entry_mode": book.entry_mode,
                 "last_entry_signal_key": book.last_entry_signal_key,
@@ -162,6 +163,7 @@ class MultiDesk:
                     continue
                 book.stop = float(row.get("stop") or 0)
                 book.highest = float(row.get("highest") or 0)
+                book.lowest = float(row.get("lowest") or 0)
                 book.entry_at = row.get("entry_at")
                 book.entry_mode = row.get("entry_mode")
                 book.last_entry_signal_key = row.get("last_entry_signal_key")
@@ -169,6 +171,33 @@ class MultiDesk:
                 fills = row.get("fills") or []
                 if isinstance(fills, list):
                     book.fills = [f for f in fills[-200:] if isinstance(f, dict)]
+        for book in self.books:
+            position = self.wallet.position(book.id)
+            if not position:
+                continue
+            book.entry_at = (
+                book.entry_at
+                or position.get("opened_at")
+            )
+            book.entry_mode = (
+                book.entry_mode
+                or position.get("mode")
+            )
+            book.last_entry_signal_key = (
+                book.last_entry_signal_key
+                or position.get("signal_key")
+            )
+            if not book.stop:
+                book.stop = float(
+                    position.get("current_stop")
+                    or position.get("initial_stop")
+                    or 0.0
+                )
+            entry = float(position.get("entry_price") or 0.0)
+            if entry > 0:
+                book.highest = book.highest or entry
+                book.lowest = book.lowest or entry
+
         if "armed" in data:
             self.armed = bool(data["armed"])
         settings = data.get("settings") or {}
@@ -869,7 +898,11 @@ class MultiDesk:
             return []
 
         equity = max(self.wallet.equity(self.marks()), 1.0)
-        slice_usd = equity * self.risk_slice
+        risk_budget_usd = equity * TRADE_RISK_FRACTION
+        capital_cap_usd = min(
+            equity * self.risk_slice,
+            max(self.wallet.usd * 0.95, 0.0),
+        )
         btc_bias, btc_long = self._btc_gate()
 
         open_books = [
@@ -909,7 +942,7 @@ class MultiDesk:
                 btc_bias_on=btc_bias,
                 btc_in_position=btc_long,
             )
-            if snap.get("executable_signal") != "buy":
+            if snap.get("executable_signal") not in {"buy", "short"}:
                 continue
             candidates.append(
                 (
@@ -937,52 +970,27 @@ class MultiDesk:
                 >= int(profile["cluster_cap"])
             ):
                 continue
-
-            mark = float(book.mark or 0.0)
-            if mark <= 0:
+            if float(book.mark or 0.0) <= 0:
                 continue
-
-            stop_pct = max(
-                float(
-                    snap.get("risk_stop_pct")
-                    or profile["min_stop_pct"]
-                ),
-                0.01,
-            )
-            rate = fee_rate(
-                book.id,
-                qty=1.0,
-                price=mark,
-                side="buy",
-            )
-            cost_pct = max(
-                float(snap.get("cost_pct") or 0.0),
-                rate * 200,
-            )
-            modeled_loss_fraction = max(
-                (stop_pct + cost_pct) / 100.0,
-                1e-6,
-            )
-            risk_notional = (
-                equity
-                * TRADE_RISK_FRACTION
-                / modeled_loss_fraction
-            )
-            notional = min(
-                slice_usd,
-                risk_notional,
-                max(self.wallet.usd * 0.95, 0.0),
-            )
-            if notional <= 0:
+            if risk_budget_usd <= 0 or capital_cap_usd <= 0:
                 continue
 
             result = book.enter(
-                notional,
+                risk_budget_usd,
                 strategy_snapshot=snap,
+                max_capital_usd=capital_cap_usd,
             )
             result["playbook"] = snap.get("mode")
             result["quality_score"] = snap.get(
                 "quality_score"
+            )
+            result["risk_budget_usd"] = round(
+                risk_budget_usd,
+                4,
+            )
+            result["capital_cap_usd"] = round(
+                capital_cap_usd,
+                4,
             )
             out.append(result)
 
@@ -997,7 +1005,10 @@ class MultiDesk:
                     asyncio.create_task(
                         live.place_order(
                             pair=book.kraken,
-                            side="buy",
+                            side=str(
+                                result.get("execution_side")
+                                or "buy"
+                            ),
                             volume=float(
                                 result.get("qty") or 0
                             ),
@@ -1033,7 +1044,10 @@ class MultiDesk:
                 if book.kraken:
                     await live.place_order(
                         pair=book.kraken,
-                        side="sell",
+                        side=str(
+                            row.get("execution_side")
+                            or "sell"
+                        ),
                         volume=float(
                             row.get("qty") or 0
                         ),
