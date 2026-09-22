@@ -1,4 +1,7 @@
+from app.pair_book import PairBook
 from app.playbooks import playbook_profile, playbook_snapshot
+from app.universe import BY_ID
+from app.wallet import SpotWallet
 
 
 def _daily(count=240, start=100.0, step=1.0):
@@ -125,7 +128,7 @@ def test_eth_rider_requires_btc_long():
     assert allowed["signal"] == "buy"
 
 
-def test_intraday_playbook_follows_aligned_grain():
+def test_intraday_playbook_follows_aligned_grain_without_fake_future_fill():
     daily = _daily(100, start=50.0, step=0.5)
     hourly = _hourly(240, start=80.0, step=0.25)
     minute = _minutes(900, start=120.0, step=0.03)
@@ -141,7 +144,8 @@ def test_intraday_playbook_follows_aligned_grain():
     assert snap["four_hour_grain"] == "long"
     assert snap["one_hour_grain"] == "long"
     assert snap["signal"] == "buy"
-    assert snap["executable_signal"] == "buy"
+    assert snap["executable_signal"] is None
+    assert snap["execution_status"] == "long_adapter_required"
 
 
 def test_bearish_setup_is_detected_but_not_fake_executed():
@@ -176,3 +180,56 @@ def test_intraday_entry_is_blocked_outside_required_session():
     )
     assert snap["signal"] is None
     assert snap["reason"] == "session_closed"
+
+
+def test_cash_equity_long_can_execute_when_setup_qualifies():
+    daily = _daily(100, start=50.0, step=0.5)
+    hourly = _hourly(240, start=80.0, step=0.25)
+    minute = _minutes(900, start=120.0, step=0.03)
+    snap = playbook_snapshot(
+        "nvda",
+        minute,
+        hourly,
+        daily,
+        mark=minute[-1]["close"],
+        active_session_ids={"rth"},
+    )
+    assert snap["signal"] == "buy"
+    assert snap["executable_signal"] == "buy"
+    assert snap["execution_status"] == "paper_long_ready"
+
+
+def test_direct_future_entry_is_blocked_until_contract_adapter_exists():
+    book = PairBook(BY_ID["mes"], SpotWallet())
+    book.mark = 5000.0
+    book.bid = 4999.75
+    book.ask = 5000.25
+    out = book.enter(
+        500.0,
+        strategy_snapshot={"mode": "intraday", "risk_stop_pct": 1.0},
+    )
+    assert out["ok"] is False
+    assert out["error"] == "execution_adapter_required"
+
+
+def test_completed_daily_signal_is_consumed_once():
+    bars = _daily(240, step=1.0)
+    book = PairBook(BY_ID["btc"], SpotWallet())
+    book.seed_daily(bars)
+    book.mark = float(bars[-1]["close"])
+    book.bid = book.mark - 0.1
+    book.ask = book.mark + 0.1
+
+    first = book.snapshot_strategy()
+    assert first["executable_signal"] == "buy"
+    result = book.enter(100.0, strategy_snapshot=first)
+    assert result["ok"] is True
+    consumed_key = first["signal_key"]
+    assert book.last_entry_signal_key == consumed_key
+
+    book.wallet.sell("btc", book.qty(), book.mark)
+    second = book.snapshot_strategy()
+    assert second["signal"] == "buy"
+    assert second["signal_key"] == consumed_key
+    assert second["executable_signal"] is None
+    assert second["execution_status"] == "signal_already_consumed"
