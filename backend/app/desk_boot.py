@@ -12,6 +12,7 @@ def attach(engine) -> None:
     from app.intel import build_intel
     from app.kraken_ws import stream as kraken_stream
     from app.pipes import asset_id_from_pair, enrich_markets, fetch_yahoo_bars
+    from app.sessions import desk_board, for_asset
     from app.universe import ALLOWED_IDS
 
     orig_markets = venue.fetch_markets
@@ -45,6 +46,7 @@ def attach(engine) -> None:
 
     original = engine.snapshot
     original_asset = desk.asset_snapshot
+    original_floor = desk.floor_snapshot
     raw_buy = desk.wallet.buy
     raw_sell = desk.wallet.sell
 
@@ -87,6 +89,12 @@ def attach(engine) -> None:
     def snapshot():
         data = original()
         data["desk"] = desk.snapshot()
+        data["sessions"] = desk_board()
+        return data
+
+    def floor_snapshot():
+        data = original_floor()
+        data["sessions"] = desk_board()
         return data
 
     def asset_snapshot(asset_id: str):
@@ -105,6 +113,7 @@ def attach(engine) -> None:
         )
         quote = fee_quote(asset_id, qty=1.0, price=float(view.get("mark") or 1), side="buy")
         skin = theme(asset_id)
+        clock = for_asset(asset_id)
         intel["cards"].insert(
             1,
             {
@@ -122,17 +131,58 @@ def attach(engine) -> None:
                 ],
             },
         )
+        live = ", ".join(clock["active"]) or "none"
+        intel["cards"].insert(
+            2,
+            {
+                "id": "session",
+                "title": "Session / clocks",
+                "slang": "Where the sun is",
+                "plain": clock["sessions"][0]["plain"] if clock["always_open"] else "Cash-session windows in Eastern time. Same object the bot reads.",
+                "tone": "good" if clock["active"] else "flat",
+                "headline": "24/7" if clock["always_open"] else live,
+                "fields": [
+                    {"key": "clock", "label": "Desk clock", "means": "America/New_York right now", "value": clock["clock"], "unit": ""},
+                    {"key": "kind", "label": "Market type", "means": "Which session calendar this book uses", "value": clock["kind"], "unit": ""},
+                    {"key": "active", "label": "Active now", "means": "Sessions that are open at this minute", "value": live, "unit": ""},
+                    *[
+                        {
+                            "key": s["id"],
+                            "label": s["name"] + (" · ACTIVE" if s["active"] else ""),
+                            "means": s["plain"],
+                            "value": s["window"],
+                            "unit": "",
+                        }
+                        for s in clock["sessions"]
+                    ],
+                    *[
+                        {
+                            "key": t["id"],
+                            "label": t["name"] + " · " + t["role"],
+                            "means": t["plain"],
+                            "value": t["role"],
+                            "unit": "",
+                        }
+                        for t in clock["timeframes"]
+                    ],
+                ],
+            },
+        )
+        intel["sessions"] = clock
         data["intel"] = intel
         data["broker"] = skin
         data["fee"] = quote
+        data["sessions"] = clock
         book = desk.by_id.get(str(asset_id).lower())
         if book is not None:
             book.last_intel = intel
+            book.last_sessions = clock
             book.fee_quote = quote
         return data
 
     engine.snapshot = snapshot
     desk.asset_snapshot = asset_snapshot
+    desk.floor_snapshot = floor_snapshot
 
     def on_ws_quote(quote):
         book = desk.by_id.get(quote["id"])
@@ -167,7 +217,7 @@ def attach(engine) -> None:
         loop.create_task(kraken_stream(on_ws_quote, engine._log))
     except RuntimeError:
         pass
-    engine._log("INFO", "Desk frozen to 12 books. Kraken public WS on BTC/ETH.")
+    engine._log("INFO", "Desk frozen to 12 books. Session clock shared with the bot.")
 
     auto = os.getenv("AETHER_AUTO_RUN", "1").strip() not in {"0", "false", "FALSE"}
     if auto and getattr(engine, "start_bot", None):
