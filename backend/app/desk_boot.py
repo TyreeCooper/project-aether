@@ -146,7 +146,7 @@ def attach(engine) -> None:
                 "source": "kraken-ws",
             }
         )
-        book.push_px(quote["last"], quote["ts"])
+        book.push_px(int(quote["ts"]))
 
     async def seed_yahoo():
         for book in desk.books:
