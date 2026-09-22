@@ -112,6 +112,7 @@ class MultiDesk:
                 "highest": book.highest,
                 "entry_at": book.entry_at,
                 "entry_mode": book.entry_mode,
+                "last_entry_signal_key": book.last_entry_signal_key,
                 "last_reason": book.last_reason,
                 "fills": list(book.fills)[-200:],
             }
@@ -147,6 +148,7 @@ class MultiDesk:
                 book.highest = float(row.get("highest") or 0)
                 book.entry_at = row.get("entry_at")
                 book.entry_mode = row.get("entry_mode")
+                book.last_entry_signal_key = row.get("last_entry_signal_key")
                 book.last_reason = str(row.get("last_reason") or book.last_reason)
                 fills = row.get("fills") or []
                 if isinstance(fills, list):
@@ -539,6 +541,9 @@ class MultiDesk:
                 book.seed_daily(daily)
             except Exception as exc:
                 logger.warning("seed failed %s %s", book.pair, exc)
+        seeded_at = time.time()
+        self._last_context_refresh = seeded_at
+        self._last_daily_refresh = seeded_at
 
     async def _refresh_context_bars(
         self,
@@ -1038,7 +1043,6 @@ class MultiDesk:
             await self._refresh_one_community(force=True)
             await self._refresh_one_news(force=True)
             await self._quotes()
-            await self._refresh_context_bars(force=True)
             await self._persist_intelligence(force=True)
             while True:
                 try:
