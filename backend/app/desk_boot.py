@@ -52,39 +52,11 @@ def attach(engine) -> None:
     original = engine.snapshot
     original_asset = desk.asset_snapshot
     original_floor = desk.floor_snapshot
-    raw_buy = desk.wallet.buy
-    raw_sell = desk.wallet.sell
-
-    def buy(asset, qty, price, fee_rate=None):
-        if str(asset).lower() not in ALLOWED_IDS:
-            return {"ok": False, "error": "asset not on the 12-book desk"}
-        quote = fee_quote(asset, qty=qty, price=price, side="buy")
-        out = raw_buy(asset, qty, price, fee_rate=quote["rate"])
-        if out.get("ok"):
-            out["fee_model"] = quote
-            out["fee"] = quote["fee_usd"] if quote.get("model") != "percent_taker" else out.get("fee")
-        return out
-
-    def sell(asset, qty, price, fee_rate=None):
-        if str(asset).lower() not in ALLOWED_IDS:
-            return {"ok": False, "error": "asset not on the 12-book desk"}
-        quote = fee_quote(asset, qty=qty, price=price, side="sell")
-        out = raw_sell(asset, qty, price, fee_rate=quote["rate"])
-        if out.get("ok"):
-            out["fee_model"] = quote
-        return out
-
-    desk.wallet.buy = buy
-    desk.wallet.sell = sell
-
-    extra = [k for k in list(getattr(desk.wallet, "balances", {}) or {}) if k not in ALLOWED_IDS]
-    for key in extra:
-        desk.wallet.balances.pop(key, None)
+    # PaperPortfolio owns product-specific fees, margin, long/short P&L,
+    # and the 12-book position ledger. Do not monkey-patch the removed
+    # SpotWallet buy/sell/balances API here; doing so prevents app startup.
     desk.books[:] = [b for b in desk.books if b.id in ALLOWED_IDS]
     desk.by_id = {b.id: b for b in desk.books}
-    if extra:
-        desk.wallet.save()
-        engine._log("INFO", "Dropped leftover alt balances: " + ",".join(extra))
 
     async def frozen_add(_asset):
         return {"ok": False, "error": "universe frozen to the 12 official books"}
