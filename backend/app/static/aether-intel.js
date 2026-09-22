@@ -8,7 +8,7 @@
     }
     return String(v);
   };
-  function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&","<":"<",">":">",'"':""","'":"&#39;"}[m]));}
+  function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));}
   function sessionRows(rows){
     return (rows||[]).map(s=>{
       const on=!!s.active;

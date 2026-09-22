@@ -27,6 +27,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+      - name: Check browser JavaScript syntax
+        run: |
+          for file in app/static/*.js; do
+            node --check "$file"
+          done
       - name: Run backend tests
         env:
           PYTHONPATH: .
@@ -64,3 +69,37 @@ jobs:
           app-name: 'aether-prod-api'
           slot-name: 'Production'
           package: .
+      - name: Verify production runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://aether-prod-api.azurewebsites.net"
+          for attempt in $(seq 1 18); do
+            if curl --fail --silent --show-error --max-time 20 "$base/api/v1/health" >/tmp/aether-health.json; then
+              break
+            fi
+            if [ "$attempt" -eq 18 ]; then
+              echo "Production health endpoint did not recover after deploy."
+              exit 1
+            fi
+            sleep 10
+          done
+          python - <<'PY'
+          import json
+          with open("/tmp/aether-health.json", encoding="utf-8") as fh:
+              body = json.load(fh)
+          assert body.get("ok") is True, body
+          assert body.get("paper_mode") is True, body
+          assert body.get("live_blocked") is True, body
+          PY
+          curl --fail --silent --show-error --max-time 20 "$base/" >/tmp/aether-root.html
+          grep -q "Aether Trading Desk" /tmp/aether-root.html
+          curl --fail --silent --show-error --max-time 20 "$base/api/v1/floor" >/tmp/aether-floor.json
+          python - <<'PY'
+          import json
+          with open("/tmp/aether-floor.json", encoding="utf-8") as fh:
+              body = json.load(fh)
+          assert isinstance(body.get("assets"), list), body
+          assert len(body["assets"]) >= 12, len(body["assets"])
+          assert isinstance(body.get("portfolio"), dict), body
+          PY
