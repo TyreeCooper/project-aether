@@ -1,16 +1,4 @@
-"""Published venue fees for paper fills. Not invented spreads.
-
-Kraken Spot Crypto Tier 1 taker = 0.80% as of 2026-09-21 (kraken.com/features/fee-schedule).
-Override only when the live account tier is known: AETHER_TAKER_FEE_RATE.
-
-Other books use that broker's published retail/default schedule:
-- Interactive Brokers Pro Fixed US stock: $0.005/share, $1 min, 1% cap
-  plus FINRA TAF ~$0.000166/share on sells (interactivebrokers.com commissions).
-- NinjaTrader Lifetime all-in per side (as of 2026-07-01 ninjatrader.com/pricing):
-  MES/MNQ $0.65, MGC $1.00, MCL use MGC-like $1.00, 10Y $0.76.
-- tastyfx / FX: typical retail markup modeled as 0.8 pip EURUSD / 1.0 pip USDJPY
-  expressed as a conservative taker-equivalent until a live tastyfx ticket exists.
-"""
+"""Published venue fees for paper fills. Not invented spreads."""
 from __future__ import annotations
 
 import os
@@ -22,15 +10,38 @@ KRAKEN_TIER1_TAKER = 0.008
 TAKER_FEE = float(os.getenv("AETHER_TAKER_FEE_RATE", str(KRAKEN_TIER1_TAKER)))
 
 BROKER_THEME = {
-    "kraken": {"id": "kraken", "label": "Kraken", "hex": "#5741d9"},
-    "interactive_brokers": {"id": "ibkr", "label": "Interactive Brokers", "hex": "#d35400"},
-    "ibkr": {"id": "ibkr", "label": "Interactive Brokers", "hex": "#d35400"},
-    "ninjatrader": {"id": "ninjatrader", "label": "NinjaTrader", "hex": "#1f8a70"},
-    "tastyfx": {"id": "tastyfx", "label": "tastyfx", "hex": "#b8860b"},
-    "binance": {"id": "binance", "label": "Binance.US watch", "hex": "#c9a227"},
+    "kraken": {
+        "id": "kraken",
+        "label": "Kraken",
+        "logo": "/static/brokers/kraken.svg",
+    },
+    "interactive_brokers": {
+        "id": "ibkr",
+        "label": "Interactive Brokers",
+        "logo": "/static/brokers/ibkr.svg",
+    },
+    "ibkr": {
+        "id": "ibkr",
+        "label": "Interactive Brokers",
+        "logo": "/static/brokers/ibkr.svg",
+    },
+    "ninjatrader": {
+        "id": "ninjatrader",
+        "label": "NinjaTrader",
+        "logo": "/static/brokers/ninjatrader.svg",
+    },
+    "tastyfx": {
+        "id": "tastyfx",
+        "label": "tastyfx",
+        "logo": "/static/brokers/tastyfx.svg",
+    },
+    "binance": {
+        "id": "binance",
+        "label": "Binance.US watch",
+        "logo": "/static/brokers/kraken.svg",
+    },
 }
 
-# NinjaTrader Lifetime all-in USD per contract per side (exchange+NFA+clearing+commission).
 NT_PER_SIDE = {
     "mes": 0.65,
     "mnq": 0.65,
@@ -60,7 +71,6 @@ def fee_quote(
     price: float,
     side: str = "buy",
 ) -> dict[str, Any]:
-    """Exact paper fee for this fill. Rate is published; dollars follow qty*price."""
     aid = str(asset_id).lower()
     broker = broker_of(aid)
     notional = abs(float(qty) * float(price))
@@ -107,7 +117,6 @@ def fee_quote(
             "source": "NinjaTrader Lifetime all-in per side as of 2026-07-01 commission table",
         }
 
-    # tastyfx: express typical 0.8–1.0 pip cost as a percent of notional.
     pip_frac = 0.00008 if aid == "eurusd" else 0.00010
     fee = notional * pip_frac
     return {
