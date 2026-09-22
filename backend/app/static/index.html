@@ -25,7 +25,13 @@
   <nav id="assetNav" class="asset-nav" aria-label="Asset pages"></nav>
   <main>
     <section id="view-floor" class="view">
-      <div class="page-title"><div><p class="eyebrow">PORTFOLIO COMMAND</p><h1>The Floor</h1><p>One account. Independent Kraken asset books.</p></div><div id="floorClock" class="clock"></div></div>
+      <div class="page-title"><div><p class="eyebrow">PORTFOLIO COMMAND</p><h1>The Floor</h1><p>One account. Twelve instrument-aware paper books.</p></div><div id="floorClock" class="clock"></div></div>
+      <button id="floorLiveStrip" class="live-strip" type="button" data-route="live">
+        <span id="floorLiveDot" class="live-dot"></span>
+        <b id="floorLiveState">AETHER SCANNING</b>
+        <span id="floorLiveDetail">0 open positions</span>
+        <span class="live-strip-arrow">›</span>
+      </button>
       <section class="hero-grid">
         <article class="hero-card primary"><span>Portfolio Equity</span><strong id="floorEquity">—</strong><small id="floorPnl">—</small></article>
         <article class="hero-card"><span>Cash</span><strong id="floorCash">—</strong><small id="floorExposure">—</small></article>
@@ -88,8 +94,22 @@
       </section>
       <section class="panel"><header><div><p class="eyebrow">DECISION MATRIX</p><h2>Independent Asset Books</h2></div></header><div id="engineMatrix" class="asset-board"></div></section>
     </section>
+    <section id="view-live" class="view hidden">
+      <div class="page-title"><div><p class="eyebrow">IN-FLIGHT EXECUTION</p><h1>Live Trades</h1><p>Watch Aether qualify, enter, manage, and close paper positions in real time.</p></div><span id="liveStateBadge" class="badge">SCANNING</span></div>
+      <section class="hero-grid live-hero-grid">
+        <article class="hero-card primary"><span>Open Trades</span><strong id="liveOpenCount">0</strong><small id="liveOpenSummary">Aether is scanning.</small></article>
+        <article class="hero-card"><span>Open P&L</span><strong id="liveOpenPnl">—</strong><small>Across active paper positions</small></article>
+        <article class="hero-card"><span>Top Watch</span><strong id="liveTopWatch">—</strong><small id="liveTopWatchDetail">No qualified setup</small></article>
+        <article class="hero-card"><span>Engine</span><strong id="liveEngineState">—</strong><small>Paper execution only</small></article>
+      </section>
+      <section class="dashboard-grid">
+        <article class="panel span-2"><header><div><p class="eyebrow">OPEN POSITIONS</p><h2>Active Trade Cockpits</h2></div><span class="panel-note">timers update locally every second</span></header><div id="liveTradeCards" class="live-trade-grid"></div></article>
+        <article class="panel"><header><div><p class="eyebrow">NEXT OPPORTUNITIES</p><h2>Setup Watch</h2></div></header><div id="liveWatch" class="metric-list"></div></article>
+        <article class="panel"><header><div><p class="eyebrow">BOT ACTIVITY</p><h2>Event Stream</h2></div></header><div id="liveEvents" class="event-stream"></div></article>
+      </section>
+    </section>
     <section id="view-blotter" class="view hidden">
-      <div class="page-title"><div><p class="eyebrow">EXECUTION RECORD</p><h1>Blotter</h1></div></div>
+      <div class="page-title"><div><p class="eyebrow">COMPLETED ROUND TRIPS</p><h1>Blotter</h1><p>One row per completed trade. Raw fills remain available separately.</p></div></div>
       <section class="panel"><div id="deskBlotter" class="table-wrap"></div></section>
     </section>
     <section id="view-booth" class="view hidden">
@@ -115,7 +135,7 @@
   <nav class="bottom-nav" aria-label="Primary">
     <button data-route="floor" class="on"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V9m5 10V5m6 14v-7m5 7V3"/></svg><span>Floor</span></button>
     <button data-route="assets"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="9" r="5"/><circle cx="15.5" cy="15.5" r="4.5"/></svg><span>Assets</span></button>
-    <button data-route="engine"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg><span>Engine</span></button>
+    <button data-route="live"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h4l2-6 4 12 2-6h4"/></svg><span>Live</span></button>
     <button data-route="blotter"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5"/></svg><span>Blotter</span></button>
     <button data-route="booth"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 4.8-2.7 8-7 10-4.3-2-7-5.2-7-10V6l7-3z"/></svg><span>Booth</span></button>
   </nav>
@@ -126,6 +146,7 @@
   <button class="drawer-item" data-drawer-route="settings" type="button"><span class="drawer-icon">⚙</span><span><b>Settings</b><small>Engine, execution, security & data</small></span><span>›</span></button>
   <button class="drawer-item" data-drawer-route="floor" type="button"><span class="drawer-icon">⌂</span><span><b>The Floor</b><small>Portfolio command overview</small></span><span>›</span></button>
   <button class="drawer-item" data-drawer-route="engine" type="button"><span class="drawer-icon">⚡</span><span><b>Aether Vector Engine</b><small>Autonomous decision matrix</small></span><span>›</span></button>
+  <button class="drawer-item" data-drawer-route="live" type="button"><span class="drawer-icon">●</span><span><b>Live Trades</b><small>Open positions, timers & bot activity</small></span><span>›</span></button>
   <button class="drawer-item" data-drawer-route="blotter" type="button"><span class="drawer-icon">≡</span><span><b>Blotter</b><small>Desk execution record</small></span><span>›</span></button>
   <div class="drawer-foot"><span>PAPER MODE</span><span>LIVE BLOCKED</span></div>
 </aside>
