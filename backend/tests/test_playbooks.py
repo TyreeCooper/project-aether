@@ -1,3 +1,4 @@
+from app.desk import completed_bars
 from app.pair_book import PairBook
 from app.playbooks import playbook_profile, playbook_snapshot
 from app.universe import BY_ID
@@ -233,3 +234,15 @@ def test_completed_daily_signal_is_consumed_once():
     assert second["signal_key"] == consumed_key
     assert second["executable_signal"] is None
     assert second["execution_status"] == "signal_already_consumed"
+
+
+def test_completed_bar_filter_keeps_closed_tail_and_drops_forming_tail():
+    rows = [
+        {"ts": 100, "close": 1.0},
+        {"ts": 200, "close": 2.0},
+    ]
+    forming = completed_bars(rows, 60, now_ts=250)
+    assert forming == rows[:-1]
+
+    closed = completed_bars(rows, 60, now_ts=260)
+    assert closed == rows
