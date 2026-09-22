@@ -134,7 +134,13 @@ async def fetch_yahoo_bars(asset_id: str, interval: str = "1m", limit: int = 240
     symbol = YAHOO.get(str(asset_id).lower()) or FALLBACK.get(str(asset_id).lower())
     if not symbol:
         return []
-    range_map = {"1m": "1d", "5m": "5d", "60m": "60m", "1h": "3mo"}
+    range_map = {
+        "1m": "1d",
+        "5m": "5d",
+        "60m": "60m",
+        "1h": "3mo",
+        "1d": "2y",
+    }
     url = CHART.format(symbol=symbol)
     async with httpx.AsyncClient(timeout=10.0, headers=HEADERS) as client:
         res = await client.get(url, params={"interval": interval, "range": range_map.get(interval, "1d")})

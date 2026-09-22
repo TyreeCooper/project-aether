@@ -9,6 +9,7 @@ from datetime import datetime, time
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from app.playbooks import playbook_profile
 from app.universe import BY_ID
 
 ET = ZoneInfo("America/New_York")
@@ -35,10 +36,36 @@ FUTURES_SESSIONS = [
 ]
 
 CLOCKS = [
-    {"id": "1m", "name": "1 minute", "role": "Tape", "plain": "Bars the book actually stores and that the chart shows."},
-    {"id": "5m", "name": "5 minute", "role": "Trigger", "plain": "The clock the breakout rule is allowed to fire on."},
-    {"id": "1h", "name": "1 hour", "role": "Context", "plain": "Higher-timeframe structure. Not an entry clock."},
-    {"id": "1d", "name": "Daily", "role": "Bias", "plain": "If daily structure disagrees, the book stays flat."},
+    {
+        "id": "1m",
+        "name": "1 minute",
+        "role": "Tape",
+        "plain": "Tape/chart only; no directional decision is made from one-minute noise.",
+    },
+    {
+        "id": "15m",
+        "name": "15 minute",
+        "role": "Intraday trigger",
+        "plain": "Continuation trigger for FX, index micros, and shares.",
+    },
+    {
+        "id": "1h",
+        "name": "1 hour",
+        "role": "Context / swing trigger",
+        "plain": "Tactical context and the trigger clock for swing-first markets.",
+    },
+    {
+        "id": "4h",
+        "name": "4 hour",
+        "role": "Grain",
+        "plain": "Intermediate trend. Aether trades with it, not against it.",
+    },
+    {
+        "id": "1d",
+        "name": "Daily",
+        "role": "Structural bias",
+        "plain": "Daily structure governs every book; BTC/ETH use daily candles exclusively.",
+    },
 ]
 
 
@@ -117,6 +144,7 @@ def for_asset(asset_id: str, now: datetime | None = None) -> dict[str, Any]:
         sessions = _decorate(EQUITY_SESSIONS, now)
         applies = True
     live = [s for s in sessions if s["active"]]
+    profile = playbook_profile(asset_id)
     return {
         "asset_id": str(asset_id).lower(),
         "kind": kind,
@@ -127,7 +155,12 @@ def for_asset(asset_id: str, now: datetime | None = None) -> dict[str, Any]:
         "active": [s["name"] for s in live],
         "active_slang": [s["slang"] for s in live],
         "sessions": sessions,
-        "timeframes": CLOCKS,
+        "timeframes": profile["clocks"],
+        "playbook": {
+            "primary": profile["primary"],
+            "secondary": profile.get("secondary"),
+            "cluster": profile["cluster"],
+        },
         "same_as_bot": True,
     }
 
