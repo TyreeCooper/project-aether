@@ -1014,9 +1014,15 @@ class MultiDesk:
         await self._refresh_context_bars()
         await self._persist_intelligence()
 
-        btc_bias, btc_long = self._btc_gate()
         exits = []
-        for book in self.books:
+        ordered_books = sorted(
+            self.books,
+            key=lambda item: 0 if item.id == "btc" else 1,
+        )
+        for book in ordered_books:
+            # Re-read the BTC gate before every managed book. If BTC exits
+            # earlier in this tick, ETH sees the closed rider gate immediately.
+            btc_bias, btc_long = self._btc_gate()
             row = book.manage(
                 btc_bias_on=btc_bias,
                 btc_in_position=btc_long,
