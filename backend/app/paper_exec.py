@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from app.clock import allow_after_losses, is_new_five_minute
 from app.exits import stop_fill_price, time_stop_due
 from app.fees import TAKER_FEE as KRAKEN_TAKER
+from app.fill_model import fill_cost
 from app.strategy import round_trip_cost_pct
 
 SLIPPAGE_BPS = 5.0
@@ -22,13 +23,11 @@ def slipped_price(
     ask: float | None,
     mark: float | None,
 ) -> float | None:
-    raw = ask if side == "buy" else bid
-    if raw is None:
-        raw = mark
-    if raw is None:
-        return None
-    slip = raw * SLIPPAGE_BPS / 10_000.0
-    return raw + slip if side == "buy" else raw - slip
+    fill = fill_cost(
+        side, 1.0, bid=bid, ask=ask, mark=mark,
+        fee_rate=0.0, slippage_bps=SLIPPAGE_BPS,
+    )
+    return None if fill is None else fill.fill_price
 
 
 def deny_microstructure(
