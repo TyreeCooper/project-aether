@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 import logging
 import os
 import time
+import uuid
 from typing import Any
 
 from app import live, venue
@@ -95,6 +97,7 @@ class MultiDesk:
         self._news_cursor = 0
         self._last_news_refresh = 0.0
         self._last_intelligence_persist = 0.0
+        self.activity_events: list[dict[str, Any]] = []
         restored_sources = (
             restored.get("asset_source_registry")
             if isinstance(restored, dict)
@@ -144,6 +147,7 @@ class MultiDesk:
                     "poll_seconds": self.poll_seconds,
                 },
                 "asset_source_registry": self.asset_source_registry,
+                "activity_events": self.activity_events[-300:],
                 "saved_at": time.time(),
             }
         )
@@ -197,6 +201,14 @@ class MultiDesk:
             if entry > 0:
                 book.highest = book.highest or entry
                 book.lowest = book.lowest or entry
+
+        activity = data.get("activity_events") or []
+        if isinstance(activity, list):
+            self.activity_events = [
+                dict(row)
+                for row in activity[-300:]
+                if isinstance(row, dict)
+            ]
 
         if "armed" in data:
             self.armed = bool(data["armed"])
@@ -349,6 +361,209 @@ class MultiDesk:
             "official_macro": self.official_macro_sources,
             "note": "Unavailable, partial, degraded, stale, and healthy are distinct states.",
         }
+
+    @staticmethod
+    def _duration_seconds(
+        opened_at: str | None,
+        closed_at: str | None = None,
+    ) -> int | None:
+        if not opened_at:
+            return None
+        try:
+            opened = datetime.fromisoformat(
+                str(opened_at).replace("Z", "+00:00")
+            )
+            closed = (
+                datetime.fromisoformat(
+                    str(closed_at).replace("Z", "+00:00")
+                )
+                if closed_at
+                else datetime.now(timezone.utc)
+            )
+        except ValueError:
+            return None
+        return max(int((closed - opened).total_seconds()), 0)
+
+    def _record_event(
+        self,
+        event_type: str,
+        book: PairBook,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        row = {
+            "event_id": uuid.uuid4().hex,
+            "event_type": str(event_type),
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "asset_id": book.id,
+            "symbol": book.symbol,
+            "pair": book.pair,
+            "broker": book.broker,
+            **dict(payload or {}),
+        }
+        self.activity_events.append(row)
+        self.activity_events = self.activity_events[-300:]
+        return row
+
+    def live_trades(self) -> dict[str, Any]:
+        btc_bias, btc_long = self._btc_gate()
+        items: list[dict[str, Any]] = []
+        watch: list[dict[str, Any]] = []
+
+        for book in self.books:
+            position = self.wallet.position(book.id)
+            if position:
+                mark = float(
+                    book.mark
+                    or position.get("entry_price")
+                    or 0.0
+                )
+                notional = self.wallet.notional_usd(
+                    book.id,
+                    mark,
+                )
+                open_pnl = self.wallet.open_pnl(
+                    book.id,
+                    mark,
+                )
+                try:
+                    strategy = book.snapshot_strategy(
+                        btc_bias_on=btc_bias,
+                        btc_in_position=btc_long,
+                    )
+                except Exception as exc:
+                    strategy = {
+                        "reason": f"strategy_error:{exc}",
+                    }
+                excursion = book.current_excursion()
+                entry = float(
+                    position.get("entry_price") or 0.0
+                )
+                side = str(position.get("side") or "long")
+                move = (
+                    ((mark / entry) - 1) * 100
+                    if side == "long" and entry > 0
+                    else ((entry / mark) - 1) * 100
+                    if side == "short" and mark > 0
+                    else 0.0
+                )
+                items.append(
+                    {
+                        "trade_id": position.get("trade_id"),
+                        "asset_id": book.id,
+                        "symbol": book.symbol,
+                        "pair": book.pair,
+                        "broker": book.broker,
+                        "product_type": position.get(
+                            "product_type"
+                        ),
+                        "side": side,
+                        "mode": position.get("mode"),
+                        "opened_at": position.get("opened_at"),
+                        "duration_seconds": self._duration_seconds(
+                            position.get("opened_at")
+                        ),
+                        "entry_price": entry,
+                        "current_price": mark,
+                        "stop_price": book.stop or position.get(
+                            "current_stop"
+                        ),
+                        "quantity": position.get("quantity"),
+                        "quantity_unit": position.get(
+                            "quantity_unit"
+                        ),
+                        "notional_usd": round(notional, 4),
+                        "margin_reserved_usd": position.get(
+                            "margin_reserved_usd"
+                        ),
+                        "open_pnl_usd": round(open_pnl, 4),
+                        "price_move_pct": round(move, 4),
+                        "mfe_pct": excursion.get("mfe_pct"),
+                        "mae_pct": excursion.get("mae_pct"),
+                        "entry_reason": (
+                            position.get("metadata") or {}
+                        ).get("entry_reason"),
+                        "quality_score": (
+                            position.get("metadata") or {}
+                        ).get("quality_score"),
+                        "entry_clock": (
+                            position.get("metadata") or {}
+                        ).get("entry_clock"),
+                        "bias_clock": (
+                            position.get("metadata") or {}
+                        ).get("bias_clock"),
+                        "management_state": (
+                            "EXIT WATCH"
+                            if strategy.get("exit_signal")
+                            else "MANAGING"
+                        ),
+                        "strategy": {
+                            "reason": strategy.get("reason"),
+                            "direction": strategy.get("direction"),
+                            "daily_grain": strategy.get(
+                                "daily_grain"
+                            ),
+                            "four_hour_grain": strategy.get(
+                                "four_hour_grain"
+                            ),
+                            "one_hour_grain": strategy.get(
+                                "one_hour_grain"
+                            ),
+                            "signal": strategy.get("signal"),
+                        },
+                    }
+                )
+                continue
+
+            try:
+                snap = book.snapshot_strategy(
+                    btc_bias_on=btc_bias,
+                    btc_in_position=btc_long,
+                )
+            except Exception:
+                continue
+            watch.append(
+                {
+                    "asset_id": book.id,
+                    "symbol": book.symbol,
+                    "pair": book.pair,
+                    "mode": snap.get("mode"),
+                    "signal": snap.get("signal"),
+                    "direction": snap.get("direction"),
+                    "reason": snap.get("reason"),
+                    "quality_score": int(
+                        snap.get("quality_score") or 0
+                    ),
+                    "execution_status": snap.get(
+                        "execution_status"
+                    ),
+                }
+            )
+
+        watch.sort(
+            key=lambda row: int(row.get("quality_score") or 0),
+            reverse=True,
+        )
+        items.sort(
+            key=lambda row: str(row.get("opened_at") or "")
+        )
+        return {
+            "state": "trading" if items else "scanning",
+            "open_count": len(items),
+            "items": items,
+            "watch": watch[:5],
+            "events": self.trade_events(40),
+        }
+
+    def trade_events(
+        self,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        rows = list(self.activity_events)
+        rows.sort(
+            key=lambda row: str(row.get("ts") or ""),
+            reverse=True,
+        )
+        return rows[: max(1, int(limit))]
 
     def source_registry_snapshot(self) -> dict[str, Any]:
         return {
@@ -505,6 +720,90 @@ class MultiDesk:
 
     def blotter(self, limit: int = 200) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for trade in self.wallet.closed_trades:
+            aid = str(trade.get("asset_id") or "")
+            book = self.by_id.get(aid)
+            trade_id = str(trade.get("trade_id") or "")
+            if trade_id:
+                seen.add(trade_id)
+            rows.append(
+                {
+                    **dict(trade),
+                    "symbol": book.symbol if book else aid.upper(),
+                    "pair": book.pair if book else aid.upper(),
+                    "broker": book.broker if book else None,
+                }
+            )
+
+        # Preserve pre-upgrade paper history. These rows may not have enough
+        # information for exact duration, but are never discarded.
+        for book in self.books:
+            for fill in book.fills:
+                if fill.get("event"):
+                    continue
+                if str(fill.get("side") or "").lower() != "sell":
+                    continue
+                if fill.get("pnl") is None:
+                    continue
+                legacy_id = str(
+                    fill.get("trade_id")
+                    or f"legacy-{book.id}-{fill.get('ts')}"
+                )
+                if legacy_id in seen:
+                    continue
+                rows.append(
+                    {
+                        "trade_id": legacy_id,
+                        "asset_id": book.id,
+                        "symbol": book.symbol,
+                        "pair": book.pair,
+                        "broker": book.broker,
+                        "side": "long",
+                        "mode": fill.get("entry_mode"),
+                        "entry_price": fill.get(
+                            "entry_fill_price"
+                        ),
+                        "exit_price": fill.get("price"),
+                        "opened_at": fill.get("opened_at"),
+                        "closed_at": fill.get("ts"),
+                        "duration_seconds": fill.get(
+                            "duration_seconds"
+                        ),
+                        "quantity": fill.get("qty"),
+                        "realized_pnl_usd": fill.get("pnl"),
+                        "fees_usd": fill.get(
+                            "fees_usd",
+                            fill.get("fee"),
+                        ),
+                        "net_return_pct": fill.get(
+                            "net_return_pct"
+                        ),
+                        "mfe_pct": fill.get("mfe_pct"),
+                        "mae_pct": fill.get("mae_pct"),
+                        "capture_efficiency_pct": fill.get(
+                            "capture_efficiency_pct"
+                        ),
+                        "exit_reason": fill.get("actor"),
+                        "legacy": True,
+                    }
+                )
+
+        rows.sort(
+            key=lambda row: str(
+                row.get("closed_at")
+                or row.get("ts")
+                or ""
+            ),
+            reverse=True,
+        )
+        return rows[: max(1, int(limit))]
+
+    def fill_ledger(
+        self,
+        limit: int = 300,
+    ) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
         for book in self.books:
             for fill in book.fills:
                 rows.append(
@@ -513,9 +812,13 @@ class MultiDesk:
                         "asset_id": book.id,
                         "symbol": book.symbol,
                         "pair": book.pair,
+                        "broker": book.broker,
                     }
                 )
-        rows.sort(key=lambda row: str(row.get("ts") or ""), reverse=True)
+        rows.sort(
+            key=lambda row: str(row.get("ts") or ""),
+            reverse=True,
+        )
         return rows[: max(1, int(limit))]
 
     async def add_asset(self, asset: dict[str, Any]) -> dict[str, Any]:
