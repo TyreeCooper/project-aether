@@ -1,4 +1,9 @@
 (function(){
+  if(!document.querySelector('script[src="/static/aether-fast.js"]')){
+    const s=document.createElement("script");
+    s.src="/static/aether-fast.js";
+    document.head.appendChild(s);
+  }
   function money(n){
     const v=Number(n);
     if(!Number.isFinite(v)) return "\u2014";
@@ -16,7 +21,7 @@
     if(!host) return;
     const vals=closes(series);
     if(vals.length<2){
-      host.innerHTML='<div class="empty">Waiting for Kraken 1m bars.</div>';
+      host.innerHTML='<div class="empty">Waiting for 1m bars.</div>';
       return;
     }
     const w=390,h=168,p=14;
