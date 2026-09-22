@@ -1,10 +1,23 @@
 (function(){
   const $=id=>document.getElementById(id);
-  const state={floor:null,asset:null,blotter:[],settings:null,token:localStorage.getItem("aether-operator-token")||""};
+  const state={floor:null,asset:null,live:null,blotter:[],settings:null,token:localStorage.getItem("aether-operator-token")||""};
   const money=n=>{const v=Number(n);if(!Number.isFinite(v))return "—";const d=Math.abs(v)<1?4:2;return "$"+v.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:d});};
   const num=(n,d=4)=>{const v=Number(n);return Number.isFinite(v)?v.toLocaleString("en-US",{maximumFractionDigits:d}):"—";};
   const pct=n=>{const v=Number(n);return Number.isFinite(v)?((v>0?"+":"")+v.toFixed(2)+"%"):"—";};
   const when=v=>{if(!v)return "—";const d=new Date(v);return Number.isFinite(d.getTime())?d.toLocaleString([], {month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}):String(v);};
+  const duration=s=>{
+    const n=Math.max(0,Math.floor(Number(s)||0));
+    if(n<60)return n+"s";
+    const d=Math.floor(n/86400),h=Math.floor((n%86400)/3600),m=Math.floor((n%3600)/60),sec=n%60;
+    if(d)return d+"d "+h+"h";
+    if(h)return h+"h "+m+"m";
+    return m+"m "+String(sec).padStart(2,"0")+"s";
+  };
+  const liveDuration=opened=>{
+    if(!opened)return null;
+    const t=new Date(opened).getTime();
+    return Number.isFinite(t)?Math.max(0,Math.floor((Date.now()-t)/1000)):null;
+  };
   const pnlClass=n=>Number(n)>0?"up":Number(n)<0?"down":"";
   const esc=s=>String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
   function toast(msg){const e=$("toast");e.textContent=msg;e.classList.add("show");setTimeout(()=>e.classList.remove("show"),1800);}
@@ -71,6 +84,14 @@
     setText("floorCash",money(p.cash));setText("floorExposure",pct(p.exposure_pct)+" exposure");
     setText("floorInvested",money(p.invested));setText("floorPositions",(p.active_positions||0)+" active positions");
     setText("floorRealized",money(p.realized_pnl),pnlClass(p.realized_pnl));setText("floorTrades",(p.trades||0)+" completed trades");
+    const live=state.live||{},open=live.items||[];
+    const strip=$("floorLiveStrip");
+    if(strip){
+      const count=Number(live.open_count??p.active_positions??0);
+      setText("floorLiveState",count?(count+" LIVE TRADE"+(count===1?"":"S")):"AETHER SCANNING");
+      setText("floorLiveDetail",count?open.slice(0,3).map(x=>x.symbol+" "+String(x.side||"").toUpperCase()+" "+money(x.open_pnl_usd)).join(" · "):"0 open positions · watching all 12 books");
+      $("floorLiveDot")?.classList.toggle("active",count>0);
+    }
     bars("pnlBars",rows,a=>Number(a.open_pnl||0)+Number(a.analytics?.realized_pnl||0),money);
     bars("allocationBars",rows,a=>Number(a.position_value||0),money);
     bars("breadthBars",rows,a=>Number(a.analytics?.change_pct||0),pct);
@@ -103,7 +124,8 @@
     const basis=(Number(a.watch_last)-Number(a.mark));setText("assetBasis",Number.isFinite(basis)?money(basis):"—");
     setText("assetChartTitle",(a.pair||"")+" price");setText("assetWindow",(w.bars||0)+" recent 1m bars");
     lineChart(d.series);
-    $("assetPosition").innerHTML=metric("Quantity",num(a.qty,8)+" "+(a.symbol||""))+metric("Average entry",money(a.avg))+metric("Position value",money(a.position_value))+metric("Open P&L",money(a.open_pnl),pnlClass(a.open_pnl))+metric("Active stop",money(a.stop));
+    const held=a.opened_at?liveDuration(a.opened_at):null;
+    $("assetPosition").innerHTML=metric("Side",a.side?String(a.side).toUpperCase():"FLAT")+metric("Quantity",num(a.qty,8)+" "+(a.quantity_unit||a.symbol||""))+metric("Average entry",money(a.avg))+metric("Position value",money(a.position_value))+metric("Open P&L",money(a.open_pnl),pnlClass(a.open_pnl))+metric("In trade",held==null?"—":duration(held))+metric("Active stop",money(a.stop));
     $("assetPerformance").innerHTML=metric("Realized P&L",money(an.realized_pnl),pnlClass(an.realized_pnl))+metric("Trades",String(an.trades||0))+metric("Win rate",pct(an.win_rate_pct))+metric("Profit factor",an.profit_factor==null?"—":num(an.profit_factor,2))+metric("Fees",money(an.fees));
     setText("assetSignal",(s.signal||"NO SIGNAL").toUpperCase());$("assetSignal").className="badge "+(s.signal==="buy"?"good":"");
     $("assetStrategy").innerHTML=metric("Strategy","Aether Vector Engine")+metric("Decision",String(s.reason||a.reason||"warming"))+metric("Signal",String(s.signal||"none").toUpperCase())+metric("Quality",s.quality_score==null?"—":String(s.quality_score))+metric("Cost hurdle",s.hurdle_pct==null?"—":pct(s.hurdle_pct));
@@ -129,9 +151,30 @@
     $("engineMatrix").innerHTML=rows.map(a=>'<div class="asset-row" data-id="'+a.id+'"><b class="pair">'+esc(a.pair)+'</b><span>'+esc(String(a.signal||"NONE").toUpperCase())+'</span><span>'+esc(a.reason||"warming")+'</span><span>'+money(a.open_pnl)+'</span><span>'+num(a.qty,8)+'</span><span>'+money(a.stop)+'</span></div>').join("");
     $("engineMatrix").querySelectorAll(".asset-row").forEach(r=>r.onclick=()=>go("asset/"+r.dataset.id));
   }
+  function renderLive(){
+    const d=state.live||{},items=d.items||[],watch=d.watch||[],events=d.events||[];
+    const openPnl=items.reduce((s,x)=>s+Number(x.open_pnl_usd||0),0);
+    setText("liveOpenCount",String(d.open_count||0));
+    setText("liveOpenSummary",items.length?items.map(x=>x.symbol+" "+String(x.side||"").toUpperCase()).join(" · "):"Aether is scanning.");
+    setText("liveOpenPnl",money(openPnl),pnlClass(openPnl));
+    const top=watch[0];
+    setText("liveTopWatch",top?String(top.symbol||"—"):"—");
+    setText("liveTopWatchDetail",top?(String(top.signal||top.direction||"watch").toUpperCase()+" · "+String(top.quality_score||0)+"/100"):"No qualified setup");
+    const engine=state.floor?.engine||{};
+    setText("liveEngineState",engine.accepting_entries?"ARMED":(engine.armed?"STARTING":"DISARMED"));
+    setText("liveStateBadge",items.length?"TRADING":"SCANNING");
+    $("liveStateBadge").className="badge "+(items.length?"good":"");
+    $("liveTradeCards").innerHTML=items.length?items.map(t=>{
+      const held=liveDuration(t.opened_at);
+      return '<article class="live-trade-card" data-asset="'+esc(t.asset_id)+'"><header><div><p class="eyebrow">'+esc(String(t.mode||"trade").toUpperCase())+'</p><h3>'+esc(t.symbol||t.pair||"—")+' <span>'+esc(String(t.side||"").toUpperCase())+'</span></h3></div><b class="live-duration" data-opened="'+esc(t.opened_at||"")+'">'+duration(held??t.duration_seconds)+'</b></header><div class="live-price-row"><div><span>Entry</span><b>'+money(t.entry_price)+'</b></div><div><span>Current</span><b>'+money(t.current_price)+'</b></div><div><span>Stop</span><b>'+money(t.stop_price)+'</b></div></div><div class="live-pnl '+pnlClass(t.open_pnl_usd)+'">'+money(t.open_pnl_usd)+' <small>'+pct(t.price_move_pct)+'</small></div><div class="metric-list">'+metric("MFE",t.mfe_pct==null?"—":pct(t.mfe_pct))+metric("MAE",t.mae_pct==null?"—":pct(t.mae_pct))+metric("Quantity",num(t.quantity,8)+" "+String(t.quantity_unit||""))+metric("Management",String(t.management_state||"MANAGING"))+metric("Entry reason",String(t.entry_reason||"—"))+'</div></article>';
+    }).join(""):'<div class="empty live-empty"><b>AETHER SCANNING</b><span>No paper position is open right now. Valid setups can appear below while Aether waits for an executable trigger.</span></div>';
+    $("liveTradeCards").querySelectorAll("[data-asset]").forEach(x=>x.onclick=()=>go("asset/"+x.dataset.asset));
+    $("liveWatch").innerHTML=watch.length?watch.slice(0,5).map((x,i)=>metric((i+1)+". "+String(x.symbol||x.pair||"—"),String(x.signal||x.direction||"WATCH").toUpperCase()+" · "+String(x.quality_score||0)+"/100 · "+String(x.reason||"waiting"))).join(""):metric("Watch","No setup data yet");
+    $("liveEvents").innerHTML=events.length?events.slice(0,12).map(e=>'<div class="event-row"><span>'+esc(when(e.ts))+'</span><b>'+esc(String(e.event_type||"event").replaceAll("_"," ").toUpperCase())+'</b><em>'+esc(e.symbol||e.pair||"—")+'</em></div>').join(""):'<div class="empty">No trade lifecycle events yet.</div>';
+  }
   function renderBlotter(){
     const rows=state.blotter||[];
-    $("deskBlotter").innerHTML=rows.length?'<table><thead><tr><th>P&L</th><th>Price</th><th>Fee</th><th>Asset</th><th>Side</th><th>Qty</th><th>Actor</th><th>Timestamp</th></tr></thead><tbody>'+rows.map(f=>'<tr><td class="'+pnlClass(f.pnl)+'">'+money(f.pnl)+'</td><td>'+money(f.price)+'</td><td>'+money(f.fee)+'</td><td><b>'+esc(f.pair||f.symbol||"—")+'</b></td><td>'+esc(String(f.side||"").toUpperCase())+'</td><td>'+num(f.qty,8)+'</td><td>'+esc(f.actor||"—")+'</td><td>'+esc(String(f.ts||"").replace("T"," ").slice(0,19))+'</td></tr>').join("")+'</tbody></table>':'<div class="empty">The desk has no paper fills yet.</div>';
+    $("deskBlotter").innerHTML=rows.length?'<table><thead><tr><th>Net P&L</th><th>Asset</th><th>Side</th><th>Mode</th><th>Entry</th><th>Exit</th><th>Duration</th><th>Return</th><th>Fees</th><th>Exit reason</th><th>Closed</th></tr></thead><tbody>'+rows.map(t=>'<tr><td class="'+pnlClass(t.realized_pnl_usd)+'">'+money(t.realized_pnl_usd)+'</td><td><b>'+esc(t.pair||t.symbol||"—")+'</b></td><td>'+esc(String(t.side||"").toUpperCase())+'</td><td>'+esc(String(t.mode||"—").toUpperCase())+'</td><td>'+money(t.entry_price)+'</td><td>'+money(t.exit_price)+'</td><td>'+esc(t.duration_seconds==null?"—":duration(t.duration_seconds))+'</td><td class="'+pnlClass(t.net_return_pct)+'">'+(t.net_return_pct==null?"—":pct(t.net_return_pct))+'</td><td>'+money(t.fees_usd)+'</td><td>'+esc(String(t.exit_reason||"—").replaceAll("_"," "))+'</td><td>'+esc(when(t.closed_at))+'</td></tr>').join("")+'</tbody></table>':'<div class="empty">No completed round-trip paper trades yet.</div>';
   }
   function openAssetPicker(){
     $("assetPicker").classList.remove("hidden");
@@ -201,7 +244,8 @@
     $("settingsLive").innerHTML=metric("Kraken keys",live.keys_present?"PRESENT":"NOT PRESENT",live.keys_present?"up":"")+metric("Live flag",live.live_flag?"ON":"OFF")+metric("Orders enabled",live.orders_enabled?"YES":"NO",live.orders_enabled?"down":"up")+metric("Safety state",live.live_blocked?"LIVE BLOCKED":"LIVE READY",live.live_blocked?"up":"down")+metric("Status",live.reason||"—");
   }
   async function loadSettings(){state.settings=await get("/api/v1/settings");renderSettings();}
-  async function loadFloor(){state.floor=await get("/api/v1/floor");navAssets();renderFloor();renderEngine();}
+  async function loadLive(){state.live=await get("/api/v1/desk/live-trades");renderLive();renderFloor();}
+  async function loadFloor(){const [floor,live]=await Promise.all([get("/api/v1/floor"),get("/api/v1/desk/live-trades").catch(()=>state.live)]);state.floor=floor;if(live)state.live=live;navAssets();renderFloor();renderEngine();if(state.live)renderLive();}
   async function loadAsset(id){state.asset=await get("/api/v1/assets/"+encodeURIComponent(id));renderAsset();}
   async function loadBlotter(){const d=await get("/api/v1/desk/blotter?limit=300");state.blotter=d.items||[];renderBlotter();}
   async function route(){
@@ -210,6 +254,7 @@
       if(!state.floor)await loadFloor();
       if(r.startsWith("asset/")){const id=r.split("/")[1];show("asset");await loadAsset(id);}
       else if(r==="engine"){show("engine");renderEngine();}
+      else if(r==="live"){show("live");await loadLive();}
       else if(r==="blotter"){show("blotter");await loadBlotter();}
       else if(r==="booth"){show("booth");}
       else if(r==="settings"){show("settings");await loadSettings();}
@@ -219,6 +264,7 @@
     }catch(e){toast("Data refresh failed");}
   }
   document.querySelectorAll(".bottom-nav button").forEach(b=>b.onclick=()=>go(b.dataset.route));
+  $("floorLiveStrip")?.addEventListener("click",()=>go("live"));
   $("backFloor").onclick=()=>go("floor");
   $("connectOperator").onclick=async()=>{try{await runButton($("connectOperator"),"Connecting…",async()=>{state.token=$("operatorToken").value.trim();localStorage.setItem("aether-operator-token",state.token);await post("/api/v1/auth/verify");$("authBadge").textContent="CONNECTED";$("authBadge").className="badge good";if($("settingsOperatorToken"))$("settingsOperatorToken").value=state.token;toast("Operator connected");});}catch(e){$("authBadge").textContent="LOCKED";$("authBadge").className="badge bad";toast("Authentication failed");}};
   $("armDesk").onclick=async()=>{try{await runButton($("armDesk"),"Arming…",async()=>{await post("/api/v1/desk/arm");await loadFloor();toast("Aether Vector Engine armed");});}catch(e){toast(e.message);}};
@@ -230,7 +276,7 @@
   $("settingsDisconnectOperator").onclick=()=>{state.token="";localStorage.removeItem("aether-operator-token");$("settingsOperatorToken").value="";$("operatorToken").value="";renderSettings();toast("Operator disconnected");};
   if(state.token){$("operatorToken").value=state.token;$("settingsOperatorToken").value=state.token;}
   addEventListener("hashchange",route);
-  setInterval(()=>{const d=new Date();$("floorClock").textContent=d.toLocaleTimeString([], {hour:"2-digit",minute:"2-digit",second:"2-digit"});},1000);
+  setInterval(()=>{const d=new Date();$("floorClock").textContent=d.toLocaleTimeString([], {hour:"2-digit",minute:"2-digit",second:"2-digit"});document.querySelectorAll(".live-duration[data-opened]").forEach(el=>{const seconds=liveDuration(el.dataset.opened);if(seconds!=null)el.textContent=duration(seconds);});},1000);
   route();
-  setInterval(async()=>{try{await loadFloor();const r=location.hash.replace(/^#\/?/,"");if(r.startsWith("asset/"))await loadAsset(r.split("/")[1]);if(r==="blotter")await loadBlotter();}catch(e){}},8000);
+  setInterval(async()=>{try{await loadFloor();const r=location.hash.replace(/^#\/?/,"");if(r.startsWith("asset/"))await loadAsset(r.split("/")[1]);if(r==="live")await loadLive();if(r==="blotter")await loadBlotter();}catch(e){}},8000);
 })();

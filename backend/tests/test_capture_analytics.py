@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from app.pair_book import PairBook
-from app.wallet import SpotWallet
+from app.paper_portfolio import PaperPortfolio
 
 
 ASSET = {
@@ -15,11 +15,20 @@ ASSET = {
 
 
 def test_capture_analytics_separate_slippage_fees_and_exit_timing():
-    wallet = SpotWallet(10_000)
+    wallet = PaperPortfolio(10_000)
     book = PairBook(ASSET, wallet)
     book.apply_quote({"last": 100.0, "bid": 99.9, "ask": 100.0})
 
-    entry = book.enter(1_000)
+    entry = book.enter(
+        1_000,
+        strategy_snapshot={
+            "executable_signal": "buy",
+            "mode": "intraday",
+            "risk_stop_pct": 2.0,
+            "signal_key": "capture-test",
+        },
+        max_capital_usd=1_500,
+    )
     assert entry["ok"] is True
     assert entry["reference_price"] == 100.0
     assert 4.9 < entry["slippage_bps"] < 5.1

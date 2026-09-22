@@ -228,20 +228,17 @@ def playbook_profile(asset_id: str) -> dict[str, Any]:
     base = dict(PLAYBOOKS[aid])
     base["asset_id"] = aid
     base["short_setup_detection"] = aid not in {"btc", "eth"}
-    base["short_execution_supported"] = False
-    base["paper_long_execution_supported"] = aid in {
-        "btc",
-        "eth",
-        "nvda",
-        "tsla",
-        "pltr",
-    }
+    base["paper_long_execution_supported"] = True
+    base["paper_short_execution_supported"] = aid not in {"btc", "eth"}
+    base["short_execution_supported"] = base["paper_short_execution_supported"]
     base["execution_adapter"] = (
-        "cash_spot"
+        "crypto_spot"
         if aid in {"btc", "eth"}
-        else "cash_equity"
+        else "equity"
         if aid in {"nvda", "tsla", "pltr"}
-        else "required"
+        else "fx"
+        if aid in {"eurusd", "usdjpy"}
+        else "future"
     )
     clock_mode = (
         "daily"
@@ -644,6 +641,7 @@ def playbook_snapshot(
     in_position: bool = False,
     btc_bias_on: bool = False,
     btc_in_position: bool = False,
+    position_side: str | None = None,
 ) -> dict[str, Any]:
     aid = str(asset_id).lower()
     profile = playbook_profile(aid)
@@ -699,25 +697,42 @@ def playbook_snapshot(
     long_adapter_ready = bool(
         profile.get("paper_long_execution_supported")
     )
+    short_adapter_ready = bool(
+        profile.get("paper_short_execution_supported")
+    )
     executable = (
         "buy"
         if signal == "buy" and long_adapter_ready
+        else "short"
+        if signal == "short" and short_adapter_ready
         else None
     )
 
-    major_flip = (
+    side = str(position_side or "").lower()
+    long_flip = (
         selected.get("daily_grain") == "short"
         or selected.get("four_hour_grain") == "short"
+        or (
+            selected.get("mode") == "intraday"
+            and selected.get("one_hour_grain") == "short"
+        )
     )
-    tactical_flip = (
-        selected.get("mode") == "intraday"
-        and selected.get("one_hour_grain") == "short"
+    short_flip = (
+        selected.get("daily_grain") == "long"
+        or selected.get("four_hour_grain") == "long"
+        or (
+            selected.get("mode") == "intraday"
+            and selected.get("one_hour_grain") == "long"
+        )
     )
-    exit_signal = (
-        "sell"
-        if in_position and (major_flip or tactical_flip)
-        else None
+    should_exit = (
+        in_position
+        and (
+            (side in {"", "long"} and long_flip)
+            or (side == "short" and short_flip)
+        )
     )
+    exit_signal = "exit" if should_exit else None
 
     return {
         **selected,
@@ -728,14 +743,14 @@ def playbook_snapshot(
         "playbook": profile,
         "opportunities": opportunities,
         "short_setup_detected": signal == "short",
-        "short_execution_supported": False,
+        "short_execution_supported": short_adapter_ready,
         "execution_status": (
             "paper_long_ready"
             if executable == "buy"
-            else "short_adapter_required"
-            if signal == "short"
-            else "long_adapter_required"
-            if signal == "buy" and not long_adapter_ready
+            else "paper_short_ready"
+            if executable == "short"
+            else "short_not_supported"
+            if signal == "short" and not short_adapter_ready
             else "no_trade"
         ),
     }

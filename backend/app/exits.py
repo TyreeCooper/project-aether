@@ -16,5 +16,14 @@ def time_stop_due(
     return bars_held >= limit and gain_pct < cost_pct * 1.25
 
 
-def stop_fill_price(stop: float, slip_bps: float = STOP_SLIP_BPS) -> float:
-    return float(stop) * (1 - float(slip_bps) / 10_000.0)
+def stop_fill_price(
+    stop: float,
+    slip_bps: float = STOP_SLIP_BPS,
+    *,
+    side: str = "sell",
+) -> float:
+    """Conservative protective-stop fill for long sells or short covers."""
+    slip = float(slip_bps) / 10_000.0
+    if str(side).lower() == "buy":
+        return float(stop) * (1 + slip)
+    return float(stop) * (1 - slip)

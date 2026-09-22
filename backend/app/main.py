@@ -404,9 +404,26 @@ async def asset_page(asset_id: str):
     return row
 
 
+@app.get("/api/v1/desk/live-trades")
+async def desk_live_trades():
+    return desk.live_trades()
+
+
+@app.get("/api/v1/desk/events")
+async def desk_trade_events(
+    limit: int = Query(default=100, ge=1, le=300),
+):
+    return {"items": desk.trade_events(limit)}
+
+
 @app.get("/api/v1/desk/blotter")
 async def desk_blotter(limit: int = Query(default=200, ge=1, le=500)):
     return {"items": desk.blotter(limit)}
+
+
+@app.get("/api/v1/desk/fills")
+async def desk_fills(limit: int = Query(default=300, ge=1, le=500)):
+    return {"items": desk.fill_ledger(limit)}
 
 
 @app.post("/api/v1/desk/arm")
