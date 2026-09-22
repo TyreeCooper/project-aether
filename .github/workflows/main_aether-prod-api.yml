@@ -73,7 +73,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          base="https://aether-prod-api.azurewebsites.net"
+          host="$(az webapp list --query "[?name=='aether-prod-api'].defaultHostName | [0]" -o tsv)"
+          if [ -z "$host" ]; then
+            echo "Could not resolve Azure defaultHostName for aether-prod-api."
+            exit 1
+          fi
+          base="https://$host"
+          echo "Verifying production runtime at $base"
           for attempt in $(seq 1 18); do
             if curl --fail --silent --show-error --max-time 20 "$base/api/v1/health" >/tmp/aether-health.json; then
               break
