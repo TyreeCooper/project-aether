@@ -105,3 +105,88 @@ def test_restore_preserves_open_position_identity():
     assert restored.position("eurusd")["trade_id"] == opened["trade_id"]
     assert restored.side("eurusd") == "short"
     assert restored.qty("eurusd") == 10_000
+
+
+
+def test_all_12_books_support_intended_paper_sides():
+    p = PaperPortfolio(500_000)
+    cases = [
+        ("btc", "long", 0.01, 100_000.0, 100_500.0),
+        ("eth", "long", 0.10, 4_000.0, 4_020.0),
+        ("nvda", "long", 10, 200.0, 202.0),
+        ("tsla", "short", 10, 300.0, 297.0),
+        ("pltr", "short", 10, 150.0, 148.0),
+        ("eurusd", "long", 10_000, 1.1000, 1.1010),
+        ("usdjpy", "short", 10_000, 150.00, 149.90),
+        ("mes", "long", 1, 5_000.0, 5_001.0),
+        ("mnq", "short", 1, 20_000.0, 19_999.0),
+        ("mgc", "long", 1, 2_500.0, 2_500.2),
+        ("mcl", "short", 1, 70.00, 69.98),
+        ("us10y", "long", 1, 4.250, 4.252),
+    ]
+    for aid, side, qty, entry, exit_price in cases:
+        opened = p.open_position(
+            aid,
+            side=side,
+            quantity=qty,
+            price=entry,
+        )
+        assert opened["ok"] is True, (aid, opened)
+        closed = p.close_position(aid, price=exit_price)
+        assert closed["ok"] is True, (aid, closed)
+
+
+def test_account_reconciles_after_every_position_is_closed():
+    starting = 100_000.0
+    p = PaperPortfolio(starting)
+    realized = 0.0
+
+    cases = [
+        ("btc", "long", 0.01, 100_000.0, 101_000.0),
+        ("nvda", "short", 10, 200.0, 198.0),
+        ("eurusd", "long", 10_000, 1.1000, 1.1010),
+        ("mes", "short", 1, 5_000.0, 4_998.0),
+    ]
+    for aid, side, qty, entry, exit_price in cases:
+        assert p.open_position(
+            aid,
+            side=side,
+            quantity=qty,
+            price=entry,
+        )["ok"]
+        closed = p.close_position(aid, price=exit_price)
+        assert closed["ok"]
+        realized += float(closed["realized_pnl_usd"])
+
+    assert p.positions == {}
+    assert round(p.equity({}), 6) == round(p.usd, 6)
+    assert round(p.usd, 6) == round(starting + realized, 6)
+
+
+def test_open_equity_reconciles_cash_reserved_margin_and_pnl():
+    p = PaperPortfolio(50_000)
+    assert p.open_position(
+        "mes",
+        side="long",
+        quantity=1,
+        price=5_000.0,
+    )["ok"]
+    snap = p.snapshot({"mes": 5_002.0})
+    expected = p.usd + snap["reserved_margin_usd"] + p.gross_pnl("mes", 5_002.0)
+    assert round(snap["equity"], 6) == round(expected, 6)
+
+
+def test_legacy_spot_wallet_payload_migrates_without_second_cash_debit():
+    p = PaperPortfolio(1)
+    p.restore(
+        {
+            "usd": 8_000.0,
+            "units": {"btc": 0.02},
+            "avg": {"btc": 100_000.0},
+        }
+    )
+    assert p.usd == 8_000.0
+    assert p.qty("btc") == 0.02
+    assert p.avg_entry("btc") == 100_000.0
+    assert p.position("btc")["legacy_migrated"] is True
+    assert p.equity({"btc": 100_000.0}) == 10_000.0
