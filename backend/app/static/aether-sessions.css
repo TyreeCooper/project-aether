@@ -1,0 +1,10 @@
+.session-board,.session-strip{margin:10px 0 14px}
+.session-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.session-head h2,.session-board h3{margin:12px 0 6px;font-size:13px;letter-spacing:.08em;text-transform:uppercase}
+.sess-row{display:grid;grid-template-columns:minmax(0,1.1fr) auto auto;gap:4px 8px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.06);font-size:12px}
+.sess-row small{grid-column:1/-1;opacity:.72;font-size:11px}
+.sess-row em{font-style:normal;font-size:10px;letter-spacing:.08em;padding:2px 6px;border-radius:999px}
+.sess-row.on em{background:#163528;color:#3ee6a0}
+.sess-row.off em{background:#2a2e36;color:#8b93a3}
+.sess-clocks{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;font-size:11px}
+.sess-clocks span{border:1px solid rgba(255,255,255,.1);border-radius:999px;padding:3px 8px}
