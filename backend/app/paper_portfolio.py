@@ -206,6 +206,7 @@ class PaperPortfolio:
         risk_usd: float,
         entry_price: float,
         stop_price: float,
+        max_capital_usd: float | None = None,
     ) -> float:
         aid = str(asset_id).lower()
         spec = instrument_spec(aid)
@@ -236,8 +237,33 @@ class PaperPortfolio:
         if per_unit <= 0:
             return 0.0
         raw = risk / per_unit
+        if max_capital_usd is not None:
+            cap = max(float(max_capital_usd), 0.0)
+            margin_per_unit = self._required_margin(
+                aid,
+                side,
+                1.0,
+                entry,
+            )
+            if margin_per_unit > 0:
+                raw = min(raw, cap / margin_per_unit)
         step = float(spec.get("quantity_step") or 1.0)
         return _round_step(raw, step)
+
+    def required_margin(
+        self,
+        asset_id: str,
+        *,
+        side: str,
+        quantity: float,
+        price: float,
+    ) -> float:
+        return self._required_margin(
+            str(asset_id).lower(),
+            str(side).lower(),
+            float(quantity),
+            float(price),
+        )
 
     def open_position(
         self,
