@@ -6,9 +6,39 @@ import os
 
 
 def attach(engine) -> None:
+    from app import venue
     from app.desk import desk
     from app.fees import fee_quote, theme
     from app.intel import build_intel
+    from app.pipes import asset_id_from_pair, enrich_markets, fetch_yahoo_bars
+
+    orig_markets = venue.fetch_markets
+    orig_bars = venue.fetch_bars
+
+    async def fetch_markets():
+        try:
+            items = await orig_markets()
+        except Exception:
+            items = []
+        return await enrich_markets(items)
+
+    async def fetch_bars(interval=1, limit=720, pair="XBTUSD"):
+        bars = []
+        if pair:
+            try:
+                bars = await orig_bars(interval=interval, limit=limit, pair=pair)
+            except Exception:
+                bars = []
+        if bars:
+            return bars
+        aid = asset_id_from_pair(str(pair or ""))
+        if not aid:
+            return []
+        y_int = {1: "1m", 5: "5m", 60: "60m"}.get(int(interval or 1), "1m")
+        return await fetch_yahoo_bars(aid, interval=y_int, limit=limit)
+
+    venue.fetch_markets = fetch_markets
+    venue.fetch_bars = fetch_bars
 
     original = engine.snapshot
     original_asset = desk.asset_snapshot
@@ -62,34 +92,10 @@ def attach(engine) -> None:
                 "tone": "tape",
                 "headline": quote.get("fee_usd"),
                 "fields": [
-                    {
-                        "key": "broker",
-                        "label": "Broker",
-                        "means": "Who would execute this book live",
-                        "value": skin["label"],
-                        "unit": "",
-                    },
-                    {
-                        "key": "model",
-                        "label": "Fee model",
-                        "means": "How the ticket is calculated",
-                        "value": quote.get("model"),
-                        "unit": "",
-                    },
-                    {
-                        "key": "rate",
-                        "label": "Effective rate",
-                        "means": "Fee as a fraction of notional on a 1-unit example",
-                        "value": quote.get("rate"),
-                        "unit": "",
-                    },
-                    {
-                        "key": "source",
-                        "label": "Source",
-                        "means": "Published schedule this number came from",
-                        "value": quote.get("source"),
-                        "unit": "",
-                    },
+                    {"key": "broker", "label": "Broker", "means": "Who would execute this book live", "value": skin["label"], "unit": ""},
+                    {"key": "model", "label": "Fee model", "means": "How the ticket is calculated", "value": quote.get("model"), "unit": ""},
+                    {"key": "rate", "label": "Effective rate", "means": "Fee as a fraction of notional on a 1-unit example", "value": quote.get("rate"), "unit": ""},
+                    {"key": "source", "label": "Source", "means": "Published schedule this number came from", "value": quote.get("source"), "unit": ""},
                 ],
             },
         )
@@ -104,8 +110,26 @@ def attach(engine) -> None:
 
     engine.snapshot = snapshot
     desk.asset_snapshot = asset_snapshot
+
+    async def seed_yahoo():
+        for book in desk.books:
+            if book.bars:
+                continue
+            try:
+                bars = await fetch_yahoo_bars(book.id, interval="1m", limit=240)
+                if bars:
+                    book.seed(bars)
+                    engine._log("INFO", f"Yahoo pipe seeded {book.pair} bars={len(bars)}")
+            except Exception as exc:
+                engine._log("WARN", f"Yahoo seed skipped {book.pair}: {exc}")
+
     desk.start()
-    engine._log("INFO", "Per-broker fees bound. Asset pages inherit broker color.")
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(seed_yahoo())
+    except RuntimeError:
+        pass
+    engine._log("INFO", "Public Yahoo pipes on for FX, micros, names. Kraken still fills crypto.")
 
     auto = os.getenv("AETHER_AUTO_RUN", "1").strip() not in {"0", "false", "FALSE"}
     if auto and getattr(engine, "start_bot", None):
