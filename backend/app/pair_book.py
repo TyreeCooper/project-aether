@@ -753,11 +753,11 @@ class PairBook:
                 "slippage_usd": None,
                 "cost_drag_pct": None,
             }
-        sells = [
+        closes = [
             f for f in self.fills
-            if str(f.get("side", "")).lower() == "sell"
+            if str(f.get("event") or "") == "exit"
         ]
-        if not sells:
+        if not closes:
             return {
                 "state": "none",
                 "mfe_pct": None,
@@ -776,7 +776,7 @@ class PairBook:
                 "slippage_usd": None,
                 "cost_drag_pct": None,
             }
-        last = sells[-1]
+        last = closes[-1]
         return {
             "state": "last_closed",
             "mfe_pct": last.get("mfe_pct"),
@@ -804,27 +804,76 @@ class PairBook:
         }
 
     def analytics(self) -> dict[str, Any]:
-        sells = [f for f in self.fills if str(f.get("side", "")).lower() == "sell"]
-        wins = sum(1 for f in sells if float(f.get("pnl") or 0) > 1e-9)
-        losses = sum(1 for f in sells if float(f.get("pnl") or 0) < -1e-9)
-        realized = sum(float(f.get("pnl") or 0) for f in sells)
-        fees = sum(float(f.get("fee") or 0) for f in self.fills)
-        gross_profit = sum(max(float(f.get("pnl") or 0), 0.0) for f in sells)
-        gross_loss = sum(abs(min(float(f.get("pnl") or 0), 0.0)) for f in sells)
+        closed = [
+            row
+            for row in getattr(self.wallet, "closed_trades", [])
+            if str(row.get("asset_id") or "") == self.id
+        ]
+        wins = sum(
+            1
+            for row in closed
+            if float(row.get("realized_pnl_usd") or 0.0) > 1e-9
+        )
+        losses = sum(
+            1
+            for row in closed
+            if float(row.get("realized_pnl_usd") or 0.0) < -1e-9
+        )
+        realized = sum(
+            float(row.get("realized_pnl_usd") or 0.0)
+            for row in closed
+        )
+        fees = sum(
+            float(row.get("fees_usd") or 0.0)
+            for row in closed
+        )
+        open_pos = getattr(self.wallet, "position", lambda _aid: None)(self.id)
+        if open_pos:
+            fees += float(open_pos.get("entry_fee_usd") or 0.0)
+        gross_profit = sum(
+            max(float(row.get("realized_pnl_usd") or 0.0), 0.0)
+            for row in closed
+        )
+        gross_loss = sum(
+            abs(min(float(row.get("realized_pnl_usd") or 0.0), 0.0))
+            for row in closed
+        )
         first = float(self.bars[0]["close"]) if self.bars else 0.0
-        last = float(self.mark or (self.bars[-1]["close"] if self.bars else 0.0))
-        change_pct = ((last / first) - 1) * 100 if first > 0 and last > 0 else 0.0
+        last = float(
+            self.mark
+            or (self.bars[-1]["close"] if self.bars else 0.0)
+        )
+        change_pct = (
+            ((last / first) - 1) * 100
+            if first > 0 and last > 0
+            else 0.0
+        )
+        durations = [
+            float(row["duration_seconds"])
+            for row in closed
+            if row.get("duration_seconds") is not None
+        ]
         return {
-            "trades": len(sells),
+            "trades": len(closed),
             "wins": wins,
             "losses": losses,
-            "win_rate_pct": round(wins / max(wins + losses, 1) * 100, 2),
+            "win_rate_pct": round(
+                wins / max(wins + losses, 1) * 100,
+                2,
+            ),
             "realized_pnl": round(realized, 4),
             "fees": round(fees, 4),
             "gross_profit": round(gross_profit, 4),
             "gross_loss": round(gross_loss, 4),
             "profit_factor": (
-                round(gross_profit / gross_loss, 4) if gross_loss > 1e-12 else None
+                round(gross_profit / gross_loss, 4)
+                if gross_loss > 1e-12
+                else None
+            ),
+            "avg_duration_seconds": (
+                round(sum(durations) / len(durations), 2)
+                if durations
+                else None
             ),
             "change_pct": round(change_pct, 4),
         }
@@ -832,6 +881,33 @@ class PairBook:
     def view(self) -> dict[str, Any]:
         qty = self.qty()
         avg = self.wallet.avg_entry(self.id)
+        side = self.position_side()
+        position = getattr(
+            self.wallet,
+            "position",
+            lambda _aid: None,
+        )(self.id)
+        mark = float(self.mark or 0.0)
+        notional = (
+            float(
+                getattr(self.wallet, "notional_usd")(
+                    self.id,
+                    mark,
+                )
+            )
+            if qty > 0 and hasattr(self.wallet, "notional_usd")
+            else 0.0
+        )
+        open_pnl = (
+            float(
+                getattr(self.wallet, "open_pnl")(
+                    self.id,
+                    mark,
+                )
+            )
+            if qty > 0 and hasattr(self.wallet, "open_pnl")
+            else 0.0
+        )
         return {
             "id": self.id,
             "name": self.name,
@@ -850,10 +926,17 @@ class PairBook:
             "vwap_24h": self.vwap_24h,
             "trades_24h": self.trades_24h,
             "qty": qty,
+            "side": side,
             "avg": avg,
             "stop": self.stop or None,
-            "position_value": qty * float(self.mark or 0.0),
-            "open_pnl": (self.mark - avg) * qty if qty and self.mark else 0.0,
+            "position_value": notional,
+            "open_pnl": open_pnl,
+            "trade_id": (position or {}).get("trade_id"),
+            "opened_at": (position or {}).get("opened_at"),
+            "margin_reserved_usd": (position or {}).get(
+                "margin_reserved_usd"
+            ),
+            "quantity_unit": (position or {}).get("quantity_unit"),
             "bars": len(self.bars),
             "context_bars_1h": len(self.bars_1h),
             "context_bars_1d": len(self.bars_1d),
@@ -865,3 +948,4 @@ class PairBook:
             "reason": self.last_reason,
             "paper": True,
         }
+
