@@ -344,7 +344,12 @@ class PairBook:
         qty = self.qty()
         if qty <= 0 or not self.mark:
             return None
-        self.highest = max(self.highest, float(self.mark))
+
+        side = self.position_side() or "long"
+        mark = float(self.mark)
+        self.highest = max(self.highest or mark, mark)
+        self.lowest = min(self.lowest or mark, mark)
+
         snap = self.snapshot_strategy(
             btc_bias_on=btc_bias_on,
             btc_in_position=btc_in_position,
@@ -358,13 +363,14 @@ class PairBook:
         rate = fee_rate(
             self.id,
             qty=max(qty, 1.0),
-            price=float(self.mark),
-            side="sell",
+            price=mark,
+            side="buy" if side == "short" else "sell",
         )
         cost_pct = max(
             float(snap.get("cost_pct") or 0.0),
             rate * 200,
         )
+
         if mode == "daily_swing":
             source_bars = list(self.bars_1d)
         elif mode == "swing":
@@ -375,32 +381,90 @@ class PairBook:
                 15,
                 require_complete=True,
             )
-        plan = exit_plan(
-            list(self.bars),
-            self.wallet.avg_entry(self.id),
-            self.highest,
-            self.mark,
-            float(profile["max_stop_pct"]),
-            cost_pct,
-            frozen_hard_stop=self.stop,
-            source_bars=source_bars or None,
-            minimum_stop_pct=float(profile["min_stop_pct"]),
-            atr_multiplier=2.0,
+
+        if side == "short":
+            trail_pct = max(
+                float(profile["min_stop_pct"]),
+                min(
+                    float(profile["max_stop_pct"]),
+                    float(
+                        snap.get("risk_stop_pct")
+                        or profile["min_stop_pct"]
+                    ),
+                ),
+            )
+            candidate = self.lowest * (1 + trail_pct / 100)
+            self.stop = (
+                min(self.stop, candidate)
+                if self.stop > 0
+                else candidate
+            )
+        else:
+            plan = exit_plan(
+                list(self.bars),
+                self.wallet.avg_entry(self.id),
+                self.highest,
+                mark,
+                float(profile["max_stop_pct"]),
+                cost_pct,
+                frozen_hard_stop=self.stop,
+                source_bars=source_bars or None,
+                minimum_stop_pct=float(profile["min_stop_pct"]),
+                atr_multiplier=2.0,
+            )
+            stop = float(plan.get("hard_stop") or self.stop or 0)
+            if stop:
+                self.stop = max(self.stop, stop)
+
+        update_stop = getattr(self.wallet, "update_stop", None)
+        if callable(update_stop):
+            update_stop(self.id, self.stop or None)
+
+        bar_low = float(self.bars[-1]["low"]) if self.bars else mark
+        bar_high = float(self.bars[-1]["high"]) if self.bars else mark
+        hit = (
+            self.stop > 0
+            and (
+                bar_high >= self.stop
+                if side == "short"
+                else bar_low <= self.stop
+            )
         )
-        stop = float(plan.get("hard_stop") or self.stop or 0)
-        if stop:
-            self.stop = max(self.stop, stop)
-        low = float(self.bars[-1]["low"]) if self.bars else self.mark
-        hit = self.stop > 0 and low <= self.stop
+
         held = None
         if self.entry_at:
             try:
-                entered = datetime.fromisoformat(self.entry_at.replace("Z", "+00:00"))
-                held = int((datetime.now(timezone.utc) - entered).total_seconds() // 60)
+                entered = datetime.fromisoformat(
+                    self.entry_at.replace("Z", "+00:00")
+                )
+                held = int(
+                    (
+                        datetime.now(timezone.utc) - entered
+                    ).total_seconds()
+                    // 60
+                )
             except ValueError:
                 held = None
-        avg = self.wallet.avg_entry(self.id) or self.mark
-        gain = ((self.mark / avg) - 1) * 100
+
+        avg = float(self.wallet.avg_entry(self.id) or mark)
+        notional = float(
+            getattr(self.wallet, "notional_usd")(self.id, avg)
+        )
+        move_pnl = getattr(self.wallet, "move_pnl")
+        current_gross_pnl = float(
+            move_pnl(
+                self.id,
+                side=side,
+                quantity=qty,
+                entry_price=avg,
+                mark=mark,
+            )
+        )
+        gain = (
+            current_gross_pnl / notional * 100
+            if notional > 0
+            else 0.0
+        )
         limit = (
             profile.get("time_stop_minutes") or {}
         ).get(mode)
@@ -413,69 +477,122 @@ class PairBook:
                 limit=int(limit),
             )
         )
-        rule_exit = snap.get("exit_signal") == "sell"
+        rule_exit = snap.get("exit_signal") in {"sell", "exit"}
         if not (hit or timed or rule_exit):
             return None
+
+        exit_side = "buy" if side == "short" else "sell"
         exit_reference = (
             float(self.stop)
             if hit and self.stop
-            else float(self.bid if self.bid is not None else self.mark)
+            else float(
+                self.ask
+                if side == "short" and self.ask is not None
+                else self.bid
+                if side == "long" and self.bid is not None
+                else mark
+            )
         )
-        raw = stop_fill_price(self.stop) if hit and self.stop else self.fill_px("sell")
+        raw = (
+            stop_fill_price(
+                self.stop,
+                side=exit_side,
+            )
+            if hit and self.stop
+            else self.fill_px(exit_side)
+        )
         if not raw:
             return None
-        buy_fill = next(
+
+        entry_fill = next(
             (
                 fill
                 for fill in reversed(self.fills)
-                if str(fill.get("side") or "").lower() == "buy"
+                if str(fill.get("event") or "") == "entry"
             ),
             None,
         )
         entry_fill_price = float(
-            (buy_fill or {}).get("price")
+            (entry_fill or {}).get("price")
             or avg
             or 0.0
         )
         entry_reference = float(
-            (buy_fill or {}).get("reference_price")
+            (entry_fill or {}).get("reference_price")
             or entry_fill_price
             or 0.0
         )
-        entry_fee = float((buy_fill or {}).get("fee") or 0.0)
         entry_slippage_usd = float(
-            (buy_fill or {}).get("slippage_usd") or 0.0
+            (entry_fill or {}).get("slippage_usd") or 0.0
         )
         excursion = self.current_excursion(entry_fill_price)
-        result = self.wallet.sell(self.id, qty, raw)
+
+        close_position = getattr(self.wallet, "close_position", None)
+        if not callable(close_position):
+            return None
+        reason = (
+            "managed_stop"
+            if hit
+            else "rule_exit"
+            if rule_exit
+            else "time_stop"
+        )
+        result = close_position(
+            self.id,
+            price=float(raw),
+            exit_reason=reason,
+            reference_price=exit_reference,
+        )
+        if not result.get("ok"):
+            return None
         result["pair"] = self.pair
         result.update(excursion)
 
-        exit_fee = float(result.get("fee") or 0.0)
-        exit_slippage_usd = max(exit_reference - raw, 0.0) * qty
+        gross_pnl = float(
+            move_pnl(
+                self.id,
+                side=side,
+                quantity=qty,
+                entry_price=entry_fill_price,
+                mark=float(raw),
+            )
+        )
+        reference_pnl = float(
+            move_pnl(
+                self.id,
+                side=side,
+                quantity=qty,
+                entry_price=entry_reference,
+                mark=exit_reference,
+            )
+        )
+        exit_slippage_usd = max(reference_pnl - gross_pnl, 0.0)
         exit_slippage_bps = (
-            (1 - raw / exit_reference) * 10_000
+            abs(float(raw) / exit_reference - 1) * 10_000
             if exit_reference > 0
             else None
         )
-        entry_cost = entry_fill_price * qty + entry_fee
+        entry_notional = max(notional, 0.0)
         net_return_pct = (
-            float(result.get("pnl") or 0) / entry_cost * 100
-            if entry_cost > 0
+            float(result.get("pnl") or 0.0)
+            / entry_notional
+            * 100
+            if entry_notional > 0
             else 0.0
         )
         gross_return_pct = (
-            (raw / entry_fill_price - 1) * 100
-            if entry_fill_price > 0
+            gross_pnl / entry_notional * 100
+            if entry_notional > 0
             else 0.0
         )
         reference_return_pct = (
-            (exit_reference / entry_reference - 1) * 100
-            if entry_reference > 0 and exit_reference > 0
+            reference_pnl / entry_notional * 100
+            if entry_notional > 0
             else gross_return_pct
         )
+
         result["entry_fill_price"] = round(entry_fill_price, 8)
-        result["exit_fill_price"] = round(raw, 8)
+        result["exit_fill_price"] = round(float(raw), 8)
         result["entry_reference_price"] = round(entry_reference, 8)
         result["exit_reference_price"] = round(exit_reference, 8)
         result["entry_slippage_usd"] = round(entry_slippage_usd, 8)
@@ -489,11 +606,16 @@ class PairBook:
             if exit_slippage_bps is None
             else round(exit_slippage_bps, 4)
         )
-        result["fees_usd"] = round(entry_fee + exit_fee, 8)
         result["gross_return_pct"] = round(gross_return_pct, 4)
-        result["reference_return_pct"] = round(reference_return_pct, 4)
+        result["reference_return_pct"] = round(
+            reference_return_pct,
+            4,
+        )
         result["net_return_pct"] = round(net_return_pct, 4)
-        result["fee_drag_pct"] = round(gross_return_pct - net_return_pct, 4)
+        result["fee_drag_pct"] = round(
+            gross_return_pct - net_return_pct,
+            4,
+        )
         result["slippage_drag_pct"] = round(
             reference_return_pct - gross_return_pct,
             4,
@@ -510,15 +632,22 @@ class PairBook:
             else None
         )
         result["missed_opportunity_pct"] = (
-            round(max(float(mfe) - gross_return_pct, 0.0), 4)
+            round(
+                max(float(mfe) - gross_return_pct, 0.0),
+                4,
+            )
             if mfe is not None
             else None
         )
         result["net_missed_opportunity_pct"] = (
-            round(max(float(mfe) - net_return_pct, 0.0), 4)
+            round(
+                max(float(mfe) - net_return_pct, 0.0),
+                4,
+            )
             if mfe is not None
             else None
         )
+
         high = excursion.get("trade_high")
         low = excursion.get("trade_low")
         if (
@@ -527,43 +656,60 @@ class PairBook:
             and float(high) > float(low)
         ):
             span = float(high) - float(low)
+            if side == "short":
+                entry_eff = (
+                    (entry_fill_price - float(low))
+                    / span
+                    * 100
+                )
+                exit_eff = (
+                    (float(high) - float(raw))
+                    / span
+                    * 100
+                )
+            else:
+                entry_eff = (
+                    (float(high) - entry_fill_price)
+                    / span
+                    * 100
+                )
+                exit_eff = (
+                    (float(raw) - float(low))
+                    / span
+                    * 100
+                )
             result["entry_efficiency_pct"] = round(
-                max(
-                    0.0,
-                    min(
-                        100.0,
-                        (float(high) - entry_fill_price) / span * 100,
-                    ),
-                ),
+                max(0.0, min(100.0, entry_eff)),
                 2,
             )
             result["exit_efficiency_pct"] = round(
-                max(
-                    0.0,
-                    min(
-                        100.0,
-                        (raw - float(low)) / span * 100,
-                    ),
-                ),
+                max(0.0, min(100.0, exit_eff)),
                 2,
             )
         else:
             result["entry_efficiency_pct"] = None
             result["exit_efficiency_pct"] = None
+
         result["net_capture_pct"] = result["net_return_pct"]
-        result["actor"] = (
-            "bot-playbook-managed-stop"
-            if hit
-            else "bot-playbook-rule-exit"
-            if rule_exit
-            else "bot-playbook-time-stop"
-        )
+        result["actor"] = f"bot-playbook-{reason.replace('_', '-')}"
         result["entry_mode"] = mode
-        if result.get("ok"):
-            self.entry_at = None
-            self.entry_mode = None
-            self.stop = 0.0
-            self.fills.append({**result, "side": "sell", "ts": _now()})
+        result["position_side"] = side
+        result["execution_side"] = exit_side
+        result["event"] = "exit"
+
+        closed_at = str(result.get("closed_at") or _now())
+        self.entry_at = None
+        self.entry_mode = None
+        self.stop = 0.0
+        self.highest = 0.0
+        self.lowest = 0.0
+        self.fills.append(
+            {
+                **result,
+                "side": exit_side,
+                "ts": closed_at,
+            }
+        )
         return result
 
     def capture_snapshot(self) -> dict[str, Any]:
