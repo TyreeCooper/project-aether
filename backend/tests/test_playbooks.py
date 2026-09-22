@@ -266,7 +266,7 @@ def test_pair_book_can_open_and_close_short_future():
     book.bid = 19_999.75
     book.ask = 20_000.25
     out = book.enter(
-        200.0,
+        300.0,
         strategy_snapshot={
             "executable_signal": "short",
             "mode": "intraday",
