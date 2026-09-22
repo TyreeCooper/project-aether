@@ -1,36 +1,27 @@
-#view-asset[data-broker="kraken"]{
-  --broker:#5741d9;
+#view-asset .broker-mark{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  margin:8px 0 10px;
 }
-#view-asset[data-broker="ibkr"],
-#view-asset[data-broker="interactive_brokers"]{
-  --broker:#d35400;
+#view-asset .broker-mark img{
+  height:22px;
+  width:auto;
+  max-width:210px;
+  display:block;
+  filter:none;
 }
-#view-asset[data-broker="ninjatrader"]{
-  --broker:#1f8a70;
+html[data-theme="dark"] #view-asset .broker-mark img,
+:root #view-asset .broker-mark img{
+  color:#e8eaef;
 }
-#view-asset[data-broker="tastyfx"]{
-  --broker:#b8860b;
+html[data-theme="light"] #view-asset .broker-mark img{
+  color:#2a2418;
 }
-#view-asset[data-broker="binance"]{
-  --broker:#c9a227;
-}
-#view-asset{
-  --broker:#5741d9;
-}
+.broker-chip{display:none !important}
 #view-asset .asset-hero,
 #view-asset .asset-chart-panel,
 #view-asset .intel-card{
-  border-color:color-mix(in srgb,var(--broker) 55%, #252a35);
-  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--broker) 22%, transparent);
+  border-color:#2a303c;
+  box-shadow:none;
 }
-#view-asset .symbol-badge,
-#view-asset .asset-page-head .badge{
-  background:color-mix(in srgb,var(--broker) 80%, #11141b);
-  border-color:var(--broker);
-}
-#view-asset .intel-card.good{border-color:var(--broker)}
-.broker-chip{
-  display:inline-flex;align-items:center;gap:6px;margin:6px 0 0;
-  font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--broker);
-}
-.broker-chip i{width:8px;height:8px;border-radius:50%;background:var(--broker);display:inline-block}
