@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 210 28" fill="none">
+  <rect width="28" height="28" rx="7" fill="#c24a00"/>
+  <text x="5" y="19" fill="#fff" font-family="Inter,Arial,sans-serif" font-size="11" font-weight="800">IB</text>
+  <text x="36" y="19" fill="currentColor" font-family="Inter,Arial,sans-serif" font-size="12" font-weight="700" letter-spacing=".04em">Interactive Brokers</text>
+</svg>

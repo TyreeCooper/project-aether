@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 28" fill="none">
+  <rect width="28" height="28" rx="7" fill="#5741d9"/>
+  <path d="M9 7.5h3.1l3.3 5.4L18.7 7.5H22L16.4 16.2V20.5h-3.2v-4.3L9 7.5z" fill="#fff"/>
+  <text x="36" y="19" fill="currentColor" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="800" letter-spacing=".08em">KRAKEN</text>
+</svg>

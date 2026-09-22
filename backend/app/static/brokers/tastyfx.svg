@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 28" fill="none">
+  <rect width="28" height="28" rx="7" fill="#c9a227"/>
+  <text x="6" y="19" fill="#1a1208" font-family="Inter,Arial,sans-serif" font-size="12" font-weight="800">tx</text>
+  <text x="36" y="19" fill="currentColor" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="700" letter-spacing=".06em">tastyfx</text>
+</svg>
