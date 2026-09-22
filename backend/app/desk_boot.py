@@ -38,7 +38,12 @@ def attach(engine) -> None:
         aid = asset_id_from_pair(str(pair or ""))
         if not aid or aid not in ALLOWED_IDS:
             return []
-        y_int = {1: "1m", 5: "5m", 60: "60m"}.get(int(interval or 1), "1m")
+        y_int = {
+            1: "1m",
+            5: "5m",
+            60: "60m",
+            1440: "1d",
+        }.get(int(interval or 1), "1m")
         return await fetch_yahoo_bars(aid, interval=y_int, limit=limit)
 
     venue.fetch_markets = fetch_markets
