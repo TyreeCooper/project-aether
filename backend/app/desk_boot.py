@@ -10,7 +10,9 @@ def attach(engine) -> None:
     from app.desk import desk
     from app.fees import fee_quote, theme
     from app.intel import build_intel
+    from app.kraken_ws import stream as kraken_stream
     from app.pipes import asset_id_from_pair, enrich_markets, fetch_yahoo_bars
+    from app.universe import ALLOWED_IDS
 
     orig_markets = venue.fetch_markets
     orig_bars = venue.fetch_bars
@@ -20,7 +22,8 @@ def attach(engine) -> None:
             items = await orig_markets()
         except Exception:
             items = []
-        return await enrich_markets(items)
+        items = await enrich_markets(items)
+        return [row for row in items if str(row.get("id") or "").lower() in ALLOWED_IDS]
 
     async def fetch_bars(interval=1, limit=720, pair="XBTUSD"):
         bars = []
@@ -32,7 +35,7 @@ def attach(engine) -> None:
         if bars:
             return bars
         aid = asset_id_from_pair(str(pair or ""))
-        if not aid:
+        if not aid or aid not in ALLOWED_IDS:
             return []
         y_int = {1: "1m", 5: "5m", 60: "60m"}.get(int(interval or 1), "1m")
         return await fetch_yahoo_bars(aid, interval=y_int, limit=limit)
@@ -46,6 +49,8 @@ def attach(engine) -> None:
     raw_sell = desk.wallet.sell
 
     def buy(asset, qty, price, fee_rate=None):
+        if str(asset).lower() not in ALLOWED_IDS:
+            return {"ok": False, "error": "asset not on the 12-book desk"}
         quote = fee_quote(asset, qty=qty, price=price, side="buy")
         out = raw_buy(asset, qty, price, fee_rate=quote["rate"])
         if out.get("ok"):
@@ -54,6 +59,8 @@ def attach(engine) -> None:
         return out
 
     def sell(asset, qty, price, fee_rate=None):
+        if str(asset).lower() not in ALLOWED_IDS:
+            return {"ok": False, "error": "asset not on the 12-book desk"}
         quote = fee_quote(asset, qty=qty, price=price, side="sell")
         out = raw_sell(asset, qty, price, fee_rate=quote["rate"])
         if out.get("ok"):
@@ -63,12 +70,28 @@ def attach(engine) -> None:
     desk.wallet.buy = buy
     desk.wallet.sell = sell
 
+    extra = [k for k in list(getattr(desk.wallet, "balances", {}) or {}) if k not in ALLOWED_IDS]
+    for key in extra:
+        desk.wallet.balances.pop(key, None)
+    desk.books[:] = [b for b in desk.books if b.id in ALLOWED_IDS]
+    desk.by_id = {b.id: b for b in desk.books}
+    if extra:
+        desk.wallet.save()
+        engine._log("INFO", "Dropped leftover alt balances: " + ",".join(extra))
+
+    async def frozen_add(_asset):
+        return {"ok": False, "error": "universe frozen to the 12 official books"}
+
+    desk.add_asset = frozen_add
+
     def snapshot():
         data = original()
         data["desk"] = desk.snapshot()
         return data
 
     def asset_snapshot(asset_id: str):
+        if str(asset_id).lower() not in ALLOWED_IDS:
+            return None
         data = original_asset(asset_id)
         if not data:
             return data
@@ -111,9 +134,23 @@ def attach(engine) -> None:
     engine.snapshot = snapshot
     desk.asset_snapshot = asset_snapshot
 
+    def on_ws_quote(quote):
+        book = desk.by_id.get(quote["id"])
+        if book is None:
+            return
+        book.apply_quote(
+            {
+                "last": quote["last"],
+                "bid": quote["bid"],
+                "ask": quote["ask"],
+                "source": "kraken-ws",
+            }
+        )
+        book.push_px(quote["last"], quote["ts"])
+
     async def seed_yahoo():
         for book in desk.books:
-            if book.bars:
+            if book.bars or book.id in {"btc", "eth"}:
                 continue
             try:
                 bars = await fetch_yahoo_bars(book.id, interval="1m", limit=240)
@@ -127,9 +164,10 @@ def attach(engine) -> None:
     try:
         loop = asyncio.get_running_loop()
         loop.create_task(seed_yahoo())
+        loop.create_task(kraken_stream(on_ws_quote, engine._log))
     except RuntimeError:
         pass
-    engine._log("INFO", "Public Yahoo pipes on for FX, micros, names. Kraken still fills crypto.")
+    engine._log("INFO", "Desk frozen to 12 books. Kraken public WS on BTC/ETH.")
 
     auto = os.getenv("AETHER_AUTO_RUN", "1").strip() not in {"0", "false", "FALSE"}
     if auto and getattr(engine, "start_bot", None):
