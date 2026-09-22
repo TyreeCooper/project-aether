@@ -50,6 +50,7 @@ class PairBook:
         self.highest = 0.0
         self.entry_at: str | None = None
         self.entry_mode: str | None = None
+        self.last_entry_signal_key: str | None = None
         self.fills: list[dict[str, Any]] = []
         self.last_reason = "warming"
         self.signal: str | None = None
@@ -137,6 +138,13 @@ class PairBook:
             btc_bias_on=btc_bias_on,
             btc_in_position=btc_in_position,
         )
+        if (
+            snap.get("executable_signal") == "buy"
+            and snap.get("signal_key")
+            and str(snap.get("signal_key")) == str(self.last_entry_signal_key)
+        ):
+            snap["executable_signal"] = None
+            snap["execution_status"] = "signal_already_consumed"
         self.signal = snap.get("signal")
         self.last_reason = str(snap.get("reason") or "")
         return snap
@@ -164,6 +172,13 @@ class PairBook:
         *,
         strategy_snapshot: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        profile = playbook_profile(self.id)
+        if not bool(profile.get("paper_long_execution_supported")):
+            return {
+                "ok": False,
+                "error": "execution_adapter_required",
+                "pair": self.pair,
+            }
         reference = self.ask if self.ask is not None else self.mark
         px = self.fill_px("buy")
         if not px:
@@ -190,6 +205,10 @@ class PairBook:
             self.stop = px * (1 - max(stop_pct, 0.01) / 100)
             result["entry_mode"] = self.entry_mode
             result["risk_stop_pct"] = stop_pct
+            signal_key = (strategy_snapshot or {}).get("signal_key")
+            if signal_key:
+                self.last_entry_signal_key = str(signal_key)
+                result["signal_key"] = self.last_entry_signal_key
             reference_px = float(reference or px)
             slippage_usd = max(px - reference_px, 0.0) * qty
             slippage_bps = (
@@ -609,6 +628,7 @@ class PairBook:
             "context_bars_1h": len(self.bars_1h),
             "context_bars_1d": len(self.bars_1d),
             "entry_mode": self.entry_mode,
+            "last_entry_signal_key": self.last_entry_signal_key,
             "broker": self.broker,
             "playbook": playbook_profile(self.id),
             "signal": self.signal,
