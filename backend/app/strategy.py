@@ -419,18 +419,31 @@ def exit_plan(
     configured_stop_pct: float,
     cost_pct: float,
     frozen_hard_stop: float = 0.0,
+    *,
+    source_bars: list[Bar] | None = None,
+    minimum_stop_pct: float = 0.8,
+    atr_multiplier: float = 2.5,
 ) -> dict[str, float]:
-    """ATR + structure initial risk, then breakeven and Chandelier-style trail."""
-    bars5 = resample_bars(bars_1m, 5, require_complete=True)
+    """ATR + structure initial risk, then breakeven and Chandelier-style trail.
+
+    source_bars lets asset playbooks use 15m, 1h, or daily risk structure while
+    preserving the legacy 5m behavior for existing engine/replay callers.
+    """
+    bars5 = (
+        [normalize_bar(b) for b in source_bars]
+        if source_bars is not None
+        else resample_bars(bars_1m, 5, require_complete=True)
+    )
     source = bars5 or bars_1m
     atr_value = atr(source, 14)
     atr_pct = (atr_value / mark * 100) if atr_value and mark > 0 else 0.0
 
+    floor = max(float(minimum_stop_pct), 0.01)
     initial_stop_pct = max(
-        0.8,
+        floor,
         min(
             configured_stop_pct,
-            max(atr_pct * 2.5, cost_pct * 1.25, 0.8),
+            max(atr_pct * float(atr_multiplier), cost_pct * 1.25, floor),
         ),
     )
     atr_stop = entry_price * (1 - initial_stop_pct / 100)
