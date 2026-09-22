@@ -108,15 +108,20 @@ class PaperPortfolio:
             return quote_pnl / mark if mark > 0 else 0.0
         raise ValueError("unsupported FX quote conversion")
 
-    def gross_pnl(self, asset_id: str, mark: float) -> float:
+    def move_pnl(
+        self,
+        asset_id: str,
+        *,
+        side: str,
+        quantity: float,
+        entry_price: float,
+        mark: float,
+    ) -> float:
         aid = str(asset_id).lower()
-        pos = self.positions.get(aid)
-        if not pos:
-            return 0.0
         spec = instrument_spec(aid)
-        side = str(pos["side"])
-        qty = float(pos["quantity"])
-        entry = float(pos["entry_price"])
+        side = str(side).lower()
+        qty = abs(float(quantity))
+        entry = float(entry_price)
         mark = float(mark)
         direction = 1.0 if side == "long" else -1.0
         kind = spec["product_type"]
@@ -127,6 +132,19 @@ class PaperPortfolio:
         if kind == "fx":
             return self._fx_pnl(spec, side, qty, entry, mark)
         raise ValueError(f"unsupported product type: {kind}")
+
+    def gross_pnl(self, asset_id: str, mark: float) -> float:
+        aid = str(asset_id).lower()
+        pos = self.positions.get(aid)
+        if not pos:
+            return 0.0
+        return self.move_pnl(
+            aid,
+            side=str(pos["side"]),
+            quantity=float(pos["quantity"]),
+            entry_price=float(pos["entry_price"]),
+            mark=float(mark),
+        )
 
     def open_pnl(self, asset_id: str, mark: float) -> float:
         pos = self.positions.get(str(asset_id).lower())
