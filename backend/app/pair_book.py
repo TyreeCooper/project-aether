@@ -280,7 +280,10 @@ class PairBook:
                         mark=px,
                     )
                 )
-                slippage_usd = max(-adverse, 0.0)
+                # The constructed execution price is deliberately worse
+                # than the reference price for the chosen side. Convert that
+                # adverse movement into positive execution-cost dollars.
+                slippage_usd = abs(adverse)
             else:
                 slippage_usd = 0.0
             slippage_bps = (
