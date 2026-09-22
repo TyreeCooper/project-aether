@@ -25,12 +25,27 @@ def _field(key: str, slang: str, plain: str, value: Any, unit: str = "") -> dict
 
 def _call_plain(signal: str | None, in_pos: bool) -> tuple[str, str, str]:
     if in_pos:
-        return "IN POSITION", "Already long", "The book owns this coin. Engine manages the exit, not a new buy."
+        return (
+            "IN POSITION",
+            "Already long",
+            "The book owns this asset. Its playbook manages the exit, not a new entry.",
+        )
     if signal == "buy":
         return "BUY", "Green light", "The same rule the bot uses says this tape qualifies for a paper buy."
     if signal == "sell":
         return "FLAT / EXIT", "Get out", "The rule wants this book flat."
-    return "NO TRADE", "Stand down", "The rule does not want a new buy on this tape right now."
+    if signal == "short":
+        return (
+            "SHORT SETUP",
+            "Grain is down",
+            "A bearish setup qualifies, but the current paper wallet is long-only. "
+            "Aether exposes it without fabricating short execution.",
+        )
+    return (
+        "NO TRADE",
+        "Stand down",
+        "No mode currently qualifies. Aether does not force activity just to stay invested.",
+    )
 
 
 def build_intel(
@@ -58,6 +73,7 @@ def build_intel(
     if watch is not None and mark is not None:
         basis = round(watch - mark, 8)
     reason = str(strategy.get("reason") or view.get("reason") or "warming")
+    profile = strategy.get("playbook") or view.get("playbook") or {}
     cards = [
         {
             "id": "call",
@@ -74,10 +90,74 @@ def build_intel(
             ],
         },
         {
+            "id": "playbook",
+            "title": "Playbook",
+            "slang": "Trade with the grain",
+            "plain": (
+                "Asset-specific mode, higher-timeframe bias, trigger clock, "
+                "and execution capability."
+            ),
+            "tone": "struct",
+            "headline": strategy.get("mode") or profile.get("primary"),
+            "fields": [
+                _field(
+                    "primary",
+                    "Primary mode",
+                    "First strategy Aether checks for this asset",
+                    profile.get("primary"),
+                ),
+                _field(
+                    "secondary",
+                    "Secondary mode",
+                    "Fallback opportunity channel when primary has no setup",
+                    profile.get("secondary"),
+                ),
+                _field(
+                    "direction",
+                    "Dominant direction",
+                    "Direction implied by aligned higher-timeframe structure",
+                    strategy.get("direction"),
+                ),
+                _field(
+                    "daily",
+                    "Daily grain",
+                    "Structural daily direction",
+                    strategy.get("daily_grain"),
+                ),
+                _field(
+                    "four_hour",
+                    "4H grain",
+                    "Intermediate trend direction",
+                    strategy.get("four_hour_grain"),
+                ),
+                _field(
+                    "one_hour",
+                    "1H context",
+                    "Tactical direction used by intraday playbooks",
+                    strategy.get("one_hour_grain"),
+                ),
+                _field(
+                    "entry_clock",
+                    "Entry clock",
+                    "Completed candle timeframe allowed to trigger entry",
+                    strategy.get("entry_clock"),
+                ),
+                _field(
+                    "execution",
+                    "Execution state",
+                    "Short setups stay observation-only until broker short adapters exist",
+                    strategy.get("execution_status"),
+                ),
+            ],
+        },
+        {
             "id": "tape",
             "title": "The tape",
             "slang": "Bid / ask / last",
-            "plain": "Live Kraken prices. Bid is what you can sell to. Ask is what you pay to buy. Last is the latest print.",
+            "plain": (
+                "Live/public venue prices for this book. Bid is what you can sell to, "
+                "ask is what you pay, and last is the latest mark."
+            ),
             "tone": "tape",
             "headline": mark,
             "fields": [
@@ -102,7 +182,12 @@ def build_intel(
                 _field("high", "Window high", "Highest 1m high in the chart window", (window or {}).get("high"), "USD"),
                 _field("low", "Window low", "Lowest 1m low in the chart window", (window or {}).get("low"), "USD"),
                 _field("bars", "Bars the bot sees", "How many 1-minute candles are in this book", (window or {}).get("bars") or view.get("bars")),
-                _field("kraken", "Kraken pair", "Exact pair string sent to Kraken", view.get("kraken")),
+                _field(
+                    "venue",
+                    "Execution venue",
+                    "Broker/venue assigned to this official book",
+                    view.get("broker") or view.get("kraken"),
+                ),
             ],
         },
         {
