@@ -7,10 +7,12 @@ from typing import Any
 
 from app.clock import is_new_five_minute
 from app.exits import stop_fill_price, time_stop_due
-from app.fees import TAKER_FEE
+from app.fees import fee_rate
 from app.lots import size_ok, volume_min
 from app.paper_exec import slipped_price
-from app.strategy import exit_plan, trend_breakout_snapshot
+from app.playbooks import playbook_profile, playbook_snapshot
+from app.sessions import for_asset
+from app.strategy import exit_plan, resample_bars
 
 BAR_HISTORY = 720
 
@@ -25,11 +27,14 @@ class PairBook:
         self.name = str(asset.get("name") or asset["symbol"])
         self.symbol = str(asset["symbol"])
         self.pair = str(asset["pair"])
-        self.kraken = str(asset["kraken"])
+        self.kraken = str(asset.get("kraken") or "")
         self.tv = str(asset.get("tv") or "")
+        self.broker = str(asset.get("broker") or asset.get("venue") or "")
+        self.style = str(asset.get("style") or "")
         self.wallet = wallet
         self.bars: deque[dict[str, Any]] = deque(maxlen=BAR_HISTORY)
         self.bars_1h: deque[dict[str, Any]] = deque(maxlen=720)
+        self.bars_1d: deque[dict[str, Any]] = deque(maxlen=400)
         self.last_5m: int | None = None
         self.mark: float | None = None
         self.bid: float | None = None
@@ -44,6 +49,7 @@ class PairBook:
         self.stop = 0.0
         self.highest = 0.0
         self.entry_at: str | None = None
+        self.entry_mode: str | None = None
         self.fills: list[dict[str, Any]] = []
         self.last_reason = "warming"
         self.signal: str | None = None
@@ -91,31 +97,73 @@ class PairBook:
         for bar in bars_1h[-720:]:
             self.bars_1h.append(bar)
 
+    def seed_daily(self, bars_1d: list[dict[str, Any]]) -> None:
+        self.bars_1d.clear()
+        for bar in bars_1d[-400:]:
+            self.bars_1d.append(bar)
+
     def qty(self) -> float:
         return self.wallet.qty(self.id)
 
-    def snapshot_strategy(self) -> dict[str, Any]:
-        snap = trend_breakout_snapshot(
+    def snapshot_strategy(
+        self,
+        *,
+        btc_bias_on: bool = False,
+        btc_in_position: bool = False,
+    ) -> dict[str, Any]:
+        clock = for_asset(self.id)
+        active_ids = {
+            str(row.get("id"))
+            for row in clock.get("sessions") or []
+            if row.get("active")
+        }
+        rate = fee_rate(
+            self.id,
+            qty=max(self.qty(), 1.0),
+            price=float(self.mark or 1.0),
+            side="buy",
+        )
+        snap = playbook_snapshot(
+            self.id,
             list(self.bars),
+            list(self.bars_1h),
+            list(self.bars_1d),
             mark=self.mark,
             bid=self.bid,
             ask=self.ask,
-            fee_rate=TAKER_FEE,
+            fee_rate=rate,
+            active_session_ids=active_ids,
+            in_position=self.qty() > 0,
+            btc_bias_on=btc_bias_on,
+            btc_in_position=btc_in_position,
         )
         self.signal = snap.get("signal")
         self.last_reason = str(snap.get("reason") or "")
         return snap
 
-    def wants_entry(self) -> bool:
+    def wants_entry(
+        self,
+        *,
+        btc_bias_on: bool = False,
+        btc_in_position: bool = False,
+    ) -> bool:
         if self.qty() > 0:
             return False
-        snap = self.snapshot_strategy()
-        return snap.get("signal") == "buy"
+        snap = self.snapshot_strategy(
+            btc_bias_on=btc_bias_on,
+            btc_in_position=btc_in_position,
+        )
+        return snap.get("executable_signal") == "buy"
 
     def fill_px(self, side: str) -> float | None:
         return slipped_price(side, self.bid, self.ask, self.mark)
 
-    def enter(self, risk_usd: float) -> dict[str, Any]:
+    def enter(
+        self,
+        risk_usd: float,
+        *,
+        strategy_snapshot: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         reference = self.ask if self.ask is not None else self.mark
         px = self.fill_px("buy")
         if not px:
@@ -132,8 +180,16 @@ class PairBook:
         result["actor"] = "bot-v3-entry"
         if result.get("ok"):
             self.entry_at = _now()
+            self.entry_mode = str(
+                (strategy_snapshot or {}).get("mode") or "intraday"
+            )
             self.highest = px
-            self.stop = px * 0.98
+            stop_pct = float(
+                (strategy_snapshot or {}).get("risk_stop_pct") or 2.0
+            )
+            self.stop = px * (1 - max(stop_pct, 0.01) / 100)
+            result["entry_mode"] = self.entry_mode
+            result["risk_stop_pct"] = stop_pct
             reference_px = float(reference or px)
             slippage_usd = max(px - reference_px, 0.0) * qty
             slippage_bps = (
@@ -176,20 +232,57 @@ class PairBook:
             "excursion_precision": "1m_bar_bounded",
         }
 
-    def manage(self) -> dict[str, Any] | None:
+    def manage(
+        self,
+        *,
+        btc_bias_on: bool = False,
+        btc_in_position: bool = False,
+    ) -> dict[str, Any] | None:
         qty = self.qty()
         if qty <= 0 or not self.mark:
             return None
         self.highest = max(self.highest, float(self.mark))
-        cost_pct = TAKER_FEE * 200
+        snap = self.snapshot_strategy(
+            btc_bias_on=btc_bias_on,
+            btc_in_position=btc_in_position,
+        )
+        profile = playbook_profile(self.id)
+        mode = str(
+            self.entry_mode
+            or snap.get("mode")
+            or profile["primary"]
+        )
+        rate = fee_rate(
+            self.id,
+            qty=max(qty, 1.0),
+            price=float(self.mark),
+            side="sell",
+        )
+        cost_pct = max(
+            float(snap.get("cost_pct") or 0.0),
+            rate * 200,
+        )
+        if mode == "daily_swing":
+            source_bars = list(self.bars_1d)
+        elif mode == "swing":
+            source_bars = list(self.bars_1h)
+        else:
+            source_bars = resample_bars(
+                list(self.bars),
+                15,
+                require_complete=True,
+            )
         plan = exit_plan(
             list(self.bars),
             self.wallet.avg_entry(self.id),
             self.highest,
             self.mark,
-            2.0,
+            float(profile["max_stop_pct"]),
             cost_pct,
             frozen_hard_stop=self.stop,
+            source_bars=source_bars or None,
+            minimum_stop_pct=float(profile["min_stop_pct"]),
+            atr_multiplier=2.0,
         )
         stop = float(plan.get("hard_stop") or self.stop or 0)
         if stop:
@@ -205,8 +298,20 @@ class PairBook:
                 held = None
         avg = self.wallet.avg_entry(self.id) or self.mark
         gain = ((self.mark / avg) - 1) * 100
-        timed = time_stop_due(held, gain, cost_pct)
-        if not (hit or timed):
+        limit = (
+            profile.get("time_stop_minutes") or {}
+        ).get(mode)
+        timed = bool(
+            limit is not None
+            and time_stop_due(
+                held,
+                gain,
+                cost_pct,
+                limit=int(limit),
+            )
+        )
+        rule_exit = snap.get("exit_signal") == "sell"
+        if not (hit or timed or rule_exit):
             return None
         exit_reference = (
             float(self.stop)
@@ -343,9 +448,17 @@ class PairBook:
             result["entry_efficiency_pct"] = None
             result["exit_efficiency_pct"] = None
         result["net_capture_pct"] = result["net_return_pct"]
-        result["actor"] = "bot-v3-managed_stop" if hit else "bot-v3-time_stop"
+        result["actor"] = (
+            "bot-playbook-managed-stop"
+            if hit
+            else "bot-playbook-rule-exit"
+            if rule_exit
+            else "bot-playbook-time-stop"
+        )
+        result["entry_mode"] = mode
         if result.get("ok"):
             self.entry_at = None
+            self.entry_mode = None
             self.stop = 0.0
             self.fills.append({**result, "side": "sell", "ts": _now()})
         return result
@@ -494,6 +607,10 @@ class PairBook:
             "open_pnl": (self.mark - avg) * qty if qty and self.mark else 0.0,
             "bars": len(self.bars),
             "context_bars_1h": len(self.bars_1h),
+            "context_bars_1d": len(self.bars_1d),
+            "entry_mode": self.entry_mode,
+            "broker": self.broker,
+            "playbook": playbook_profile(self.id),
             "signal": self.signal,
             "reason": self.last_reason,
             "paper": True,
