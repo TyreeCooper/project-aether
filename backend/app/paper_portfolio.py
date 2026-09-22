@@ -277,6 +277,7 @@ class PaperPortfolio:
         signal_key: str | None = None,
         opened_at: str | None = None,
         reference_price: float | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         aid = str(asset_id).lower()
         side = str(side).lower()
@@ -320,6 +321,7 @@ class PaperPortfolio:
             "signal_key": signal_key,
             "initial_stop": float(stop_price) if stop_price else None,
             "current_stop": float(stop_price) if stop_price else None,
+            "metadata": dict(metadata or {}),
         }
         self.positions[aid] = pos
         return {
@@ -400,6 +402,19 @@ class PaperPortfolio:
             "pnl": net,
             "usd": self.usd,
         }
+
+    def annotate_closed_trade(
+        self,
+        trade_id: str,
+        updates: dict[str, Any],
+    ) -> None:
+        target = str(trade_id or "")
+        if not target:
+            return
+        for row in reversed(self.closed_trades):
+            if str(row.get("trade_id") or "") == target:
+                row.update(dict(updates))
+                return
 
     def equity(self, marks: dict[str, float]) -> float:
         total = self.usd
