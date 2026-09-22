@@ -276,7 +276,7 @@
   $("settingsDisconnectOperator").onclick=()=>{state.token="";localStorage.removeItem("aether-operator-token");$("settingsOperatorToken").value="";$("operatorToken").value="";renderSettings();toast("Operator disconnected");};
   if(state.token){$("operatorToken").value=state.token;$("settingsOperatorToken").value=state.token;}
   addEventListener("hashchange",route);
-  setInterval(()=>{const d=new Date();$("floorClock").textContent=d.toLocaleTimeString([], {hour:"2-digit",minute:"2-digit",second:"2-digit"});document.querySelectorAll(".live-duration[data-opened]").forEach(el=>{const seconds=liveDuration(el.dataset.opened);if(seconds!=null)el.textContent=duration(seconds);});const a=state.asset?.asset;if(a?.opened_at&&$("assetPosition"))renderAsset();},1000);
+  setInterval(()=>{const d=new Date();$("floorClock").textContent=d.toLocaleTimeString([], {hour:"2-digit",minute:"2-digit",second:"2-digit"});document.querySelectorAll(".live-duration[data-opened]").forEach(el=>{const seconds=liveDuration(el.dataset.opened);if(seconds!=null)el.textContent=duration(seconds);});},1000);
   route();
   setInterval(async()=>{try{await loadFloor();const r=location.hash.replace(/^#\/?/,"");if(r.startsWith("asset/"))await loadAsset(r.split("/")[1]);if(r==="live")await loadLive();if(r==="blotter")await loadBlotter();}catch(e){}},8000);
 })();
