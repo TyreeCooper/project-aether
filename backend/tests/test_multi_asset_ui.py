@@ -1,3 +1,5 @@
+import pytest
+
 from app.desk import MultiDesk
 
 
@@ -31,33 +33,28 @@ def test_floor_and_asset_views_are_multi_asset_and_isolated():
     assert desk.asset_snapshot("does-not-exist") is None
 
 
-def test_register_dynamic_asset_book_is_isolated():
+def test_frozen_universe_rejects_dynamic_asset_and_preserves_books():
     desk = MultiDesk()
-    # Exercise runtime registration without network seeding.
     from app.universe import register_asset
-    from app.pair_book import PairBook
 
-    asset = register_asset(
-        {
-            "id": "testcoin",
-            "name": "TEST",
-            "symbol": "TEST",
-            "pair": "TEST/USD",
-            "kraken": "TESTUSD",
-            "tv": "KRAKEN:TESTUSD",
-            "binance": "TESTUSD",
-            "paper": True,
-        }
-    )
-    if "testcoin" not in desk.by_id:
-        book = PairBook(asset, desk.wallet)
-        desk.books.append(book)
-        desk.by_id[book.id] = book
+    before = tuple(book.id for book in desk.books)
+    with pytest.raises(ValueError, match="universe frozen to the 12 official books"):
+        register_asset(
+            {
+                "id": "testcoin",
+                "name": "TEST",
+                "symbol": "TEST",
+                "pair": "TEST/USD",
+                "kraken": "TESTUSD",
+                "tv": "KRAKEN:TESTUSD",
+                "binance": "TESTUSD",
+                "paper": True,
+            }
+        )
 
-    page = desk.asset_snapshot("testcoin")
-    assert page is not None
-    assert page["asset"]["pair"] == "TEST/USD"
-    assert page["asset"]["id"] == "testcoin"
+    assert tuple(book.id for book in desk.books) == before
+    assert len(desk.books) == 12
+    assert desk.asset_snapshot("testcoin") is None
     assert desk.asset_snapshot("eth")["asset"]["pair"] == "ETH/USD"
 
 
