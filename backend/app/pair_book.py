@@ -176,6 +176,7 @@ class PairBook:
         risk_usd: float,
         *,
         strategy_snapshot: dict[str, Any] | None = None,
+        max_capital_usd: float | None = None,
     ) -> dict[str, Any]:
         snap = dict(strategy_snapshot or {})
         executable = str(snap.get("executable_signal") or "").lower()
@@ -218,6 +219,7 @@ class PairBook:
                 risk_usd=float(risk_usd),
                 entry_price=px,
                 stop_price=stop_price,
+                max_capital_usd=max_capital_usd,
             )
             or 0.0
         )
