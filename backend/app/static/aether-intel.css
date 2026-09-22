@@ -1,0 +1,12 @@
+.intel-board{display:grid;gap:8px;margin-top:10px}
+.intel-card{border:1px solid #252a35;border-radius:14px;background:#11141b;padding:12px}
+.intel-card.good{border-color:rgba(43,200,135,.35)}
+.intel-card.warn{border-color:rgba(229,179,90,.35)}
+.intel-kicker{margin:0;font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:#8e96a5}
+.intel-card h3{margin:4px 0 2px;font-size:16px}
+.intel-plain{margin:0 0 8px;font-size:11px;color:#8e96a5;line-height:1.4}
+.intel-row{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-top:1px solid rgba(255,255,255,.06);font-size:12px}
+.intel-row b{text-align:right;max-width:55%}
+.intel-row small{display:block;color:#8e96a5;font-size:10px;font-weight:400;margin-top:2px}
+.intel-note{margin:8px 0 0;font-size:10px;color:#8e96a5}
+.asset-extra{display:none !important}
