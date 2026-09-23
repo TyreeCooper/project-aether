@@ -253,6 +253,7 @@ async def settings():
         "watch_venue": "Binance.US",
         "desk": desk.settings_snapshot(),
         "engine": desk.engine_status(),
+        "load_002": desk.load_002_status_snapshot(),
         "execution": {
             "taker_fee_rate": TAKER_FEE,
             "taker_fee_pct": round(TAKER_FEE * 100, 4),
@@ -402,6 +403,11 @@ async def intelligence_research(
             threshold_pct=threshold_pct,
         ),
     }
+
+
+@app.get("/api/v1/load-status/aether-load-002")
+async def load_002_status():
+    return desk.load_002_status_snapshot()
 
 
 @app.get("/api/v1/floor")

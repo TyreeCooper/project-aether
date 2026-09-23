@@ -332,7 +332,7 @@
   document.querySelectorAll("[data-drawer-route]").forEach(b=>b.addEventListener("click",()=>{closeDrawer();go(b.dataset.drawerRoute);}));
 
   function renderSettings(){
-    const s=state.settings;if(!s)return;const d=s.desk||{},e=s.engine||{},x=s.execution||{},sec=s.security||{},live=s.live||{};
+    const s=state.settings;if(!s)return;const d=s.desk||{},e=s.engine||{},x=s.execution||{},sec=s.security||{},live=s.live||{},load=s.load_002||{};
     const armed=Boolean(e.accepting_entries);
     setText("settingsArmedBadge",armed?"ARMED":(e.armed?"STARTING":"DISARMED"));$("settingsArmedBadge").className="badge "+(armed?"good":"");
     $("settingsEngineState").innerHTML=metric("Accepting entries",armed?"YES":"NO",armed?"up":"")+metric("Engine loop",e.running?"RUNNING":"STOPPED",e.running?"up":"down")+metric("Execution test mode",e.execution_test_mode?"ON · AETHER-LOAD-002":"OFF",e.execution_test_mode?"down":"")+metric("State source",e.source||"multi_asset_desk")+metric("Live execution",e.live_blocked?"BLOCKED":"READY",e.live_blocked?"up":"down");
@@ -345,6 +345,9 @@
     state.authConfigured=Boolean(sec.operator_token_configured);
     $("settingsSecurity").innerHTML=metric("Operator token",sec.operator_token_configured?"CONFIGURED":"NOT CONFIGURED",sec.operator_token_configured?"up":"down")+metric("Mutations protected",sec.mutations_protected?"YES":"NO",sec.mutations_protected?"up":"down")+metric("Unauthenticated mode",sec.read_only_without_verified_token?"READ ONLY":"UNSAFE",sec.read_only_without_verified_token?"up":"down");
     renderOperatorControls();
+    const loadChecks=load.checks||{},loadMatrix=load.matrix||{};
+    $("settingsLoadBadge").textContent=load.ready?"READY":"NOT READY";$("settingsLoadBadge").className="badge "+(load.ready?"good":"bad");
+    $("settingsLoadStatus").innerHTML=metric("Release",load.release||"—")+metric("Runtime contract",load.ready?"PASS":"FAIL",load.ready?"up":"down")+metric("Checks passed",String(Object.values(loadChecks).filter(Boolean).length)+" / "+String(Object.keys(loadChecks).length),load.ready?"up":"down")+metric("Matrix cells",String(loadMatrix.supported_cells??"—")+" supported · "+String(loadMatrix.unsupported_cells??"—")+" N/A")+metric("Matrix run",String(loadMatrix.run_status||"NOT RUN").replaceAll("_"," ").toUpperCase())+metric("Execution test",e.execution_test_mode?"ON":"OFF",e.execution_test_mode?"down":"up")+metric("Live orders",live.orders_enabled?"ENABLED":"BLOCKED",live.orders_enabled?"down":"up");
     $("settingsLiveBadge").textContent=live.live_blocked?"BLOCKED":"READY";$("settingsLiveBadge").className="badge "+(live.live_blocked?"amber":"good");
     $("settingsLive").innerHTML=metric("Kraken keys",live.keys_present?"PRESENT":"NOT PRESENT",live.keys_present?"up":"")+metric("Live flag",live.live_flag?"ON":"OFF")+metric("Orders enabled",live.orders_enabled?"YES":"NO",live.orders_enabled?"down":"up")+metric("Safety state",live.live_blocked?"LIVE BLOCKED":"LIVE READY",live.live_blocked?"up":"down")+metric("Status",live.reason||"—");
   }
