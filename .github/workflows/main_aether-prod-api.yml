@@ -122,7 +122,7 @@ jobs:
           grep -q 'id="runExecutionMatrix"' /tmp/aether-root.html
           grep -q 'id="disconnectOperator"' /tmp/aether-root.html
 
-          curl --fail --silent --show-error --max-time 20 "$base/static/aether-app.js?v=AETHER-LOAD-003-B9" >/tmp/aether-app.js
+          curl --fail --silent --show-error --max-time 20 "$base/static/aether-app.js?v=AETHER-FILTERS-R1" >/tmp/aether-app.js
           grep -q 'Trade Duration' /tmp/aether-app.js
           grep -q 'operatorAuthenticated:false' /tmp/aether-app.js
           grep -q 'runExecutionMatrix' /tmp/aether-app.js
@@ -135,6 +135,10 @@ jobs:
           grep -q 'standard_lots' /tmp/aether-app.js
           grep -q '<th>MFE</th>' /tmp/aether-app.js
           grep -q '<th>Capture</th>' /tmp/aether-app.js
+          grep -q 'settingsOptionalFilters' /tmp/aether-root.html
+          grep -q 'filtersAllOn' /tmp/aether-root.html
+          grep -q 'filtersAllOff' /tmp/aether-root.html
+          grep -q 'saveTradeFilters' /tmp/aether-app.js
 
           curl --fail --silent --show-error --max-time 20 "$base/api/v1/desk/live-trades" >/tmp/aether-live-trades.json
           python - <<'PY'
@@ -218,6 +222,17 @@ jobs:
           assert sizing.get("micro_future_max_contracts") == 1.0, sizing
           assert sizing.get("equity_quantity_unit") == "shares", sizing
           assert sizing.get("crypto_quantity_unit") == "coin_quantity", sizing
+          filters = desk.get("trade_filters") or {}
+          optional = filters.get("optional") or {}
+          locked = filters.get("locked") or {}
+          traffic = filters.get("traffic") or {}
+          assert filters.get("special_mode") is False, filters
+          assert filters.get("optional_total") == 9, filters
+          assert len(optional) == 9, optional
+          assert len(locked) >= 10, locked
+          assert all(bool(row.get("enabled")) for row in optional.values()), optional
+          assert all(bool(row.get("enabled")) and bool(row.get("locked")) for row in locked.values()), locked
+          assert set(optional).issubset(set(traffic)), traffic
           assert intelligence.get("community_trade_influence_enabled") is False, intelligence
           assert (intelligence.get("crypto_calendar") or {}).get("trade_influence_enabled") is False, intelligence
           assert (intelligence.get("event_policy") or {}).get("mode") == "observe_only", intelligence
