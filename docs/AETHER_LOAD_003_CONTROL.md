@@ -3,9 +3,9 @@
 ## CONTROL STATUS
 
 - Load: AETHER-LOAD-003
-- State: B2 COMPLETE — WAITING FOR J.A.R.V.I.S. REVIEW
+- State: B3 COMPLETE — WAITING FOR J.A.R.V.I.S. REVIEW
 - Active implementation batch: NONE
-- Waiting on: GROK BOT J.A.R.V.I.S. CLEARANCE TO START B3
+- Waiting on: GROK BOT J.A.R.V.I.S. CLEARANCE TO START B4
 - Starting main SHA: 09dfdb510bd5b54f43cef7e9c5f20389d3636ae1
 - Live-money execution: HARD BLOCKED
 - Paper testing: remains the target runtime
@@ -170,7 +170,7 @@ ChatGPT must not advance while the batch is on HOLD.
 - CONTROL: [COMPLETE] Dedicated LOAD-003 control/checklist established
 - B1: [COMPLETE] Runtime mode separation — d339fb24695dd2738dda8fdb345c6e7a5acf7181
 - B2: [COMPLETE] Qualified opportunity pipeline — final head 5c23ca02e514447ea40b8a67bbd5a4de9c37096b
-- B3: [WAITING] Horizon-scoped position ledger
+- B3: [COMPLETE] Horizon-scoped position ledger — final head e6ace62d79c2e3d3cf58a29bc141a1f1c7807fb2
 - B4: [WAITING] Portfolio risk & qualified concurrency
 - B5: [WAITING] Instrument sizing hard ceilings
 - B6: [WAITING] Horizon-specific trade management
@@ -178,7 +178,7 @@ ChatGPT must not advance while the batch is on HOLD.
 - B8: [WAITING] Operator/UI evidence & telemetry
 - B9: [WAITING] Integration, deployment contract & closeout
 
-Implementation progress: 2 / 9 batches complete.
+Implementation progress: 3 / 9 batches complete.
 
 ---
 
@@ -604,7 +604,7 @@ ChatGPT must not start B2 without the explicit B2 clearance.
 
 ## B2 — Qualified Opportunity Pipeline
 
-Status: COMPLETE — WAITING FOR J.A.R.V.I.S. REVIEW
+Status: COMPLETE — VERIFIED/CLEARED BY J.A.R.V.I.S.
 
 Final implementation head:
 `5c23ca02e514447ea40b8a67bbd5a4de9c37096b`
@@ -689,4 +689,100 @@ If a B2 defect exists, respond:
 `J.A.R.V.I.S. HOLD — AETHER-LOAD-003 — B2 — <concrete defect/reason>`
 
 ChatGPT must not start B3 without the explicit B3 clearance.
+
+## B3 — Horizon-Scoped Position Ledger
+
+Status: COMPLETE — WAITING FOR J.A.R.V.I.S. REVIEW
+
+Final implementation head:
+`e6ace62d79c2e3d3cf58a29bc141a1f1c7807fb2`
+
+B3 commit chain:
+- `317f481f9f941c32d8aae2e966b59619a80a56ba` — `feat: scope paper positions by trading horizon`
+- `a059136f398799eddfc8919a47e709b32e61d12d` — B3 syntax repair in paper portfolio
+- `aa2e3bb2a96b3df4f2092cfa3f579d73a0e745ba` — B3 syntax repair in route PairBook
+- `e6ace62d79c2e3d3cf58a29bc141a1f1c7807fb2` — `test: adapt routing probes to horizon-scoped books`
+
+Scope completed:
+- strategy positions now use stable route identity `asset:horizon`, such as `nvda:scalp`, `nvda:intraday`, and `nvda:swing`;
+- underlying `asset_id` remains the canonical instrument identity for pricing, fees, P/L, margin, broker/product semantics, and analytics;
+- the paper portfolio supports multiple simultaneous positions for the same asset when their horizon keys differ;
+- duplicate opens of the same exact asset+horizon route are rejected;
+- position lookup, quantity, average entry, side, P/L, notional, stop updates, and close operations are route-key aware;
+- each asset+horizon receives an independent route PairBook execution state;
+- route books share market data bars with the canonical asset book but keep independent stop, high/low excursion state, entry timestamp, entry mode, signal key, and fill history;
+- strategy allocation now admits independently qualified routes into the existing downstream limits instead of collapsing them to one candidate per asset;
+- closing one route does not close or corrupt a sibling horizon position;
+- route position identity and route PairBook state persist and restore across restart;
+- legacy normal strategy positions keyed only by asset are migrated to an inferred supported horizon using saved routing/mode data with a safe primary-horizon fallback;
+- legacy/LOAD-002 execution-validation positions retain exact asset-key identity and remain isolated;
+- Live Trades enumerates actual route positions and exposes their `position_key`;
+- trade/event records preserve route identity.
+
+Required B3 proof:
+- same asset can hold two different horizon positions — PROVEN;
+- duplicate same asset+horizon is rejected — PROVEN;
+- restart restores independent sibling horizon positions/state — PROVEN;
+- closing one horizon leaves sibling horizon open — PROVEN;
+- legacy normal strategy position migration retains the original trade — PROVEN;
+- B2 route qualification behavior remains intact on route-scoped books — PROVEN.
+
+Safety/invariant evidence:
+- production runtime remains `strategy_test`;
+- live-money execution remains HARD BLOCKED;
+- forced strategy entries remain OFF;
+- isolated execution validation remains available separately;
+- B4 portfolio-risk/concurrency policy was NOT implemented in B3;
+- existing `MAX_ACTIVE_POSITIONS` and cluster caps remain in force pending B4;
+- B5 instrument size ceilings were NOT pulled forward;
+- B6 management-policy changes were NOT pulled forward.
+
+Validation evidence on final B3 head:
+- CI run #443 — SUCCESS;
+- final backend suite — 226 passed, 1 warning;
+- Azure workflow run #326 — SUCCESS;
+- Azure build backend tests — SUCCESS;
+- Azure Web App deployment — SUCCESS;
+- production runtime verification — SUCCESS;
+- deployed release asserted `AETHER-LOAD-003-B3`;
+- deployed runtime remained `strategy_test`;
+- deployed runtime asserted forced entries OFF;
+- deployed runtime asserted live execution blocked.
+
+Repair evidence:
+- CI #440 caught malformed syntax in the first atomic B3 patch; repaired inside B3 without weakening tests;
+- CI #442 then caught six preserved B2 routing probes still injecting mocks into pre-B3 base books; the tests were adapted to the new route-scoped objects while retaining the same behavioral assertions;
+- final CI #443 is green after those repairs.
+
+Files changed by B3:
+- `backend/app/paper_portfolio.py`
+- `backend/app/pair_book.py`
+- `backend/app/desk.py`
+- `backend/tests/test_horizon_position_ledger.py`
+- `backend/tests/test_routing.py`
+- `backend/tests/test_execution_test_mode.py`
+- `backend/tests/test_load_002_closeout.py`
+- `.github/workflows/main_aether-prod-api.yml`
+
+Not changed / deferred:
+- portfolio risk & qualified concurrency — B4;
+- instrument sizing hard ceilings — B5;
+- horizon-specific management policy changes — B6;
+- realistic fill/cost model — B7;
+- operator/UI evidence & telemetry — B8;
+- final integration/deployment closeout — B9.
+
+### J.A.R.V.I.S. REVIEW GATE
+
+Review final B3 head `e6ace62d79c2e3d3cf58a29bc141a1f1c7807fb2` and the evidence above.
+
+If clear, respond exactly:
+
+`J.A.R.V.I.S. CLEAR — AETHER-LOAD-003 — START B4`
+
+If a B3 defect exists, respond:
+
+`J.A.R.V.I.S. HOLD — AETHER-LOAD-003 — B3 — <concrete defect/reason>`
+
+ChatGPT must not start B4 without the explicit B4 clearance.
 
