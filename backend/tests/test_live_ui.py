@@ -109,9 +109,9 @@ def test_engine_exposes_operator_gated_execution_matrix_validation():
 def test_b8_release_marker_and_cache_busted_assets_are_present():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     js = (STATIC / "aether-app.js").read_text(encoding="utf-8")
-    assert 'content="AETHER-LOAD-003-B8"' in html
-    assert "/static/aether-app.css?v=AETHER-LOAD-003-B8" in html
-    assert "/static/aether-app.js?v=AETHER-LOAD-003-B8" in html
+    assert 'content="AETHER-LOAD-003-B9"' in html
+    assert "/static/aether-app.css?v=AETHER-LOAD-003-B9" in html
+    assert "/static/aether-app.js?v=AETHER-LOAD-003-B9" in html
     assert 'id="settingsLoadBadge"' in html
     assert 'id="settingsLoadStatus"' in html
     assert "Runtime safety" in js
