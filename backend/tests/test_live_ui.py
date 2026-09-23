@@ -110,8 +110,8 @@ def test_b8_release_marker_and_cache_busted_assets_are_present():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     js = (STATIC / "aether-app.js").read_text(encoding="utf-8")
     assert 'content="AETHER-LOAD-003-B9"' in html
-    assert "/static/aether-app.css?v=AETHER-LOAD-003-B9" in html
-    assert "/static/aether-app.js?v=AETHER-LOAD-003-B9" in html
+    assert "/static/aether-app.css?v=AETHER-FILTERS-R1" in html
+    assert "/static/aether-app.js?v=AETHER-FILTERS-R1" in html
     assert 'id="settingsLoadBadge"' in html
     assert 'id="settingsLoadStatus"' in html
     assert "Runtime safety" in js
@@ -150,3 +150,21 @@ def test_b8_blotter_renders_horizon_excursion_capture_and_cost_evidence():
     assert "<th>Costs</th>" in js
     assert "capture_efficiency_pct" in js
     assert "total_cost_drag_usd" in js
+
+
+def test_settings_exposes_trade_filter_controls_without_special_mode():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    js = (STATIC / "aether-app.js").read_text(encoding="utf-8")
+    css = (STATIC / "aether-app.css").read_text(encoding="utf-8")
+
+    assert 'id="settingsOptionalFilters"' in html
+    assert 'id="settingsLockedFilters"' in html
+    assert 'id="filtersAllOn"' in html
+    assert 'id="filtersAllOff"' in html
+    assert "saveTradeFilters" in js
+    assert "data-filter-key" in js
+    assert "All optional trade filters enabled" in js
+    assert "All optional trade filters bypassed" in js
+    assert "special_mode" not in js
+    assert ".filter-switch" in css
+    assert ".filter-row.locked" in css
