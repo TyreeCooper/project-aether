@@ -207,6 +207,22 @@ class MultiDesk:
             5,
             min(int(os.getenv("AETHER_DESK_POLL_SECONDS", str(POLL))), 120),
         )
+        self.trade_filters = dict(
+            DEFAULT_TRADE_FILTER_SETTINGS
+        )
+        self.trade_filter_traffic = {
+            key: {
+                "evaluated": 0,
+                "passed": 0,
+                "rejected": 0,
+                "bypassed": 0,
+                "limited": 0,
+            }
+            for key in (
+                set(OPTIONAL_TRADE_FILTERS)
+                | set(LOCKED_TRADE_FILTERS)
+            )
+        }
         self.live_blocked = True
         self._last_market_success = 0.0
         self._last_market_error: str | None = None
@@ -474,6 +490,12 @@ class MultiDesk:
                 "settings": {
                     "risk_slice": self.risk_slice,
                     "poll_seconds": self.poll_seconds,
+                    "trade_filters": dict(
+                        self.trade_filters
+                    ),
+                    "trade_filter_traffic": copy.deepcopy(
+                        self.trade_filter_traffic
+                    ),
                 },
                 "asset_source_registry": self.asset_source_registry,
                 "activity_events": self.activity_events[-300:],
@@ -675,6 +697,40 @@ class MultiDesk:
                 )
             except (TypeError, ValueError):
                 pass
+            restored_filters = settings.get(
+                "trade_filters"
+            )
+            if isinstance(restored_filters, dict):
+                for key in OPTIONAL_TRADE_FILTERS:
+                    if key in restored_filters:
+                        self.trade_filters[key] = bool(
+                            restored_filters[key]
+                        )
+            restored_traffic = settings.get(
+                "trade_filter_traffic"
+            )
+            if isinstance(restored_traffic, dict):
+                for key, raw in restored_traffic.items():
+                    if (
+                        key not in self.trade_filter_traffic
+                        or not isinstance(raw, dict)
+                    ):
+                        continue
+                    bucket = self.trade_filter_traffic[key]
+                    for metric in (
+                        "evaluated",
+                        "passed",
+                        "rejected",
+                        "bypassed",
+                        "limited",
+                    ):
+                        try:
+                            bucket[metric] = max(
+                                int(raw.get(metric) or 0),
+                                0,
+                            )
+                        except (TypeError, ValueError):
+                            bucket[metric] = 0
         logger.info(
             "desk restored usd=%.4f holdings=%s",
             self.wallet.usd,
@@ -1066,6 +1122,81 @@ class MultiDesk:
             },
         }
 
+    def _track_trade_filter(
+        self,
+        name: str,
+        status: str,
+        count: int = 1,
+    ) -> None:
+        key = str(name)
+        if key not in self.trade_filter_traffic:
+            return
+        amount = max(int(count), 0)
+        if amount <= 0:
+            return
+        bucket = self.trade_filter_traffic[key]
+        bucket["evaluated"] += amount
+        if status in {
+            "passed",
+            "rejected",
+            "bypassed",
+            "limited",
+        }:
+            bucket[status] += amount
+
+    def trade_filter_snapshot(self) -> dict[str, Any]:
+        optional = {
+            key: {
+                **meta,
+                "enabled": bool(
+                    self.trade_filters.get(key, True)
+                ),
+            }
+            for key, meta in OPTIONAL_TRADE_FILTERS.items()
+        }
+        locked = {
+            key: {
+                **meta,
+                "enabled": True,
+                "locked": True,
+            }
+            for key, meta in LOCKED_TRADE_FILTERS.items()
+        }
+        traffic = {
+            key: dict(
+                self.trade_filter_traffic.get(
+                    key,
+                    {
+                        "evaluated": 0,
+                        "passed": 0,
+                        "rejected": 0,
+                        "bypassed": 0,
+                        "limited": 0,
+                    },
+                )
+            )
+            for key in (
+                list(OPTIONAL_TRADE_FILTERS)
+                + list(LOCKED_TRADE_FILTERS)
+            )
+        }
+        return {
+            "optional": optional,
+            "locked": locked,
+            "traffic": traffic,
+            "optional_enabled": sum(
+                1
+                for row in optional.values()
+                if row["enabled"]
+            ),
+            "optional_total": len(optional),
+            "locked_total": len(locked),
+            "special_mode": False,
+            "forced_entries_enabled": bool(
+                self.execution_test_mode
+            ),
+        }
+
     def settings_snapshot(self) -> dict[str, Any]:
         runtime_mode = self.runtime_mode()
         return {
@@ -1112,6 +1243,7 @@ class MultiDesk:
                 "equity_quantity_unit": "shares",
                 "crypto_quantity_unit": "coin_quantity",
             },
+            "trade_filters": self.trade_filter_snapshot(),
         }
 
     async def initialize_history_persistence(self) -> None:
@@ -1298,6 +1430,9 @@ class MultiDesk:
             "quality_score": int(snap.get("quality_score") or 0),
             "setup_reason": snap.get("reason"),
             "execution_status": snap.get("execution_status"),
+            "filter_trace": dict(
+                snap.get("filter_trace") or {}
+            ),
             "strategy_qualified": snap.get("executable_signal")
             in {"buy", "short"},
             "entry_eligible": status == "qualified",
@@ -1305,6 +1440,13 @@ class MultiDesk:
             "rejection_reason": rejection_reason,
             "trade_id": None,
         }
+        for filter_name, filter_status in (
+            row.get("filter_trace") or {}
+        ).items():
+            self._track_trade_filter(
+                str(filter_name),
+                str(filter_status),
+            )
         self.opportunity_evaluation_log.append(row)
         self.opportunity_evaluation_log = (
             self.opportunity_evaluation_log[-500:]
@@ -1670,9 +1812,25 @@ class MultiDesk:
         *,
         allocation_per_entry_pct: float,
         quote_poll_seconds: int,
+        trade_filters: dict[str, bool] | None = None,
     ) -> dict[str, Any]:
-        self.risk_slice = max(0.01, min(float(allocation_per_entry_pct) / 100.0, 0.25))
-        self.poll_seconds = max(5, min(int(quote_poll_seconds), 120))
+        self.risk_slice = max(
+            0.01,
+            min(
+                float(allocation_per_entry_pct) / 100.0,
+                0.25,
+            ),
+        )
+        self.poll_seconds = max(
+            5,
+            min(int(quote_poll_seconds), 120),
+        )
+        if isinstance(trade_filters, dict):
+            for key in OPTIONAL_TRADE_FILTERS:
+                if key in trade_filters:
+                    self.trade_filters[key] = bool(
+                        trade_filters[key]
+                    )
         self.persist()
         return self.settings_snapshot()
 
