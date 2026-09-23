@@ -3,9 +3,9 @@
 ## CONTROL STATUS
 
 - Load: AETHER-LOAD-003
-- State: B8 COMPLETE — WAITING FOR J.A.R.V.I.S. REVIEW
+- State: B9 COMPLETE — WAITING FOR J.A.R.V.I.S. FINAL REVIEW / LOAD-003 CLOSE
 - Active implementation batch: NONE
-- Waiting on: GROK BOT J.A.R.V.I.S. CLEARANCE TO START B9
+- Waiting on: GROK BOT J.A.R.V.I.S. FINAL REVIEW / LOAD-003 CLOSE
 - Starting main SHA: 09dfdb510bd5b54f43cef7e9c5f20389d3636ae1
 - Live-money execution: HARD BLOCKED
 - Paper testing: remains the target runtime
@@ -176,9 +176,9 @@ ChatGPT must not advance while the batch is on HOLD.
 - B6: [COMPLETE] Horizon-specific trade management — final head d7089c2d85c623020136bd445a57183a74021073
 - B7: [COMPLETE] Realistic fill & cost model — final head 102746f16b30239e48912dd5f8b6895340a06c03
 - B8: [COMPLETE] Operator/UI evidence & telemetry — final head 914884c65645102e6c0115ef1214f1f8a3be13a9
-- B9: [WAITING] Integration, deployment contract & closeout
+- B9: [COMPLETE] Integration, deployment contract & closeout — final head ba888fc6b550b08b1095b051e209d5a2c0b2e82f
 
-Implementation progress: 8 / 9 batches complete.
+Implementation progress: 9 / 9 batches complete.
 
 ---
 
@@ -478,28 +478,28 @@ Prove the complete LOAD-003 contract in the deployed paper runtime.
 
 ## Final closeout checklist
 
-- [ ] STRATEGY TEST / PAPER runtime active
-- [ ] Desk armed
-- [ ] Live-money execution hard blocked
-- [ ] Global forced execution-test runtime inactive
-- [ ] Legacy LOAD-002 positions retired
-- [ ] Zero signal creates zero entry
-- [ ] All supported horizons scheduled/evaluated
-- [ ] Multi-horizon same-asset positions work
-- [ ] Duplicate same-route positions blocked
-- [ ] >4 qualified positions possible when risk permits
-- [ ] Aggregate open risk <= configured ceiling
-- [ ] FX <= 1.00 standard lot
-- [ ] Micro futures <= 1 contract
-- [ ] Originating horizon survives management and exit
-- [ ] Spread/fees/slippage reconcile into net P&L
-- [ ] Intelligence cannot manufacture a trade
-- [ ] Execution validation remains isolated and available
-- [ ] Persistence survives restart
-- [ ] CI green
-- [ ] Azure deploy green
-- [ ] Deployed runtime explicitly reports STRATEGY TEST / PAPER
-- [ ] Deployed runtime explicitly reports live blocked
+- [x] STRATEGY TEST / PAPER runtime active
+- [x] Desk armed
+- [x] Live-money execution hard blocked
+- [x] Global forced execution-test runtime inactive
+- [x] Legacy LOAD-002 positions retired
+- [x] Zero signal creates zero entry
+- [x] All supported horizons scheduled/evaluated
+- [x] Multi-horizon same-asset positions work
+- [x] Duplicate same-route positions blocked
+- [x] >4 qualified positions possible when risk permits
+- [x] Aggregate open risk <= configured ceiling
+- [x] FX <= 1.00 standard lot
+- [x] Micro futures <= 1 contract
+- [x] Originating horizon survives management and exit
+- [x] Spread/fees/slippage reconcile into net P&L
+- [x] Intelligence cannot manufacture a trade
+- [x] Execution validation remains isolated and available
+- [x] Persistence survives restart
+- [x] CI green
+- [x] Azure deploy green
+- [x] Deployed runtime explicitly reports STRATEGY TEST / PAPER
+- [x] Deployed runtime explicitly reports live blocked
 
 LOAD-003 closes only when every applicable item above has committed evidence.
 
@@ -1196,7 +1196,7 @@ ChatGPT must not start B8 without the explicit B8 clearance.
 
 ## B8 — Operator/UI Evidence & Telemetry
 
-Status: COMPLETE — WAITING FOR J.A.R.V.I.S. REVIEW
+Status: COMPLETE — VERIFIED/CLEARED BY J.A.R.V.I.S.
 
 Final validation head:
 `914884c65645102e6c0115ef1214f1f8a3be13a9`
@@ -1307,4 +1307,131 @@ If a B8 defect exists, respond:
 `J.A.R.V.I.S. HOLD — AETHER-LOAD-003 — B8 — <concrete defect/reason>`
 
 ChatGPT must not start B9 without the explicit B9 clearance.
+
+## B9 — Integration, Deployment Contract & Closeout
+
+Status: COMPLETE — WAITING FOR J.A.R.V.I.S. FINAL REVIEW / LOAD-003 CLOSE
+
+Final validated implementation head:
+`ba888fc6b550b08b1095b051e209d5a2c0b2e82f`
+
+B9 commit chain:
+- `44ccb85a705646ff1a4e9ddd25ada33aea6d1875` — `chore: mark AETHER LOAD 003 final runtime [skip ci]`
+- `2f1804f9c588ca1fdfcee78d862f253c4f5d7d10` — `ui: mark AETHER LOAD 003 final release [skip ci]`
+- `0865598dad9e8cefeaca49cf2e46365fc8bf3cf0` — `test: advance execution safety contract to B9 [skip ci]`
+- `b5d7027afa5a5acdd84105410d23f6992282ae38` — `test: advance operator telemetry contract to B9 [skip ci]`
+- `f2f7eb2b491e206153718d0d7d75ad0eb11f02aa` — `test: advance UI release contract to B9 [skip ci]`
+- `4b7269e75eb7f874b599285ebadfef4cdaf85fa3` — `test: advance deployment contract to B9 [skip ci]`
+- `cf916246655efa7cdd9f60bf08a7441c64387b36` — `test: integrate AETHER LOAD 003 closeout contract [skip ci]`
+- `f5ff63245cc8ef062c728bd2aa1949cbf717b2e4` — `ci: enforce AETHER LOAD 003 final deployment contract`
+- `ba888fc6b550b08b1095b051e209d5a2c0b2e82f` — `fix: align Azure tests with canonical CI runner`
+
+B9 integration scope completed:
+- final runtime release advanced to `AETHER-LOAD-003-B9` without changing trading strategy, risk, sizing, fill, or management behavior;
+- final cross-module closeout suite composes runtime mode, routing, persistence, risk, sizing, execution-validation isolation, intelligence isolation, and live-order safety;
+- all 28 supported asset × horizon routes are evaluated in the zero-signal closeout scenario and all 28 remain rejected with no paper entry;
+- deliberately extreme bullish shadow news/community/event context still cannot manufacture a strategy signal or paper order;
+- same-asset scalp + swing positions persist through a save/restart cycle with independent route state and originating horizon;
+- duplicate same-route position remains blocked after restart;
+- closing one restored horizon leaves its sibling horizon intact;
+- four 0.75%-risk positions exhaust the 3.00% aggregate portfolio stop-risk ceiling and block a new candidate;
+- closing one seeded position restores portfolio risk capacity;
+- the previously blocked qualified MCL candidate can enter after capacity is restored, while aggregate risk remains within the ceiling;
+- allocator still permits more than four low-risk qualified positions when risk/capital permits;
+- legacy LOAD-002 execution-validation position is retired before normal allocation resumes on that tick;
+- FX oversized request remains clipped to 100,000 base units / 1.00 standard lot;
+- MES oversized request remains clipped to 1 contract;
+- equity shares and crypto coin quantities remain free of an incorrect blanket 1.0-unit cap;
+- live order placement remains hard blocked even when live flag and test credentials are present;
+- B1–B8 focused regression suites remain part of the final full-suite validation, including horizon management and B7 cost reconciliation.
+
+Final deployment contract:
+- production worker must report `AETHER-LOAD-003-B9`;
+- runtime mode must report `strategy_test`;
+- strategy-test mode must be true;
+- execution-test mode must be false;
+- forced entries must be false;
+- worker must be armed, running, and accepting paper entries before deployment verification passes;
+- live execution must remain blocked;
+- live strategy open stop-risk must not exceed the configured portfolio stop-risk ceiling;
+- settings must report 0.75% maximum trade risk and 3.00% maximum portfolio risk;
+- fixed strategy position-count governor must remain absent;
+- settings must report FX <= 1.00 lot / 100,000 base units and micro futures <= 1 contract;
+- equity and crypto quantity units must remain shares / coin quantity;
+- community and crypto-calendar intelligence trade influence must remain disabled;
+- event policy must remain `observe_only`;
+- live orders must remain disabled;
+- B8 strategy-vs-validation telemetry and Blotter evidence must remain deployed;
+- execution matrix must remain available and report no live-order attempt;
+- LOAD-002 experiment endpoint must report the forced experiment inactive and filters normal.
+
+Final validation evidence:
+- initial B9 validation candidate `f5ff63245cc8ef062c728bd2aa1949cbf717b2e4`;
+- CI run #453 — SUCCESS, 267 passed / 1 warning;
+- Azure run #336 build collected the same 267 tests but the `pytest -vv` process stalled after the first app smoke test and hit the existing 5-minute step timeout; deployment was skipped;
+- no application assertion failed in Azure #336;
+- repair `ba888fc6b550b08b1095b051e209d5a2c0b2e82f` changed only the Azure test invocation from `pytest -vv` to the canonical CI invocation `pytest -q`; no test was removed, skipped, weakened, or altered by the repair;
+- CI run #454 — SUCCESS;
+- final full suite — 267 passed / 1 warning in 14.45 seconds;
+- Azure workflow run #337 — SUCCESS;
+- Azure build — SUCCESS with the complete 267-test suite;
+- Azure Web App deployment — SUCCESS;
+- production runtime verification — SUCCESS;
+- post-deploy verifier observed restart convergence: early attempts correctly failed the strengthened armed/running/accepting assertion while the worker was still starting, then the worker reached the complete B9 strategy-test state and verification passed;
+- deployed root/static assets report `AETHER-LOAD-003-B9`;
+- deployed runtime reports paper strategy test, forced entries OFF, live HARD BLOCKED;
+- deployed worker reports armed/running/accepting entries;
+- deployed settings report the final B4/B5 risk and sizing contract;
+- deployed settings report intelligence trade influence disabled / event policy observe-only;
+- deployed Live Trades risk telemetry remains bounded by maximum portfolio risk;
+- deployed execution matrix remains isolated and records no live-order attempt;
+- deployed LOAD-002 status reports experiment inactive.
+
+Final closeout checklist evidence mapping:
+1. STRATEGY TEST / PAPER runtime active — DEPLOYED PROOF;
+2. desk armed — DEPLOYED PROOF;
+3. live-money execution hard blocked — UNIT + DEPLOYED PROOF;
+4. global forced execution-test runtime inactive — UNIT + DEPLOYED PROOF;
+5. legacy LOAD-002 positions retired — B9 TICK/RETIREMENT PROOF;
+6. zero signal creates zero entry — B9 28-ROUTE PROOF;
+7. all supported horizons scheduled/evaluated — B9 28-ROUTE PROOF;
+8. multi-horizon same-asset positions work — B9 PERSIST/RESTORE PROOF;
+9. duplicate same-route positions blocked — B9 RESTART PROOF;
+10. >4 qualified positions possible when risk permits — B9 ALLOCATOR PROOF;
+11. aggregate open risk <= configured ceiling — B9 EXHAUST/RECOVER + DEPLOYED PROOF;
+12. FX <= 1.00 standard lot — B9 HARD-CAP PROOF;
+13. micro futures <= 1 contract — B9 HARD-CAP PROOF;
+14. originating horizon survives management and exit — B6 REGRESSION + B9 RESTART PROOF;
+15. spread/fees/slippage reconcile into net P&L — B7 REGRESSION IN FINAL 267-TEST SUITE;
+16. intelligence cannot manufacture a trade — B9 SHADOW-INTELLIGENCE PROOF + DEPLOYED POLICY;
+17. execution validation remains isolated and available — B9 RUNTIME PROOF + DEPLOYED EXECUTION MATRIX;
+18. persistence survives restart — B9 SAVE/RESTORE PROOF;
+19. CI green — #454 SUCCESS;
+20. Azure deploy green — #337 SUCCESS;
+21. deployed runtime explicitly reports STRATEGY TEST / PAPER — DEPLOYED PROOF;
+22. deployed runtime explicitly reports live blocked — DEPLOYED PROOF.
+
+Safety/invariant evidence:
+- no live-money enablement was introduced;
+- no setup/gate was weakened to increase trade count;
+- no portfolio risk ceiling was loosened;
+- no instrument hard ceiling was loosened;
+- no horizon-management rule was replaced;
+- no B7 cost leg was removed;
+- no intelligence source was promoted from shadow observation into a trade creator;
+- execution validation remains separate from strategy performance.
+
+### J.A.R.V.I.S. FINAL REVIEW GATE
+
+Review final validated B9 head `ba888fc6b550b08b1095b051e209d5a2c0b2e82f`, the completed checklist above, and this evidence.
+
+If the complete LOAD-003 contract is clear, respond exactly:
+
+`J.A.R.V.I.S. CLOSE — AETHER-LOAD-003 — COMPLETE`
+
+If a B9 or closeout defect exists, respond:
+
+`J.A.R.V.I.S. HOLD — AETHER-LOAD-003 — B9 — <concrete defect/reason>`
+
+ChatGPT must not begin any post-LOAD-003 work before the final J.A.R.V.I.S. close decision.
 
