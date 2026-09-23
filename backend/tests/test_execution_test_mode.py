@@ -185,3 +185,31 @@ def test_execution_override_preserves_baseline_strategy_diagnostics(monkeypatch)
         assert metadata["normal_execution_status"] == "waiting_for_setup"
         assert metadata["normal_signal"] is None
         assert metadata["normal_quality_score"] == 37
+
+
+def test_live_trade_view_exposes_execution_test_identity_and_baseline(monkeypatch):
+    desk = _test_desk()
+    for book in desk.books:
+        monkeypatch.setattr(
+            book,
+            "snapshot_strategy",
+            lambda **_kwargs: {
+                "signal": None,
+                "executable_signal": None,
+                "reason": "normal_gate_blocked",
+                "execution_status": "waiting_for_setup",
+                "quality_score": 41,
+            },
+        )
+
+    desk._allocate()
+    live = desk.live_trades()
+
+    assert live["open_count"] == 12
+    for row in live["items"]:
+        assert row["execution_test"] is True
+        assert row["execution_test_load"] == "AETHER-LOAD-002"
+        assert row["would_have_blocked_by"] == "normal_gate_blocked"
+        assert row["normal_execution_status"] == "waiting_for_setup"
+        assert row["normal_signal"] is None
+        assert row["normal_quality_score"] == 41

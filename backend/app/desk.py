@@ -520,6 +520,27 @@ class MultiDesk:
                         "bias_clock": (
                             position.get("metadata") or {}
                         ).get("bias_clock"),
+                        "execution_test": bool(
+                            position.get("execution_test_funded")
+                            or (position.get("metadata") or {}).get(
+                                "execution_test"
+                            )
+                        ),
+                        "execution_test_load": (
+                            position.get("metadata") or {}
+                        ).get("execution_test_load"),
+                        "would_have_blocked_by": (
+                            position.get("metadata") or {}
+                        ).get("would_have_blocked_by"),
+                        "normal_execution_status": (
+                            position.get("metadata") or {}
+                        ).get("normal_execution_status"),
+                        "normal_signal": (
+                            position.get("metadata") or {}
+                        ).get("normal_signal"),
+                        "normal_quality_score": (
+                            position.get("metadata") or {}
+                        ).get("normal_quality_score"),
                         "management_state": (
                             "EXIT WATCH"
                             if strategy.get("exit_signal")
