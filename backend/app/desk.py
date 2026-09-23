@@ -2535,9 +2535,56 @@ class MultiDesk:
             closed_ts = self._latest_closed_minute_ts()
             if closed_ts is None:
                 return []
-            due_routes = self.strategy_router.due(closed_ts)
-            if not due_routes:
-                return []
+            clock_due_routes = self.strategy_router.due(
+                closed_ts
+            )
+            all_route_cells = sum(
+                len(tuple(supported_horizons(book.id)))
+                for book in self.books
+            )
+            if self.trade_filters.get(
+                "route_clock",
+                True,
+            ):
+                due_routes = clock_due_routes
+                due_horizons = {
+                    route.horizon.value
+                    for route in due_routes
+                }
+                due_cells = sum(
+                    1
+                    for book in self.books
+                    for horizon in supported_horizons(
+                        book.id
+                    )
+                    if clock_horizon(
+                        book.id,
+                        horizon,
+                    )
+                    in due_horizons
+                )
+                self._track_trade_filter(
+                    "route_clock",
+                    "passed",
+                    due_cells,
+                )
+                self._track_trade_filter(
+                    "route_clock",
+                    "rejected",
+                    max(
+                        all_route_cells - due_cells,
+                        0,
+                    ),
+                )
+                if not due_routes:
+                    return []
+            else:
+                due_routes = tuple(ROUTES.values())
+                self._track_trade_filter(
+                    "route_clock",
+                    "bypassed",
+                    all_route_cells,
+                )
 
         candidates: list[
             tuple[
@@ -2634,6 +2681,9 @@ class MultiDesk:
                         horizon,
                     )
                     try:
+                        route_book.entry_filter_settings = (
+                            self.trade_filters
+                        )
                         snap = route_book.snapshot_strategy(
                             btc_bias_on=btc_bias,
                             btc_in_position=btc_long,
@@ -2675,8 +2725,10 @@ class MultiDesk:
                                 f"{type(exc).__name__}"
                             ),
                         )
+                        route_book.entry_filter_settings = None
                         continue
 
+                    route_book.entry_filter_settings = None
                     snap = {
                         **snap,
                         "routing_horizon": horizon,
@@ -2686,6 +2738,9 @@ class MultiDesk:
                             route.strategy_version
                         ),
                         "position_key": position_key,
+                        "trade_filter_settings": dict(
+                            self.trade_filters
+                        ),
                     }
                     executable = snap.get(
                         "executable_signal"
@@ -2727,6 +2782,14 @@ class MultiDesk:
                         )
                         continue
 
+                    self._track_trade_filter(
+                        "duplicate_route",
+                        (
+                            "rejected"
+                            if route_book.qty() > 0
+                            else "passed"
+                        ),
+                    )
                     if route_book.qty() > 0:
                         self._record_opportunity_evaluation(
                             route_book,
@@ -2776,10 +2839,26 @@ class MultiDesk:
                     )
 
         out: list[dict[str, Any]] = []
-        candidates.sort(
-            key=lambda row: row[0],
-            reverse=True,
-        )
+        if candidates:
+            if self.trade_filters.get(
+                "quality_ranking",
+                True,
+            ):
+                candidates.sort(
+                    key=lambda row: row[0],
+                    reverse=True,
+                )
+                self._track_trade_filter(
+                    "quality_ranking",
+                    "passed",
+                    len(candidates),
+                )
+            else:
+                self._track_trade_filter(
+                    "quality_ranking",
+                    "bypassed",
+                    len(candidates),
+                )
         active_count = len(self.wallet.positions)
 
         for _, book, snap, evaluation in candidates:
@@ -2796,7 +2875,14 @@ class MultiDesk:
                 )
                 continue
 
-            if float(book.mark or 0.0) <= 0:
+            market_valid = float(
+                book.mark or 0.0
+            ) > 0
+            self._track_trade_filter(
+                "market_validity",
+                "passed" if market_valid else "rejected",
+            )
+            if not market_valid:
                 self._update_opportunity_evaluation(
                     evaluation,
                     status="blocked",
@@ -2874,10 +2960,19 @@ class MultiDesk:
                     0.0,
                 )
 
-                if (
+                asset_capacity_ok = (
                     asset_remaining
-                    <= RISK_EPSILON_USD
-                ):
+                    > RISK_EPSILON_USD
+                )
+                self._track_trade_filter(
+                    "asset_risk",
+                    (
+                        "passed"
+                        if asset_capacity_ok
+                        else "rejected"
+                    ),
+                )
+                if not asset_capacity_ok:
                     if evaluation is not None:
                         evaluation.update(
                             {
@@ -2904,10 +2999,19 @@ class MultiDesk:
                     )
                     continue
 
-                if (
+                cluster_capacity_ok = (
                     cluster_remaining
-                    <= RISK_EPSILON_USD
-                ):
+                    > RISK_EPSILON_USD
+                )
+                self._track_trade_filter(
+                    "cluster_risk",
+                    (
+                        "passed"
+                        if cluster_capacity_ok
+                        else "rejected"
+                    ),
+                )
+                if not cluster_capacity_ok:
                     if evaluation is not None:
                         evaluation.update(
                             {
@@ -2935,10 +3039,19 @@ class MultiDesk:
                     )
                     continue
 
-                if (
+                portfolio_capacity_ok = (
                     portfolio_remaining
-                    <= RISK_EPSILON_USD
-                ):
+                    > RISK_EPSILON_USD
+                )
+                self._track_trade_filter(
+                    "portfolio_risk",
+                    (
+                        "passed"
+                        if portfolio_capacity_ok
+                        else "rejected"
+                    ),
+                )
+                if not portfolio_capacity_ok:
                     if evaluation is not None:
                         evaluation.update(
                             {
@@ -2965,7 +3078,12 @@ class MultiDesk:
                     )
                     continue
 
-                if capital_cap_usd <= 0:
+                capital_ok = capital_cap_usd > 0
+                self._track_trade_filter(
+                    "capital_margin",
+                    "passed" if capital_ok else "rejected",
+                )
+                if not capital_ok:
                     self._update_opportunity_evaluation(
                         evaluation,
                         status="blocked",
@@ -2981,10 +3099,19 @@ class MultiDesk:
                     cluster_remaining,
                     portfolio_remaining,
                 )
-                if (
+                trade_capacity_ok = (
                     risk_budget_usd
-                    <= RISK_EPSILON_USD
-                ):
+                    > RISK_EPSILON_USD
+                )
+                self._track_trade_filter(
+                    "trade_risk",
+                    (
+                        "passed"
+                        if trade_capacity_ok
+                        else "rejected"
+                    ),
+                )
+                if not trade_capacity_ok:
                     self._update_opportunity_evaluation(
                         evaluation,
                         status="blocked",
@@ -3071,6 +3198,10 @@ class MultiDesk:
                         > trade_limit
                         + RISK_EPSILON_USD
                     ):
+                        self._track_trade_filter(
+                            "trade_risk",
+                            "rejected",
+                        )
                         self._update_opportunity_evaluation(
                             evaluation,
                             status="blocked",
@@ -3085,6 +3216,10 @@ class MultiDesk:
                         > asset_limit
                         + RISK_EPSILON_USD
                     ):
+                        self._track_trade_filter(
+                            "asset_risk",
+                            "rejected",
+                        )
                         self._update_opportunity_evaluation(
                             evaluation,
                             status="blocked",
@@ -3099,6 +3234,10 @@ class MultiDesk:
                         > cluster_limit
                         + RISK_EPSILON_USD
                     ):
+                        self._track_trade_filter(
+                            "cluster_risk",
+                            "rejected",
+                        )
                         self._update_opportunity_evaluation(
                             evaluation,
                             status="blocked",
@@ -3113,6 +3252,10 @@ class MultiDesk:
                         > portfolio_limit
                         + RISK_EPSILON_USD
                     ):
+                        self._track_trade_filter(
+                            "portfolio_risk",
+                            "rejected",
+                        )
                         self._update_opportunity_evaluation(
                             evaluation,
                             status="blocked",
@@ -3147,6 +3290,31 @@ class MultiDesk:
                         ),
                     }
 
+            cost_status = plan.get(
+                "cost_edge_filter_status"
+            )
+            if cost_status in {
+                "passed",
+                "rejected",
+                "bypassed",
+            }:
+                self._track_trade_filter(
+                    "cost_edge_hurdle",
+                    str(cost_status),
+                )
+
+            if plan.get("ok"):
+                self._track_trade_filter(
+                    "instrument_size_cap",
+                    (
+                        "limited"
+                        if plan.get(
+                            "hard_quantity_cap_applied"
+                        )
+                        else "passed"
+                    ),
+                )
+
             if evaluation is not None:
                 for key in (
                     "opportunity_pct",
@@ -3172,8 +3340,17 @@ class MultiDesk:
                     status="blocked",
                     rejection_reason=rejection_reason,
                 )
+                if plan_error != "edge_below_cost_hurdle":
+                    self._track_trade_filter(
+                        "final_order_validation",
+                        "rejected",
+                    )
                 continue
 
+            self._track_trade_filter(
+                "final_order_validation",
+                "passed",
+            )
             result = book.enter(
                 risk_budget_usd,
                 strategy_snapshot=snap,
