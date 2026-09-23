@@ -147,7 +147,7 @@ class PairBook:
             position_key=self.position_key,
         )
 
-    def snapshot_strategy(    def snapshot_strategy(
+    def snapshot_strategy(
         self,
         *,
         btc_bias_on: bool = False,
