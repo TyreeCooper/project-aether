@@ -50,7 +50,7 @@ RISK_EPSILON_USD = 1e-6
 POLL = 20
 LOAD_002_RELEASE = "AETHER-LOAD-002-EXP-R1"
 LOAD_002_EXPERIMENT_RUN = "EXP-R1"
-LOAD_003_RELEASE = "AETHER-LOAD-003-B7"
+LOAD_003_RELEASE = "AETHER-LOAD-003-B8"
 STRATEGY_TEST_MODE = "strategy_test"
 EXECUTION_VALIDATION_MODE = "execution_validation"
 
@@ -1246,11 +1246,57 @@ class MultiDesk:
         )
         return rows[: max(1, int(limit))]
 
+    def operator_watch_rows(
+        self,
+        limit: int = 12,
+    ) -> list[dict[str, Any]]:
+        rows = self.opportunity_evaluations_snapshot(500)
+        latest: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for raw in rows:
+            aid = str(raw.get("asset_id") or "").lower()
+            horizon = str(
+                raw.get("routing_horizon") or ""
+            ).lower()
+            if not aid or not horizon:
+                continue
+            route_key = strategy_position_key(
+                aid,
+                horizon,
+            )
+            if route_key in seen:
+                continue
+            seen.add(route_key)
+            reason = (
+                raw.get("rejection_reason")
+                or raw.get("setup_reason")
+                or raw.get("execution_status")
+                or "waiting"
+            )
+            latest.append(
+                {
+                    **dict(raw),
+                    "route_key": route_key,
+                    "trade_class": "strategy",
+                    "reason": reason,
+                    "gate_reason": reason,
+                    "actionable": raw.get("status")
+                    in {"qualified", "entered"},
+                }
+            )
+            if len(latest) >= max(1, int(limit)):
+                break
+        return latest
+
     def live_trades(self) -> dict[str, Any]:
         btc_bias, btc_long = self._btc_gate()
         items: list[dict[str, Any]] = []
-        watch: list[dict[str, Any]] = []
+        runtime = self.engine_status()
+        risk = self.strategy_risk_snapshot()
+        equity = max(float(risk.get("equity_usd") or 1.0), 1.0)
 
+        strategy_open = 0
+        validation_open = 0
         for position_key, position in self.wallet.positions.items():
             aid = str(position.get("asset_id") or "").lower()
             base_book = self.by_id.get(aid)
@@ -1304,10 +1350,40 @@ class MultiDesk:
             )
             opened_at = position.get("opened_at") or book.entry_at
             metadata = position.get("metadata") or {}
+            execution_test = bool(
+                position.get("execution_test_funded")
+                or metadata.get("execution_test")
+            )
+            trade_class = (
+                "execution_validation"
+                if execution_test
+                else "strategy"
+            )
+            if execution_test:
+                validation_open += 1
+            else:
+                strategy_open += 1
+            stop_risk = float(
+                self.wallet.position_stop_risk_usd(
+                    aid,
+                    position_key=position_key,
+                )
+            )
+            risk_pct = stop_risk / equity * 100.0
+            routing_horizon = (
+                metadata.get("routing_horizon")
+                or book.routing_horizon
+            )
             items.append(
                 {
                     "trade_id": position.get("trade_id"),
+                    "trade_class": trade_class,
                     "position_key": position_key,
+                    "route_key": (
+                        position_key
+                        if route_book is not None
+                        else None
+                    ),
                     "asset_id": aid,
                     "symbol": book.symbol,
                     "pair": book.pair,
@@ -1325,6 +1401,17 @@ class MultiDesk:
                     "current_price": mark,
                     "stop_price": book.stop or position.get(
                         "current_stop"
+                    ),
+                    "position_risk_usd": round(
+                        stop_risk,
+                        4,
+                    ),
+                    "position_risk_pct_equity": round(
+                        risk_pct,
+                        4,
+                    ),
+                    "target_risk_usd": metadata.get(
+                        "target_risk_usd"
                     ),
                     "quantity": position.get("quantity"),
                     "quantity_unit": position.get(
@@ -1365,10 +1452,7 @@ class MultiDesk:
                     ),
                     "entry_clock": metadata.get("entry_clock"),
                     "bias_clock": metadata.get("bias_clock"),
-                    "execution_test": bool(
-                        position.get("execution_test_funded")
-                        or metadata.get("execution_test")
-                    ),
+                    "execution_test": execution_test,
                     "execution_test_load": metadata.get(
                         "execution_test_load"
                     ),
@@ -1384,10 +1468,7 @@ class MultiDesk:
                     "normal_quality_score": metadata.get(
                         "normal_quality_score"
                     ),
-                    "routing_horizon": metadata.get(
-                        "routing_horizon"
-                    )
-                    or book.routing_horizon,
+                    "routing_horizon": routing_horizon,
                     "originating_horizon": management.get(
                         "originating_horizon"
                     ),
@@ -1407,6 +1488,20 @@ class MultiDesk:
                     "strategy_version": metadata.get(
                         "strategy_version"
                     ),
+                    "opportunity_pct": position.get(
+                        "opportunity_pct"
+                    )
+                    or metadata.get("opportunity_pct"),
+                    "modeled_round_trip_cost_pct": position.get(
+                        "modeled_round_trip_cost_pct"
+                    )
+                    or metadata.get(
+                        "modeled_round_trip_cost_pct"
+                    ),
+                    "cost_hurdle_pct": position.get(
+                        "cost_hurdle_pct"
+                    )
+                    or metadata.get("cost_hurdle_pct"),
                     "management_state": (
                         "EXIT WATCH"
                         if strategy.get("exit_signal")
@@ -1429,38 +1524,7 @@ class MultiDesk:
                 }
             )
 
-        for book in self.books:
-            if book.qty() > 0:
-                continue
-            try:
-                snap = book.snapshot_strategy(
-                    btc_bias_on=btc_bias,
-                    btc_in_position=btc_long,
-                )
-            except Exception:
-                continue
-            watch.append(
-                {
-                    "asset_id": book.id,
-                    "symbol": book.symbol,
-                    "pair": book.pair,
-                    "mode": snap.get("mode"),
-                    "signal": snap.get("signal"),
-                    "direction": snap.get("direction"),
-                    "reason": snap.get("reason"),
-                    "quality_score": int(
-                        snap.get("quality_score") or 0
-                    ),
-                    "execution_status": snap.get(
-                        "execution_status"
-                    ),
-                }
-            )
-
-        watch.sort(
-            key=lambda row: int(row.get("quality_score") or 0),
-            reverse=True,
-        )
+        watch = self.operator_watch_rows(12)
         items.sort(
             key=lambda row: (
                 str(row.get("opened_at") or ""),
@@ -1470,8 +1534,12 @@ class MultiDesk:
         return {
             "state": "trading" if items else "scanning",
             "open_count": len(items),
+            "strategy_open_count": strategy_open,
+            "execution_validation_open_count": validation_open,
+            "runtime": runtime,
+            "risk": risk,
             "items": items,
-            "watch": watch[:5],
+            "watch": watch,
             "events": self.trade_events(40),
         }
 
@@ -1574,6 +1642,9 @@ class MultiDesk:
                 "wins": wins,
                 "losses": losses,
                 "win_rate_pct": round(wins / max(wins + losses, 1) * 100, 2),
+                "strategy_risk": self.strategy_risk_snapshot(
+                    equity
+                ),
             },
             "assets": rows,
             "intelligence": floor_intelligence(
@@ -1651,11 +1722,34 @@ class MultiDesk:
     ) -> dict[str, Any]:
         aid = str(trade.get("asset_id") or "")
         book = self.by_id.get(aid)
+        metadata = dict(trade.get("metadata") or {})
+        execution_test = bool(
+            trade.get("execution_test_funded")
+            or metadata.get("execution_test")
+        )
+        routing_horizon = (
+            trade.get("routing_horizon")
+            or trade.get("originating_horizon")
+            or metadata.get("routing_horizon")
+            or metadata.get("originating_horizon")
+        )
         return {
             **dict(trade),
             "symbol": trade.get("symbol") or (book.symbol if book else aid.upper()),
             "pair": trade.get("pair") or (book.pair if book else aid.upper()),
             "broker": trade.get("broker") or (book.broker if book else None),
+            "execution_test": execution_test,
+            "trade_class": (
+                "execution_validation"
+                if execution_test
+                else "strategy"
+            ),
+            "routing_horizon": routing_horizon,
+            "originating_horizon": (
+                trade.get("originating_horizon")
+                or metadata.get("originating_horizon")
+                or routing_horizon
+            ),
         }
 
     def merge_blotter_history(
