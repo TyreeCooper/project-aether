@@ -8,7 +8,10 @@ from typing import Any
 from app.clock import is_new_five_minute
 from app.exits import stop_fill_price, time_stop_due
 from app.fees import fee_rate
-from app.instruments import instrument_spec
+from app.instruments import (
+    instrument_spec,
+    quantity_metadata,
+)
 from app.paper_exec import slipped_price
 from app.playbooks import playbook_profile, playbook_snapshot
 from app.sessions import for_asset
@@ -312,6 +315,7 @@ class PairBook:
             "stop_price": float(stop_price),
             "risk_stop_pct": float(stop_pct),
             "qty": float(qty),
+            **quantity_metadata(self.id, qty),
             "stop_risk_usd": float(stop_risk),
         }
 
@@ -1240,6 +1244,23 @@ class PairBook:
                 "margin_reserved_usd"
             ),
             "quantity_unit": (position or {}).get("quantity_unit"),
+            "base_units": (position or {}).get("base_units"),
+            "standard_lots": (position or {}).get("standard_lots"),
+            "standard_lot_units": (position or {}).get(
+                "standard_lot_units"
+            ),
+            "max_standard_lots": (position or {}).get(
+                "max_standard_lots"
+            ),
+            "contracts": (position or {}).get("contracts"),
+            "shares": (position or {}).get("shares"),
+            "coin_quantity": (position or {}).get(
+                "coin_quantity"
+            ),
+            "max_quantity": (position or {}).get("max_quantity"),
+            "hard_quantity_cap_applied": (position or {}).get(
+                "hard_quantity_cap_applied"
+            ),
             "bars": len(self.bars),
             "context_bars_1h": len(self.bars_1h),
             "context_bars_1d": len(self.bars_1d),

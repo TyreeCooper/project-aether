@@ -7,7 +7,11 @@ import uuid
 from typing import Any
 
 from app.fees import TAKER_FEE, fee_quote
-from app.instruments import instrument_spec, supports_side
+from app.instruments import (
+    instrument_spec,
+    quantity_metadata,
+    supports_side,
+)
 from app.wallet import STARTING_USD
 
 
@@ -473,6 +477,9 @@ class PaperPortfolio:
             )
             if margin_per_unit > 0:
                 raw = min(raw, cap / margin_per_unit)
+        hard_max = spec.get("max_quantity")
+        if hard_max is not None:
+            raw = min(raw, max(float(hard_max), 0.0))
         step = float(spec.get("quantity_step") or 1.0)
         return _round_step(raw, step)
 
@@ -572,7 +579,15 @@ class PaperPortfolio:
             return {"ok": False, "error": "side_not_supported", "asset_id": aid, "side": side}
         spec = instrument_spec(aid)
         step = float(spec.get("quantity_step") or 1.0)
-        qty = _round_step(float(quantity), step)
+        requested_qty = _round_step(float(quantity), step)
+        hard_max = spec.get("max_quantity")
+        qty = requested_qty
+        hard_cap_applied = False
+        if hard_max is not None:
+            max_qty = _round_step(float(hard_max), step)
+            if qty > max_qty:
+                qty = max_qty
+                hard_cap_applied = True
         price = float(price)
         if qty <= 0 or price <= 0:
             return {"ok": False, "error": "bad_qty_or_price", "asset_id": aid}
@@ -605,7 +620,9 @@ class PaperPortfolio:
             "product_type": spec["product_type"],
             "side": side,
             "quantity": qty,
-            "quantity_unit": spec["quantity_unit"],
+            **quantity_metadata(aid, qty),
+            "requested_quantity": requested_qty,
+            "hard_quantity_cap_applied": hard_cap_applied,
             "entry_price": price,
             "entry_reference_price": float(reference_price or price),
             "entry_fee_usd": fee,
@@ -859,6 +876,12 @@ class PaperPortfolio:
             row["position_key"] = str(
                 row.get("position_key") or key
             ).lower()
+            row.update(
+                quantity_metadata(
+                    aid,
+                    float(row.get("quantity") or 0.0),
+                )
+            )
             self.positions[row["position_key"]] = row
 
         # Upgrade open execution-test positions created by the former
@@ -907,7 +930,9 @@ class PaperPortfolio:
                     "product_type": spec["product_type"],
                     "side": "long",
                     "quantity": qty,
-                    "quantity_unit": spec["quantity_unit"],
+                    **quantity_metadata(aid, qty),
+                    "requested_quantity": qty,
+                    "hard_quantity_cap_applied": False,
                     "entry_price": entry,
                     "entry_reference_price": entry,
                     "entry_fee_usd": 0.0,

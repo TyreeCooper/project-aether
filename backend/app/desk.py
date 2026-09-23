@@ -50,7 +50,7 @@ RISK_EPSILON_USD = 1e-6
 POLL = 20
 LOAD_002_RELEASE = "AETHER-LOAD-002-EXP-R1"
 LOAD_002_EXPERIMENT_RUN = "EXP-R1"
-LOAD_003_RELEASE = "AETHER-LOAD-003-B4"
+LOAD_003_RELEASE = "AETHER-LOAD-003-B5"
 STRATEGY_TEST_MODE = "strategy_test"
 EXECUTION_VALIDATION_MODE = "execution_validation"
 
@@ -1008,6 +1008,13 @@ class MultiDesk:
                 ),
                 "fixed_strategy_position_limit": None,
             },
+            "instrument_sizing_policy": {
+                "fx_max_standard_lots": 1.0,
+                "fx_max_base_units": 100000.0,
+                "micro_future_max_contracts": 1.0,
+                "equity_quantity_unit": "shares",
+                "crypto_quantity_unit": "coin_quantity",
+            },
         }
 
     async def initialize_history_persistence(self) -> None:
@@ -1316,6 +1323,27 @@ class MultiDesk:
                     "quantity": position.get("quantity"),
                     "quantity_unit": position.get(
                         "quantity_unit"
+                    ),
+                    "base_units": position.get("base_units"),
+                    "standard_lots": position.get(
+                        "standard_lots"
+                    ),
+                    "standard_lot_units": position.get(
+                        "standard_lot_units"
+                    ),
+                    "max_standard_lots": position.get(
+                        "max_standard_lots"
+                    ),
+                    "contracts": position.get("contracts"),
+                    "shares": position.get("shares"),
+                    "coin_quantity": position.get(
+                        "coin_quantity"
+                    ),
+                    "max_quantity": position.get(
+                        "max_quantity"
+                    ),
+                    "hard_quantity_cap_applied": position.get(
+                        "hard_quantity_cap_applied"
                     ),
                     "notional_usd": round(notional, 4),
                     "margin_reserved_usd": position.get(

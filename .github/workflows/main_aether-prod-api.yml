@@ -101,15 +101,15 @@ jobs:
           assert body.get("live_blocked") is True, body
           PY
 
-          echo "Waiting for AETHER-LOAD-003-B4 strategy-test runtime to become active..."
+          echo "Waiting for AETHER-LOAD-003-B5 strategy-test runtime to become active..."
           for attempt in $(seq 1 18); do
             if curl --fail --silent --show-error --max-time 20 "$base/api/v1/floor" >/tmp/aether-floor-mode.json \
-              && python -c 'import json; b=json.load(open("/tmp/aether-floor-mode.json", encoding="utf-8")); e=b.get("engine") or {}; assert e.get("runtime_release")=="AETHER-LOAD-003-B4"; assert e.get("runtime_mode") == "strategy_test"; assert e.get("strategy_test_mode") is True; assert e.get("execution_test_mode") is False; assert e.get("forced_entries_enabled") is False; assert e.get("live_blocked") is True'; then
+              && python -c 'import json; b=json.load(open("/tmp/aether-floor-mode.json", encoding="utf-8")); e=b.get("engine") or {}; assert e.get("runtime_release")=="AETHER-LOAD-003-B5"; assert e.get("runtime_mode") == "strategy_test"; assert e.get("strategy_test_mode") is True; assert e.get("execution_test_mode") is False; assert e.get("forced_entries_enabled") is False; assert e.get("live_blocked") is True'; then
               echo "Expected strategy-test runtime is active."
               break
             fi
             if [ "$attempt" -eq 18 ]; then
-              echo "Expected LOAD-003-B4 strategy-test runtime never became active."
+              echo "Expected LOAD-003-B5 strategy-test runtime never became active."
               cat /tmp/aether-floor-mode.json 2>/dev/null || true
               exit 1
             fi
@@ -140,7 +140,7 @@ jobs:
           portfolio = body.get("portfolio") or {}
           assert float(portfolio.get("starting_bank") or 0) == 300000.0, portfolio
           engine = body.get("engine") or {}
-          assert engine.get("runtime_release") == "AETHER-LOAD-003-B4", engine
+          assert engine.get("runtime_release") == "AETHER-LOAD-003-B5", engine
           assert engine.get("runtime_mode") == "strategy_test", engine
           assert engine.get("strategy_test_mode") is True, engine
           assert engine.get("execution_test_mode") is False, engine

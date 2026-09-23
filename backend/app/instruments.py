@@ -67,6 +67,9 @@ INSTRUMENTS: dict[str, dict[str, Any]] = {
         "quote_currency": "USD",
         "pip_size": 0.0001,
         "quantity_step": 100.0,
+        "standard_lot_units": 100_000.0,
+        "max_standard_lots": 1.0,
+        "max_quantity": 100_000.0,
         "paper_margin_rate": 0.05,
     },
     "usdjpy": {
@@ -79,6 +82,9 @@ INSTRUMENTS: dict[str, dict[str, Any]] = {
         "quote_currency": "JPY",
         "pip_size": 0.01,
         "quantity_step": 100.0,
+        "standard_lot_units": 100_000.0,
+        "max_standard_lots": 1.0,
+        "max_quantity": 100_000.0,
         "paper_margin_rate": 0.05,
     },
     "mes": {
@@ -92,6 +98,7 @@ INSTRUMENTS: dict[str, dict[str, Any]] = {
         "tick_size": 0.25,
         "tick_value_usd": 1.25,
         "quantity_step": 1.0,
+        "max_quantity": 1.0,
         "paper_margin_rate": 0.10,
     },
     "mnq": {
@@ -105,6 +112,7 @@ INSTRUMENTS: dict[str, dict[str, Any]] = {
         "tick_size": 0.25,
         "tick_value_usd": 0.50,
         "quantity_step": 1.0,
+        "max_quantity": 1.0,
         "paper_margin_rate": 0.10,
     },
     "mgc": {
@@ -118,6 +126,7 @@ INSTRUMENTS: dict[str, dict[str, Any]] = {
         "tick_size": 0.10,
         "tick_value_usd": 1.0,
         "quantity_step": 1.0,
+        "max_quantity": 1.0,
         "paper_margin_rate": 0.10,
     },
     "mcl": {
@@ -131,6 +140,7 @@ INSTRUMENTS: dict[str, dict[str, Any]] = {
         "tick_size": 0.01,
         "tick_value_usd": 1.0,
         "quantity_step": 1.0,
+        "max_quantity": 1.0,
         "paper_margin_rate": 0.10,
     },
     "us10y": {
@@ -144,6 +154,7 @@ INSTRUMENTS: dict[str, dict[str, Any]] = {
         "tick_size": 0.001,
         "tick_value_usd": 1.0,
         "quantity_step": 1.0,
+        "max_quantity": 1.0,
         "paper_margin_rate": 0.10,
     },
 }
@@ -164,3 +175,36 @@ def supports_side(asset_id: str, side: str) -> bool:
     if normalized == "short":
         return bool(spec["supports_short"])
     return False
+
+def quantity_metadata(
+    asset_id: str,
+    quantity: float,
+) -> dict[str, Any]:
+    spec = instrument_spec(asset_id)
+    qty = abs(float(quantity))
+    kind = str(spec["product_type"])
+    out: dict[str, Any] = {
+        "quantity_unit": spec["quantity_unit"],
+        "max_quantity": spec.get("max_quantity"),
+    }
+    if kind == "fx":
+        lot_units = float(
+            spec.get("standard_lot_units") or 100_000.0
+        )
+        out.update(
+            {
+                "base_units": qty,
+                "standard_lot_units": lot_units,
+                "standard_lots": round(qty / lot_units, 8),
+                "max_standard_lots": spec.get(
+                    "max_standard_lots"
+                ),
+            }
+        )
+    elif kind == "future":
+        out["contracts"] = qty
+    elif kind == "equity":
+        out["shares"] = qty
+    elif kind == "crypto_spot":
+        out["coin_quantity"] = qty
+    return out
