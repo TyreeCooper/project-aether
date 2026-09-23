@@ -402,6 +402,15 @@ def _risk_stop_pct(
     )
 
 
+def _filter_enabled(
+    filters: dict[str, bool] | None,
+    name: str,
+) -> bool:
+    if not isinstance(filters, dict):
+        return True
+    return bool(filters.get(name, True))
+
+
 def _mode_snapshot(
     mode: str,
     profile: dict[str, Any],
@@ -410,12 +419,22 @@ def _mode_snapshot(
     bars_1d: list[Bar],
     active_session_ids: set[str],
     cost_pct: float,
+    filter_settings: dict[str, bool] | None = None,
 ) -> dict[str, Any]:
     daily = _direction(bars_1d, 20, 50)
     bars_4h = _aggregate_hours(bars_1h, 4)
     four = _direction(bars_4h, 8, 20)
     hourly = _direction(bars_1h, 8, 20)
     session_ok = _session_ok(profile, mode, active_session_ids)
+    session_enabled = _filter_enabled(filter_settings, "session_window")
+    alignment_enabled = _filter_enabled(
+        filter_settings,
+        "higher_timeframe_alignment",
+    )
+    continuation_enabled = _filter_enabled(
+        filter_settings,
+        "continuation_trigger",
+    )
 
     if mode == "scalp":
         trigger_bars = [
@@ -424,191 +443,161 @@ def _mode_snapshot(
             if float(bar.get("close", bar.get("c", 0)) or 0) > 0
         ]
         trigger = _breakout_direction(trigger_bars, 10)
-        aligned = (
-            daily == four == hourly
-            and daily in {"long", "short"}
-        )
-        direction = daily if aligned else None
+        grain = (daily, four, hourly)
+        aligned = daily == four == hourly and daily in {"long", "short"}
+        warm = "warming" in set(grain) or len(trigger_bars) < 11
+        qualified_reason = "qualified_scalp_grain"
+        continuation_reason = "no_1m_continuation"
+        entry_clock = "1m"
+        bias_clock = "1d/4h/1h"
         score = (
             (20 if daily in {"long", "short"} else 0)
-            + (20 if direction and four == direction else 0)
-            + (20 if direction and hourly == direction else 0)
-            + (30 if direction and trigger == direction else 0)
+            + (20 if daily in {"long", "short"} and four == daily else 0)
+            + (20 if daily in {"long", "short"} and hourly == daily else 0)
+            + (30 if trigger in {"long", "short"} and trigger == daily else 0)
             + (10 if session_ok else 0)
         )
-        if (
-            "warming" in {daily, four, hourly}
-            or len(trigger_bars) < 11
-        ):
-            reason = "warming"
-        elif not session_ok:
-            reason = "session_closed"
-        elif not aligned:
-            reason = "grain_not_aligned"
-        elif trigger != direction:
-            reason = "no_1m_continuation"
-        else:
-            reason = "qualified_scalp_grain"
-        signal = (
-            "buy"
-            if direction == "long"
-            and reason == "qualified_scalp_grain"
-            else "short"
-            if direction == "short"
-            and reason == "qualified_scalp_grain"
-            else None
-        )
-        stop_pct = _risk_stop_pct(
-            trigger_bars[-60:],
-            profile,
-            cost_pct,
-        )
-        opportunity_pct = _opportunity_pct(
-            trigger_bars,
-            10,
-        )
+        stop_source = trigger_bars[-60:]
+        opportunity_pct = _opportunity_pct(trigger_bars, 10)
         signal_key = (
             f"{mode}:{int(trigger_bars[-1]['ts'])}"
             if trigger_bars
             else None
         )
-        return {
-            "mode": mode,
-            "signal": signal,
-            "signal_key": signal_key,
-            "reason": reason,
-            "direction": direction or "flat",
-            "daily_grain": daily,
-            "four_hour_grain": four,
-            "one_hour_grain": hourly,
-            "trigger": trigger,
-            "session_ok": session_ok,
-            "quality_score": score,
-            "risk_stop_pct": stop_pct,
-            "opportunity_pct": round(
-                opportunity_pct,
-                6,
-            ),
-            "entry_clock": "1m",
-            "bias_clock": "1d/4h/1h",
-        }
-
-    if mode == "intraday":
+    elif mode == "intraday":
         trigger_bars = resample_bars(
             bars_1m,
             15,
             require_complete=True,
         )
         trigger = _breakout_direction(trigger_bars, 20)
-        aligned = (
-            daily == four == hourly
-            and daily in {"long", "short"}
-        )
-        direction = daily if aligned else None
+        grain = (daily, four, hourly)
+        aligned = daily == four == hourly and daily in {"long", "short"}
+        warm = "warming" in set(grain) or len(trigger_bars) < 21
+        qualified_reason = "qualified_intraday_grain"
+        continuation_reason = "no_15m_continuation"
+        entry_clock = "15m"
+        bias_clock = "1d/4h"
         score = (
             (25 if daily in {"long", "short"} else 0)
-            + (25 if direction and four == direction else 0)
-            + (20 if direction and hourly == direction else 0)
-            + (20 if direction and trigger == direction else 0)
+            + (25 if daily in {"long", "short"} and four == daily else 0)
+            + (20 if daily in {"long", "short"} and hourly == daily else 0)
+            + (20 if trigger in {"long", "short"} and trigger == daily else 0)
             + (10 if session_ok else 0)
         )
-        if (
-            "warming" in {daily, four, hourly}
-            or len(trigger_bars) < 21
-        ):
-            reason = "warming"
-        elif not session_ok:
-            reason = "session_closed"
-        elif not aligned:
-            reason = "grain_not_aligned"
-        elif trigger != direction:
-            reason = "no_15m_continuation"
-        else:
-            reason = "qualified_intraday_grain"
-        signal = (
-            "buy"
-            if direction == "long"
-            and reason == "qualified_intraday_grain"
-            else "short"
-            if direction == "short"
-            and reason == "qualified_intraday_grain"
-            else None
-        )
-        stop_pct = _risk_stop_pct(
-            trigger_bars,
-            profile,
-            cost_pct,
-        )
-        opportunity_pct = _opportunity_pct(
-            trigger_bars,
-            20,
-        )
+        stop_source = trigger_bars
+        opportunity_pct = _opportunity_pct(trigger_bars, 20)
         signal_key = (
             f"{mode}:{int(trigger_bars[-1]['ts'])}"
             if trigger_bars
             else None
         )
-        return {
-            "mode": mode,
-            "signal": signal,
-            "signal_key": signal_key,
-            "reason": reason,
-            "direction": direction or "flat",
-            "daily_grain": daily,
-            "four_hour_grain": four,
-            "one_hour_grain": hourly,
-            "trigger": trigger,
-            "session_ok": session_ok,
-            "quality_score": score,
-            "risk_stop_pct": stop_pct,
-            "opportunity_pct": round(
-                opportunity_pct,
-                6,
-            ),
-            "entry_clock": "15m",
-            "bias_clock": "1d/4h",
-        }
-
-    trigger = _breakout_direction(bars_1h, 20)
-    aligned = daily == four and daily in {"long", "short"}
-    direction = daily if aligned else None
-    score = (
-        (35 if daily in {"long", "short"} else 0)
-        + (30 if direction and four == direction else 0)
-        + (25 if direction and trigger == direction else 0)
-        + (10 if session_ok else 0)
-    )
-    if "warming" in {daily, four} or len(bars_1h) < 21:
-        reason = "warming"
-    elif not session_ok:
-        reason = "session_closed"
-    elif not aligned:
-        reason = "grain_not_aligned"
-    elif trigger != direction:
-        reason = "no_1h_continuation"
     else:
-        reason = "qualified_swing_grain"
+        trigger_bars = [
+            normalize_bar(bar)
+            for bar in bars_1h
+            if float(bar.get("close", bar.get("c", 0)) or 0) > 0
+        ]
+        trigger = _breakout_direction(trigger_bars, 20)
+        grain = (daily, four)
+        aligned = daily == four and daily in {"long", "short"}
+        warm = "warming" in set(grain) or len(trigger_bars) < 21
+        qualified_reason = "qualified_swing_grain"
+        continuation_reason = "no_1h_continuation"
+        entry_clock = "1h"
+        bias_clock = "1d/4h"
+        score = (
+            (35 if daily in {"long", "short"} else 0)
+            + (30 if daily in {"long", "short"} and four == daily else 0)
+            + (25 if trigger in {"long", "short"} and trigger == daily else 0)
+            + (10 if session_ok else 0)
+        )
+        stop_source = bars_1h
+        opportunity_pct = _opportunity_pct(bars_1h, 20)
+        signal_key = (
+            f"{mode}:{int(normalize_bar(bars_1h[-1])['ts'])}"
+            if bars_1h
+            else None
+        )
+
+    if alignment_enabled:
+        direction = daily if aligned else None
+    else:
+        direction = (
+            trigger
+            if trigger in {"long", "short"}
+            else daily
+            if daily in {"long", "short"}
+            else four
+            if four in {"long", "short"}
+            else hourly
+            if hourly in {"long", "short"}
+            else None
+        )
+
+    continuation_ok = trigger in {"long", "short"} and trigger == direction
+    direction_ok = direction in {"long", "short"}
+
+    trace = {
+        "data_warmup": "rejected" if warm else "passed",
+        "session_window": (
+            "bypassed"
+            if not session_enabled
+            else "passed"
+            if session_ok
+            else "rejected"
+        ),
+        "higher_timeframe_alignment": (
+            "bypassed"
+            if not alignment_enabled
+            else "passed"
+            if aligned
+            else "rejected"
+        ),
+        "continuation_trigger": (
+            "bypassed"
+            if not continuation_enabled
+            else "passed"
+            if continuation_ok
+            else "rejected"
+        ),
+        "direction_required": "passed" if direction_ok else "rejected",
+    }
+
+    if warm:
+        reason = "warming"
+    elif session_enabled and not session_ok:
+        reason = "session_closed"
+    elif alignment_enabled and not aligned:
+        reason = "grain_not_aligned"
+    elif continuation_enabled and not continuation_ok:
+        reason = continuation_reason
+    elif not direction_ok:
+        reason = "no_direction"
+    else:
+        bypassed = any(value == "bypassed" for value in trace.values())
+        reason = (
+            f"{qualified_reason}_filters_bypassed"
+            if bypassed
+            else qualified_reason
+        )
+
+    qualified = (
+        not warm
+        and (session_ok or not session_enabled)
+        and (aligned or not alignment_enabled)
+        and (continuation_ok or not continuation_enabled)
+        and direction_ok
+    )
     signal = (
         "buy"
-        if direction == "long" and reason == "qualified_swing_grain"
+        if qualified and direction == "long"
         else "short"
-        if direction == "short" and reason == "qualified_swing_grain"
+        if qualified and direction == "short"
         else None
     )
-    stop_pct = _risk_stop_pct(
-        bars_1h,
-        profile,
-        cost_pct,
-    )
-    opportunity_pct = _opportunity_pct(
-        bars_1h,
-        20,
-    )
-    signal_key = (
-        f"{mode}:{int(normalize_bar(bars_1h[-1])['ts'])}"
-        if bars_1h
-        else None
-    )
+
+    stop_pct = _risk_stop_pct(stop_source, profile, cost_pct)
     return {
         "mode": mode,
         "signal": signal,
@@ -622,12 +611,10 @@ def _mode_snapshot(
         "session_ok": session_ok,
         "quality_score": score,
         "risk_stop_pct": stop_pct,
-        "opportunity_pct": round(
-            opportunity_pct,
-            6,
-        ),
-        "entry_clock": "1h",
-        "bias_clock": "1d/4h",
+        "opportunity_pct": round(opportunity_pct, 6),
+        "entry_clock": entry_clock,
+        "bias_clock": bias_clock,
+        "filter_trace": trace,
     }
 
 
@@ -640,6 +627,7 @@ def _crypto_daily(
     btc_bias_on: bool,
     btc_in_position: bool,
     cost_pct: float,
+    filter_settings: dict[str, bool] | None = None,
 ) -> dict[str, Any]:
     clean = [
         normalize_bar(b)
@@ -663,6 +651,10 @@ def _crypto_daily(
         "execution_status": "no_trade",
         "short_execution_supported": False,
         "opportunities": [],
+        "filter_trace": {
+            "data_warmup": "rejected",
+            "crypto_breakout_direction": "rejected",
+        },
     }
     if len(clean) < 200:
         return base
@@ -702,23 +694,66 @@ def _crypto_daily(
     if profile.get("requires_btc_long"):
         rider_ok = bool(btc_bias_on and btc_in_position)
 
-    signal = None
-    reason = "no_20d_breakout"
-    if not bias_on:
+    trend_enabled = _filter_enabled(filter_settings, "crypto_trend_bias")
+    rider_enabled = _filter_enabled(filter_settings, "crypto_btc_rider")
+    structure_enabled = _filter_enabled(
+        filter_settings,
+        "crypto_structure_minimum",
+    )
+
+    trace = {
+        "data_warmup": "passed",
+        "crypto_breakout_direction": "passed" if breakout else "rejected",
+        "crypto_trend_bias": (
+            "bypassed"
+            if not trend_enabled
+            else "passed"
+            if bias_on
+            else "rejected"
+        ),
+        "crypto_btc_rider": (
+            "bypassed"
+            if not rider_enabled
+            else "passed"
+            if rider_ok
+            else "rejected"
+        ),
+        "crypto_structure_minimum": (
+            "bypassed"
+            if not structure_enabled
+            else "passed"
+            if structure_distance >= 2.0
+            else "rejected"
+        ),
+        "direction_required": "passed" if breakout else "rejected",
+    }
+
+    if not breakout:
+        signal = None
+        reason = "no_20d_breakout"
+    elif trend_enabled and not bias_on:
+        signal = None
         reason = "below_200d_sma"
-    elif not rider_ok:
+    elif rider_enabled and not rider_ok:
+        signal = None
         reason = "btc_rider_gate_closed"
-    elif structure_distance < 2.0:
+    elif structure_enabled and structure_distance < 2.0:
+        signal = None
         reason = "structure_under_2pct"
-    elif breakout:
+    else:
         signal = "buy"
-        reason = "qualified_daily_200_20"
+        bypassed = any(value == "bypassed" for value in trace.values())
+        reason = (
+            "qualified_daily_200_20_filters_bypassed"
+            if bypassed
+            else "qualified_daily_200_20"
+        )
 
     exit_signal = None
     if in_position and (
         current < prior_low
-        or current < float(ma200)
-        or not rider_ok
+        or (trend_enabled and current < float(ma200))
+        or (rider_enabled and not rider_ok)
     ):
         exit_signal = "sell"
 
@@ -734,7 +769,7 @@ def _crypto_daily(
         "signal": signal,
         "executable_signal": signal,
         "exit_signal": exit_signal,
-        "direction": "long" if bias_on else "flat",
+        "direction": "long" if breakout else "flat",
         "reason": reason,
         "quality_score": score,
         "risk_stop_pct": round(risk_stop, 6),
@@ -743,20 +778,13 @@ def _crypto_daily(
         "sma_200": round(float(ma200), 8),
         "prior_20d_close_high": round(prior_high, 8),
         "prior_20d_close_low": round(prior_low, 8),
-        "structure_distance_pct": round(
-            structure_distance,
-            6,
-        ),
-        "opportunity_pct": round(
-            structure_distance,
-            6,
-        ),
+        "structure_distance_pct": round(structure_distance, 6),
+        "opportunity_pct": round(structure_distance, 6),
         "atr_14_pct": round(atr_pct, 6),
         "btc_rider_gate_open": rider_ok,
+        "filter_trace": trace,
         "execution_status": (
-            "paper_long_ready"
-            if signal == "buy"
-            else "no_trade"
+            "paper_long_ready" if signal == "buy" else "no_trade"
         ),
         "opportunities": [
             {
@@ -785,6 +813,7 @@ def playbook_snapshot(
     btc_in_position: bool = False,
     position_side: str | None = None,
     requested_mode: str | None = None,
+    filter_settings: dict[str, bool] | None = None,
 ) -> dict[str, Any]:
     aid = str(asset_id).lower()
     profile = playbook_profile(aid)
@@ -818,6 +847,7 @@ def playbook_snapshot(
                 else True
             ),
             cost_pct=cost_pct,
+            filter_settings=filter_settings,
         )
 
     active = set(active_session_ids or set())
@@ -842,6 +872,7 @@ def playbook_snapshot(
             bars_1d,
             active,
             cost_pct,
+            filter_settings,
         )
         for mode in modes
     ]
