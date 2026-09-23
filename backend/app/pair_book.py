@@ -402,10 +402,15 @@ class PairBook:
             self.entry_mode
             or profile["primary"]
         )
+        strategy_mode = (
+            "daily_swing"
+            if self.id in {"btc", "eth"}
+            else mode
+        )
         snap = self.snapshot_strategy(
             btc_bias_on=btc_bias_on,
             btc_in_position=btc_in_position,
-            requested_mode=mode,
+            requested_mode=strategy_mode,
         )
         rate = fee_rate(
             self.id,
