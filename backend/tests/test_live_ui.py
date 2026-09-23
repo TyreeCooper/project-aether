@@ -72,3 +72,21 @@ def test_floor_exposes_margin_and_bank_labels():
     assert "Free Margin" in js
     assert "Gross Exposure" in js
     assert "Test Overflow" in js
+
+
+
+def test_operator_ui_is_server_verified_and_read_only_until_connected():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    js = (STATIC / "aether-app.js").read_text(encoding="utf-8")
+    assert 'id="disconnectOperator"' in html
+    assert "operatorAuthenticated:false" in js
+    assert "authConfigured:false" in js
+    assert "/api/v1/auth/status" in js
+    assert "renderOperatorControls" in js
+    assert "sessionStorage" in js
+    assert 'localStorage.removeItem("aether-operator-token")' in js
+    assert 'el.value=""' in js
+    assert 'el.disabled=connected||!configured' in js
+    assert 'const armDisabled=!connected||armed' in js
+    assert 'disarmDisabled=!connected||!armed' in js
+    assert 'if(!state.operatorAuthenticated){toast("Operator authentication required.")' in js

@@ -133,16 +133,27 @@ class ConfigBody(BaseModel):
 OPERATOR_TOKEN = os.getenv("AETHER_OPERATOR_TOKEN", "").strip()
 
 
+def operator_authenticated(x_operator_token: str | None) -> bool:
+    return bool(
+        OPERATOR_TOKEN
+        and x_operator_token
+        and hmac.compare_digest(x_operator_token, OPERATOR_TOKEN)
+    )
+
+
 def require_operator(
     x_operator_token: str | None = Header(default=None),
 ) -> None:
     if not OPERATOR_TOKEN:
-        return
-    if not x_operator_token or not hmac.compare_digest(
-        x_operator_token,
-        OPERATOR_TOKEN,
-    ):
-        raise HTTPException(status_code=401, detail="operator authentication required")
+        raise HTTPException(
+            status_code=503,
+            detail="operator authentication not configured; app is read-only",
+        )
+    if not operator_authenticated(x_operator_token):
+        raise HTTPException(
+            status_code=401,
+            detail="operator authentication required",
+        )
 
 
 def _basis(exec_last, watch_last):
@@ -251,7 +262,8 @@ async def settings():
         },
         "security": {
             "operator_token_configured": bool(OPERATOR_TOKEN),
-            "mutations_protected": bool(OPERATOR_TOKEN),
+            "mutations_protected": True,
+            "read_only_without_verified_token": True,
         },
         "live": {
             "keys_present": bool(live_state.get("keys_present")),
@@ -454,10 +466,15 @@ async def storage():
 
 
 @app.get("/api/v1/auth/status")
-async def auth_status():
+async def auth_status(
+    x_operator_token: str | None = Header(default=None),
+):
+    authenticated = operator_authenticated(x_operator_token)
     return {
         "configured": bool(OPERATOR_TOKEN),
-        "enforced_on_mutations": bool(OPERATOR_TOKEN),
+        "enforced_on_mutations": True,
+        "authenticated": authenticated,
+        "read_only": not authenticated,
     }
 
 

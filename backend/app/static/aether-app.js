@@ -1,6 +1,17 @@
 (function(){
   const $=id=>document.getElementById(id);
-  const state={floor:null,asset:null,live:null,blotter:[],settings:null,token:localStorage.getItem("aether-operator-token")||""};
+  const legacyToken=localStorage.getItem("aether-operator-token")||"";
+  localStorage.removeItem("aether-operator-token");
+  const state={
+    floor:null,
+    asset:null,
+    live:null,
+    blotter:[],
+    settings:null,
+    token:sessionStorage.getItem("aether-operator-token")||legacyToken,
+    operatorAuthenticated:false,
+    authConfigured:false
+  };
   const money=n=>{const v=Number(n);if(!Number.isFinite(v))return "—";const d=Math.abs(v)<1?4:2;return "$"+v.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:d});};
   const num=(n,d=4)=>{const v=Number(n);return Number.isFinite(v)?v.toLocaleString("en-US",{maximumFractionDigits:d}):"—";};
   const pct=n=>{const v=Number(n);return Number.isFinite(v)?((v>0?"+":"")+v.toFixed(2)+"%"):"—";};
@@ -34,16 +45,68 @@
     try{
       const out=await fn();
       btn.classList.remove("working");btn.classList.add("state-success");btn.textContent="Done";
-      setTimeout(()=>{btn.classList.remove("state-success");btn.disabled=false;btn.textContent=original;},650);
+      setTimeout(()=>{btn.classList.remove("state-success");btn.textContent=original;renderOperatorControls();},650);
       return out;
     }catch(e){
       btn.classList.remove("working");btn.classList.add("state-error");btn.textContent="Error";
-      setTimeout(()=>{btn.classList.remove("state-error");btn.disabled=false;btn.textContent=original;},900);
+      setTimeout(()=>{btn.classList.remove("state-error");btn.textContent=original;renderOperatorControls();},900);
       throw e;
     }
   }
   async function get(path){const r=await fetch(path,{cache:"no-store"});if(!r.ok)throw new Error(path);return r.json();}
-  async function post(path){const headers={};if(state.token)headers["X-Operator-Token"]=state.token;const r=await fetch(path,{method:"POST",headers});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.detail||d.error||"Request failed");return d;}
+  function clearOperatorSession(){
+    state.token="";
+    state.operatorAuthenticated=false;
+    sessionStorage.removeItem("aether-operator-token");
+  }
+  async function post(path){const headers={};if(state.token)headers["X-Operator-Token"]=state.token;const r=await fetch(path,{method:"POST",headers});const d=await r.json().catch(()=>({}));if(!r.ok){if(r.status===401||r.status===503){clearOperatorSession();if(r.status===503)state.authConfigured=false;renderOperatorControls();}throw new Error(d.detail||d.error||"Request failed");}return d;}
+  function operatorArmed(){return Boolean(state.settings?.engine?.armed ?? state.floor?.armed);}
+  function renderOperatorControls(){
+    const connected=Boolean(state.operatorAuthenticated),configured=Boolean(state.authConfigured),armed=operatorArmed();
+    [["authBadge","LOCKED"],["settingsAuthBadge","LOCKED"]].forEach(([id])=>{const el=$(id);if(!el)return;el.textContent=connected?"CONNECTED":(configured?"LOCKED":"READ ONLY");el.className="badge "+(connected?"good":"bad");});
+    ["operatorToken","settingsOperatorToken"].forEach(id=>{const el=$(id);if(!el)return;el.value="";el.disabled=connected||!configured;el.placeholder=connected?"Verified operator session":(configured?"Operator token":"Operator token not configured");});
+    ["connectOperator","settingsConnectOperator"].forEach(id=>{const el=$(id);if(!el)return;el.disabled=connected||!configured;el.textContent=connected?"Connected":"Connect";});
+    ["settingsDisconnectOperator","disconnectOperator"].forEach(id=>{const el=$(id);if(el)el.disabled=!connected;});
+    const armDisabled=!connected||armed,disarmDisabled=!connected||!armed;
+    ["armDesk","settingsArm"].forEach(id=>{const el=$(id);if(el)el.disabled=armDisabled;});
+    ["disarmDesk","settingsDisarm"].forEach(id=>{const el=$(id);if(el)el.disabled=disarmDisabled;});
+    ["saveDeskSettings","settingAllocation","settingPoll"].forEach(id=>{const el=$(id);if(el)el.disabled=!connected;});
+    const add=$("addAssetBtn");if(add)add.disabled=!connected;
+  }
+  async function refreshAuth(){
+    const headers={};if(state.token)headers["X-Operator-Token"]=state.token;
+    try{
+      const r=await fetch("/api/v1/auth/status",{headers,cache:"no-store"});
+      const d=await r.json();
+      state.authConfigured=Boolean(d.configured);
+      state.operatorAuthenticated=Boolean(d.authenticated);
+      if(!state.operatorAuthenticated){clearOperatorSession();}
+    }catch(_e){
+      state.authConfigured=false;
+      clearOperatorSession();
+    }
+    renderOperatorControls();
+  }
+  async function connectOperator(inputId){
+    const token=$(inputId)?.value.trim()||"";
+    if(!token)throw new Error("Operator token required");
+    state.token=token;
+    try{
+      await post("/api/v1/auth/verify");
+      state.authConfigured=true;
+      state.operatorAuthenticated=true;
+      sessionStorage.setItem("aether-operator-token",token);
+      renderOperatorControls();
+    }catch(e){
+      clearOperatorSession();
+      renderOperatorControls();
+      throw e;
+    }
+  }
+  function disconnectOperator(){
+    clearOperatorSession();
+    renderOperatorControls();
+  }
   function metric(label,value,cls=""){return '<div class="metric"><span>'+esc(label)+'</span><b class="'+cls+'">'+esc(value)+'</b></div>';}
   function setText(id,v,cls){const e=$(id);if(!e)return;e.textContent=v;if(cls)e.className=cls;}
   function navAssets(){
@@ -53,6 +116,7 @@
     $("assetNav").querySelectorAll("[data-asset]").forEach(b=>b.addEventListener("click",()=>go("asset/"+b.dataset.asset)));
     $("addAssetBtn")?.addEventListener("click",openAssetPicker);
     markNav();
+    renderOperatorControls();
   }
   function markNav(){
     const h=location.hash.replace(/^#\/?/,"")||"floor";
@@ -192,6 +256,7 @@
     $("deskBlotter").innerHTML=rows.length?'<table><thead><tr><th>Net P&L</th><th>Asset</th><th>Side</th><th>Mode</th><th>Entry</th><th>Exit</th><th>Trade Duration</th><th>Return</th><th>Fees</th><th>Exit reason</th><th>Closed</th></tr></thead><tbody>'+rows.map(t=>'<tr><td class="'+pnlClass(t.realized_pnl_usd)+'">'+money(t.realized_pnl_usd)+'</td><td><b>'+esc(t.pair||t.symbol||"—")+'</b></td><td>'+esc(String(t.side||"").toUpperCase())+'</td><td>'+esc(String(t.mode||"—").toUpperCase())+'</td><td>'+money(t.entry_price)+'</td><td>'+money(t.exit_price)+'</td><td>'+esc(t.duration_seconds==null?"—":duration(t.duration_seconds))+'</td><td class="'+pnlClass(t.net_return_pct)+'">'+(t.net_return_pct==null?"—":pct(t.net_return_pct))+'</td><td>'+money(t.fees_usd)+'</td><td>'+esc(String(t.exit_reason||"—").replaceAll("_"," "))+'</td><td>'+esc(when(t.closed_at))+'</td></tr>').join("")+'</tbody></table>':'<div class="empty">No completed round-trip paper trades match these filters.</div>';
   }
   function openAssetPicker(){
+    if(!state.operatorAuthenticated){toast("Operator authentication required.");return;}
     $("assetPicker").classList.remove("hidden");
     $("assetSearch").value="";
     $("assetSearchResults").innerHTML="";
@@ -213,7 +278,7 @@
     }catch(e){$("assetSearchStatus").textContent="Kraken asset search is temporarily unavailable.";}
   }
   async function addKrakenAsset(pair,button){
-    if(!state.token){toast("Connect operator access in Booth before adding assets.");return;}
+    if(!state.operatorAuthenticated){toast("Operator authentication required.");return;}
     try{
       await runButton(button,"Adding…",async()=>{
         const headers={"Content-Type":"application/json","X-Operator-Token":state.token};
@@ -253,8 +318,9 @@
     $("settingsData").innerHTML=metric("Primary venue",s.venue||"Kraken")+metric("Watch venue",s.watch_venue||"Binance.US")+metric("Asset books",String(s.assets||0))+metric("Poll cadence",(d.quote_poll_seconds||"—")+" sec")+metric("State persistence",d.state_persistence?"ON":"OFF")+metric("Resume armed state",d.resume_armed_after_restart?"ON":"OFF");
     const intel=s.intelligence||{},intelSources=intel.sources||[],cryptoIntel=intel.crypto_calendar||{},officialMacro=intel.official_macro_sources||{},assetSources=intel.asset_source_registry||{},trust=assetSources.trust_states||{},health=intel.health||{};
     $("settingsIntelligence").innerHTML=metric("Market health",String(health.market?.state||"unavailable").toUpperCase(),health.market?.state==="healthy"?"up":"")+metric("Macro health",String(health.macro_calendar?.state||"unavailable").toUpperCase(),health.macro_calendar?.state==="healthy"?"up":"")+metric("News health",String(health.news?.state||"unavailable").toUpperCase(),health.news?.state==="healthy"?"up":"")+metric("News coverage",health.news?.coverage_pct==null?"—":num(health.news.coverage_pct,1)+"%")+metric("Community health",String(health.community?.state||"unavailable").toUpperCase(),health.community?.state==="healthy"?"up":"")+metric("Community feed coverage",health.community?.coverage_pct==null?"—":num(health.community.coverage_pct,1)+"%")+metric("Macro calendar",intel.macro_calendar_connected?"CONNECTED":"DEGRADED",intel.macro_calendar_connected?"up":"down")+metric("BLS primary",String(officialMacro.bls?.status||"unavailable").toUpperCase(),officialMacro.bls?.connected?"up":"")+metric("Federal Reserve primary",String(officialMacro.federal_reserve?.status||"planned").toUpperCase())+metric("BEA primary",String(officialMacro.bea?.status||"planned").toUpperCase())+metric("Crypto calendar",String(cryptoIntel.status||"unconfigured").toUpperCase(),cryptoIntel.connected?"up":"")+metric("Crypto events loaded",String(cryptoIntel.events_loaded||0))+metric("Crypto trade influence",cryptoIntel.trade_influence_enabled?"ENABLED":"SHADOW ONLY")+metric("Community coverage",String((intel.community_assets_configured||[]).length)+" assets")+metric("Asset source registry",String(assetSources.sources||0)+" sources")+metric("Trusted sources",String(trust.trusted||0))+metric("Candidate sources",String(trust.candidate||0))+metric("Disabled sources",String(trust.disabled||0))+metric("Community trade influence",intel.community_trade_influence_enabled?"ENABLED":"SHADOW ONLY")+metric("Event policy",String(intel.event_policy?.mode||"observe_only").toUpperCase())+metric("Connected sources",String(intelSources.filter(x=>x.status==="connected").length))+metric("Planned sources",String(intelSources.filter(x=>x.status==="planned").length));
-    $("settingsSecurity").innerHTML=metric("Operator token",sec.operator_token_configured?"CONFIGURED":"NOT CONFIGURED",sec.operator_token_configured?"up":"down")+metric("Mutations protected",sec.mutations_protected?"YES":"NO",sec.mutations_protected?"up":"down");
-    $("settingsAuthBadge").textContent=state.token?"CONNECTED":"LOCKED";$("settingsAuthBadge").className="badge "+(state.token?"good":"bad");
+    state.authConfigured=Boolean(sec.operator_token_configured);
+    $("settingsSecurity").innerHTML=metric("Operator token",sec.operator_token_configured?"CONFIGURED":"NOT CONFIGURED",sec.operator_token_configured?"up":"down")+metric("Mutations protected",sec.mutations_protected?"YES":"NO",sec.mutations_protected?"up":"down")+metric("Unauthenticated mode",sec.read_only_without_verified_token?"READ ONLY":"UNSAFE",sec.read_only_without_verified_token?"up":"down");
+    renderOperatorControls();
     $("settingsLiveBadge").textContent=live.live_blocked?"BLOCKED":"READY";$("settingsLiveBadge").className="badge "+(live.live_blocked?"amber":"good");
     $("settingsLive").innerHTML=metric("Kraken keys",live.keys_present?"PRESENT":"NOT PRESENT",live.keys_present?"up":"")+metric("Live flag",live.live_flag?"ON":"OFF")+metric("Orders enabled",live.orders_enabled?"YES":"NO",live.orders_enabled?"down":"up")+metric("Safety state",live.live_blocked?"LIVE BLOCKED":"LIVE READY",live.live_blocked?"up":"down")+metric("Status",live.reason||"—");
   }
@@ -285,17 +351,18 @@
   document.querySelectorAll(".bottom-nav button").forEach(b=>b.onclick=()=>go(b.dataset.route));
   $("floorLiveStrip")?.addEventListener("click",()=>go("live"));
   $("backFloor").onclick=()=>go("floor");
-  $("connectOperator").onclick=async()=>{try{await runButton($("connectOperator"),"Connecting…",async()=>{state.token=$("operatorToken").value.trim();localStorage.setItem("aether-operator-token",state.token);await post("/api/v1/auth/verify");$("authBadge").textContent="CONNECTED";$("authBadge").className="badge good";if($("settingsOperatorToken"))$("settingsOperatorToken").value=state.token;toast("Operator connected");});}catch(e){$("authBadge").textContent="LOCKED";$("authBadge").className="badge bad";toast("Authentication failed");}};
+  $("connectOperator").onclick=async()=>{try{await runButton($("connectOperator"),"Connecting…",async()=>{await connectOperator("operatorToken");toast("Operator connected");});}catch(e){toast(e.message||"Authentication failed");}};
   $("armDesk").onclick=async()=>{try{await runButton($("armDesk"),"Arming…",async()=>{await post("/api/v1/desk/arm");await loadFloor();toast("Aether Vector Engine armed");});}catch(e){toast(e.message);}};
   $("disarmDesk").onclick=async()=>{try{await runButton($("disarmDesk"),"Disarming…",async()=>{await post("/api/v1/desk/disarm");await loadFloor();toast("Engine disarmed");});}catch(e){toast(e.message);}};
   $("settingsArm").onclick=async()=>{try{await runButton($("settingsArm"),"Arming…",async()=>{await post("/api/v1/desk/arm");await loadFloor();await loadSettings();toast("Engine armed");});}catch(e){toast(e.message);}};
   $("settingsDisarm").onclick=async()=>{try{await runButton($("settingsDisarm"),"Disarming…",async()=>{await post("/api/v1/desk/disarm");await loadFloor();await loadSettings();toast("Engine disarmed");});}catch(e){toast(e.message);}};
-  $("saveDeskSettings").onclick=async()=>{try{await runButton($("saveDeskSettings"),"Saving…",async()=>{const headers={"Content-Type":"application/json"};if(state.token)headers["X-Operator-Token"]=state.token;const body={allocation_per_entry_pct:Number($("settingAllocation").value),quote_poll_seconds:Number($("settingPoll").value)};const r=await fetch("/api/v1/settings",{method:"POST",headers,body:JSON.stringify(body)});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.detail||"Save failed");await loadSettings();await loadFloor();toast("Trading settings saved");});}catch(e){toast(e.message);}};
-  $("settingsConnectOperator").onclick=async()=>{try{await runButton($("settingsConnectOperator"),"Connecting…",async()=>{state.token=$("settingsOperatorToken").value.trim();localStorage.setItem("aether-operator-token",state.token);await post("/api/v1/auth/verify");$("operatorToken").value=state.token;await loadSettings();toast("Operator connected");});}catch(e){toast("Authentication failed");}};
-  $("settingsDisconnectOperator").onclick=()=>{state.token="";localStorage.removeItem("aether-operator-token");$("settingsOperatorToken").value="";$("operatorToken").value="";renderSettings();toast("Operator disconnected");};
-  if(state.token){$("operatorToken").value=state.token;$("settingsOperatorToken").value=state.token;}
+  $("saveDeskSettings").onclick=async()=>{try{await runButton($("saveDeskSettings"),"Saving…",async()=>{const headers={"Content-Type":"application/json","X-Operator-Token":state.token};const body={allocation_per_entry_pct:Number($("settingAllocation").value),quote_poll_seconds:Number($("settingPoll").value)};const r=await fetch("/api/v1/settings",{method:"POST",headers,body:JSON.stringify(body)});const d=await r.json().catch(()=>({}));if(!r.ok){if(r.status===401||r.status===503){clearOperatorSession();renderOperatorControls();}throw new Error(d.detail||"Save failed");}await loadSettings();await loadFloor();toast("Trading settings saved");});}catch(e){toast(e.message);}};
+  $("settingsConnectOperator").onclick=async()=>{try{await runButton($("settingsConnectOperator"),"Connecting…",async()=>{await connectOperator("settingsOperatorToken");await loadSettings();toast("Operator connected");});}catch(e){toast(e.message||"Authentication failed");}};
+  $("settingsDisconnectOperator").onclick=()=>{disconnectOperator();renderSettings();toast("Operator disconnected");};
+  $("disconnectOperator").onclick=()=>{disconnectOperator();toast("Operator disconnected");};
   addEventListener("hashchange",route);
   setInterval(()=>{const d=new Date();$("floorClock").textContent=d.toLocaleTimeString([], {hour:"2-digit",minute:"2-digit",second:"2-digit"});document.querySelectorAll(".live-duration[data-opened]").forEach(el=>{const seconds=liveDuration(el.dataset.opened);if(seconds!=null)el.textContent=duration(seconds);});},1000);
-  route();
+  async function boot(){await refreshAuth();await route();renderOperatorControls();}
+  boot();
   setInterval(async()=>{try{await loadFloor();const r=location.hash.replace(/^#\/?/,"");if(r.startsWith("asset/"))await loadAsset(r.split("/")[1]);if(r==="live")await loadLive();if(r==="blotter")await loadBlotter();}catch(e){}},8000);
 })();
