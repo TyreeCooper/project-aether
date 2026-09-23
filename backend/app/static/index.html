@@ -7,7 +7,7 @@
 <meta name="aether-release" content="AETHER-LOAD-003-B9"/>
 <title>Aether Trading Desk</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml"/>
-<link rel="stylesheet" href="/static/aether-app.css?v=AETHER-LOAD-003-B9"/>
+<link rel="stylesheet" href="/static/aether-app.css?v=AETHER-FILTERS-R1"/>
 <link rel="stylesheet" href="/static/aether-fit.css?v=AETHER-LOAD-003-B9"/>
 </head>
 <body>
@@ -126,6 +126,7 @@
       <section class="dashboard-grid">
         <article class="panel"><header><div><p class="eyebrow">ENGINE</p><h2>Runtime State</h2></div><span id="settingsArmedBadge" class="badge">—</span></header><div id="settingsEngineState" class="metric-list"></div><div class="control-row compact-controls"><button id="settingsArm" class="action primary" type="button">Arm</button><button id="settingsDisarm" class="action" type="button">Disarm</button></div></article>
         <article class="panel"><header><div><p class="eyebrow">TRADING</p><h2>Desk Behavior</h2></div></header><label class="setting-field"><span>Allocation per new position</span><div><input id="settingAllocation" class="input mini-input" type="number" min="1" max="25" step="0.5"/><em>%</em></div></label><label class="setting-field"><span>Quote / decision poll</span><div><input id="settingPoll" class="input mini-input" type="number" min="5" max="120" step="1"/><em>sec</em></div></label><button id="saveDeskSettings" class="action primary small-action" type="button">Save Trading Settings</button></article>
+        <article class="panel span-2 trade-filter-panel"><header><div><p class="eyebrow">TRADE TRAFFIC</p><h2>Filter Stack</h2></div><span id="settingsFilterSummary" class="badge">—</span></header><p class="filter-intro">Turn qualification filters on or off and watch where trade traffic is being reduced. Locked safety gates cannot be disabled.</p><div class="filter-master-actions"><button id="filtersAllOn" class="action" type="button">All Optional ON</button><button id="filtersAllOff" class="action" type="button">All Optional OFF</button><span id="settingsFilterTrafficNote" class="muted">Traffic counts persist with desk state.</span></div><div class="filter-section-head"><span>ADJUSTABLE QUALIFICATION FILTERS</span><small>These change how tight the funnel is.</small></div><div id="settingsOptionalFilters" class="filter-stack"></div><div class="filter-section-head locked-head"><span>NON-NEGOTIABLE GATES</span><small>Always enforced.</small></div><div id="settingsLockedFilters" class="filter-stack"></div></article>
         <article class="panel"><header><div><p class="eyebrow">EXECUTION MODEL</p><h2>Cost & Guardrails</h2></div></header><div id="settingsExecution" class="metric-list"></div></article>
         <article class="panel"><header><div><p class="eyebrow">DATA</p><h2>Market & Persistence</h2></div></header><div id="settingsData" class="metric-list"></div></article>
         <article class="panel span-2"><header><div><p class="eyebrow">INTELLIGENCE</p><h2>Source & Risk Feed Health</h2></div><span class="badge">SHADOW</span></header><div id="settingsIntelligence" class="metric-list"></div></article>
@@ -162,7 +163,7 @@
   </section>
 </div>
 <div id="toast" class="toast"></div>
-<script src="/static/aether-app.js?v=AETHER-LOAD-003-B9"></script>
-<script src="/static/aether-chart.js?v=AETHER-LOAD-003-B9"></script>
+<script src="/static/aether-app.js?v=AETHER-FILTERS-R1"></script>
+<script src="/static/aether-chart.js?v=AETHER-FILTERS-R1"></script>
 </body>
 </html>
