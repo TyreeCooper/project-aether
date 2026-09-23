@@ -14,6 +14,21 @@ from app.universe import ASSETS
 MATRIX_HORIZONS: tuple[str, ...] = ("scalp", "intraday", "swing")
 MATRIX_SIDES: tuple[str, ...] = ("long", "short")
 
+VALIDATION_REFERENCE_PRICES: dict[str, float] = {
+    "eurusd": 1.10,
+    "usdjpy": 150.0,
+    "mes": 6000.0,
+    "mnq": 21000.0,
+    "mgc": 3000.0,
+    "mcl": 70.0,
+    "us10y": 110.0,
+    "nvda": 180.0,
+    "tsla": 450.0,
+    "pltr": 180.0,
+    "btc": 100000.0,
+    "eth": 4000.0,
+}
+
 # Deliberately explicit: each book only gets horizons appropriate to its
 # current product/playbook architecture.
 ASSET_HORIZONS: dict[str, tuple[str, ...]] = {
@@ -55,6 +70,17 @@ def clock_horizon(asset_id: str, horizon: str) -> str:
 
 def matrix_cell_id(asset_id: str, horizon: str, side: str) -> str:
     return f"{str(asset_id).lower()}:{str(horizon).lower()}:{str(side).lower()}"
+
+
+def validation_reference_price(
+    asset_id: str,
+    current_mark: float | None,
+) -> tuple[float, str]:
+    mark = float(current_mark or 0.0)
+    if mark > 0:
+        return mark, "current_paper_mark"
+    aid = str(asset_id).lower()
+    return float(VALIDATION_REFERENCE_PRICES[aid]), "synthetic_validation_reference"
 
 
 def capability_cells() -> list[dict[str, Any]]:

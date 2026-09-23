@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 from datetime import datetime, timezone
 import logging
 import os
@@ -24,7 +25,9 @@ from app.execution_matrix import (
     clock_horizon,
     directional_summary,
     execution_mode,
+    forced_execution_snapshot,
     supported_horizons,
+    validation_reference_price,
 )
 from app.horizons import TradingHorizon
 from app.playbooks import playbook_profile
@@ -108,6 +111,7 @@ class MultiDesk:
         self._last_news_refresh = 0.0
         self._last_intelligence_persist = 0.0
         self.activity_events: list[dict[str, Any]] = []
+        self.execution_matrix_ledger: dict[str, Any] = {}
         restored_sources = (
             restored.get("asset_source_registry")
             if isinstance(restored, dict)
@@ -173,6 +177,7 @@ class MultiDesk:
                 },
                 "asset_source_registry": self.asset_source_registry,
                 "activity_events": self.activity_events[-300:],
+                "execution_matrix_ledger": self.execution_matrix_ledger,
                 "strategy_route_buckets": {
                     horizon.value: int(bucket)
                     for horizon, bucket in (
@@ -252,6 +257,10 @@ class MultiDesk:
                 if isinstance(row, dict)
             ]
 
+        matrix_ledger = data.get("execution_matrix_ledger") or {}
+        if isinstance(matrix_ledger, dict):
+            self.execution_matrix_ledger = copy.deepcopy(matrix_ledger)
+
         route_buckets = data.get("strategy_route_buckets") or {}
         if isinstance(route_buckets, dict):
             for raw_horizon, raw_bucket in route_buckets.items():
@@ -311,12 +320,232 @@ class MultiDesk:
         }
 
     def execution_matrix_snapshot(self) -> dict[str, Any]:
+        capability = capability_cells()
+        ledger = copy.deepcopy(self.execution_matrix_ledger)
+        results = {
+            str(row.get("cell_id")): row
+            for row in (ledger.get("cells") or [])
+            if isinstance(row, dict) and row.get("cell_id")
+        }
+        cells: list[dict[str, Any]] = []
+        for row in capability:
+            stored = results.get(str(row["cell_id"]))
+            cells.append({**row, **stored} if stored else row)
+
+        counts = {
+            "pass": sum(1 for row in cells if row.get("status") == "pass"),
+            "fail": sum(1 for row in cells if row.get("status") == "fail"),
+            "n_a": sum(1 for row in cells if row.get("status") == "n/a"),
+            "pending": sum(1 for row in cells if row.get("status") == "pending"),
+        }
         return {
             "load": "AETHER-LOAD-002",
-            "mode": "paper_execution_experiment",
+            "mode": "isolated_execution_validation",
             **directional_summary(),
-            "cells": capability_cells(),
+            "run_id": ledger.get("run_id"),
+            "run_status": ledger.get("status") or "not_run",
+            "started_at": ledger.get("started_at"),
+            "completed_at": ledger.get("completed_at"),
+            "updated_at": ledger.get("updated_at"),
+            "production_wallet_unchanged": ledger.get(
+                "production_wallet_unchanged"
+            ),
+            "live_order_attempted": False,
+            "counts": counts,
+            "cells": cells,
         }
+
+    def run_execution_matrix_validation(self) -> dict[str, Any]:
+        """Exercise every supported matrix cell in an isolated paper sandbox.
+
+        Normal strategy diagnostics are captured for each cell, but they do
+        not veto the execution-rail validation. Production positions, cash,
+        and live-order code are never used.
+        """
+        existing = self.execution_matrix_ledger
+        resumable = (
+            isinstance(existing, dict)
+            and existing.get("status") == "running"
+            and isinstance(existing.get("cells"), list)
+        )
+        if resumable:
+            ledger = copy.deepcopy(existing)
+        else:
+            now = datetime.now(timezone.utc).isoformat()
+            ledger = {
+                "run_id": f"matrix-{uuid.uuid4().hex}",
+                "status": "running",
+                "started_at": now,
+                "updated_at": now,
+                "completed_at": None,
+                "production_wallet_unchanged": None,
+                "live_order_attempted": False,
+                "cells": capability_cells(),
+            }
+            for row in ledger["cells"]:
+                row["attempts"] = 0
+        self.execution_matrix_ledger = ledger
+        self.persist()
+
+        production_before = copy.deepcopy(self.wallet.payload())
+        assets = {str(row["id"]): dict(row) for row in ASSETS}
+
+        for row in self.execution_matrix_ledger["cells"]:
+            if row.get("status") != "pending":
+                continue
+
+            aid = str(row["asset_id"])
+            horizon = str(row["horizon"])
+            side = str(row["side"])
+            source = self.by_id[aid]
+            test_wallet = PaperPortfolio(STARTING_USD)
+            test_book = PairBook(assets[aid], test_wallet)
+
+            test_book.bars.extend(copy.deepcopy(list(source.bars)))
+            test_book.bars_1h.extend(copy.deepcopy(list(source.bars_1h)))
+            test_book.bars_1d.extend(copy.deepcopy(list(source.bars_1d)))
+
+            mark, price_source = validation_reference_price(
+                aid,
+                source.mark,
+            )
+            spread = max(abs(mark) * 0.0001, 0.00001)
+            test_book.mark = mark
+            test_book.bid = float(source.bid or (mark - spread))
+            test_book.ask = float(source.ask or (mark + spread))
+            row["price_source"] = price_source
+            row["validation_mark"] = mark
+            row["attempts"] = int(row.get("attempts") or 0) + 1
+            row["attempted_at"] = datetime.now(timezone.utc).isoformat()
+
+            mode = execution_mode(aid, horizon)
+            try:
+                baseline = test_book.snapshot_strategy(
+                    requested_mode=mode,
+                )
+            except Exception as exc:
+                baseline = {
+                    "reason": f"strategy_error:{type(exc).__name__}",
+                    "execution_status": "strategy_error",
+                    "executable_signal": None,
+                    "quality_score": 0,
+                }
+
+            row["normal_reason"] = baseline.get("reason")
+            row["normal_execution_status"] = baseline.get(
+                "execution_status"
+            )
+            row["normal_signal"] = baseline.get("executable_signal")
+            row["normal_quality_score"] = baseline.get("quality_score")
+            row["normal_gate_would_block"] = (
+                baseline.get("executable_signal") not in {"buy", "short"}
+            )
+
+            try:
+                forced = forced_execution_snapshot(
+                    aid,
+                    horizon,
+                    side,
+                    baseline=baseline,
+                )
+                opened = test_book.enter(
+                    100.0,
+                    strategy_snapshot=forced,
+                    max_capital_usd=None,
+                    execution_test=True,
+                )
+                row["open_ok"] = bool(opened.get("ok"))
+                row["open_error"] = opened.get("error")
+                row["trade_id"] = opened.get("trade_id")
+                row["position_side"] = opened.get("position_side")
+                row["entry_mode"] = opened.get("entry_mode")
+                row["margin_reserved_usd"] = opened.get(
+                    "margin_reserved_usd"
+                )
+                row["normal_required_margin_usd"] = opened.get(
+                    "normal_required_margin_usd"
+                )
+                row["test_overflow_usd"] = opened.get(
+                    "test_overflow_usd"
+                )
+
+                if not opened.get("ok"):
+                    row["status"] = "fail"
+                    row["reason"] = opened.get("error") or "entry_failed"
+                else:
+                    exit_side = "buy" if side == "short" else "sell"
+                    exit_price = test_book.fill_px(exit_side)
+                    closed = (
+                        test_wallet.close_position(
+                            aid,
+                            price=float(exit_price),
+                            exit_reason="execution_matrix_validation",
+                            reference_price=mark,
+                        )
+                        if exit_price
+                        else {"ok": False, "error": "no_exit_price"}
+                    )
+                    row["close_ok"] = bool(closed.get("ok"))
+                    row["close_error"] = closed.get("error")
+                    row["round_trip_complete"] = bool(
+                        closed.get("ok")
+                        and test_wallet.position(aid) is None
+                    )
+                    row["status"] = (
+                        "pass"
+                        if row["round_trip_complete"]
+                        and opened.get("position_side") == side
+                        and opened.get("entry_mode") == mode
+                        else "fail"
+                    )
+                    row["reason"] = (
+                        "isolated_round_trip_verified"
+                        if row["status"] == "pass"
+                        else "round_trip_invariant_failed"
+                    )
+            except Exception as exc:
+                row["status"] = "fail"
+                row["reason"] = f"validation_error:{type(exc).__name__}"
+                row["error_detail"] = str(exc)
+
+            row["live_order_attempted"] = False
+            self.execution_matrix_ledger["updated_at"] = (
+                datetime.now(timezone.utc).isoformat()
+            )
+            self.persist()
+
+        production_after = self.wallet.payload()
+        unchanged = production_after == production_before
+        self.execution_matrix_ledger["production_wallet_unchanged"] = unchanged
+        counts = {
+            "pass": sum(
+                1 for row in self.execution_matrix_ledger["cells"]
+                if row.get("status") == "pass"
+            ),
+            "fail": sum(
+                1 for row in self.execution_matrix_ledger["cells"]
+                if row.get("status") == "fail"
+            ),
+            "n_a": sum(
+                1 for row in self.execution_matrix_ledger["cells"]
+                if row.get("status") == "n/a"
+            ),
+            "pending": sum(
+                1 for row in self.execution_matrix_ledger["cells"]
+                if row.get("status") == "pending"
+            ),
+        }
+        self.execution_matrix_ledger["counts"] = counts
+        self.execution_matrix_ledger["status"] = (
+            "completed"
+            if unchanged and counts["fail"] == 0 and counts["pending"] == 0
+            else "completed_with_failures"
+        )
+        now = datetime.now(timezone.utc).isoformat()
+        self.execution_matrix_ledger["updated_at"] = now
+        self.execution_matrix_ledger["completed_at"] = now
+        self.persist()
+        return self.execution_matrix_snapshot()
 
     def settings_snapshot(self) -> dict[str, Any]:
         return {

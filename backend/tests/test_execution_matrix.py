@@ -115,3 +115,84 @@ def test_execution_matrix_snapshot_is_read_only_capability_contract():
     assert snap["long_supported_count"] == 12
     assert snap["short_supported_count"] == 10
     assert snap["cells"]
+
+
+
+def test_full_execution_matrix_orchestrator_passes_supported_cells_without_touching_production_wallet(monkeypatch):
+    desk = MultiDesk(execution_test_mode=False)
+    desk.execution_matrix_ledger = {}
+    desk.wallet = PaperPortfolio(300_000.0)
+    for book in desk.books:
+        book.wallet = desk.wallet
+        book.mark = None
+        book.bid = None
+        book.ask = None
+
+    monkeypatch.setattr(desk, "persist", lambda: None)
+    before = desk.wallet.payload()
+
+    result = desk.run_execution_matrix_validation()
+
+    assert result["run_status"] == "completed"
+    assert result["counts"] == {
+        "pass": 54,
+        "fail": 0,
+        "n_a": 18,
+        "pending": 0,
+    }
+    assert result["production_wallet_unchanged"] is True
+    assert result["live_order_attempted"] is False
+    assert desk.wallet.payload() == before
+    assert all(
+        row["status"] in {"pass", "n/a"}
+        for row in result["cells"]
+    )
+    assert all(
+        row.get("live_order_attempted") is False
+        for row in result["cells"]
+        if row["status"] == "pass"
+    )
+
+
+def test_matrix_validation_records_normal_gate_without_using_it_as_veto(monkeypatch):
+    desk = MultiDesk(execution_test_mode=False)
+    desk.execution_matrix_ledger = {}
+    monkeypatch.setattr(desk, "persist", lambda: None)
+
+    result = desk.run_execution_matrix_validation()
+    supported = [row for row in result["cells"] if row["status"] == "pass"]
+
+    assert supported
+    assert any(row.get("normal_gate_would_block") for row in supported)
+    assert all(row.get("normal_reason") is not None for row in supported)
+    assert all(row["reason"] == "isolated_round_trip_verified" for row in supported)
+
+
+def test_matrix_ledger_restores_and_can_resume_pending_cells(monkeypatch):
+    desk = MultiDesk(execution_test_mode=False)
+    monkeypatch.setattr(desk, "persist", lambda: None)
+    cells = capability_cells()
+    for row in cells:
+        if row["status"] == "pending":
+            row["status"] = "pass"
+            row["reason"] = "already_verified"
+            break
+
+    restored = MultiDesk(execution_test_mode=False)
+    monkeypatch.setattr(restored, "persist", lambda: None)
+    restored._restore(
+        {
+            "execution_matrix_ledger": {
+                "run_id": "resume-test",
+                "status": "running",
+                "cells": cells,
+                "started_at": "2026-09-23T10:00:00+00:00",
+            }
+        }
+    )
+    result = restored.run_execution_matrix_validation()
+
+    assert result["run_id"] == "resume-test"
+    assert result["run_status"] == "completed"
+    assert result["counts"]["pending"] == 0
+    assert result["counts"]["fail"] == 0

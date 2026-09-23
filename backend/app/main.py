@@ -427,6 +427,13 @@ async def desk_execution_matrix():
     return desk.execution_matrix_snapshot()
 
 
+@app.post("/api/v1/desk/execution-matrix/run")
+async def desk_execution_matrix_run(
+    _: None = Depends(require_operator),
+):
+    return desk.run_execution_matrix_validation()
+
+
 @app.get("/api/v1/desk/events")
 async def desk_trade_events(
     limit: int = Query(default=100, ge=1, le=300),
