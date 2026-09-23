@@ -3,9 +3,9 @@
 ## CONTROL STATUS
 
 - Load: AETHER-LOAD-003
-- State: B3 COMPLETE — WAITING FOR J.A.R.V.I.S. REVIEW
+- State: B4 COMPLETE — WAITING FOR J.A.R.V.I.S. REVIEW
 - Active implementation batch: NONE
-- Waiting on: GROK BOT J.A.R.V.I.S. CLEARANCE TO START B4
+- Waiting on: GROK BOT J.A.R.V.I.S. CLEARANCE TO START B5
 - Starting main SHA: 09dfdb510bd5b54f43cef7e9c5f20389d3636ae1
 - Live-money execution: HARD BLOCKED
 - Paper testing: remains the target runtime
@@ -171,14 +171,14 @@ ChatGPT must not advance while the batch is on HOLD.
 - B1: [COMPLETE] Runtime mode separation — d339fb24695dd2738dda8fdb345c6e7a5acf7181
 - B2: [COMPLETE] Qualified opportunity pipeline — final head 5c23ca02e514447ea40b8a67bbd5a4de9c37096b
 - B3: [COMPLETE] Horizon-scoped position ledger — final head e6ace62d79c2e3d3cf58a29bc141a1f1c7807fb2
-- B4: [WAITING] Portfolio risk & qualified concurrency
+- B4: [COMPLETE] Portfolio risk & qualified concurrency — final head 28c33641b7d891ee2e3f64793102ff2d04703800
 - B5: [WAITING] Instrument sizing hard ceilings
 - B6: [WAITING] Horizon-specific trade management
 - B7: [WAITING] Realistic fill & cost model
 - B8: [WAITING] Operator/UI evidence & telemetry
 - B9: [WAITING] Integration, deployment contract & closeout
 
-Implementation progress: 3 / 9 batches complete.
+Implementation progress: 4 / 9 batches complete.
 
 ---
 
@@ -692,7 +692,7 @@ ChatGPT must not start B3 without the explicit B3 clearance.
 
 ## B3 — Horizon-Scoped Position Ledger
 
-Status: COMPLETE — WAITING FOR J.A.R.V.I.S. REVIEW
+Status: COMPLETE — VERIFIED/CLEARED BY J.A.R.V.I.S.
 
 Final implementation head:
 `e6ace62d79c2e3d3cf58a29bc141a1f1c7807fb2`
@@ -785,4 +785,124 @@ If a B3 defect exists, respond:
 `J.A.R.V.I.S. HOLD — AETHER-LOAD-003 — B3 — <concrete defect/reason>`
 
 ChatGPT must not start B4 without the explicit B4 clearance.
+
+## B4 — Portfolio Risk & Qualified Concurrency
+
+Status: COMPLETE — WAITING FOR J.A.R.V.I.S. REVIEW
+
+Final implementation head:
+`28c33641b7d891ee2e3f64793102ff2d04703800`
+
+B4 commit chain:
+- `e0f345eac13c0312bb1cc90a737fd8fd04ee92b4` — `feat: govern qualified concurrency by portfolio risk`
+- `c5312d5aff4906d8568d259f531bd2e594991f72` — `fix: keep unopened horizon lookup route-scoped`
+- `5ef7302f07c10a1e4518a2aae04cd4aa1d3a0d0f` — `test: correct B4 risk fixtures to market marks`
+- `28c33641b7d891ee2e3f64793102ff2d04703800` — `test: anchor B4 exposure limit to current equity`
+
+B4 risk policy:
+- maximum target risk per new strategy trade: 0.75% of current paper equity;
+- maximum aggregate open stop-risk: 3.00% of current paper equity;
+- maximum per-asset open stop-risk: 1.50% of current paper equity;
+- maximum per-cluster open stop-risk: 2.25% of current paper equity;
+- the former fixed four-position strategy cap is removed;
+- exposure ceilings are expressed in stop-risk dollars rather than raw position counts;
+- execution-validation mode remains separately bounded and is not governed by the strategy concurrency contract.
+
+Scope completed:
+- canonical stop-risk math is available for planned and open paper positions across supported instrument types;
+- stop-risk is measured from entry to the active stop using instrument-aware P/L semantics;
+- profitable/trailing stops at or beyond breakeven contribute zero remaining downside stop-risk rather than a false absolute-risk value;
+- the allocator recalculates current paper equity and open-risk capacity before accepting each qualified candidate;
+- new strategy sizing is bounded by the minimum remaining capacity across trade, asset, cluster, aggregate portfolio, and capital constraints;
+- actual post-rounding candidate stop-risk is independently checked before the order is opened;
+- qualified candidates can be reduced to remaining risk capacity rather than requiring a full 0.75% target;
+- asset exposure can veto a qualified route when the 1.50% asset-risk ceiling is exhausted;
+- cluster/correlation exposure can veto a qualified route when the 2.25% cluster-risk ceiling is exhausted;
+- aggregate portfolio exposure can veto a qualified route when the 3.00% open-risk ceiling is exhausted;
+- risk-gate rejection reasons and relevant risk values are retained on opportunity evaluations;
+- successful strategy entries persist target risk, initial stop-risk, and pre-entry portfolio/asset/cluster risk context in position metadata;
+- the previous `MAX_ACTIVE_POSITIONS = 4` strategy governor is removed;
+- more than four qualified low-risk positions are permitted when stop-risk and capital permit;
+- cash/margin remains enforced by the paper portfolio; normal strategy entries cannot borrow validation-only overflow capital;
+- the allocator recomputes the capital cap from current free paper cash before each entry;
+- B3 route isolation was hardened so an explicit unopened route key such as `nvda:swing` does not inherit aggregate quantity from open sibling horizons.
+
+Required B4 proof:
+- >4 qualified low-risk positions can coexist when risk permits — PROVEN;
+- aggregate open stop-risk cannot exceed the configured 3.00% ceiling — PROVEN;
+- asset exposure limit can reject an otherwise qualified route — PROVEN;
+- cluster/correlation exposure limit can reject an otherwise qualified route — PROVEN;
+- risk rejection reason is recorded — PROVEN;
+- per-trade stop-risk remains <= 0.75% of current paper equity — PROVEN;
+- normal paper allocation leaves cash nonnegative and validation overflow at zero — PROVEN;
+- explicit unopened route lookup remains horizon-scoped with sibling positions present — PROVEN;
+- fixed four-position strategy limit is absent from the machine-visible B4 policy — PROVEN.
+
+Machine-visible policy:
+- `max_trade_risk_pct = 0.75`;
+- `max_asset_risk_pct = 1.50`;
+- `max_cluster_risk_pct = 2.25`;
+- `max_portfolio_risk_pct = 3.00`;
+- `fixed_strategy_position_limit = null`.
+
+Safety/invariant evidence:
+- production runtime remains `strategy_test`;
+- live-money execution remains HARD BLOCKED;
+- forced strategy entries remain OFF;
+- isolated LOAD-002 execution validation remains available;
+- validation-only buying-power overflow does not apply to normal strategy allocation;
+- B5 instrument hard ceilings were NOT implemented in B4;
+- B6 horizon-specific management changes were NOT implemented in B4;
+- B7 cost-model changes were NOT pulled forward.
+
+Validation evidence on final B4 head:
+- CI run #447 — SUCCESS;
+- final backend suite — 232 passed, 1 warning;
+- Azure workflow run #330 — SUCCESS;
+- Azure build backend tests — SUCCESS;
+- Azure Web App deployment — SUCCESS;
+- production runtime verification — SUCCESS;
+- deployed release asserted `AETHER-LOAD-003-B4`;
+- deployed runtime remained `strategy_test`;
+- deployed runtime asserted forced entries OFF;
+- deployed runtime asserted live execution blocked.
+
+Repair evidence:
+- the first B4 validation exposed test fixtures that seeded large synthetic holdings and unintentionally exhausted cash before the aggregate-risk assertion;
+- B4 validation also exposed a real B3 ledger edge case where an explicit unopened horizon lookup fell back to aggregate same-asset quantity; this was repaired in B4 because it directly affected qualified concurrency/exposure gating;
+- subsequent validation showed one assertion using nominal starting equity instead of current equity after entry fees; the assertion was corrected to the runtime's current-equity basis;
+- CI #446 and Azure #329 were correctly red on the pre-final repair head;
+- final CI #447 and Azure #330 are green on `28c33641b7d891ee2e3f64793102ff2d04703800`.
+
+Files changed by B4:
+- `backend/app/paper_portfolio.py`
+- `backend/app/pair_book.py`
+- `backend/app/desk.py`
+- `backend/tests/test_portfolio_risk.py`
+- `backend/tests/test_execution_test_mode.py`
+- `backend/tests/test_load_002_closeout.py`
+- `.github/workflows/main_aether-prod-api.yml`
+
+Not changed / deferred:
+- FX 1.00-standard-lot and 100,000-base-unit hard ceilings — B5;
+- one-contract hard ceilings for MES/MNQ/MGC/MCL/US10Y — B5;
+- equity/crypto instrument-specific hard sizing ceilings — B5;
+- horizon-specific management policy changes — B6;
+- realistic fill/cost model — B7;
+- operator/UI risk display — B8;
+- final integration/deployment closeout — B9.
+
+### J.A.R.V.I.S. REVIEW GATE
+
+Review final B4 head `28c33641b7d891ee2e3f64793102ff2d04703800` and the evidence above.
+
+If clear, respond exactly:
+
+`J.A.R.V.I.S. CLEAR — AETHER-LOAD-003 — START B5`
+
+If a B4 defect exists, respond:
+
+`J.A.R.V.I.S. HOLD — AETHER-LOAD-003 — B4 — <concrete defect/reason>`
+
+ChatGPT must not start B5 without the explicit B5 clearance.
 
