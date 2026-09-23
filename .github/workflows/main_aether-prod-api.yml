@@ -101,9 +101,9 @@ jobs:
           assert body.get("live_blocked") is True, body
           PY
 
-          echo "Waiting for deployed release AETHER-LOAD-002-B7 to become active..."
+          echo "Waiting for deployed release AETHER-LOAD-002-EXP-R1 to become active..."
           for attempt in $(seq 1 18); do
-            if curl --fail --silent --show-error --max-time 20 "$base/api/v1/load-status/aether-load-002" >/tmp/aether-load-002.json               && python -c 'import json; b=json.load(open("/tmp/aether-load-002.json", encoding="utf-8")); assert b.get("release")=="AETHER-LOAD-002-B7"; assert b.get("ready") is True'; then
+            if curl --fail --silent --show-error --max-time 20 "$base/api/v1/load-status/aether-load-002" >/tmp/aether-load-002.json               && python -c 'import json; b=json.load(open("/tmp/aether-load-002.json", encoding="utf-8")); assert b.get("release")=="AETHER-LOAD-002-EXP-R1"; assert b.get("runtime_safe") is True; assert b.get("status")=="experiment_active"; assert b.get("filters_bypassed") is True'; then
               echo "Expected release is active."
               break
             fi
@@ -117,11 +117,11 @@ jobs:
 
           curl --fail --silent --show-error --max-time 20 "$base/" >/tmp/aether-root.html
           grep -q "Aether Trading Desk" /tmp/aether-root.html
-          grep -q 'AETHER-LOAD-002-B7' /tmp/aether-root.html
+          grep -q 'AETHER-LOAD-002-EXP-R1' /tmp/aether-root.html
           grep -q 'id="runExecutionMatrix"' /tmp/aether-root.html
           grep -q 'id="disconnectOperator"' /tmp/aether-root.html
 
-          curl --fail --silent --show-error --max-time 20 "$base/static/aether-app.js?v=AETHER-LOAD-002-B7" >/tmp/aether-app.js
+          curl --fail --silent --show-error --max-time 20 "$base/static/aether-app.js?v=AETHER-LOAD-002-EXP-R1" >/tmp/aether-app.js
           grep -q 'Trade Duration' /tmp/aether-app.js
           grep -q 'operatorAuthenticated:false' /tmp/aether-app.js
           grep -q 'runExecutionMatrix' /tmp/aether-app.js
@@ -139,7 +139,7 @@ jobs:
           portfolio = body.get("portfolio") or {}
           assert float(portfolio.get("starting_bank") or 0) == 300000.0, portfolio
           engine = body.get("engine") or {}
-          assert engine.get("execution_test_mode") is False, engine
+          assert engine.get("execution_test_mode") is True, engine
           assert body.get("live_blocked") is True, body
           PY
 
@@ -162,9 +162,14 @@ jobs:
           import json
           with open("/tmp/aether-load-002.json", encoding="utf-8") as fh:
               body = json.load(fh)
-          assert body.get("release") == "AETHER-LOAD-002-B7", body
-          assert body.get("ready") is True, body
-          assert body.get("status") == "ready", body
+          assert body.get("release") == "AETHER-LOAD-002-EXP-R1", body
+          assert body.get("runtime_safe") is True, body
+          assert body.get("status") == "experiment_active", body
+          assert body.get("filters_bypassed") is True, body
+          experiment = body.get("experiment") or {}
+          assert experiment.get("active") is True, experiment
+          assert experiment.get("run_id") == "EXP-R1", experiment
+          assert experiment.get("target_count") == 12, experiment
           checks = body.get("checks") or {}
           assert checks and all(checks.values()), checks
           matrix = body.get("matrix") or {}
