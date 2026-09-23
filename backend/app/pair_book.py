@@ -990,25 +990,63 @@ class PairBook:
             return None
 
         exit_side = "buy" if side == "short" else "sell"
-        exit_reference = (
-            float(self.stop)
-            if hit and self.stop
-            else float(
-                self.ask
-                if side == "short" and self.ask is not None
-                else self.bid
-                if side == "long" and self.bid is not None
-                else mark
-            )
+        cost_leg = getattr(
+            self.wallet,
+            "execution_leg_cost",
+            None,
         )
-        raw = (
-            stop_fill_price(
+        if hit and self.stop:
+            exit_market_reference = float(self.stop)
+            exit_quote_reference = float(self.stop)
+            raw = stop_fill_price(
                 self.stop,
                 side=exit_side,
             )
-            if hit and self.stop
-            else self.fill_px(exit_side)
-        )
+            exit_leg = (
+                cost_leg(
+                    self.id,
+                    execution_side=exit_side,
+                    quantity=qty,
+                    bid=float(self.stop),
+                    ask=float(self.stop),
+                    mark=float(self.stop),
+                    slippage_bps=SLIPPAGE_BPS,
+                )
+                if callable(cost_leg)
+                else {}
+            )
+        else:
+            exit_market_reference = float(
+                market_reference_price(
+                    bid=self.bid,
+                    ask=self.ask,
+                    mark=self.mark,
+                )
+                or mark
+            )
+            exit_quote_reference = float(
+                quote_reference_price(
+                    exit_side,
+                    bid=self.bid,
+                    ask=self.ask,
+                    mark=self.mark,
+                )
+                or exit_market_reference
+            )
+            raw = self.fill_px(exit_side)
+            exit_leg = (
+                cost_leg(
+                    self.id,
+                    execution_side=exit_side,
+                    quantity=qty,
+                    bid=self.bid,
+                    ask=self.ask,
+                    mark=self.mark,
+                    slippage_bps=SLIPPAGE_BPS,
+                )
+                if callable(cost_leg)
+                else {}
+            )
         if not raw:
             return None
 
@@ -1025,13 +1063,34 @@ class PairBook:
             or avg
             or 0.0
         )
-        entry_reference = float(
-            (entry_fill or {}).get("reference_price")
+        entry_market_reference = float(
+            position.get(
+                "entry_market_reference_price"
+            )
+            or (entry_fill or {}).get(
+                "market_reference_price"
+            )
+            or position.get("entry_reference_price")
             or entry_fill_price
             or 0.0
         )
+        entry_quote_reference = float(
+            position.get("entry_quote_price")
+            or (entry_fill or {}).get(
+                "quote_reference_price"
+            )
+            or (entry_fill or {}).get("reference_price")
+            or entry_market_reference
+        )
+        entry_spread_usd = float(
+            position.get("entry_spread_usd")
+            or (entry_fill or {}).get("spread_usd")
+            or 0.0
+        )
         entry_slippage_usd = float(
-            (entry_fill or {}).get("slippage_usd") or 0.0
+            position.get("entry_slippage_usd")
+            or (entry_fill or {}).get("slippage_usd")
+            or 0.0
         )
         excursion = self.current_excursion(entry_fill_price)
 
@@ -1049,7 +1108,15 @@ class PairBook:
             self.id,
             price=float(raw),
             exit_reason=reason,
-            reference_price=exit_reference,
+            reference_price=exit_market_reference,
+            market_reference_price=exit_market_reference,
+            quote_reference_price=exit_quote_reference,
+            exit_spread_usd=float(
+                exit_leg.get("spread_usd") or 0.0
+            ),
+            exit_slippage_usd=float(
+                exit_leg.get("slippage_usd") or 0.0
+            ),
             position_key=self.position_key,
         )
         if not result.get("ok"):
@@ -1066,24 +1133,47 @@ class PairBook:
                 mark=float(raw),
             )
         )
+        quote_pnl = float(
+            move_pnl(
+                self.id,
+                side=side,
+                quantity=qty,
+                entry_price=entry_quote_reference,
+                mark=exit_quote_reference,
+            )
+        )
         reference_pnl = float(
             move_pnl(
                 self.id,
                 side=side,
                 quantity=qty,
-                entry_price=entry_reference,
-                mark=exit_reference,
+                entry_price=entry_market_reference,
+                mark=exit_market_reference,
             )
         )
-        exit_slippage_usd = max(reference_pnl - gross_pnl, 0.0)
-        exit_slippage_bps = (
-            abs(float(raw) / exit_reference - 1) * 10_000
-            if exit_reference > 0
-            else None
+        exit_spread_usd = float(
+            exit_leg.get("spread_usd") or 0.0
+        )
+        exit_slippage_usd = float(
+            exit_leg.get("slippage_usd") or 0.0
+        )
+        spread_usd = max(
+            entry_spread_usd + exit_spread_usd,
+            0.0,
+        )
+        slippage_usd = max(
+            entry_slippage_usd + exit_slippage_usd,
+            0.0,
+        )
+        fees_usd = float(result.get("fees_usd") or 0.0)
+        net_pnl = float(result.get("pnl") or 0.0)
+        total_cost_drag_usd = max(
+            reference_pnl - net_pnl,
+            0.0,
         )
         entry_notional = max(notional, 0.0)
         net_return_pct = (
-            float(result.get("pnl") or 0.0)
+            net_pnl
             / entry_notional
             * 100
             if entry_notional > 0
@@ -1094,44 +1184,127 @@ class PairBook:
             if entry_notional > 0
             else 0.0
         )
+        quote_return_pct = (
+            quote_pnl / entry_notional * 100
+            if entry_notional > 0
+            else gross_return_pct
+        )
         reference_return_pct = (
             reference_pnl / entry_notional * 100
             if entry_notional > 0
             else gross_return_pct
         )
 
-        result["entry_fill_price"] = round(entry_fill_price, 8)
-        result["exit_fill_price"] = round(float(raw), 8)
-        result["entry_reference_price"] = round(entry_reference, 8)
-        result["exit_reference_price"] = round(exit_reference, 8)
-        result["entry_slippage_usd"] = round(entry_slippage_usd, 8)
-        result["exit_slippage_usd"] = round(exit_slippage_usd, 8)
-        result["slippage_usd"] = round(
-            entry_slippage_usd + exit_slippage_usd,
+        result["entry_fill_price"] = round(
+            entry_fill_price,
             8,
+        )
+        result["exit_fill_price"] = round(float(raw), 8)
+        result["entry_reference_price"] = round(
+            entry_market_reference,
+            8,
+        )
+        result["exit_reference_price"] = round(
+            exit_market_reference,
+            8,
+        )
+        result["entry_market_reference_price"] = round(
+            entry_market_reference,
+            8,
+        )
+        result["exit_market_reference_price"] = round(
+            exit_market_reference,
+            8,
+        )
+        result["entry_quote_price"] = round(
+            entry_quote_reference,
+            8,
+        )
+        result["exit_quote_price"] = round(
+            exit_quote_reference,
+            8,
+        )
+        result["entry_spread_usd"] = round(
+            entry_spread_usd,
+            8,
+        )
+        result["exit_spread_usd"] = round(
+            exit_spread_usd,
+            8,
+        )
+        result["spread_usd"] = round(
+            spread_usd,
+            8,
+        )
+        result["entry_slippage_usd"] = round(
+            entry_slippage_usd,
+            8,
+        )
+        result["exit_slippage_usd"] = round(
+            exit_slippage_usd,
+            8,
+        )
+        result["slippage_usd"] = round(
+            slippage_usd,
+            8,
+        )
+        result["fees_usd"] = round(fees_usd, 8)
+        result["total_cost_drag_usd"] = round(
+            total_cost_drag_usd,
+            8,
+        )
+        exit_slippage_bps = (
+            abs(float(raw) / exit_quote_reference - 1)
+            * 10_000
+            if exit_quote_reference > 0
+            else None
         )
         result["exit_slippage_bps"] = (
             None
             if exit_slippage_bps is None
             else round(exit_slippage_bps, 4)
         )
-        result["gross_return_pct"] = round(gross_return_pct, 4)
+        result["gross_return_pct"] = round(
+            gross_return_pct,
+            4,
+        )
+        result["quote_return_pct"] = round(
+            quote_return_pct,
+            4,
+        )
         result["reference_return_pct"] = round(
             reference_return_pct,
             4,
         )
-        result["net_return_pct"] = round(net_return_pct, 4)
-        result["fee_drag_pct"] = round(
-            gross_return_pct - net_return_pct,
+        result["net_return_pct"] = round(
+            net_return_pct,
+            4,
+        )
+        result["spread_drag_pct"] = round(
+            reference_return_pct - quote_return_pct,
             4,
         )
         result["slippage_drag_pct"] = round(
-            reference_return_pct - gross_return_pct,
+            quote_return_pct - gross_return_pct,
+            4,
+        )
+        result["fee_drag_pct"] = round(
+            gross_return_pct - net_return_pct,
             4,
         )
         result["cost_drag_pct"] = round(
             reference_return_pct - net_return_pct,
             4,
+        )
+        result["cost_reconciliation_usd"] = round(
+            (
+                reference_pnl
+                - spread_usd
+                - slippage_usd
+                - fees_usd
+                - net_pnl
+            ),
+            8,
         )
 
         mfe = excursion.get("mfe_pct")
@@ -1237,7 +1410,17 @@ class PairBook:
                         "reference_return_pct"
                     ),
                     "cost_drag_pct": result.get("cost_drag_pct"),
+                    "spread_drag_pct": result.get(
+                        "spread_drag_pct"
+                    ),
+                    "spread_usd": result.get("spread_usd"),
                     "slippage_usd": result.get("slippage_usd"),
+                    "total_cost_drag_usd": result.get(
+                        "total_cost_drag_usd"
+                    ),
+                    "cost_reconciliation_usd": result.get(
+                        "cost_reconciliation_usd"
+                    ),
                     "entry_slippage_usd": result.get(
                         "entry_slippage_usd"
                     ),
@@ -1315,7 +1498,10 @@ class PairBook:
                 "missed_opportunity_pct": None,
                 "net_missed_opportunity_pct": None,
                 "fees_usd": None,
+                "spread_usd": None,
                 "slippage_usd": None,
+                "total_cost_drag_usd": None,
+                "spread_drag_pct": None,
                 "cost_drag_pct": None,
             }
         closes = [
@@ -1344,7 +1530,10 @@ class PairBook:
                 "missed_opportunity_pct": None,
                 "net_missed_opportunity_pct": None,
                 "fees_usd": None,
+                "spread_usd": None,
                 "slippage_usd": None,
+                "total_cost_drag_usd": None,
+                "spread_drag_pct": None,
                 "cost_drag_pct": None,
             }
         last = closes[-1]
@@ -1365,8 +1554,15 @@ class PairBook:
                 "net_missed_opportunity_pct"
             ),
             "fees_usd": last.get("fees_usd"),
+            "spread_usd": last.get("spread_usd"),
             "slippage_usd": last.get("slippage_usd"),
+            "total_cost_drag_usd": last.get(
+                "total_cost_drag_usd"
+            ),
             "fee_drag_pct": last.get("fee_drag_pct"),
+            "spread_drag_pct": last.get(
+                "spread_drag_pct"
+            ),
             "slippage_drag_pct": last.get("slippage_drag_pct"),
             "cost_drag_pct": last.get("cost_drag_pct"),
             "entry_fill_price": last.get("entry_fill_price"),
