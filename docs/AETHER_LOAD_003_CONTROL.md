@@ -3,9 +3,9 @@
 ## CONTROL STATUS
 
 - Load: AETHER-LOAD-003
-- State: B4 COMPLETE — WAITING FOR J.A.R.V.I.S. REVIEW
+- State: B5 COMPLETE — WAITING FOR J.A.R.V.I.S. REVIEW
 - Active implementation batch: NONE
-- Waiting on: GROK BOT J.A.R.V.I.S. CLEARANCE TO START B5
+- Waiting on: GROK BOT J.A.R.V.I.S. CLEARANCE TO START B6
 - Starting main SHA: 09dfdb510bd5b54f43cef7e9c5f20389d3636ae1
 - Live-money execution: HARD BLOCKED
 - Paper testing: remains the target runtime
@@ -172,13 +172,13 @@ ChatGPT must not advance while the batch is on HOLD.
 - B2: [COMPLETE] Qualified opportunity pipeline — final head 5c23ca02e514447ea40b8a67bbd5a4de9c37096b
 - B3: [COMPLETE] Horizon-scoped position ledger — final head e6ace62d79c2e3d3cf58a29bc141a1f1c7807fb2
 - B4: [COMPLETE] Portfolio risk & qualified concurrency — final head 28c33641b7d891ee2e3f64793102ff2d04703800
-- B5: [WAITING] Instrument sizing hard ceilings
+- B5: [COMPLETE] Instrument sizing hard ceilings — 151ad2fb2e2a5a5648b18cfe3393dcf7ff6d596c
 - B6: [WAITING] Horizon-specific trade management
 - B7: [WAITING] Realistic fill & cost model
 - B8: [WAITING] Operator/UI evidence & telemetry
 - B9: [WAITING] Integration, deployment contract & closeout
 
-Implementation progress: 4 / 9 batches complete.
+Implementation progress: 5 / 9 batches complete.
 
 ---
 
@@ -788,7 +788,7 @@ ChatGPT must not start B4 without the explicit B4 clearance.
 
 ## B4 — Portfolio Risk & Qualified Concurrency
 
-Status: COMPLETE — WAITING FOR J.A.R.V.I.S. REVIEW
+Status: COMPLETE — VERIFIED/CLEARED BY J.A.R.V.I.S.
 
 Final implementation head:
 `28c33641b7d891ee2e3f64793102ff2d04703800`
@@ -905,4 +905,104 @@ If a B4 defect exists, respond:
 `J.A.R.V.I.S. HOLD — AETHER-LOAD-003 — B4 — <concrete defect/reason>`
 
 ChatGPT must not start B5 without the explicit B5 clearance.
+
+## B5 — Instrument Sizing Hard Ceilings
+
+Status: COMPLETE — WAITING FOR J.A.R.V.I.S. REVIEW
+
+Implementation SHA:
+`151ad2fb2e2a5a5648b18cfe3393dcf7ff6d596c`
+
+Commit:
+`feat: enforce instrument sizing ceilings`
+
+Scope completed:
+- EURUSD and USDJPY hard cap at 100,000 base units / 1.00 standard lot per trade;
+- both FX specifications define `standard_lot_units=100000`, `max_standard_lots=1.0`, and `max_quantity=100000`;
+- MES, MNQ, MGC, MCL, and US10Y hard cap at 1 contract per trade;
+- hard caps are applied after risk/capital sizing, so they may only reduce the risk-derived size and can never increase it;
+- paper `open_position` reapplies the same ceiling as a final invariant, protecting direct/internal paper calls from oversized requests;
+- quantity-step rounding remains instrument-specific;
+- FX paper positions persist raw base units and derived standard lots;
+- futures persist contracts;
+- equities persist shares;
+- crypto persists coin quantity;
+- equities and crypto intentionally have no blanket 1.0-unit hard cap;
+- restored open positions are backfilled with the canonical quantity metadata;
+- PairBook entry plans and views expose unambiguous quantity units;
+- Live Trades API output carries base units/standard lots/contracts/shares/coin quantity as applicable;
+- machine-visible settings expose the B5 sizing contract.
+
+Machine-visible sizing policy:
+- `fx_max_standard_lots = 1.0`;
+- `fx_max_base_units = 100000.0`;
+- `micro_future_max_contracts = 1.0`;
+- `equity_quantity_unit = shares`;
+- `crypto_quantity_unit = coin_quantity`.
+
+Required B5 proof:
+- oversized FX risk sizing clips to <= 100,000 base units / <= 1.00 standard lot — PROVEN;
+- direct oversized FX paper request is clipped to 100,000 base units and stores `standard_lots=1.0` — PROVEN;
+- MES hard cap <= 1 contract — PROVEN;
+- MNQ hard cap <= 1 contract — PROVEN;
+- MGC hard cap <= 1 contract — PROVEN;
+- MCL hard cap <= 1 contract — PROVEN;
+- US10Y hard cap <= 1 contract — PROVEN;
+- equities can size/open above 1 share when risk and capital allow — PROVEN;
+- crypto can size/open above 1 coin when risk and capital allow — PROVEN;
+- below-minimum risk sizing still returns zero quantity/no trade — PROVEN;
+- FX and futures entry plans expose unambiguous unit metadata — PROVEN;
+- hard caps do not replace B4 risk sizing; they only constrain its output — PROVEN.
+
+Safety/invariant evidence:
+- production runtime remains `strategy_test`;
+- forced strategy entries remain OFF;
+- live-money execution remains HARD BLOCKED;
+- isolated LOAD-002 execution validation remains available;
+- B4 per-trade/asset/cluster/portfolio risk ceilings remain in force;
+- B6 horizon-specific management changes were NOT implemented;
+- B7 fill/cost changes were NOT implemented;
+- B8 visual/operator UI changes were NOT pulled forward beyond API quantity metadata required by B5.
+
+Validation evidence:
+- CI run #448 — SUCCESS;
+- final backend suite — 239 passed, 1 warning;
+- Azure workflow run #331 — SUCCESS;
+- Azure build backend tests — SUCCESS;
+- Azure Web App deployment — SUCCESS;
+- production runtime verification — SUCCESS;
+- deployed release asserted `AETHER-LOAD-003-B5`;
+- deployed runtime remained `strategy_test`;
+- deployed runtime asserted forced entries OFF;
+- deployed runtime asserted live execution blocked.
+
+Files changed by B5:
+- `backend/app/instruments.py`
+- `backend/app/paper_portfolio.py`
+- `backend/app/pair_book.py`
+- `backend/app/desk.py`
+- `backend/tests/test_instrument_sizing_limits.py`
+- `backend/tests/test_execution_test_mode.py`
+- `backend/tests/test_load_002_closeout.py`
+- `.github/workflows/main_aether-prod-api.yml`
+
+Not changed / deferred:
+- horizon-specific management policy — B6;
+- realistic fill/cost model — B7;
+- full operator/UI evidence presentation — B8;
+- integration/deployment closeout — B9.
+
+### J.A.R.V.I.S. REVIEW GATE
+
+Review implementation SHA `151ad2fb2e2a5a5648b18cfe3393dcf7ff6d596c` and the evidence above.
+
+If clear, respond exactly:
+
+`J.A.R.V.I.S. CLEAR — AETHER-LOAD-003 — START B6`
+
+If a B5 defect exists, respond:
+
+`J.A.R.V.I.S. HOLD — AETHER-LOAD-003 — B5 — <concrete defect/reason>`
+
+ChatGPT must not start B6 without the explicit B6 clearance.
 
