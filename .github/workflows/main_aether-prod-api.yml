@@ -116,6 +116,23 @@ jobs:
             sleep 10
           done
 
+          echo "Waiting for operator trade-filter controls to become active..."
+          for attempt in $(seq 1 18); do
+            if curl --fail --silent --show-error --max-time 20 "$base/" >/tmp/aether-filter-root.html \
+              && grep -q 'AETHER-FILTERS-R1' /tmp/aether-filter-root.html \
+              && curl --fail --silent --show-error --max-time 20 "$base/api/v1/settings" >/tmp/aether-filter-settings.json \
+              && python -c 'import json; b=json.load(open("/tmp/aether-filter-settings.json", encoding="utf-8")); f=((b.get("desk") or {}).get("trade_filters") or {}); assert f.get("special_mode") is False; assert f.get("optional_total")==9; assert len(f.get("optional") or {})==9; assert len(f.get("locked") or {})>=10'; then
+              echo "Operator trade-filter controls are active."
+              break
+            fi
+            if [ "$attempt" -eq 18 ]; then
+              echo "Expected operator trade-filter controls never became active."
+              cat /tmp/aether-filter-settings.json 2>/dev/null || true
+              exit 1
+            fi
+            sleep 10
+          done
+
           curl --fail --silent --show-error --max-time 20 "$base/" >/tmp/aether-root.html
           grep -q "Aether Trading Desk" /tmp/aether-root.html
           grep -q 'AETHER-LOAD-003-B9' /tmp/aether-root.html
@@ -230,7 +247,7 @@ jobs:
           assert filters.get("optional_total") == 9, filters
           assert len(optional) == 9, optional
           assert len(locked) >= 10, locked
-          assert all(bool(row.get("enabled")) for row in optional.values()), optional
+          assert all(isinstance(row.get("enabled"), bool) for row in optional.values()), optional
           assert all(bool(row.get("enabled")) and bool(row.get("locked")) for row in locked.values()), locked
           assert set(optional).issubset(set(traffic)), traffic
           assert intelligence.get("community_trade_influence_enabled") is False, intelligence
