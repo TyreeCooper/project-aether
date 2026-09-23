@@ -280,6 +280,9 @@ class PairBook:
                 "normal_quality_score": snap.get(
                     "normal_quality_score"
                 ),
+                "matrix_cell_id": snap.get("matrix_cell_id"),
+                "matrix_horizon": snap.get("matrix_horizon"),
+                "matrix_side": snap.get("matrix_side"),
             },
             execution_test=execution_test,
         )

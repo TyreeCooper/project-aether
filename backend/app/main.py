@@ -410,6 +410,11 @@ async def desk_live_trades():
     return desk.live_trades()
 
 
+@app.get("/api/v1/desk/execution-matrix")
+async def desk_execution_matrix():
+    return desk.execution_matrix_snapshot()
+
+
 @app.get("/api/v1/desk/events")
 async def desk_trade_events(
     limit: int = Query(default=100, ge=1, le=300),

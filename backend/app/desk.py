@@ -20,6 +20,7 @@ from app.news import fetch_asset_news
 from app.official_macro import verify_macro_events
 from app.desk_persist import load_desk, save_desk
 from app.events import active_risk, fetch_calendar
+from app.execution_matrix import capability_cells, directional_summary
 from app.playbooks import playbook_profile
 from app.universe import ASSETS, export_assets, register_asset
 from app.wallet import STARTING_USD
@@ -267,6 +268,14 @@ class MultiDesk:
             "live_blocked": True,
             "source": "multi_asset_desk",
             "execution_test_mode": self.execution_test_mode,
+        }
+
+    def execution_matrix_snapshot(self) -> dict[str, Any]:
+        return {
+            "load": "AETHER-LOAD-002",
+            "mode": "paper_execution_experiment",
+            **directional_summary(),
+            "cells": capability_cells(),
         }
 
     def settings_snapshot(self) -> dict[str, Any]:
