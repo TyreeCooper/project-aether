@@ -43,11 +43,14 @@ from app.pair_book import PairBook
 logger = logging.getLogger("aether.desk")
 RISK_SLICE = 0.08
 TRADE_RISK_FRACTION = 0.0075
-MAX_ACTIVE_POSITIONS = 4
+ASSET_RISK_FRACTION = 0.015
+CLUSTER_RISK_FRACTION = 0.0225
+PORTFOLIO_RISK_FRACTION = 0.03
+RISK_EPSILON_USD = 1e-6
 POLL = 20
 LOAD_002_RELEASE = "AETHER-LOAD-002-EXP-R1"
 LOAD_002_EXPERIMENT_RUN = "EXP-R1"
-LOAD_003_RELEASE = "AETHER-LOAD-003-B3"
+LOAD_003_RELEASE = "AETHER-LOAD-003-B4"
 STRATEGY_TEST_MODE = "strategy_test"
 EXECUTION_VALIDATION_MODE = "execution_validation"
 
@@ -224,6 +227,107 @@ class MultiDesk:
                 migrated_metadata["routing_horizon"] = requested
                 migrated_metadata["position_key"] = target
                 migrated["metadata"] = migrated_metadata
+
+    def strategy_risk_snapshot(
+        self,
+        equity_usd: float | None = None,
+    ) -> dict[str, Any]:
+        equity = max(
+            float(
+                equity_usd
+                if equity_usd is not None
+                else self.wallet.equity(self.marks())
+            ),
+            1.0,
+        )
+        by_asset: dict[str, float] = {}
+        by_cluster: dict[str, float] = {}
+        open_risk = 0.0
+
+        for key, position in self.wallet.positions.items():
+            metadata = position.get("metadata") or {}
+            if bool(
+                position.get("execution_test_funded")
+                or metadata.get("execution_test")
+            ):
+                continue
+            aid = str(
+                position.get("asset_id") or ""
+            ).lower()
+            if not aid:
+                continue
+            stop_present = (
+                position.get("current_stop") is not None
+                or position.get("initial_stop") is not None
+            )
+            risk = float(
+                self.wallet.position_stop_risk_usd(
+                    aid,
+                    position_key=key,
+                )
+            )
+            if not stop_present:
+                risk = max(
+                    float(
+                        metadata.get(
+                            "initial_stop_risk_usd"
+                        )
+                        or 0.0
+                    ),
+                    equity * TRADE_RISK_FRACTION,
+                )
+            risk = max(risk, 0.0)
+            cluster = str(
+                metadata.get("cluster")
+                or playbook_profile(aid).get("cluster")
+                or "unclassified"
+            )
+            open_risk += risk
+            by_asset[aid] = (
+                by_asset.get(aid, 0.0) + risk
+            )
+            by_cluster[cluster] = (
+                by_cluster.get(cluster, 0.0) + risk
+            )
+
+        portfolio_limit = (
+            equity * PORTFOLIO_RISK_FRACTION
+        )
+        return {
+            "equity_usd": round(equity, 8),
+            "max_trade_risk_usd": round(
+                equity * TRADE_RISK_FRACTION,
+                8,
+            ),
+            "max_asset_risk_usd": round(
+                equity * ASSET_RISK_FRACTION,
+                8,
+            ),
+            "max_cluster_risk_usd": round(
+                equity * CLUSTER_RISK_FRACTION,
+                8,
+            ),
+            "max_portfolio_risk_usd": round(
+                portfolio_limit,
+                8,
+            ),
+            "open_stop_risk_usd": round(
+                open_risk,
+                8,
+            ),
+            "remaining_portfolio_risk_usd": round(
+                max(portfolio_limit - open_risk, 0.0),
+                8,
+            ),
+            "by_asset": {
+                key: round(value, 8)
+                for key, value in by_asset.items()
+            },
+            "by_cluster": {
+                key: round(value, 8)
+                for key, value in by_cluster.items()
+            },
+        }
 
     def _latest_closed_minute_ts(self) -> int | None:
         latest: list[int] = []
@@ -885,6 +989,25 @@ class MultiDesk:
                 if self.execution_test_mode
                 else None
             ),
+            "strategy_risk_policy": {
+                "max_trade_risk_pct": round(
+                    TRADE_RISK_FRACTION * 100,
+                    4,
+                ),
+                "max_asset_risk_pct": round(
+                    ASSET_RISK_FRACTION * 100,
+                    4,
+                ),
+                "max_cluster_risk_pct": round(
+                    CLUSTER_RISK_FRACTION * 100,
+                    4,
+                ),
+                "max_portfolio_risk_pct": round(
+                    PORTFOLIO_RISK_FRACTION * 100,
+                    4,
+                ),
+                "fixed_strategy_position_limit": None,
+            },
         }
 
     async def initialize_history_persistence(self) -> None:
@@ -2015,23 +2138,7 @@ class MultiDesk:
         if not self.armed:
             return []
 
-        equity = max(self.wallet.equity(self.marks()), 1.0)
-        risk_budget_usd = equity * TRADE_RISK_FRACTION
-        capital_cap_usd = min(
-            equity * self.risk_slice,
-            max(self.wallet.usd * 0.95, 0.0),
-        )
         btc_bias, btc_long = self._btc_gate()
-
-        group_counts: dict[str, int] = {}
-        for position in self.wallet.positions.values():
-            aid = str(position.get("asset_id") or "").lower()
-            if aid not in self.by_id:
-                continue
-            group = str(playbook_profile(aid)["cluster"])
-            group_counts[group] = (
-                group_counts.get(group, 0) + 1
-            )
 
         due_routes = ()
         if not self.execution_test_mode:
@@ -2064,7 +2171,10 @@ class MultiDesk:
                     )
                 except Exception as exc:
                     baseline = {
-                        "reason": f"strategy_error:{type(exc).__name__}",
+                        "reason": (
+                            f"strategy_error:"
+                            f"{type(exc).__name__}"
+                        ),
                         "execution_status": "strategy_error",
                         "quality_score": 0,
                     }
@@ -2076,22 +2186,36 @@ class MultiDesk:
                     "reason": "execution_test_mode",
                     "execution_status": "execution_test_forced",
                     "signal_key": (
-                        f"execution-test:{book.id}:{int(time.time()) // 60}"
+                        f"execution-test:{book.id}:"
+                        f"{int(time.time()) // 60}"
                     ),
                     "risk_stop_pct": 10.0,
                     "entry_clock": "desk_tick",
                     "bias_clock": "bypassed",
                     "execution_test": True,
-                    "execution_test_run": LOAD_002_EXPERIMENT_RUN,
-                    "would_have_blocked_by": baseline.get("reason"),
-                    "normal_execution_status": baseline.get("execution_status"),
-                    "normal_signal": baseline.get("executable_signal"),
-                    "normal_quality_score": baseline.get("quality_score"),
+                    "execution_test_run": (
+                        LOAD_002_EXPERIMENT_RUN
+                    ),
+                    "would_have_blocked_by": baseline.get(
+                        "reason"
+                    ),
+                    "normal_execution_status": baseline.get(
+                        "execution_status"
+                    ),
+                    "normal_signal": baseline.get(
+                        "executable_signal"
+                    ),
+                    "normal_quality_score": baseline.get(
+                        "quality_score"
+                    ),
                     "position_key": book.id,
                 }
                 candidates.append(
                     (
-                        int(baseline.get("quality_score") or 0),
+                        int(
+                            baseline.get("quality_score")
+                            or 0
+                        ),
                         book,
                         snap,
                         None,
@@ -2111,8 +2235,14 @@ class MultiDesk:
                         horizon,
                     )
                     route_book = self.route_books[position_key]
-                    self._sync_route_book_market(book, route_book)
-                    mode = execution_mode(book.id, horizon)
+                    self._sync_route_book_market(
+                        book,
+                        route_book,
+                    )
+                    mode = execution_mode(
+                        book.id,
+                        horizon,
+                    )
                     try:
                         snap = route_book.snapshot_strategy(
                             btc_bias_on=btc_bias,
@@ -2121,27 +2251,38 @@ class MultiDesk:
                         )
                     except Exception as exc:
                         logger.exception(
-                            "strategy route failed asset=%s horizon=%s",
+                            (
+                                "strategy route failed "
+                                "asset=%s horizon=%s"
+                            ),
                             book.id,
                             horizon,
                         )
                         self._record_opportunity_evaluation(
                             route_book,
                             routing_horizon=horizon,
-                            clock_horizon_value=route.horizon.value,
+                            clock_horizon_value=(
+                                route.horizon.value
+                            ),
                             strategy_id=route.strategy_id,
-                            strategy_version=route.strategy_version,
+                            strategy_version=(
+                                route.strategy_version
+                            ),
                             mode=mode,
                             snapshot={
                                 "reason": (
-                                    f"strategy_error:{type(exc).__name__}"
+                                    f"strategy_error:"
+                                    f"{type(exc).__name__}"
                                 ),
-                                "execution_status": "strategy_error",
+                                "execution_status": (
+                                    "strategy_error"
+                                ),
                                 "quality_score": 0,
                             },
                             status="error",
                             rejection_reason=(
-                                f"strategy_error:{type(exc).__name__}"
+                                f"strategy_error:"
+                                f"{type(exc).__name__}"
                             ),
                         )
                         continue
@@ -2151,19 +2292,25 @@ class MultiDesk:
                         "routing_horizon": horizon,
                         "clock_horizon": route.horizon.value,
                         "strategy_id": route.strategy_id,
-                        "strategy_version": route.strategy_version,
+                        "strategy_version": (
+                            route.strategy_version
+                        ),
                         "position_key": position_key,
                     }
-                    executable = snap.get("executable_signal")
+                    executable = snap.get(
+                        "executable_signal"
+                    )
                     if executable not in {"buy", "short"}:
                         raw_signal = snap.get("signal")
                         execution_status = str(
-                            snap.get("execution_status") or ""
+                            snap.get("execution_status")
+                            or ""
                         )
                         rejection_reason = str(
                             (
                                 execution_status
-                                if raw_signal in {"buy", "short"}
+                                if raw_signal
+                                in {"buy", "short"}
                                 and execution_status
                                 not in {"", "no_trade"}
                                 else snap.get("reason")
@@ -2174,13 +2321,19 @@ class MultiDesk:
                         self._record_opportunity_evaluation(
                             route_book,
                             routing_horizon=horizon,
-                            clock_horizon_value=route.horizon.value,
+                            clock_horizon_value=(
+                                route.horizon.value
+                            ),
                             strategy_id=route.strategy_id,
-                            strategy_version=route.strategy_version,
+                            strategy_version=(
+                                route.strategy_version
+                            ),
                             mode=mode,
                             snapshot=snap,
                             status="rejected",
-                            rejection_reason=rejection_reason,
+                            rejection_reason=(
+                                rejection_reason
+                            ),
                         )
                         continue
 
@@ -2188,29 +2341,44 @@ class MultiDesk:
                         self._record_opportunity_evaluation(
                             route_book,
                             routing_horizon=horizon,
-                            clock_horizon_value=route.horizon.value,
+                            clock_horizon_value=(
+                                route.horizon.value
+                            ),
                             strategy_id=route.strategy_id,
-                            strategy_version=route.strategy_version,
+                            strategy_version=(
+                                route.strategy_version
+                            ),
                             mode=mode,
                             snapshot=snap,
                             status="blocked",
-                            rejection_reason="position_already_open",
+                            rejection_reason=(
+                                "position_already_open"
+                            ),
                         )
                         continue
 
-                    evaluation = self._record_opportunity_evaluation(
-                        route_book,
-                        routing_horizon=horizon,
-                        clock_horizon_value=route.horizon.value,
-                        strategy_id=route.strategy_id,
-                        strategy_version=route.strategy_version,
-                        mode=mode,
-                        snapshot=snap,
-                        status="qualified",
+                    evaluation = (
+                        self._record_opportunity_evaluation(
+                            route_book,
+                            routing_horizon=horizon,
+                            clock_horizon_value=(
+                                route.horizon.value
+                            ),
+                            strategy_id=route.strategy_id,
+                            strategy_version=(
+                                route.strategy_version
+                            ),
+                            mode=mode,
+                            snapshot=snap,
+                            status="qualified",
+                        )
                     )
                     candidates.append(
                         (
-                            int(snap.get("quality_score") or 0),
+                            int(
+                                snap.get("quality_score")
+                                or 0
+                            ),
                             route_book,
                             snap,
                             evaluation,
@@ -2223,34 +2391,21 @@ class MultiDesk:
             reverse=True,
         )
         active_count = len(self.wallet.positions)
-        active_limit = (
-            len(self.books)
-            if self.execution_test_mode
-            else MAX_ACTIVE_POSITIONS
-        )
 
         for _, book, snap, evaluation in candidates:
-            if active_count >= active_limit:
-                self._update_opportunity_evaluation(
-                    evaluation,
-                    status="blocked",
-                    rejection_reason="active_position_limit",
-                )
-                continue
-
-            profile = playbook_profile(book.id)
-            group = str(profile["cluster"])
             if (
-                not self.execution_test_mode
-                and group_counts.get(group, 0)
-                >= int(profile["cluster_cap"])
+                self.execution_test_mode
+                and active_count >= len(self.books)
             ):
                 self._update_opportunity_evaluation(
                     evaluation,
                     status="blocked",
-                    rejection_reason="cluster_cap",
+                    rejection_reason=(
+                        "execution_validation_position_limit"
+                    ),
                 )
                 continue
+
             if float(book.mark or 0.0) <= 0:
                 self._update_opportunity_evaluation(
                     evaluation,
@@ -2258,14 +2413,358 @@ class MultiDesk:
                     rejection_reason="no_mark",
                 )
                 continue
-            if (
-                not self.execution_test_mode
-                and (risk_budget_usd <= 0 or capital_cap_usd <= 0)
-            ):
+
+            equity = max(
+                self.wallet.equity(self.marks()),
+                1.0,
+            )
+            capital_cap_usd = min(
+                equity * self.risk_slice,
+                max(self.wallet.usd * 0.95, 0.0),
+            )
+
+            if self.execution_test_mode:
+                risk_budget_usd = (
+                    equity * TRADE_RISK_FRACTION
+                )
+                plan = book.entry_plan(
+                    risk_budget_usd,
+                    strategy_snapshot=snap,
+                    max_capital_usd=None,
+                    execution_test=True,
+                )
+            else:
+                risk_state = self.strategy_risk_snapshot(
+                    equity
+                )
+                profile = playbook_profile(book.id)
+                cluster = str(profile["cluster"])
+
+                asset_before = float(
+                    (
+                        risk_state.get("by_asset")
+                        or {}
+                    ).get(book.id, 0.0)
+                )
+                cluster_before = float(
+                    (
+                        risk_state.get("by_cluster")
+                        or {}
+                    ).get(cluster, 0.0)
+                )
+                portfolio_before = float(
+                    risk_state["open_stop_risk_usd"]
+                )
+                trade_limit = float(
+                    risk_state["max_trade_risk_usd"]
+                )
+                asset_limit = float(
+                    risk_state["max_asset_risk_usd"]
+                )
+                cluster_limit = float(
+                    risk_state["max_cluster_risk_usd"]
+                )
+                portfolio_limit = float(
+                    risk_state[
+                        "max_portfolio_risk_usd"
+                    ]
+                )
+
+                asset_remaining = max(
+                    asset_limit - asset_before,
+                    0.0,
+                )
+                cluster_remaining = max(
+                    cluster_limit - cluster_before,
+                    0.0,
+                )
+                portfolio_remaining = max(
+                    portfolio_limit
+                    - portfolio_before,
+                    0.0,
+                )
+
+                if (
+                    asset_remaining
+                    <= RISK_EPSILON_USD
+                ):
+                    if evaluation is not None:
+                        evaluation.update(
+                            {
+                                "asset_open_risk_usd": (
+                                    round(
+                                        asset_before,
+                                        8,
+                                    )
+                                ),
+                                "asset_risk_limit_usd": (
+                                    round(
+                                        asset_limit,
+                                        8,
+                                    )
+                                ),
+                            }
+                        )
+                    self._update_opportunity_evaluation(
+                        evaluation,
+                        status="blocked",
+                        rejection_reason=(
+                            "asset_risk_limit"
+                        ),
+                    )
+                    continue
+
+                if (
+                    cluster_remaining
+                    <= RISK_EPSILON_USD
+                ):
+                    if evaluation is not None:
+                        evaluation.update(
+                            {
+                                "cluster": cluster,
+                                "cluster_open_risk_usd": (
+                                    round(
+                                        cluster_before,
+                                        8,
+                                    )
+                                ),
+                                "cluster_risk_limit_usd": (
+                                    round(
+                                        cluster_limit,
+                                        8,
+                                    )
+                                ),
+                            }
+                        )
+                    self._update_opportunity_evaluation(
+                        evaluation,
+                        status="blocked",
+                        rejection_reason=(
+                            "cluster_risk_limit"
+                        ),
+                    )
+                    continue
+
+                if (
+                    portfolio_remaining
+                    <= RISK_EPSILON_USD
+                ):
+                    if evaluation is not None:
+                        evaluation.update(
+                            {
+                                "portfolio_open_risk_usd": (
+                                    round(
+                                        portfolio_before,
+                                        8,
+                                    )
+                                ),
+                                "portfolio_risk_limit_usd": (
+                                    round(
+                                        portfolio_limit,
+                                        8,
+                                    )
+                                ),
+                            }
+                        )
+                    self._update_opportunity_evaluation(
+                        evaluation,
+                        status="blocked",
+                        rejection_reason=(
+                            "aggregate_open_risk_limit"
+                        ),
+                    )
+                    continue
+
+                if capital_cap_usd <= 0:
+                    self._update_opportunity_evaluation(
+                        evaluation,
+                        status="blocked",
+                        rejection_reason=(
+                            "risk_or_capital_unavailable"
+                        ),
+                    )
+                    continue
+
+                risk_budget_usd = min(
+                    trade_limit,
+                    asset_remaining,
+                    cluster_remaining,
+                    portfolio_remaining,
+                )
+                if (
+                    risk_budget_usd
+                    <= RISK_EPSILON_USD
+                ):
+                    self._update_opportunity_evaluation(
+                        evaluation,
+                        status="blocked",
+                        rejection_reason=(
+                            "risk_capacity_unavailable"
+                        ),
+                    )
+                    continue
+
+                plan = book.entry_plan(
+                    risk_budget_usd,
+                    strategy_snapshot=snap,
+                    max_capital_usd=capital_cap_usd,
+                    execution_test=False,
+                )
+                if plan.get("ok"):
+                    candidate_risk = float(
+                        plan.get("stop_risk_usd")
+                        or 0.0
+                    )
+                    if evaluation is not None:
+                        evaluation.update(
+                            {
+                                "candidate_stop_risk_usd": (
+                                    round(
+                                        candidate_risk,
+                                        8,
+                                    )
+                                ),
+                                "target_risk_usd": (
+                                    round(
+                                        risk_budget_usd,
+                                        8,
+                                    )
+                                ),
+                                "max_trade_risk_usd": (
+                                    round(
+                                        trade_limit,
+                                        8,
+                                    )
+                                ),
+                                "asset_open_risk_usd": (
+                                    round(
+                                        asset_before,
+                                        8,
+                                    )
+                                ),
+                                "asset_risk_limit_usd": (
+                                    round(
+                                        asset_limit,
+                                        8,
+                                    )
+                                ),
+                                "cluster": cluster,
+                                "cluster_open_risk_usd": (
+                                    round(
+                                        cluster_before,
+                                        8,
+                                    )
+                                ),
+                                "cluster_risk_limit_usd": (
+                                    round(
+                                        cluster_limit,
+                                        8,
+                                    )
+                                ),
+                                "portfolio_open_risk_usd": (
+                                    round(
+                                        portfolio_before,
+                                        8,
+                                    )
+                                ),
+                                "portfolio_risk_limit_usd": (
+                                    round(
+                                        portfolio_limit,
+                                        8,
+                                    )
+                                ),
+                            }
+                        )
+
+                    if (
+                        candidate_risk
+                        > trade_limit
+                        + RISK_EPSILON_USD
+                    ):
+                        self._update_opportunity_evaluation(
+                            evaluation,
+                            status="blocked",
+                            rejection_reason=(
+                                "trade_risk_limit"
+                            ),
+                        )
+                        continue
+                    if (
+                        asset_before
+                        + candidate_risk
+                        > asset_limit
+                        + RISK_EPSILON_USD
+                    ):
+                        self._update_opportunity_evaluation(
+                            evaluation,
+                            status="blocked",
+                            rejection_reason=(
+                                "asset_risk_limit"
+                            ),
+                        )
+                        continue
+                    if (
+                        cluster_before
+                        + candidate_risk
+                        > cluster_limit
+                        + RISK_EPSILON_USD
+                    ):
+                        self._update_opportunity_evaluation(
+                            evaluation,
+                            status="blocked",
+                            rejection_reason=(
+                                "cluster_risk_limit"
+                            ),
+                        )
+                        continue
+                    if (
+                        portfolio_before
+                        + candidate_risk
+                        > portfolio_limit
+                        + RISK_EPSILON_USD
+                    ):
+                        self._update_opportunity_evaluation(
+                            evaluation,
+                            status="blocked",
+                            rejection_reason=(
+                                "aggregate_open_risk_limit"
+                            ),
+                        )
+                        continue
+
+                    snap = {
+                        **snap,
+                        "target_risk_usd": (
+                            risk_budget_usd
+                        ),
+                        "portfolio_open_risk_before_usd": (
+                            portfolio_before
+                        ),
+                        "portfolio_risk_limit_usd": (
+                            portfolio_limit
+                        ),
+                        "asset_open_risk_before_usd": (
+                            asset_before
+                        ),
+                        "asset_risk_limit_usd": (
+                            asset_limit
+                        ),
+                        "cluster_open_risk_before_usd": (
+                            cluster_before
+                        ),
+                        "cluster_risk_limit_usd": (
+                            cluster_limit
+                        ),
+                    }
+
+            if not plan.get("ok"):
                 self._update_opportunity_evaluation(
                     evaluation,
                     status="blocked",
-                    rejection_reason="risk_or_capital_unavailable",
+                    rejection_reason=(
+                        f"execution_rejected:"
+                        f"{plan.get('error') or 'unknown'}"
+                    ),
                 )
                 continue
 
@@ -2278,6 +2777,7 @@ class MultiDesk:
                     else capital_cap_usd
                 ),
                 execution_test=self.execution_test_mode,
+                entry_plan=plan,
             )
             result["playbook"] = snap.get("mode")
             result["quality_score"] = snap.get(
@@ -2300,51 +2800,72 @@ class MultiDesk:
                     trade_id=result.get("trade_id"),
                 )
                 active_count += 1
-                group_counts[group] = (
-                    group_counts.get(group, 0) + 1
-                )
                 self._record_event(
                     "entry_filled",
                     book,
                     {
-                        "trade_id": result.get("trade_id"),
-                        "position_key": result.get("position_key"),
-                        "side": result.get("position_side"),
-                        "mode": result.get("entry_mode"),
+                        "trade_id": result.get(
+                            "trade_id"
+                        ),
+                        "position_key": result.get(
+                            "position_key"
+                        ),
+                        "side": result.get(
+                            "position_side"
+                        ),
+                        "mode": result.get(
+                            "entry_mode"
+                        ),
                         "price": result.get("price"),
                         "quantity": result.get("qty"),
-                        "stop_price": book.stop or None,
+                        "stop_price": (
+                            book.stop or None
+                        ),
+                        "stop_risk_usd": result.get(
+                            "stop_risk_usd"
+                        ),
                         "risk_budget_usd": result.get(
                             "risk_budget_usd"
                         ),
                         "quality_score": result.get(
                             "quality_score"
                         ),
-                        "execution_test": self.execution_test_mode,
+                        "execution_test": (
+                            self.execution_test_mode
+                        ),
                         "routing_horizon": snap.get(
                             "routing_horizon"
                         ),
                         "clock_horizon": snap.get(
                             "clock_horizon"
                         ),
-                        "strategy_id": snap.get("strategy_id"),
+                        "strategy_id": snap.get(
+                            "strategy_id"
+                        ),
                         "strategy_version": snap.get(
                             "strategy_version"
                         ),
-                        "would_have_blocked_by": snap.get(
-                            "would_have_blocked_by"
+                        "would_have_blocked_by": (
+                            snap.get(
+                                "would_have_blocked_by"
+                            )
                         ),
                     },
                 )
                 if self.execution_test_mode:
                     self.persist()
 
-                if book.kraken and not self.execution_test_mode:
+                if (
+                    book.kraken
+                    and not self.execution_test_mode
+                ):
                     asyncio.create_task(
                         live.place_order(
                             pair=book.kraken,
                             side=str(
-                                result.get("execution_side")
+                                result.get(
+                                    "execution_side"
+                                )
                                 or "buy"
                             ),
                             volume=float(

@@ -424,6 +424,59 @@ class PaperPortfolio:
         step = float(spec.get("quantity_step") or 1.0)
         return _round_step(raw, step)
 
+    def stop_risk_usd(
+        self,
+        asset_id: str,
+        *,
+        side: str,
+        quantity: float,
+        entry_price: float,
+        stop_price: float | None,
+    ) -> float:
+        if stop_price is None:
+            return 0.0
+        stop = float(stop_price)
+        entry = float(entry_price)
+        qty = abs(float(quantity))
+        if stop <= 0 or entry <= 0 or qty <= 0:
+            return 0.0
+        pnl_at_stop = self.move_pnl(
+            str(asset_id).lower(),
+            side=str(side).lower(),
+            quantity=qty,
+            entry_price=entry,
+            mark=stop,
+        )
+        return max(-float(pnl_at_stop), 0.0)
+
+    def position_stop_risk_usd(
+        self,
+        asset_id: str,
+        *,
+        position_key: str | None = None,
+    ) -> float:
+        aid = str(asset_id).lower()
+        key = self._resolve_position_key(aid, position_key)
+        rows = (
+            [(key, self.positions[key])]
+            if key is not None
+            else self._position_items_for_asset(aid)
+        )
+        total = 0.0
+        for _, pos in rows:
+            total += self.stop_risk_usd(
+                aid,
+                side=str(pos.get("side") or ""),
+                quantity=float(pos.get("quantity") or 0.0),
+                entry_price=float(pos.get("entry_price") or 0.0),
+                stop_price=(
+                    pos.get("current_stop")
+                    if pos.get("current_stop") is not None
+                    else pos.get("initial_stop")
+                ),
+            )
+        return total
+
     def required_margin(
         self,
         asset_id: str,

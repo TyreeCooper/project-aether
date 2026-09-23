@@ -210,7 +210,7 @@ class PairBook:
     def fill_px(self, side: str) -> float | None:
         return slipped_price(side, self.bid, self.ask, self.mark)
 
-    def enter(
+    def entry_plan(
         self,
         risk_usd: float,
         *,
@@ -239,13 +239,20 @@ class PairBook:
         if not px:
             return {"ok": False, "error": "no_mark", "pair": self.pair}
 
-        stop_pct = max(float(snap.get("risk_stop_pct") or 2.0), 0.01)
+        stop_pct = max(
+            float(snap.get("risk_stop_pct") or 2.0),
+            0.01,
+        )
         stop_price = (
             px * (1 + stop_pct / 100)
             if position_side == "short"
             else px * (1 - stop_pct / 100)
         )
-        size_for_risk = getattr(self.wallet, "size_for_risk", None)
+        size_for_risk = getattr(
+            self.wallet,
+            "size_for_risk",
+            None,
+        )
         if not callable(size_for_risk):
             return {
                 "ok": False,
@@ -253,11 +260,9 @@ class PairBook:
                 "pair": self.pair,
             }
         if execution_test:
-            # AETHER-LOAD-002 is testing the execution rail, not sizing.
-            # Use exactly one legal quantity step so every official book can
-            # prove that it can open a paper position.
             qty = float(
-                instrument_spec(self.id).get("quantity_step") or 1.0
+                instrument_spec(self.id).get("quantity_step")
+                or 1.0
             )
         else:
             qty = float(
@@ -278,18 +283,82 @@ class PairBook:
                 "pair": self.pair,
             }
 
-        open_position = getattr(self.wallet, "open_position", None)
+        risk_fn = getattr(self.wallet, "stop_risk_usd", None)
+        stop_risk = (
+            float(
+                risk_fn(
+                    self.id,
+                    side=position_side,
+                    quantity=qty,
+                    entry_price=px,
+                    stop_price=stop_price,
+                )
+            )
+            if callable(risk_fn)
+            else 0.0
+        )
+        route_position_key = str(
+            snap.get("position_key")
+            or self.position_key
+            or self.id
+        ).lower()
+        return {
+            "ok": True,
+            "position_key": route_position_key,
+            "position_side": position_side,
+            "execution_side": fill_side,
+            "reference_price": float(reference or px),
+            "price": float(px),
+            "stop_price": float(stop_price),
+            "risk_stop_pct": float(stop_pct),
+            "qty": float(qty),
+            "stop_risk_usd": float(stop_risk),
+        }
+
+    def enter(
+        self,
+        risk_usd: float,
+        *,
+        strategy_snapshot: dict[str, Any] | None = None,
+        max_capital_usd: float | None = None,
+        execution_test: bool = False,
+        entry_plan: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        snap = dict(strategy_snapshot or {})
+        plan = dict(
+            entry_plan
+            or self.entry_plan(
+                risk_usd,
+                strategy_snapshot=snap,
+                max_capital_usd=max_capital_usd,
+                execution_test=execution_test,
+            )
+        )
+        if not plan.get("ok"):
+            return plan
+
+        position_side = str(plan["position_side"])
+        fill_side = str(plan["execution_side"])
+        reference = float(plan["reference_price"])
+        px = float(plan["price"])
+        stop_price = float(plan["stop_price"])
+        stop_pct = float(plan["risk_stop_pct"])
+        qty = float(plan["qty"])
+        stop_risk = float(plan.get("stop_risk_usd") or 0.0)
+        route_position_key = str(plan["position_key"])
+
+        open_position = getattr(
+            self.wallet,
+            "open_position",
+            None,
+        )
         if not callable(open_position):
             return {
                 "ok": False,
                 "error": "paper_portfolio_required",
                 "pair": self.pair,
             }
-        route_position_key = str(
-            snap.get("position_key")
-            or self.position_key
-            or self.id
-        ).lower()
+
         result = open_position(
             self.id,
             side=position_side,
@@ -302,7 +371,7 @@ class PairBook:
                 if snap.get("signal_key") is not None
                 else None
             ),
-            reference_price=float(reference or px),
+            reference_price=reference,
             metadata={
                 "entry_reason": snap.get("reason"),
                 "quality_score": snap.get("quality_score"),
@@ -311,9 +380,13 @@ class PairBook:
                 "cluster": playbook_profile(self.id).get("cluster"),
                 "execution_test": bool(execution_test),
                 "execution_test_load": (
-                    "AETHER-LOAD-002" if execution_test else None
+                    "AETHER-LOAD-002"
+                    if execution_test
+                    else None
                 ),
-                "execution_test_run": snap.get("execution_test_run"),
+                "execution_test_run": snap.get(
+                    "execution_test_run"
+                ),
                 "would_have_blocked_by": snap.get(
                     "would_have_blocked_by"
                 ),
@@ -327,11 +400,37 @@ class PairBook:
                 "matrix_cell_id": snap.get("matrix_cell_id"),
                 "matrix_horizon": snap.get("matrix_horizon"),
                 "matrix_side": snap.get("matrix_side"),
-                "routing_horizon": snap.get("routing_horizon"),
+                "routing_horizon": snap.get(
+                    "routing_horizon"
+                ),
                 "clock_horizon": snap.get("clock_horizon"),
                 "strategy_id": snap.get("strategy_id"),
-                "strategy_version": snap.get("strategy_version"),
+                "strategy_version": snap.get(
+                    "strategy_version"
+                ),
                 "position_key": route_position_key,
+                "target_risk_usd": snap.get(
+                    "target_risk_usd"
+                ),
+                "initial_stop_risk_usd": stop_risk,
+                "portfolio_open_risk_before_usd": snap.get(
+                    "portfolio_open_risk_before_usd"
+                ),
+                "portfolio_risk_limit_usd": snap.get(
+                    "portfolio_risk_limit_usd"
+                ),
+                "asset_open_risk_before_usd": snap.get(
+                    "asset_open_risk_before_usd"
+                ),
+                "asset_risk_limit_usd": snap.get(
+                    "asset_risk_limit_usd"
+                ),
+                "cluster_open_risk_before_usd": snap.get(
+                    "cluster_open_risk_before_usd"
+                ),
+                "cluster_risk_limit_usd": snap.get(
+                    "cluster_risk_limit_usd"
+                ),
             },
             execution_test=execution_test,
             position_key=route_position_key,
@@ -342,9 +441,14 @@ class PairBook:
         result["execution_side"] = fill_side
         result["event"] = "entry"
         result["execution_test"] = bool(execution_test)
+        result["stop_risk_usd"] = round(stop_risk, 8)
         if result.get("ok"):
-            self.entry_at = str(result.get("opened_at") or _now())
-            self.entry_mode = str(snap.get("mode") or "intraday")
+            self.entry_at = str(
+                result.get("opened_at") or _now()
+            )
+            self.entry_mode = str(
+                snap.get("mode") or "intraday"
+            )
             self.highest = px
             self.lowest = px
             self.stop = stop_price
@@ -353,34 +457,41 @@ class PairBook:
             signal_key = snap.get("signal_key")
             if signal_key:
                 self.last_entry_signal_key = str(signal_key)
-                result["signal_key"] = self.last_entry_signal_key
-            reference_px = float(reference or px)
-            move_pnl = getattr(self.wallet, "move_pnl", None)
+                result["signal_key"] = (
+                    self.last_entry_signal_key
+                )
+            move_pnl = getattr(
+                self.wallet,
+                "move_pnl",
+                None,
+            )
             if callable(move_pnl):
                 adverse = float(
                     move_pnl(
                         self.id,
                         side=position_side,
                         quantity=qty,
-                        entry_price=reference_px,
+                        entry_price=reference,
                         mark=px,
                     )
                 )
-                # The constructed execution price is deliberately worse
-                # than the reference price for the chosen side. Convert that
-                # adverse movement into positive execution-cost dollars.
                 slippage_usd = abs(adverse)
             else:
                 slippage_usd = 0.0
             slippage_bps = (
-                abs(px / reference_px - 1) * 10_000
-                if reference_px > 0
+                abs(px / reference - 1) * 10_000
+                if reference > 0
                 else None
             )
-            result["reference_price"] = reference_px
-            result["slippage_usd"] = round(slippage_usd, 8)
+            result["reference_price"] = reference
+            result["slippage_usd"] = round(
+                slippage_usd,
+                8,
+            )
             result["slippage_bps"] = (
-                None if slippage_bps is None else round(slippage_bps, 4)
+                None
+                if slippage_bps is None
+                else round(slippage_bps, 4)
             )
             self.fills.append(
                 {
