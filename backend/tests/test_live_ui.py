@@ -106,13 +106,47 @@ def test_engine_exposes_operator_gated_execution_matrix_validation():
 
 
 
-def test_load_002_release_marker_and_cache_busted_assets_are_present():
+def test_b8_release_marker_and_cache_busted_assets_are_present():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     js = (STATIC / "aether-app.js").read_text(encoding="utf-8")
-    assert 'content="AETHER-LOAD-002-EXP-R1"' in html
-    assert "/static/aether-app.css?v=AETHER-LOAD-002-EXP-R1" in html
-    assert "/static/aether-app.js?v=AETHER-LOAD-002-EXP-R1" in html
+    assert 'content="AETHER-LOAD-003-B8"' in html
+    assert "/static/aether-app.css?v=AETHER-LOAD-003-B8" in html
+    assert "/static/aether-app.js?v=AETHER-LOAD-003-B8" in html
     assert 'id="settingsLoadBadge"' in html
     assert 'id="settingsLoadStatus"' in html
     assert "Runtime safety" in js
     assert "Observed books" in js
+
+
+def test_b8_live_ui_exposes_runtime_risk_route_and_unit_evidence():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    js = (STATIC / "aether-app.js").read_text(encoding="utf-8")
+    css = (STATIC / "aether-app.css").read_text(encoding="utf-8")
+
+    assert 'id="liveOpenRisk"' in html
+    assert 'id="liveRiskRemaining"' in html
+    assert 'id="liveRuntimeMode"' in html
+    assert "STRATEGY TEST / PAPER" in js
+    assert "EXECUTION VALIDATION" in js
+    assert "position_risk_usd" in js
+    assert "position_risk_pct_equity" in js
+    assert "standard_lots" in js
+    assert "contracts" in js
+    assert "gate_reason" in js
+    assert "route_key" in js
+    assert "trade-class-pill" in css
+    assert "validation-trade" in css
+    assert "watch-row" in css
+
+
+def test_b8_blotter_renders_horizon_excursion_capture_and_cost_evidence():
+    js = (STATIC / "aether-app.js").read_text(encoding="utf-8")
+
+    assert "<th>Class</th>" in js
+    assert "<th>Horizon</th>" in js
+    assert "<th>MFE</th>" in js
+    assert "<th>MAE</th>" in js
+    assert "<th>Capture</th>" in js
+    assert "<th>Costs</th>" in js
+    assert "capture_efficiency_pct" in js
+    assert "total_cost_drag_usd" in js
