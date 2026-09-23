@@ -3,9 +3,9 @@
 ## CONTROL STATUS
 
 - Load: AETHER-LOAD-003
-- State: B5 COMPLETE — WAITING FOR J.A.R.V.I.S. REVIEW
+- State: B6 COMPLETE — WAITING FOR J.A.R.V.I.S. REVIEW
 - Active implementation batch: NONE
-- Waiting on: GROK BOT J.A.R.V.I.S. CLEARANCE TO START B6
+- Waiting on: GROK BOT J.A.R.V.I.S. CLEARANCE TO START B7
 - Starting main SHA: 09dfdb510bd5b54f43cef7e9c5f20389d3636ae1
 - Live-money execution: HARD BLOCKED
 - Paper testing: remains the target runtime
@@ -173,12 +173,12 @@ ChatGPT must not advance while the batch is on HOLD.
 - B3: [COMPLETE] Horizon-scoped position ledger — final head e6ace62d79c2e3d3cf58a29bc141a1f1c7807fb2
 - B4: [COMPLETE] Portfolio risk & qualified concurrency — final head 28c33641b7d891ee2e3f64793102ff2d04703800
 - B5: [COMPLETE] Instrument sizing hard ceilings — 151ad2fb2e2a5a5648b18cfe3393dcf7ff6d596c
-- B6: [WAITING] Horizon-specific trade management
+- B6: [COMPLETE] Horizon-specific trade management — final head d7089c2d85c623020136bd445a57183a74021073
 - B7: [WAITING] Realistic fill & cost model
 - B8: [WAITING] Operator/UI evidence & telemetry
 - B9: [WAITING] Integration, deployment contract & closeout
 
-Implementation progress: 5 / 9 batches complete.
+Implementation progress: 6 / 9 batches complete.
 
 ---
 
@@ -908,7 +908,7 @@ ChatGPT must not start B5 without the explicit B5 clearance.
 
 ## B5 — Instrument Sizing Hard Ceilings
 
-Status: COMPLETE — WAITING FOR J.A.R.V.I.S. REVIEW
+Status: COMPLETE — VERIFIED/CLEARED BY J.A.R.V.I.S.
 
 Implementation SHA:
 `151ad2fb2e2a5a5648b18cfe3393dcf7ff6d596c`
@@ -1005,4 +1005,96 @@ If a B5 defect exists, respond:
 `J.A.R.V.I.S. HOLD — AETHER-LOAD-003 — B5 — <concrete defect/reason>`
 
 ChatGPT must not start B6 without the explicit B6 clearance.
+
+## B6 — Horizon-Specific Trade Management
+
+Status: COMPLETE — WAITING FOR J.A.R.V.I.S. REVIEW
+
+Final implementation head:
+`d7089c2d85c623020136bd445a57183a74021073`
+
+B6 commit chain:
+- `ba7db244ceb9f5aec3186e5b4d1b7e23417f0bfb` — `feat: bind trade management to entry horizon`
+- `d7089c2d85c623020136bd445a57183a74021073` — `test: isolate sibling horizon stop management`
+
+Scope completed:
+- every strategy route now has an explicit management contract derived from its route identity;
+- route identity is authoritative over a conflicting saved `entry_mode` or stale metadata;
+- scalp routes manage as `scalp` on 1-minute source bars with the configured 15-minute time stop;
+- intraday routes manage as `intraday` on completed 15-minute bars with the instrument-specific intraday time stop;
+- swing routes manage as `swing` on 1-hour bars with the instrument-specific swing time stop;
+- BTC/ETH `swing` route identity maps canonically to `daily_swing` management on 1-day bars;
+- originating horizon, management mode, management clock, and management time-stop contract are exposed on route/book and Live Trades state;
+- new strategy entries persist `originating_horizon` and canonical `management_mode` in position metadata;
+- legacy normal strategy migration backfills `originating_horizon` and canonical `management_mode`;
+- execution-validation positions remain isolated and deliberately use the asset's valid primary playbook rather than an invalid `execution_test` strategy mode;
+- the existing structural/hard stop, ATR-aware long exit plan, short trailing logic, time stop, rule exit, MFE/MAE, capture, slippage, and fee analytics remain intact;
+- sibling horizons on one asset retain independent stops and execution state;
+- restart restores route stop/high/low/entry state and the same horizon-specific management contract;
+- a route horizon cannot silently fall back to an unrelated asset primary when the route identity is present.
+
+Required B6 proof:
+- scalp remains scalp through management — PROVEN;
+- intraday remains intraday through management — PROVEN;
+- swing remains swing through management — PROVEN;
+- BTC/ETH swing maps to daily-swing management — PROVEN;
+- route identity overrides conflicting saved entry-mode metadata — PROVEN;
+- management requests the originating horizon playbook — PROVEN;
+- stop movement on one horizon does not mutate a sibling horizon — PROVEN;
+- restart preserves route management identity and stop/excursion state — PROVEN;
+- execution validation never requests `execution_test` as a strategy playbook — PROVEN.
+
+Safety/invariant evidence:
+- production runtime remains `strategy_test`;
+- forced strategy entries remain OFF;
+- live-money execution remains HARD BLOCKED;
+- isolated LOAD-002 execution validation remains available;
+- B4 risk ceilings remain in force;
+- B5 instrument hard size ceilings remain in force;
+- B7 fill/cost model changes were NOT implemented in B6;
+- B8 operator/UI work was NOT pulled forward beyond management metadata needed for B6 evidence.
+
+Validation evidence on final B6 head:
+- CI run #450 — SUCCESS;
+- final backend suite — 246 passed, 1 warning;
+- Azure workflow run #333 — SUCCESS;
+- Azure build backend tests — SUCCESS;
+- Azure Web App deployment — SUCCESS;
+- production runtime verification — SUCCESS;
+- deployed release asserted `AETHER-LOAD-003-B6`;
+- deployed runtime remained `strategy_test`;
+- deployed runtime asserted forced entries OFF;
+- deployed runtime asserted live execution blocked.
+
+Repair evidence:
+- before final validation, the sibling-stop regression fixture was corrected so its synthetic 1-minute bar did not falsely cross the newly trailed scalp stop;
+- this repair changed only the test fixture and did not loosen production management behavior or assertions;
+- final CI #450 and Azure #333 are green on `d7089c2d85c623020136bd445a57183a74021073`.
+
+Files changed by B6:
+- `backend/app/pair_book.py`
+- `backend/app/desk.py`
+- `backend/tests/test_horizon_management.py`
+- `backend/tests/test_execution_test_mode.py`
+- `backend/tests/test_load_002_closeout.py`
+- `.github/workflows/main_aether-prod-api.yml`
+
+Not changed / deferred:
+- realistic spread/fee/slippage and cost-edge model — B7;
+- full operator/UI evidence presentation — B8;
+- final cross-module integration/deployment closeout — B9.
+
+### J.A.R.V.I.S. REVIEW GATE
+
+Review final B6 head `d7089c2d85c623020136bd445a57183a74021073` and the evidence above.
+
+If clear, respond exactly:
+
+`J.A.R.V.I.S. CLEAR — AETHER-LOAD-003 — START B7`
+
+If a B6 defect exists, respond:
+
+`J.A.R.V.I.S. HOLD — AETHER-LOAD-003 — B6 — <concrete defect/reason>`
+
+ChatGPT must not start B7 without the explicit B7 clearance.
 
