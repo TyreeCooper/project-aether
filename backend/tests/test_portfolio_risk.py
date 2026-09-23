@@ -168,17 +168,9 @@ def test_aggregate_open_risk_ceiling_rejects_fifth_full_risk_candidate(monkeypat
     # The candidate is in another cluster so the aggregate gate is the one
     # that must reject it.
     for index, aid in enumerate(("nvda", "tsla", "pltr", "eurusd")):
-        entry = (
-            1.0
-            if aid == "eurusd"
-            else 100.0
-        )
-        distance = (
-            trade_risk / 100_000.0
-            if aid == "eurusd"
-            else trade_risk / 1_000.0
-        )
-        qty = 100_000.0 if aid == "eurusd" else 1_000.0
+        entry = float(desk.by_id[aid].mark)
+        qty = 10_000.0 if aid == "eurusd" else 100.0
+        distance = trade_risk / qty
         opened = desk.wallet.open_position(
             aid,
             side="long",
@@ -238,14 +230,16 @@ def test_asset_exposure_limit_rejects_third_full_risk_horizon(monkeypatch):
     equity = 300_000.0
     trade_risk = equity * TRADE_RISK_FRACTION
 
+    entry = float(desk.by_id["nvda"].mark)
+    qty = 100.0
     for horizon in ("scalp", "intraday"):
         opened = desk.wallet.open_position(
             "nvda",
             side="long",
-            quantity=1_000.0,
-            price=100.0,
+            quantity=qty,
+            price=entry,
             stop_price=(
-                100.0 - trade_risk / 1_000.0
+                entry - trade_risk / qty
             ),
             mode=horizon,
             position_key=f"nvda:{horizon}",
@@ -295,11 +289,11 @@ def test_cluster_exposure_limit_rejects_otherwise_valid_setup(monkeypatch):
             # MES point value is $5, so 450 points at one contract
             # produces the same 0.75%-equity risk.
             qty = 1.0
-            entry = 6000.0
+            entry = float(desk.by_id[aid].mark)
             stop = entry - risk_each / 5.0
         else:
-            qty = 1_000.0
-            entry = 100.0
+            qty = 100.0
+            entry = float(desk.by_id[aid].mark)
             stop = entry - risk_each / qty
         opened = desk.wallet.open_position(
             aid,
@@ -333,6 +327,33 @@ def test_cluster_exposure_limit_rejects_otherwise_valid_setup(monkeypatch):
     assert rows[0]["rejection_reason"] == (
         "cluster_risk_limit"
     )
+
+
+def test_explicit_unopened_route_does_not_inherit_sibling_position():
+    portfolio = PaperPortfolio(300_000.0)
+    opened = portfolio.open_position(
+        "nvda",
+        side="long",
+        quantity=10.0,
+        price=180.0,
+        stop_price=175.0,
+        mode="scalp",
+        position_key="nvda:scalp",
+    )
+    assert opened["ok"] is True
+    assert portfolio.qty(
+        "nvda",
+        position_key="nvda:scalp",
+    ) == 10.0
+    assert portfolio.qty(
+        "nvda",
+        position_key="nvda:swing",
+    ) == 0.0
+    assert portfolio.position(
+        "nvda",
+        position_key="nvda:swing",
+    ) is None
+    assert portfolio.qty("nvda") == 10.0
 
 
 def test_strategy_risk_policy_is_machine_visible_and_fixed_count_removed(monkeypatch):
