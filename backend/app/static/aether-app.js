@@ -109,6 +109,15 @@
     renderOperatorControls();
   }
   function metric(label,value,cls=""){return '<div class="metric"><span>'+esc(label)+'</span><b class="'+cls+'">'+esc(value)+'</b></div>';}
+  function tradeClassLabel(row){return String(row?.trade_class||((row?.execution_test||row?.execution_test_funded)?"execution_validation":"strategy")).replaceAll("_"," ").toUpperCase();}
+  function routeLabel(row){const h=row?.originating_horizon||row?.routing_horizon||row?.mode||"—";return String(h).replaceAll("_"," ").toUpperCase();}
+  function quantityLabel(row){
+    if(row?.standard_lots!=null)return num(row.base_units??row.quantity,0)+" "+String(row.quantity_unit||"units")+" · "+num(row.standard_lots,2)+" lots";
+    if(row?.contracts!=null)return num(row.contracts,2)+" contract"+(Number(row.contracts)===1?"":"s");
+    if(row?.shares!=null)return num(row.shares,2)+" shares";
+    if(row?.coin_quantity!=null)return num(row.coin_quantity,8)+" "+String(row.quantity_unit||"coins");
+    return num(row?.quantity,8)+" "+String(row?.quantity_unit||"");
+  }
   function setText(id,v,cls){const e=$(id);if(!e)return;e.textContent=v;if(cls)e.className=cls;}
   function navAssets(){
     const rows=state.floor?.assets||[];
@@ -183,6 +192,9 @@
     $("assetBoard").innerHTML=floorRows.map(a=>'<div class="asset-row" data-id="'+a.id+'"><b class="pair">'+esc(a.pair)+'</b><span>'+money(a.mark)+'</span><span class="'+pnlClass(a.intelligence?.opportunity_24h?.net_change_pct)+'">'+pct(a.intelligence?.opportunity_24h?.net_change_pct)+'</span><span>'+money(a.position_value)+'</span><span class="'+pnlClass(a.open_pnl)+'">'+money(a.open_pnl)+'</span><span>'+esc((a.signal||a.reason||"watch").toUpperCase())+'</span></div>').join("");
     $("assetBoard").querySelectorAll(".asset-row").forEach(r=>r.onclick=()=>go("asset/"+r.dataset.id));
     const e=f.engine||{};const armed=Boolean(e.accepting_entries);const engineLabel=armed?"ARMED":(e.armed&&!e.running?"STARTING":"DISARMED");
+    const strategyMode=String(e.runtime_mode||"strategy_test")==="strategy_test";
+    setText("modeBadge",strategyMode?"STRATEGY TEST / PAPER":"EXECUTION VALIDATION");
+    $("modeBadge").className="badge "+(strategyMode?"good":"amber");
     $("floorHealth").innerHTML=metric("Engine",engineLabel,armed?"up":"")+metric("Loop",e.running?"RUNNING":"STOPPED",e.running?"up":"down")+metric("Live execution",f.live_blocked?"BLOCKED":"READY",f.live_blocked?"up":"down")+metric("Books",String(p.assets||0))+metric("Active positions",String(p.active_positions||0))+metric("Exposure",pct(p.exposure_pct));
     $("floorPerformance").innerHTML=metric("Starting Bank",money(p.starting_bank))+metric("Open P&L",money(p.open_pnl),pnlClass(p.open_pnl))+metric("Realized P&L",money(p.realized_pnl),pnlClass(p.realized_pnl))+metric("Margin Used",money(p.margin_used))+metric("Free Margin",money(p.free_margin))+metric("Gross Exposure",money(p.gross_exposure))+metric("Test Overflow",money(p.test_overflow),p.test_overflow>0?"amber":"")+metric("Fees",money(p.fees))+metric("Win rate",pct(p.win_rate_pct))+metric("W / L",(p.wins||0)+" / "+(p.losses||0));
     $("engineBadge").textContent=armed?"ARMED":(e.armed?"STARTING":"DISARMED");$("engineBadge").className="badge "+(armed?"good":"");
@@ -250,35 +262,53 @@
   }
 
   function renderLive(){
-    const d=state.live||{},rawItems=d.items||[],watch=d.watch||[],events=d.events||[];
+    const d=state.live||{},rawItems=d.items||[],watch=d.watch||[],events=d.events||[],risk=d.risk||{},runtime=d.runtime||state.floor?.engine||{};
     const liveSide=selected("liveSideFilter","all"),liveMode=selected("liveModeFilter","all"),liveKey=selected("liveSort","pnl"),liveDir=selected("liveSortDir","desc");
     const filteredItems=rawItems.filter(x=>(liveSide==="all"||String(x.side||"").toLowerCase()===liveSide)&&(liveMode==="all"||String(x.mode||"").toLowerCase()===liveMode));
     const items=sortRows(filteredItems,liveKey,liveDir,(x,key)=>key==="pnl"?Number(x.open_pnl_usd||0):key==="return"?Number(x.price_move_pct||0):key==="duration"?Number(x.duration_seconds??liveDuration(x.opened_at)??0):key==="asset"?String(x.symbol||x.pair||""):key==="side"?String(x.side||""):key==="mode"?String(x.mode||""):key==="entry"?Date.parse(x.opened_at||0):Number(x.quantity||0));
-    const openPnl=rawItems.reduce((s,x)=>s+Number(x.open_pnl_usd||0),0);
+    const openPnl=rawItems.reduce((sum,x)=>sum+Number(x.open_pnl_usd||0),0);
+    const strategyCount=Number(d.strategy_open_count||0),validationCount=Number(d.execution_validation_open_count||0);
     setText("liveOpenCount",String(d.open_count||0));
-    setText("liveOpenSummary",items.length?items.map(x=>x.symbol+" "+String(x.side||"").toUpperCase()).join(" · "):"Aether is scanning.");
+    setText("liveOpenSummary",(d.open_count||0)?strategyCount+" strategy · "+validationCount+" validation":"Aether is scanning.");
     setText("liveOpenPnl",money(openPnl),pnlClass(openPnl));
-    const top=watch[0];
-    setText("liveTopWatch",top?String(top.symbol||"—"):"—");
-    setText("liveTopWatchDetail",top?(String(top.signal||top.direction||"watch").toUpperCase()+" · "+String(top.quality_score||0)+"/100"):"No qualified setup");
-    const engine=state.floor?.engine||{};
-    setText("liveEngineState",engine.accepting_entries?"ARMED":(engine.armed?"STARTING":"DISARMED"));
-    setText("liveStateBadge",items.length?"TRADING":"SCANNING");
-    $("liveStateBadge").className="badge "+(items.length?"good":"");
+    setText("liveOpenRisk",money(risk.open_stop_risk_usd||0));
+    setText("liveRiskRemaining","Remaining "+money(risk.remaining_portfolio_risk_usd||0)+" · cap "+money(risk.max_portfolio_risk_usd||0));
+    const strategyMode=String(runtime.runtime_mode||"strategy_test")==="strategy_test";
+    setText("liveRuntimeMode",strategyMode?"STRATEGY TEST / PAPER":"EXECUTION VALIDATION");
+    setText("liveRuntimeDetail",(runtime.live_blocked?"LIVE BLOCKED":"LIVE READY")+" · forced entries "+(runtime.forced_entries_enabled?"ON":"OFF"));
+    setText("modeBadge",strategyMode?"STRATEGY TEST / PAPER":"EXECUTION VALIDATION");
+    $("modeBadge").className="badge "+(strategyMode?"good":"amber");
+    setText("liveStateBadge",rawItems.length?"TRADING":"SCANNING");
+    $("liveStateBadge").className="badge "+(rawItems.length?"good":"");
+
     $("liveTradeCards").innerHTML=items.length?items.map(t=>{
-      const held=liveDuration(t.opened_at);
-      return '<article class="live-trade-card" data-asset="'+esc(t.asset_id)+'"><header><div><p class="eyebrow">'+esc(String(t.mode||"trade").toUpperCase())+'</p><h3>'+esc(t.symbol||t.pair||"—")+' <span>'+esc(String(t.side||"").toUpperCase())+'</span></h3></div><b class="live-duration" data-opened="'+esc(t.opened_at||"")+'">'+(held==null&&t.duration_seconds==null?"—":duration(held??t.duration_seconds))+'</b></header><div class="live-price-row"><div><span>Entry</span><b>'+money(t.entry_price)+'</b></div><div><span>Current</span><b>'+money(t.current_price)+'</b></div><div><span>Stop</span><b>'+money(t.stop_price)+'</b></div></div><div class="live-pnl '+pnlClass(t.open_pnl_usd)+'">'+money(t.open_pnl_usd)+' <small>'+pct(t.price_move_pct)+'</small></div><div class="metric-list">'+metric("MFE",t.mfe_pct==null?"—":pct(t.mfe_pct),pnlClass(t.mfe_pct))+metric("MAE",t.mae_pct==null?"—":pct(t.mae_pct),pnlClass(t.mae_pct))+metric("Quantity",num(t.quantity,8)+" "+String(t.quantity_unit||""))+metric("Management",String(t.management_state||"MANAGING"))+metric("Entry reason",String(t.entry_reason||"—"))+'</div></article>';
-    }).join(""):'<div class="empty live-empty"><b>AETHER SCANNING</b><span>No paper position is open right now. Valid setups can appear below while Aether waits for an executable trigger.</span></div>';
+      const held=liveDuration(t.opened_at),validation=String(t.trade_class)==="execution_validation";
+      const management=[t.management_mode,t.management_clock].filter(Boolean).map(x=>String(x).replaceAll("_"," ").toUpperCase()).join(" · ")||String(t.management_state||"MANAGING");
+      const riskText=money(t.position_risk_usd)+" · "+pct(t.position_risk_pct_equity);
+      const costText=t.modeled_round_trip_cost_pct==null?"—":pct(t.modeled_round_trip_cost_pct)+" modeled · hurdle "+pct(t.cost_hurdle_pct);
+      const normalGate=validation?metric("Normal strategy gate",String(t.would_have_blocked_by||t.normal_execution_status||"—").replaceAll("_"," "),"amber"):"";
+      return '<article class="live-trade-card '+(validation?"validation-trade":"strategy-trade")+'" data-asset="'+esc(t.asset_id)+'"><header><div><div class="trade-title-line"><span class="trade-class-pill '+(validation?"validation":"strategy")+'">'+esc(tradeClassLabel(t))+'</span><span class="route-pill">'+esc(routeLabel(t))+'</span></div><h3>'+esc(t.symbol||t.pair||"—")+' <span>'+esc(String(t.side||"").toUpperCase())+'</span></h3></div><b class="live-duration" data-opened="'+esc(t.opened_at||"")+'">'+(held==null&&t.duration_seconds==null?"—":duration(held??t.duration_seconds))+'</b></header><div class="live-price-row"><div><span>Entry</span><b>'+money(t.entry_price)+'</b></div><div><span>Current</span><b>'+money(t.current_price)+'</b></div><div><span>Stop</span><b>'+money(t.stop_price)+'</b></div></div><div class="live-pnl '+pnlClass(t.open_pnl_usd)+'">'+money(t.open_pnl_usd)+' <small>'+pct(t.price_move_pct)+'</small></div><div class="metric-list">'+metric("Route",String(t.position_key||t.route_key||"—"))+metric("Size",quantityLabel(t))+metric("Stop risk",riskText)+metric("MFE",t.mfe_pct==null?"—":pct(t.mfe_pct),pnlClass(t.mfe_pct))+metric("MAE",t.mae_pct==null?"—":pct(t.mae_pct),pnlClass(t.mae_pct))+metric("Management",management)+metric("Entry reason",String(t.entry_reason||"—").replaceAll("_"," "))+metric("Cost / edge",costText)+normalGate+'</div></article>';
+    }).join(""):'<div class="empty live-empty"><b>AETHER SCANNING</b><span>No paper position is open. Setup Watch below shows the latest asset × horizon decisions and gate reasons.</span></div>';
     $("liveTradeCards").querySelectorAll("[data-asset]").forEach(x=>x.onclick=()=>go("asset/"+x.dataset.asset));
-    $("liveWatch").innerHTML=watch.length?watch.slice(0,5).map((x,i)=>metric((i+1)+". "+String(x.symbol||x.pair||"—"),String(x.signal||x.direction||"WATCH").toUpperCase()+" · "+String(x.quality_score||0)+"/100 · "+String(x.reason||"waiting"))).join(""):metric("Watch","No setup data yet");
-    $("liveEvents").innerHTML=events.length?events.slice(0,12).map(e=>'<div class="event-row"><span>'+esc(when(e.ts))+'</span><b>'+esc(String(e.event_type||"event").replaceAll("_"," ").toUpperCase())+'</b><em>'+esc(e.symbol||e.pair||"—")+'</em></div>').join(""):'<div class="empty">No trade lifecycle events yet.</div>';
+
+    $("liveWatch").innerHTML=watch.length?watch.map(x=>{
+      const status=String(x.status||"watch").toUpperCase(),reason=String(x.gate_reason||x.reason||x.rejection_reason||x.setup_reason||"waiting").replaceAll("_"," ");
+      const route=String(x.route_key||((x.symbol||x.asset_id||"—")+":"+(x.routing_horizon||x.mode||"—"))).toUpperCase();
+      const statusClass=status==="ENTERED"||status==="QUALIFIED"?"good":status==="ERROR"?"bad":"amber";
+      const cost=x.modeled_round_trip_cost_pct==null?"":' · cost '+pct(x.modeled_round_trip_cost_pct)+(x.cost_hurdle_pct==null?"":' / hurdle '+pct(x.cost_hurdle_pct));
+      return '<div class="watch-row"><div><b>'+esc(route)+'</b><span>'+esc(String(x.signal||x.executable_signal||"NO TRADE").toUpperCase())+' · '+esc(String(x.quality_score||0))+'/100'+esc(cost)+'</span></div><div><span class="badge '+statusClass+'">'+esc(status)+'</span><small>'+esc(reason)+'</small></div></div>';
+    }).join(""):'<div class="empty">No route evaluation has completed yet.</div>';
+
+    $("liveEvents").innerHTML=events.length?events.slice(0,12).map(e=>'<div class="event-row"><span>'+esc(when(e.ts))+'</span><b>'+esc(String(e.event_type||"event").replaceAll("_"," ").toUpperCase())+'</b><em>'+esc((e.symbol||e.pair||"—")+(e.routing_horizon?" · "+String(e.routing_horizon).toUpperCase():""))+'</em></div>').join(""):'<div class="empty">No trade lifecycle events yet.</div>';
   }
+
   function renderBlotter(){
     const side=selected("blotterSideFilter","all"),mode=selected("blotterModeFilter","all"),key=selected("blotterSort","closed"),dir=selected("blotterSortDir","desc");
     const base=(state.blotter||[]).filter(t=>(side==="all"||String(t.side||"").toLowerCase()===side)&&(mode==="all"||String(t.mode||"").toLowerCase()===mode));
     const rows=sortRows(base,key,dir,(t,k)=>k==="closed"?Date.parse(t.closed_at||0):k==="pnl"?Number(t.realized_pnl_usd||0):k==="return"?Number(t.net_return_pct||0):k==="duration"?Number(t.duration_seconds||0):k==="asset"?String(t.pair||t.symbol||""):k==="side"?String(t.side||""):k==="mode"?String(t.mode||""):Number(t.fees_usd||0));
-    $("deskBlotter").innerHTML=rows.length?'<table><thead><tr><th>Net P&L</th><th>Asset</th><th>Side</th><th>Mode</th><th>Entry</th><th>Exit</th><th>Trade Duration</th><th>Return</th><th>Fees</th><th>Exit reason</th><th>Closed</th></tr></thead><tbody>'+rows.map(t=>'<tr><td class="'+pnlClass(t.realized_pnl_usd)+'">'+money(t.realized_pnl_usd)+'</td><td><b>'+esc(t.pair||t.symbol||"—")+'</b></td><td>'+esc(String(t.side||"").toUpperCase())+'</td><td>'+esc(String(t.mode||"—").toUpperCase())+'</td><td>'+money(t.entry_price)+'</td><td>'+money(t.exit_price)+'</td><td>'+esc(t.duration_seconds==null?"—":duration(t.duration_seconds))+'</td><td class="'+pnlClass(t.net_return_pct)+'">'+(t.net_return_pct==null?"—":pct(t.net_return_pct))+'</td><td>'+money(t.fees_usd)+'</td><td>'+esc(String(t.exit_reason||"—").replaceAll("_"," "))+'</td><td>'+esc(when(t.closed_at))+'</td></tr>').join("")+'</tbody></table>':'<div class="empty">No completed round-trip paper trades match these filters.</div>';
+    $("deskBlotter").innerHTML=rows.length?'<table><thead><tr><th>Net P&L</th><th>Asset</th><th>Class</th><th>Horizon</th><th>Side</th><th>Entry</th><th>Exit</th><th>Trade Duration</th><th>Return</th><th>MFE</th><th>MAE</th><th>Capture</th><th>Costs</th><th>Exit reason</th><th>Closed</th></tr></thead><tbody>'+rows.map(t=>'<tr class="'+(String(t.trade_class)==="execution_validation"?"validation-row":"")+'"><td class="'+pnlClass(t.realized_pnl_usd)+'">'+money(t.realized_pnl_usd)+'</td><td><b>'+esc(t.pair||t.symbol||"—")+'</b></td><td><span class="trade-class-pill '+(String(t.trade_class)==="execution_validation"?"validation":"strategy")+'">'+esc(tradeClassLabel(t))+'</span></td><td>'+esc(routeLabel(t))+'</td><td>'+esc(String(t.side||"").toUpperCase())+'</td><td>'+money(t.entry_price)+'</td><td>'+money(t.exit_price)+'</td><td>'+esc(t.duration_seconds==null?"—":duration(t.duration_seconds))+'</td><td class="'+pnlClass(t.net_return_pct)+'">'+(t.net_return_pct==null?"—":pct(t.net_return_pct))+'</td><td class="'+pnlClass(t.mfe_pct)+'">'+(t.mfe_pct==null?"—":pct(t.mfe_pct))+'</td><td class="'+pnlClass(t.mae_pct)+'">'+(t.mae_pct==null?"—":pct(t.mae_pct))+'</td><td>'+(t.capture_efficiency_pct==null?"—":pct(t.capture_efficiency_pct))+'</td><td>'+money(t.total_cost_drag_usd??t.fees_usd)+'</td><td>'+esc(String(t.exit_reason||"—").replaceAll("_"," "))+'</td><td>'+esc(when(t.closed_at))+'</td></tr>').join("")+'</tbody></table>':'<div class="empty">No completed round-trip paper trades match these filters.</div>';
   }
+
   function openAssetPicker(){
     if(!state.operatorAuthenticated){toast("Operator authentication required.");return;}
     $("assetPicker").classList.remove("hidden");
