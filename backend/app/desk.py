@@ -42,7 +42,8 @@ RISK_SLICE = 0.08
 TRADE_RISK_FRACTION = 0.0075
 MAX_ACTIVE_POSITIONS = 4
 POLL = 20
-LOAD_002_RELEASE = "AETHER-LOAD-002-B7"
+LOAD_002_RELEASE = "AETHER-LOAD-002-EXP-R1"
+LOAD_002_EXPERIMENT_RUN = "EXP-R1"
 
 
 def completed_bars(
@@ -563,13 +564,38 @@ class MultiDesk:
             1 for row in cells if bool(row.get("supported"))
         )
         unsupported_count = len(cells) - supported_count
+
+        target_assets = sorted(book.id for book in self.books)
+        open_run_assets: set[str] = set()
+        completed_run_assets: set[str] = set()
+        for aid, position in self.wallet.positions.items():
+            metadata = position.get("metadata") or {}
+            if (
+                metadata.get("execution_test_load") == "AETHER-LOAD-002"
+                and metadata.get("execution_test_run")
+                == LOAD_002_EXPERIMENT_RUN
+            ):
+                open_run_assets.add(str(aid))
+        for trade in self.wallet.closed_trades:
+            metadata = trade.get("metadata") or {}
+            if (
+                metadata.get("execution_test_load") == "AETHER-LOAD-002"
+                and metadata.get("execution_test_run")
+                == LOAD_002_EXPERIMENT_RUN
+            ):
+                completed_run_assets.add(str(trade.get("asset_id") or ""))
+
+        observed_run_assets = sorted(
+            (open_run_assets | completed_run_assets) & set(target_assets)
+        )
+        experiment_complete = len(observed_run_assets) == len(target_assets)
+
         checks = {
             "official_books_12": len(self.books) == 12,
             "paper_starting_bank_300k": (
                 float(STARTING_USD) == 300_000.0
                 and float(wallet.get("starting_usd") or 0.0) == 300_000.0
             ),
-            "execution_test_off": self.execution_test_mode is False,
             "live_orders_blocked": (
                 self.live_blocked is True
                 and live_state.get("orders_enabled") is False
@@ -594,13 +620,40 @@ class MultiDesk:
                 )
             ),
         }
+        runtime_safe = all(checks.values())
+        experiment_active = bool(self.execution_test_mode)
+        closeout_ready = (
+            runtime_safe
+            and experiment_complete
+            and not experiment_active
+        )
+        status = (
+            "experiment_active"
+            if runtime_safe and experiment_active
+            else "ready_for_closeout"
+            if closeout_ready
+            else "not_ready"
+        )
         return {
             "load": "AETHER-LOAD-002",
             "release": LOAD_002_RELEASE,
-            "status": "ready" if all(checks.values()) else "not_ready",
-            "ready": all(checks.values()),
+            "status": status,
+            "ready": closeout_ready,
+            "runtime_safe": runtime_safe,
+            "filters_bypassed": experiment_active,
             "checks": checks,
             "scalp_assets": scalp_assets,
+            "experiment": {
+                "run_id": LOAD_002_EXPERIMENT_RUN,
+                "active": experiment_active,
+                "target_count": len(target_assets),
+                "target_assets": target_assets,
+                "open_assets": sorted(open_run_assets),
+                "completed_assets": sorted(completed_run_assets),
+                "observed_assets": observed_run_assets,
+                "observed_count": len(observed_run_assets),
+                "complete": experiment_complete,
+            },
             "matrix": {
                 "run_status": matrix.get("run_status"),
                 "run_id": matrix.get("run_id"),
@@ -1735,6 +1788,7 @@ class MultiDesk:
                     "entry_clock": "desk_tick",
                     "bias_clock": "bypassed",
                     "execution_test": True,
+                    "execution_test_run": LOAD_002_EXPERIMENT_RUN,
                     "would_have_blocked_by": baseline.get("reason"),
                     "normal_execution_status": baseline.get("execution_status"),
                     "normal_signal": baseline.get("executable_signal"),
@@ -2124,6 +2178,9 @@ class MultiDesk:
         return data
 
 
-# LOAD-002 execution rail experiment is complete. Production now runs the
-# normal paper strategy router; live orders remain hard-blocked in app.live.
-desk = MultiDesk(execution_test_mode=False)
+# LOAD-002 real-desk execution experiment is intentionally active again.
+# Entry filters are bypassed for paper execution only; app.live still hard-blocks
+# every live order. This temporary state stays in place until the experiment is
+# explicitly completed and reviewed.
+desk = MultiDesk(execution_test_mode=True)
+desk.armed = True
