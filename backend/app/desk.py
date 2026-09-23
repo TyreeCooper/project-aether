@@ -44,6 +44,9 @@ MAX_ACTIVE_POSITIONS = 4
 POLL = 20
 LOAD_002_RELEASE = "AETHER-LOAD-002-EXP-R1"
 LOAD_002_EXPERIMENT_RUN = "EXP-R1"
+LOAD_003_B1_RELEASE = "AETHER-LOAD-003-B1"
+STRATEGY_TEST_MODE = "strategy_test"
+EXECUTION_VALIDATION_MODE = "execution_validation"
 
 
 def completed_bars(
@@ -310,14 +313,30 @@ class MultiDesk:
             "persists": True,
         }
 
+    def runtime_mode(self) -> str:
+        return (
+            EXECUTION_VALIDATION_MODE
+            if self.execution_test_mode
+            else STRATEGY_TEST_MODE
+        )
+
     def engine_status(self) -> dict[str, Any]:
         running = bool(self._task and not self._task.done())
+        runtime_mode = self.runtime_mode()
         return {
             "armed": bool(self.armed),
             "running": running,
             "accepting_entries": bool(self.armed and running),
+            "paper_mode": True,
             "live_blocked": True,
             "source": "multi_asset_desk",
+            "runtime_release": LOAD_003_B1_RELEASE,
+            "runtime_mode": runtime_mode,
+            "strategy_test_mode": runtime_mode == STRATEGY_TEST_MODE,
+            "execution_validation_mode": (
+                runtime_mode == EXECUTION_VALIDATION_MODE
+            ),
+            "forced_entries_enabled": bool(self.execution_test_mode),
             "execution_test_mode": self.execution_test_mode,
         }
 
@@ -668,13 +687,25 @@ class MultiDesk:
         }
 
     def settings_snapshot(self) -> dict[str, Any]:
+        runtime_mode = self.runtime_mode()
         return {
             "allocation_per_entry_pct": round(self.risk_slice * 100, 2),
             "quote_poll_seconds": int(self.poll_seconds),
             "resume_armed_after_restart": True,
             "state_persistence": True,
+            "runtime_release": LOAD_003_B1_RELEASE,
+            "runtime_mode": runtime_mode,
+            "strategy_test_mode": runtime_mode == STRATEGY_TEST_MODE,
+            "execution_validation_mode": (
+                runtime_mode == EXECUTION_VALIDATION_MODE
+            ),
+            "forced_entries_enabled": bool(self.execution_test_mode),
             "execution_test_mode": self.execution_test_mode,
-            "execution_test_load": "AETHER-LOAD-002" if self.execution_test_mode else None,
+            "execution_test_load": (
+                "AETHER-LOAD-002"
+                if self.execution_test_mode
+                else None
+            ),
         }
 
     async def initialize_history_persistence(self) -> None:
@@ -2178,9 +2209,8 @@ class MultiDesk:
         return data
 
 
-# LOAD-002 real-desk execution experiment is intentionally active again.
-# Entry filters are bypassed for paper execution only; app.live still hard-blocks
-# every live order. This temporary state stays in place until the experiment is
-# explicitly completed and reviewed.
-desk = MultiDesk(execution_test_mode=True)
+# AETHER-LOAD-003 B1: the production desk runs the real paper strategy.
+# Forced LOAD-002 execution validation remains available only through isolated
+# validation helpers/endpoints. app.live continues to hard-block every live order.
+desk = MultiDesk(execution_test_mode=False)
 desk.armed = True

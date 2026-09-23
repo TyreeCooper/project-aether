@@ -65,14 +65,37 @@ def test_execution_test_reserves_configured_margin():
     assert portfolio.usd == before - opened["margin_reserved_usd"] - opened["entry_fee_usd"]
 
 
-def test_test_mode_status_is_explicit_and_live_boundary_remains_blocked():
+def test_execution_validation_status_is_explicit_and_live_boundary_remains_blocked():
     desk = MultiDesk(execution_test_mode=True)
     status = desk.engine_status()
     settings = desk.settings_snapshot()
+    assert status["runtime_release"] == "AETHER-LOAD-003-B1"
+    assert status["runtime_mode"] == "execution_validation"
+    assert status["strategy_test_mode"] is False
+    assert status["execution_validation_mode"] is True
+    assert status["forced_entries_enabled"] is True
     assert status["execution_test_mode"] is True
     assert status["live_blocked"] is True
+    assert settings["runtime_mode"] == "execution_validation"
     assert settings["execution_test_mode"] is True
     assert settings["execution_test_load"] == "AETHER-LOAD-002"
+
+
+def test_strategy_test_status_disables_forced_entries_and_keeps_live_blocked():
+    desk = MultiDesk(execution_test_mode=False)
+    status = desk.engine_status()
+    settings = desk.settings_snapshot()
+    assert status["runtime_release"] == "AETHER-LOAD-003-B1"
+    assert status["runtime_mode"] == "strategy_test"
+    assert status["strategy_test_mode"] is True
+    assert status["execution_validation_mode"] is False
+    assert status["forced_entries_enabled"] is False
+    assert status["execution_test_mode"] is False
+    assert status["paper_mode"] is True
+    assert status["live_blocked"] is True
+    assert settings["runtime_mode"] == "strategy_test"
+    assert settings["forced_entries_enabled"] is False
+    assert settings["execution_test_load"] is None
 
 
 def test_execution_test_position_keeps_unmistakable_identity_through_close():
@@ -480,12 +503,17 @@ def test_normal_mode_does_not_retire_normal_strategy_position(monkeypatch):
     assert desk.wallet.position("btc") is not None
 
 
-def test_production_desk_constructor_resumes_real_desk_experiment():
+def test_production_desk_constructor_runs_strategy_test_not_forced_experiment():
     import app.desk as desk_module
 
-    assert desk_module.desk.execution_test_mode is True
+    status = desk_module.desk.engine_status()
+    assert desk_module.desk.execution_test_mode is False
     assert desk_module.desk.armed is True
-    assert desk_module.desk.engine_status()["live_blocked"] is True
+    assert status["runtime_release"] == "AETHER-LOAD-003-B1"
+    assert status["runtime_mode"] == "strategy_test"
+    assert status["strategy_test_mode"] is True
+    assert status["forced_entries_enabled"] is False
+    assert status["live_blocked"] is True
 
 
 

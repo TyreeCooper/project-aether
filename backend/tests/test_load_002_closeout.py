@@ -31,28 +31,30 @@ def test_load_002_runtime_contract_reports_active_experiment(monkeypatch):
     assert len(status["scalp_assets"]) == 7
 
 
-def test_load_002_status_endpoint_exposes_active_experiment():
+def test_load_002_status_endpoint_reports_forced_experiment_inactive():
     response = client.get("/api/v1/load-status/aether-load-002")
     assert response.status_code == 200
     body = response.json()
     assert body["release"] == "AETHER-LOAD-002-EXP-R1"
-    assert body["status"] == "experiment_active"
+    assert body["status"] != "experiment_active"
     assert body["runtime_safe"] is True
-    assert body["filters_bypassed"] is True
-    assert body["experiment"]["active"] is True
+    assert body["filters_bypassed"] is False
+    assert body["experiment"]["active"] is False
     assert body["checks"]["live_orders_blocked"] is True
 
 
-def test_production_workflow_verifies_load_002_contract():
+def test_production_workflow_verifies_strategy_test_runtime_contract():
     workflow = (
         ROOT / ".github" / "workflows" / "main_aether-prod-api.yml"
     ).read_text(encoding="utf-8")
     assert "/api/v1/load-status/aether-load-002" in workflow
-    assert "AETHER-LOAD-002-EXP-R1" in workflow
-    assert "Waiting for deployed release AETHER-LOAD-002-EXP-R1" in workflow
-    assert "Expected LOAD-002-B7 release never became active after deploy." in workflow
+    assert "AETHER-LOAD-003-B1" in workflow
+    assert "Waiting for AETHER-LOAD-003-B1 strategy-test runtime" in workflow
+    assert "Expected LOAD-003-B1 strategy-test runtime never became active." in workflow
     assert "/api/v1/desk/execution-matrix" in workflow
-    assert 'execution_test_mode") is True' in workflow
+    assert 'runtime_mode") == "strategy_test"' in workflow
+    assert 'execution_test_mode") is False' in workflow
+    assert 'forced_entries_enabled") is False' in workflow
     assert "supported_cells" in workflow
     assert "/api/v1/auth/verify" in workflow
     assert 'auth_code" != "401"' in workflow
