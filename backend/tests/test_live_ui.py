@@ -90,3 +90,16 @@ def test_operator_ui_is_server_verified_and_read_only_until_connected():
     assert 'const armDisabled=!connected||armed' in js
     assert 'disarmDisabled=!connected||!armed' in js
     assert 'if(!state.operatorAuthenticated){toast("Operator authentication required.")' in js
+
+
+
+def test_engine_exposes_operator_gated_execution_matrix_validation():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    js = (STATIC / "aether-app.js").read_text(encoding="utf-8")
+    assert 'id="runExecutionMatrix"' in html
+    assert 'id="executionMatrix"' in html
+    assert 'id="matrixRunBadge"' in html
+    assert "/api/v1/desk/execution-matrix" in js
+    assert "/api/v1/desk/execution-matrix/run" in js
+    assert "production_wallet_unchanged" in js
+    assert '"runExecutionMatrix"' in js

@@ -7,6 +7,7 @@
     asset:null,
     live:null,
     blotter:[],
+    matrix:null,
     settings:null,
     token:sessionStorage.getItem("aether-operator-token")||legacyToken,
     operatorAuthenticated:false,
@@ -70,7 +71,7 @@
     const armDisabled=!connected||armed,disarmDisabled=!connected||!armed;
     ["armDesk","settingsArm"].forEach(id=>{const el=$(id);if(el)el.disabled=armDisabled;});
     ["disarmDesk","settingsDisarm"].forEach(id=>{const el=$(id);if(el)el.disabled=disarmDisabled;});
-    ["saveDeskSettings","settingAllocation","settingPoll"].forEach(id=>{const el=$(id);if(el)el.disabled=!connected;});
+    ["saveDeskSettings","settingAllocation","settingPoll","runExecutionMatrix"].forEach(id=>{const el=$(id);if(el)el.disabled=!connected;});
     const add=$("addAssetBtn");if(add)add.disabled=!connected;
   }
   async function refreshAuth(){
@@ -225,6 +226,29 @@
     $("engineMatrix").innerHTML=rows.map(a=>'<div class="asset-row" data-id="'+a.id+'"><b class="pair">'+esc(a.pair)+'</b><span>'+esc(String(a.signal||"NONE").toUpperCase())+'</span><span>'+esc(a.reason||"warming")+'</span><span>'+money(a.open_pnl)+'</span><span>'+num(a.qty,8)+'</span><span>'+money(a.stop)+'</span></div>').join("");
     $("engineMatrix").querySelectorAll(".asset-row").forEach(r=>r.onclick=()=>go("asset/"+r.dataset.id));
   }
+  function renderExecutionMatrix(){
+    const d=state.matrix;if(!d)return;
+    const counts=d.counts||{},cells=d.cells||[];
+    const badge=$("matrixRunBadge");
+    if(badge){
+      badge.textContent=String(d.run_status||"not_run").replaceAll("_"," ").toUpperCase();
+      badge.className="badge "+(d.run_status==="completed"?"good":d.run_status==="completed_with_failures"?"bad":"");
+    }
+    $("matrixSummary").innerHTML=
+      metric("PASS",String(counts.pass||0),"up")+
+      metric("FAIL",String(counts.fail||0),(counts.fail||0)?"down":"")+
+      metric("N/A",String(counts.n_a||0))+
+      metric("PENDING",String(counts.pending||0))+
+      metric("Production wallet",d.production_wallet_unchanged===true?"UNCHANGED":d.production_wallet_unchanged===false?"CHANGED":"—",d.production_wallet_unchanged===true?"up":d.production_wallet_unchanged===false?"down":"")+
+      metric("Live orders",d.live_order_attempted?"ATTEMPTED":"NOT ATTEMPTED",d.live_order_attempted?"down":"up");
+    $("executionMatrix").innerHTML=cells.length?'<table><thead><tr><th>Asset</th><th>Horizon</th><th>Side</th><th>Status</th><th>Normal Gate</th><th>Validation</th></tr></thead><tbody>'+cells.map(row=>'<tr><td><b>'+esc(String(row.asset_id||"").toUpperCase())+'</b></td><td>'+esc(String(row.horizon||"").toUpperCase())+'</td><td>'+esc(String(row.side||"").toUpperCase())+'</td><td class="'+(row.status==="pass"?"up":row.status==="fail"?"down":"")+'">'+esc(String(row.status||"pending").toUpperCase())+'</td><td>'+esc(String(row.normal_reason||row.reason||"—").replaceAll("_"," "))+'</td><td>'+esc(String(row.reason||"—").replaceAll("_"," "))+'</td></tr>').join("")+'</tbody></table>':'<div class="empty">Execution matrix has not been loaded.</div>';
+    renderOperatorControls();
+  }
+  async function loadExecutionMatrix(){
+    state.matrix=await get("/api/v1/desk/execution-matrix");
+    renderExecutionMatrix();
+  }
+
   function renderLive(){
     const d=state.live||{},rawItems=d.items||[],watch=d.watch||[],events=d.events||[];
     const liveSide=selected("liveSideFilter","all"),liveMode=selected("liveModeFilter","all"),liveKey=selected("liveSort","pnl"),liveDir=selected("liveSortDir","desc");
@@ -334,7 +358,7 @@
     try{
       if(!state.floor)await loadFloor();
       if(r.startsWith("asset/")){const id=r.split("/")[1];show("asset");await loadAsset(id);}
-      else if(r==="engine"){show("engine");renderEngine();}
+      else if(r==="engine"){show("engine");renderEngine();await loadExecutionMatrix();}
       else if(r==="live"){show("live");await loadLive();}
       else if(r==="blotter"){show("blotter");await loadBlotter();}
       else if(r==="booth"){show("booth");}
@@ -357,6 +381,7 @@
   $("settingsArm").onclick=async()=>{try{await runButton($("settingsArm"),"Arming…",async()=>{await post("/api/v1/desk/arm");await loadFloor();await loadSettings();toast("Engine armed");});}catch(e){toast(e.message);}};
   $("settingsDisarm").onclick=async()=>{try{await runButton($("settingsDisarm"),"Disarming…",async()=>{await post("/api/v1/desk/disarm");await loadFloor();await loadSettings();toast("Engine disarmed");});}catch(e){toast(e.message);}};
   $("saveDeskSettings").onclick=async()=>{try{await runButton($("saveDeskSettings"),"Saving…",async()=>{const headers={"Content-Type":"application/json","X-Operator-Token":state.token};const body={allocation_per_entry_pct:Number($("settingAllocation").value),quote_poll_seconds:Number($("settingPoll").value)};const r=await fetch("/api/v1/settings",{method:"POST",headers,body:JSON.stringify(body)});const d=await r.json().catch(()=>({}));if(!r.ok){if(r.status===401||r.status===503){clearOperatorSession();renderOperatorControls();}throw new Error(d.detail||"Save failed");}await loadSettings();await loadFloor();toast("Trading settings saved");});}catch(e){toast(e.message);}};
+  $("runExecutionMatrix").onclick=async()=>{try{await runButton($("runExecutionMatrix"),"Validating…",async()=>{state.matrix=await post("/api/v1/desk/execution-matrix/run");renderExecutionMatrix();toast("Execution matrix validation complete");});}catch(e){toast(e.message);}};
   $("settingsConnectOperator").onclick=async()=>{try{await runButton($("settingsConnectOperator"),"Connecting…",async()=>{await connectOperator("settingsOperatorToken");await loadSettings();toast("Operator connected");});}catch(e){toast(e.message||"Authentication failed");}};
   $("settingsDisconnectOperator").onclick=()=>{disconnectOperator();renderSettings();toast("Operator disconnected");};
   $("disconnectOperator").onclick=()=>{disconnectOperator();toast("Operator disconnected");};
