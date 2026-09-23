@@ -71,7 +71,8 @@
     const armDisabled=!connected||armed,disarmDisabled=!connected||!armed;
     ["armDesk","settingsArm"].forEach(id=>{const el=$(id);if(el)el.disabled=armDisabled;});
     ["disarmDesk","settingsDisarm"].forEach(id=>{const el=$(id);if(el)el.disabled=disarmDisabled;});
-    ["saveDeskSettings","settingAllocation","settingPoll","runExecutionMatrix"].forEach(id=>{const el=$(id);if(el)el.disabled=!connected;});
+    ["saveDeskSettings","settingAllocation","settingPoll","runExecutionMatrix","filtersAllOn","filtersAllOff"].forEach(id=>{const el=$(id);if(el)el.disabled=!connected;});
+    document.querySelectorAll("[data-filter-key]").forEach(el=>{el.disabled=!connected;});
     const add=$("addAssetBtn");if(add)add.disabled=!connected;
   }
   async function refreshAuth(){
@@ -361,6 +362,62 @@
   $("drawerScrim")?.addEventListener("click",closeDrawer);
   document.querySelectorAll("[data-drawer-route]").forEach(b=>b.addEventListener("click",()=>{closeDrawer();go(b.dataset.drawerRoute);}));
 
+  function filterTrafficLine(row){
+    const t=row||{},evaluated=Number(t.evaluated||0),passed=Number(t.passed||0),rejected=Number(t.rejected||0),bypassed=Number(t.bypassed||0),limited=Number(t.limited||0);
+    const rejectRate=evaluated?Math.round(rejected/evaluated*1000)/10:0;
+    return evaluated+" eval · "+passed+" pass · "+rejected+" reject ("+rejectRate+"%) · "+bypassed+" bypass"+(limited?" · "+limited+" limited":"");
+  }
+  function filterRow(key,row,traffic,locked){
+    const enabled=locked?true:Boolean(row?.enabled);
+    return '<div class="filter-row '+(locked?"locked":"")+'"><div class="filter-copy"><div class="filter-name-line"><b>'+esc(row?.label||key.replaceAll("_"," "))+'</b>'+(locked?'<span class="filter-lock">LOCKED</span>':'')+'</div><p>'+esc(row?.description||"")+'</p><small>'+esc(filterTrafficLine(traffic))+'</small></div><label class="filter-switch" title="'+(locked?"Non-negotiable safety gate":"Toggle filter")+'"><input type="checkbox" data-filter-key="'+esc(key)+'" '+(enabled?"checked":"")+' '+(locked?"disabled":"")+'/><span></span></label></div>';
+  }
+  function currentTradeFilterValues(){
+    const optional=state.settings?.desk?.trade_filters?.optional||{};
+    return Object.fromEntries(Object.entries(optional).map(([key,row])=>[key,Boolean(row?.enabled)]));
+  }
+  async function saveTradeFilters(filters){
+    if(!state.operatorAuthenticated)throw new Error("Operator authentication required.");
+    const headers={"Content-Type":"application/json","X-Operator-Token":state.token};
+    const body={
+      allocation_per_entry_pct:Number($("settingAllocation").value),
+      quote_poll_seconds:Number($("settingPoll").value),
+      trade_filters:filters
+    };
+    const r=await fetch("/api/v1/settings",{method:"POST",headers,body:JSON.stringify(body)});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok){
+      if(r.status===401||r.status===503){clearOperatorSession();renderOperatorControls();}
+      throw new Error(d.detail||"Filter save failed");
+    }
+    await loadSettings();
+    await loadFloor();
+  }
+  function renderTradeFilters(desk){
+    const cfg=desk?.trade_filters||{},optional=cfg.optional||{},locked=cfg.locked||{},traffic=cfg.traffic||{};
+    setText("settingsFilterSummary",String(cfg.optional_enabled??0)+" / "+String(cfg.optional_total??Object.keys(optional).length)+" OPTIONAL ON");
+    $("settingsFilterSummary").className="badge "+((cfg.optional_enabled??0)===(cfg.optional_total??Object.keys(optional).length)?"good":"amber");
+    $("settingsOptionalFilters").innerHTML=Object.entries(optional).map(([key,row])=>filterRow(key,row,traffic[key],false)).join("")||'<div class="empty">No adjustable filters configured.</div>';
+    $("settingsLockedFilters").innerHTML=Object.entries(locked).map(([key,row])=>filterRow(key,row,traffic[key],true)).join("")||'<div class="empty">No locked gates configured.</div>';
+    document.querySelectorAll("#settingsOptionalFilters [data-filter-key]").forEach(input=>{
+      input.disabled=!state.operatorAuthenticated;
+      input.onchange=async()=>{
+        const next=currentTradeFilterValues();
+        next[input.dataset.filterKey]=Boolean(input.checked);
+        input.disabled=true;
+        try{
+          await saveTradeFilters(next);
+          toast((input.checked?"Enabled ":"Bypassed ")+(optional[input.dataset.filterKey]?.label||input.dataset.filterKey));
+        }catch(e){
+          await loadSettings().catch(()=>{});
+          toast(e.message||"Filter save failed");
+        }
+      };
+    });
+    const allOn=$("filtersAllOn"),allOff=$("filtersAllOff");
+    if(allOn)allOn.disabled=!state.operatorAuthenticated;
+    if(allOff)allOff.disabled=!state.operatorAuthenticated;
+  }
+
   function renderSettings(){
     const s=state.settings;if(!s)return;const d=s.desk||{},e=s.engine||{},x=s.execution||{},sec=s.security||{},live=s.live||{},load=s.load_002||{};
     const armed=Boolean(e.accepting_entries);
@@ -368,6 +425,7 @@
     $("settingsEngineState").innerHTML=metric("Accepting entries",armed?"YES":"NO",armed?"up":"")+metric("Engine loop",e.running?"RUNNING":"STOPPED",e.running?"up":"down")+metric("Execution test mode",e.execution_test_mode?"ON · AETHER-LOAD-002":"OFF",e.execution_test_mode?"down":"")+metric("State source",e.source||"multi_asset_desk")+metric("Live execution",e.live_blocked?"BLOCKED":"READY",e.live_blocked?"up":"down");
     $("settingAllocation").value=d.allocation_per_entry_pct??8;
     $("settingPoll").value=d.quote_poll_seconds??20;
+    renderTradeFilters(d);
     $("settingsExecution").innerHTML=metric("Taker fee",pct(x.taker_fee_pct))+metric("Slippage",num(x.slippage_bps,1)+" bps")+metric("Max spread",num(x.max_spread_bps,1)+" bps")+metric("Max watch basis",money(x.max_basis_usd));
     $("settingsData").innerHTML=metric("Primary venue",s.venue||"Kraken")+metric("Watch venue",s.watch_venue||"Binance.US")+metric("Asset books",String(s.assets||0))+metric("Poll cadence",(d.quote_poll_seconds||"—")+" sec")+metric("State persistence",d.state_persistence?"ON":"OFF")+metric("Resume armed state",d.resume_armed_after_restart?"ON":"OFF");
     const intel=s.intelligence||{},intelSources=intel.sources||[],cryptoIntel=intel.crypto_calendar||{},officialMacro=intel.official_macro_sources||{},assetSources=intel.asset_source_registry||{},trust=assetSources.trust_states||{},health=intel.health||{};
@@ -415,6 +473,8 @@
   $("settingsArm").onclick=async()=>{try{await runButton($("settingsArm"),"Arming…",async()=>{await post("/api/v1/desk/arm");await loadFloor();await loadSettings();toast("Engine armed");});}catch(e){toast(e.message);}};
   $("settingsDisarm").onclick=async()=>{try{await runButton($("settingsDisarm"),"Disarming…",async()=>{await post("/api/v1/desk/disarm");await loadFloor();await loadSettings();toast("Engine disarmed");});}catch(e){toast(e.message);}};
   $("saveDeskSettings").onclick=async()=>{try{await runButton($("saveDeskSettings"),"Saving…",async()=>{const headers={"Content-Type":"application/json","X-Operator-Token":state.token};const body={allocation_per_entry_pct:Number($("settingAllocation").value),quote_poll_seconds:Number($("settingPoll").value)};const r=await fetch("/api/v1/settings",{method:"POST",headers,body:JSON.stringify(body)});const d=await r.json().catch(()=>({}));if(!r.ok){if(r.status===401||r.status===503){clearOperatorSession();renderOperatorControls();}throw new Error(d.detail||"Save failed");}await loadSettings();await loadFloor();toast("Trading settings saved");});}catch(e){toast(e.message);}};
+  $("filtersAllOn").onclick=async()=>{try{await runButton($("filtersAllOn"),"Enabling…",async()=>{const next=currentTradeFilterValues();Object.keys(next).forEach(key=>next[key]=true);await saveTradeFilters(next);toast("All optional trade filters enabled");});}catch(e){toast(e.message);}};
+  $("filtersAllOff").onclick=async()=>{try{await runButton($("filtersAllOff"),"Bypassing…",async()=>{const next=currentTradeFilterValues();Object.keys(next).forEach(key=>next[key]=false);await saveTradeFilters(next);toast("All optional trade filters bypassed");});}catch(e){toast(e.message);}};
   $("runExecutionMatrix").onclick=async()=>{try{await runButton($("runExecutionMatrix"),"Validating…",async()=>{state.matrix=await post("/api/v1/desk/execution-matrix/run");renderExecutionMatrix();toast("Execution matrix validation complete");});}catch(e){toast(e.message);}};
   $("settingsConnectOperator").onclick=async()=>{try{await runButton($("settingsConnectOperator"),"Connecting…",async()=>{await connectOperator("settingsOperatorToken");await loadSettings();toast("Operator connected");});}catch(e){toast(e.message||"Authentication failed");}};
   $("settingsDisconnectOperator").onclick=()=>{disconnectOperator();renderSettings();toast("Operator disconnected");};
