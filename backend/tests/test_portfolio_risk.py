@@ -265,9 +265,10 @@ def test_asset_exposure_limit_rejects_third_full_risk_horizon(monkeypatch):
     ]
     assert rows
     assert rows[0]["rejection_reason"] == "asset_risk_limit"
+    current_equity = desk.wallet.equity(desk.marks())
     assert math.isclose(
         float(rows[0]["asset_risk_limit_usd"]),
-        equity * ASSET_RISK_FRACTION,
+        current_equity * ASSET_RISK_FRACTION,
         rel_tol=0,
         abs_tol=1e-6,
     )
