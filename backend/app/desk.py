@@ -54,6 +54,98 @@ LOAD_003_RELEASE = "AETHER-LOAD-003-B9"
 STRATEGY_TEST_MODE = "strategy_test"
 EXECUTION_VALIDATION_MODE = "execution_validation"
 
+OPTIONAL_TRADE_FILTERS: dict[str, dict[str, str]] = {
+    "route_clock": {
+        "label": "Route / Clock",
+        "description": "Only evaluate a route when its configured horizon clock is due.",
+    },
+    "session_window": {
+        "label": "Session Window",
+        "description": "Require the playbook's configured trading session to be open.",
+    },
+    "higher_timeframe_alignment": {
+        "label": "Higher-Timeframe Alignment",
+        "description": "Require the configured higher-timeframe grains to align.",
+    },
+    "continuation_trigger": {
+        "label": "Continuation / Breakout Trigger",
+        "description": "Require the route trigger to confirm the entry direction.",
+    },
+    "quality_ranking": {
+        "label": "Quality Ranking",
+        "description": "Process qualified candidates from highest quality score to lowest.",
+    },
+    "cost_edge_hurdle": {
+        "label": "Cost / Edge Hurdle",
+        "description": "Require opportunity to clear 1.40x modeled round-trip execution cost.",
+    },
+    "crypto_trend_bias": {
+        "label": "Crypto 200D Trend Bias",
+        "description": "Require BTC/ETH daily price to remain above the 200-day moving average.",
+    },
+    "crypto_btc_rider": {
+        "label": "ETH BTC-Rider Gate",
+        "description": "Require the configured BTC rider condition for ETH.",
+    },
+    "crypto_structure_minimum": {
+        "label": "Crypto Structure Minimum",
+        "description": "Require at least 2% daily structure distance for crypto swing entries.",
+    },
+}
+DEFAULT_TRADE_FILTER_SETTINGS: dict[str, bool] = {
+    key: True for key in OPTIONAL_TRADE_FILTERS
+}
+LOCKED_TRADE_FILTERS: dict[str, dict[str, str]] = {
+    "data_warmup": {
+        "label": "Data Warmup",
+        "description": "Required bars must exist before a strategy may emit a direction.",
+    },
+    "direction_required": {
+        "label": "Executable Direction",
+        "description": "A real BUY or SHORT direction is always required; Aether never invents one.",
+    },
+    "crypto_breakout_direction": {
+        "label": "Crypto Breakout Direction",
+        "description": "Crypto requires an actual 20-day breakout direction; it cannot be bypassed.",
+    },
+    "duplicate_route": {
+        "label": "Duplicate Route",
+        "description": "The same asset:horizon position cannot be opened twice.",
+    },
+    "market_validity": {
+        "label": "Valid Market / Price",
+        "description": "A usable current market and modeled execution price are mandatory.",
+    },
+    "capital_margin": {
+        "label": "Cash / Margin",
+        "description": "Paper capital and margin availability are always enforced.",
+    },
+    "trade_risk": {
+        "label": "Trade Risk <= 0.75%",
+        "description": "Per-trade stop-risk ceiling is non-negotiable.",
+    },
+    "asset_risk": {
+        "label": "Asset Risk <= 1.50%",
+        "description": "Combined stop-risk for one underlying asset is non-negotiable.",
+    },
+    "cluster_risk": {
+        "label": "Cluster Risk <= 2.25%",
+        "description": "Correlated cluster stop-risk ceiling is non-negotiable.",
+    },
+    "portfolio_risk": {
+        "label": "Portfolio Risk <= 3.00%",
+        "description": "Aggregate open stop-risk ceiling is non-negotiable.",
+    },
+    "instrument_size_cap": {
+        "label": "Instrument Size Cap",
+        "description": "FX and micro-futures hard quantity ceilings are always enforced.",
+    },
+    "final_order_validation": {
+        "label": "Final Order Validation",
+        "description": "Actual post-sizing stop-risk and order invariants are always rechecked.",
+    },
+}
+
 
 def completed_bars(
     rows: list[dict[str, Any]],
