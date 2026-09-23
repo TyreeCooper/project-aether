@@ -3,9 +3,9 @@
 ## CONTROL STATUS
 
 - Load: AETHER-LOAD-003
-- State: CONTROL FILE ESTABLISHED
+- State: B1 COMPLETE — WAITING FOR J.A.R.V.I.S. REVIEW
 - Active implementation batch: NONE
-- Waiting on: GROK BOT J.A.R.V.I.S. CLEARANCE TO START B1
+- Waiting on: GROK BOT J.A.R.V.I.S. CLEARANCE TO START B2
 - Starting main SHA: 09dfdb510bd5b54f43cef7e9c5f20389d3636ae1
 - Live-money execution: HARD BLOCKED
 - Paper testing: remains the target runtime
@@ -168,7 +168,7 @@ ChatGPT must not advance while the batch is on HOLD.
 # Master Progress
 
 - CONTROL: [COMPLETE] Dedicated LOAD-003 control/checklist established
-- B1: [WAITING] Runtime mode separation
+- B1: [COMPLETE] Runtime mode separation — d339fb24695dd2738dda8fdb345c6e7a5acf7181
 - B2: [WAITING] Qualified opportunity pipeline
 - B3: [WAITING] Horizon-scoped position ledger
 - B4: [WAITING] Portfolio risk & qualified concurrency
@@ -178,7 +178,7 @@ ChatGPT must not advance while the batch is on HOLD.
 - B8: [WAITING] Operator/UI evidence & telemetry
 - B9: [WAITING] Integration, deployment contract & closeout
 
-Implementation progress: 0 / 9 batches complete.
+Implementation progress: 1 / 9 batches complete.
 
 ---
 
@@ -528,3 +528,76 @@ If clear, respond exactly:
 `J.A.R.V.I.S. CLEAR — AETHER-LOAD-003 — START B1`
 
 ChatGPT will not start B1 before that clearance.
+
+
+## B1 — Runtime Mode Separation
+
+Status: COMPLETE — WAITING FOR J.A.R.V.I.S. REVIEW
+
+Implementation SHA:
+`d339fb24695dd2738dda8fdb345c6e7a5acf7181`
+
+Commit:
+`feat: separate strategy test from execution validation`
+
+Scope completed:
+- production desk now starts with `execution_test_mode=False`;
+- desk remains armed;
+- explicit runtime mode reports `strategy_test`;
+- explicit execution-validation mode remains available for isolated LOAD-002 validation;
+- forced-entry state is explicitly reported and is OFF in strategy-test runtime;
+- paper mode remains active;
+- live-money execution remains HARD BLOCKED;
+- existing legacy LOAD-002 retirement path remains before normal allocation;
+- deployment contract now requires strategy-test runtime and rejects a forced-execution production state;
+- LOAD-002 status remains available but reports its forced experiment inactive in the production strategy-test runtime.
+
+Safety evidence:
+- `live_blocked=True`;
+- `strategy_test_mode=True`;
+- `execution_validation_mode=False` in production;
+- `execution_test_mode=False` in production;
+- `forced_entries_enabled=False` in production;
+- isolated execution validation still reports `execution_validation` when explicitly instantiated with `execution_test_mode=True`.
+
+Validation evidence:
+- CI run #436 — SUCCESS;
+- Azure workflow run #319 — SUCCESS;
+- Azure build backend tests — SUCCESS;
+- Azure Web App deployment — SUCCESS;
+- production runtime verification — SUCCESS;
+- deployment verification asserted release `AETHER-LOAD-003-B1`;
+- deployment verification asserted runtime mode `strategy_test`;
+- deployment verification asserted forced entries OFF;
+- deployment verification asserted live execution blocked;
+- execution matrix endpoint remained present and validated as isolated execution tooling.
+
+Files changed by implementation SHA:
+- `backend/app/desk.py`
+- `backend/tests/test_execution_test_mode.py`
+- `backend/tests/test_load_002_closeout.py`
+- `.github/workflows/main_aether-prod-api.yml`
+
+Not changed / deferred:
+- qualified opportunity routing changes — B2;
+- horizon-scoped ledger — B3;
+- portfolio concurrency/risk architecture — B4;
+- instrument hard size ceilings — B5;
+- horizon-specific management changes — B6;
+- realistic fill/cost model changes — B7;
+- operator/UI evidence changes — B8;
+- final integration/closeout — B9.
+
+### J.A.R.V.I.S. REVIEW GATE
+
+Review implementation SHA `d339fb24695dd2738dda8fdb345c6e7a5acf7181` and the evidence above.
+
+If clear, respond exactly:
+
+`J.A.R.V.I.S. CLEAR — AETHER-LOAD-003 — START B2`
+
+If a B1 defect exists, respond:
+
+`J.A.R.V.I.S. HOLD — AETHER-LOAD-003 — B1 — <concrete defect/reason>`
+
+ChatGPT must not start B2 without the explicit B2 clearance.
