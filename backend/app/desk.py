@@ -50,7 +50,7 @@ RISK_EPSILON_USD = 1e-6
 POLL = 20
 LOAD_002_RELEASE = "AETHER-LOAD-002-EXP-R1"
 LOAD_002_EXPERIMENT_RUN = "EXP-R1"
-LOAD_003_RELEASE = "AETHER-LOAD-003-B6"
+LOAD_003_RELEASE = "AETHER-LOAD-003-B7"
 STRATEGY_TEST_MODE = "strategy_test"
 EXECUTION_VALIDATION_MODE = "execution_validation"
 
@@ -2803,14 +2803,30 @@ class MultiDesk:
                         ),
                     }
 
+            if evaluation is not None:
+                for key in (
+                    "opportunity_pct",
+                    "modeled_round_trip_cost_pct",
+                    "modeled_round_trip_cost_usd",
+                    "cost_hurdle_pct",
+                ):
+                    if plan.get(key) is not None:
+                        evaluation[key] = plan.get(key)
+
             if not plan.get("ok"):
+                plan_error = str(
+                    plan.get("error") or "unknown"
+                )
+                rejection_reason = (
+                    plan_error
+                    if plan_error
+                    == "edge_below_cost_hurdle"
+                    else f"execution_rejected:{plan_error}"
+                )
                 self._update_opportunity_evaluation(
                     evaluation,
                     status="blocked",
-                    rejection_reason=(
-                        f"execution_rejected:"
-                        f"{plan.get('error') or 'unknown'}"
-                    ),
+                    rejection_reason=rejection_reason,
                 )
                 continue
 
