@@ -213,3 +213,68 @@ def test_live_trade_view_exposes_execution_test_identity_and_baseline(monkeypatc
         assert row["normal_execution_status"] == "waiting_for_setup"
         assert row["normal_signal"] is None
         assert row["normal_quality_score"] == 41
+
+
+def test_blotter_keeps_execution_test_identity_and_duration_after_close():
+    desk = _test_desk()
+    book = desk.books[0]
+    rows = desk._allocate()
+    opened = next(row for row in rows if row["pair"] == book.pair)
+    trade_id = opened["trade_id"]
+    position = desk.wallet.position(book.id)
+    assert position is not None
+
+    closed = desk.wallet.close_position(
+        book.id,
+        price=float(position["entry_price"]) * 1.01,
+        closed_at="2026-09-23T08:10:30+00:00",
+        exit_reason="execution_test_close",
+    )
+    assert closed["ok"] is True
+
+    # Fix the synthetic test timestamps so duration is deterministic.
+    durable = desk.wallet.closed_trades[-1]
+    durable["opened_at"] = "2026-09-23T08:00:00+00:00"
+    durable["closed_at"] = "2026-09-23T08:10:30+00:00"
+    durable["duration_seconds"] = 630
+
+    blotter = desk.blotter()
+    row = next(item for item in blotter if item["trade_id"] == trade_id)
+
+    assert row["mode"] == "execution_test"
+    assert row["execution_test_funded"] is True
+    assert row["metadata"]["execution_test"] is True
+    assert row["metadata"]["execution_test_load"] == "AETHER-LOAD-002"
+    assert row["duration_seconds"] == 630
+
+
+def test_normal_blotter_trade_is_not_mislabeled_as_execution_test():
+    desk = MultiDesk(execution_test_mode=False)
+    desk.wallet = PaperPortfolio(10_000.0)
+    for book in desk.books:
+        book.wallet = desk.wallet
+
+    opened = desk.wallet.open_position(
+        "btc",
+        side="long",
+        quantity=0.0001,
+        price=100_000.0,
+        stop_price=98_000.0,
+        mode="intraday",
+        metadata={"entry_reason": "normal_strategy"},
+    )
+    assert opened["ok"] is True
+    closed = desk.wallet.close_position(
+        "btc",
+        price=101_000.0,
+        exit_reason="strategy_exit",
+    )
+    assert closed["ok"] is True
+
+    row = next(
+        item for item in desk.blotter()
+        if item["trade_id"] == opened["trade_id"]
+    )
+    assert row["mode"] == "intraday"
+    assert row["execution_test_funded"] is False
+    assert row["metadata"].get("execution_test") is not True
