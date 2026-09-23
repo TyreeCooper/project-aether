@@ -9,7 +9,7 @@
 - Starting main SHA: 09dfdb510bd5b54f43cef7e9c5f20389d3636ae1
 - Live-money execution: HARD BLOCKED
 - Paper testing: remains the target runtime
-- Rule: ONE batch active at a time. Never advance without Grok clearance.
+- Rule: ONE batch active at a time. Never advance without J.A.R.V.I.S. clearance.
 
 ---
 
@@ -513,7 +513,7 @@ Status: COMPLETE
 
 Purpose:
 - establish canonical checklist;
-- establish Grok stop/clear protocol;
+- establish J.A.R.V.I.S. stop/clear protocol;
 - make no runtime changes.
 
 Starting SHA:
