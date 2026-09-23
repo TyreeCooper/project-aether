@@ -728,32 +728,35 @@ def _crypto_daily(
         "direction_required": "passed" if breakout else "rejected",
     }
 
-    if not breakout:
-        signal = None
-        reason = "no_20d_breakout"
-    elif trend_enabled and not bias_on:
-        signal = None
+    signal = None
+    reason = "no_20d_breakout"
+    if trend_enabled and not bias_on:
         reason = "below_200d_sma"
     elif rider_enabled and not rider_ok:
-        signal = None
         reason = "btc_rider_gate_closed"
-    elif structure_enabled and structure_distance < 2.0:
-        signal = None
+    elif (
+        structure_enabled
+        and structure_distance < 2.0
+    ):
         reason = "structure_under_2pct"
-    else:
+    elif breakout:
         signal = "buy"
-        bypassed = any(value == "bypassed" for value in trace.values())
+        bypassed = any(
+            value == "bypassed"
+            for value in trace.values()
+        )
         reason = (
             "qualified_daily_200_20_filters_bypassed"
             if bypassed
             else "qualified_daily_200_20"
         )
 
+    # Entry filter controls must not change established exit management.
     exit_signal = None
     if in_position and (
         current < prior_low
-        or (trend_enabled and current < float(ma200))
-        or (rider_enabled and not rider_ok)
+        or current < float(ma200)
+        or not rider_ok
     ):
         exit_signal = "sell"
 
