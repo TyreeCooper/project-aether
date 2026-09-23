@@ -74,7 +74,7 @@ def test_live_operator_telemetry_distinguishes_strategy_and_validation(monkeypat
 
     live = desk.live_trades()
 
-    assert live["runtime"]["runtime_release"] == "AETHER-LOAD-003-B8"
+    assert live["runtime"]["runtime_release"] == "AETHER-LOAD-003-B9"
     assert live["runtime"]["runtime_mode"] == "strategy_test"
     assert live["runtime"]["forced_entries_enabled"] is False
     assert live["runtime"]["live_blocked"] is True
