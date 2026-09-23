@@ -50,7 +50,7 @@ RISK_EPSILON_USD = 1e-6
 POLL = 20
 LOAD_002_RELEASE = "AETHER-LOAD-002-EXP-R1"
 LOAD_002_EXPERIMENT_RUN = "EXP-R1"
-LOAD_003_RELEASE = "AETHER-LOAD-003-B5"
+LOAD_003_RELEASE = "AETHER-LOAD-003-B6"
 STRATEGY_TEST_MODE = "strategy_test"
 EXECUTION_VALIDATION_MODE = "execution_validation"
 
@@ -225,6 +225,11 @@ class MultiDesk:
                     migrated.get("metadata") or {}
                 )
                 migrated_metadata["routing_horizon"] = requested
+                migrated_metadata["originating_horizon"] = requested
+                migrated_metadata["management_mode"] = execution_mode(
+                    aid,
+                    requested,
+                )
                 migrated_metadata["position_key"] = target
                 migrated["metadata"] = migrated_metadata
 
@@ -1285,6 +1290,7 @@ class MultiDesk:
                     "reason": f"strategy_error:{exc}",
                 }
             excursion = book.current_excursion()
+            management = book.management_contract(position)
             entry = float(
                 position.get("entry_price") or 0.0
             )
@@ -1382,6 +1388,18 @@ class MultiDesk:
                         "routing_horizon"
                     )
                     or book.routing_horizon,
+                    "originating_horizon": management.get(
+                        "originating_horizon"
+                    ),
+                    "management_mode": management.get(
+                        "management_mode"
+                    ),
+                    "management_clock": management.get(
+                        "management_clock"
+                    ),
+                    "management_time_stop_minutes": (
+                        management.get("time_stop_minutes")
+                    ),
                     "clock_horizon": metadata.get(
                         "clock_horizon"
                     ),

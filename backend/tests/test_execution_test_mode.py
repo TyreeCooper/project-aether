@@ -69,7 +69,7 @@ def test_execution_validation_status_is_explicit_and_live_boundary_remains_block
     desk = MultiDesk(execution_test_mode=True)
     status = desk.engine_status()
     settings = desk.settings_snapshot()
-    assert status["runtime_release"] == "AETHER-LOAD-003-B5"
+    assert status["runtime_release"] == "AETHER-LOAD-003-B6"
     assert status["runtime_mode"] == "execution_validation"
     assert status["strategy_test_mode"] is False
     assert status["execution_validation_mode"] is True
@@ -85,7 +85,7 @@ def test_strategy_test_status_disables_forced_entries_and_keeps_live_blocked():
     desk = MultiDesk(execution_test_mode=False)
     status = desk.engine_status()
     settings = desk.settings_snapshot()
-    assert status["runtime_release"] == "AETHER-LOAD-003-B5"
+    assert status["runtime_release"] == "AETHER-LOAD-003-B6"
     assert status["runtime_mode"] == "strategy_test"
     assert status["strategy_test_mode"] is True
     assert status["execution_validation_mode"] is False
@@ -509,7 +509,7 @@ def test_production_desk_constructor_runs_strategy_test_not_forced_experiment():
     status = desk_module.desk.engine_status()
     assert desk_module.desk.execution_test_mode is False
     assert desk_module.desk.armed is True
-    assert status["runtime_release"] == "AETHER-LOAD-003-B5"
+    assert status["runtime_release"] == "AETHER-LOAD-003-B6"
     assert status["runtime_mode"] == "strategy_test"
     assert status["strategy_test_mode"] is True
     assert status["forced_entries_enabled"] is False

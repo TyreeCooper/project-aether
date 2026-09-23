@@ -7,6 +7,10 @@ from typing import Any
 
 from app.clock import is_new_five_minute
 from app.exits import stop_fill_price, time_stop_due
+from app.execution_matrix import (
+    execution_mode,
+    supported_horizons,
+)
 from app.fees import fee_rate
 from app.instruments import (
     instrument_spec,
@@ -148,6 +152,101 @@ class PairBook:
         return getter(
             self.id,
             position_key=self.position_key,
+        )
+
+    def management_contract(
+        self,
+        position: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        row = dict(position or self.position() or {})
+        metadata = dict(row.get("metadata") or {})
+        profile = playbook_profile(self.id)
+        execution_test_position = bool(
+            row.get("execution_test_funded")
+            or metadata.get("execution_test")
+        )
+
+        route_horizon = None
+        source = "legacy_entry_mode"
+        if execution_test_position:
+            management_mode = str(profile["primary"])
+            source = "execution_validation_primary"
+        else:
+            candidates = (
+                self.routing_horizon,
+                metadata.get("originating_horizon"),
+                metadata.get("routing_horizon"),
+            )
+            for candidate in candidates:
+                normalized = str(candidate or "").lower()
+                if normalized in set(supported_horizons(self.id)):
+                    route_horizon = normalized
+                    break
+            if route_horizon is not None:
+                management_mode = execution_mode(
+                    self.id,
+                    route_horizon,
+                )
+                source = "route_horizon"
+            else:
+                saved = str(
+                    row.get("mode")
+                    or self.entry_mode
+                    or profile["primary"]
+                ).lower()
+                valid_modes = {
+                    execution_mode(self.id, horizon)
+                    for horizon in supported_horizons(self.id)
+                }
+                management_mode = (
+                    saved
+                    if saved in valid_modes
+                    else str(profile["primary"])
+                )
+
+        source_clock = (
+            "1d"
+            if management_mode == "daily_swing"
+            else "1h"
+            if management_mode == "swing"
+            else "1m"
+            if management_mode == "scalp"
+            else "15m"
+        )
+        time_stop_minutes = (
+            profile.get("time_stop_minutes") or {}
+        ).get(management_mode)
+
+        return {
+            "asset_id": self.id,
+            "position_key": (
+                row.get("position_key")
+                or self.position_key
+                or self.id
+            ),
+            "originating_horizon": route_horizon,
+            "management_mode": management_mode,
+            "management_clock": source_clock,
+            "time_stop_minutes": time_stop_minutes,
+            "source": source,
+            "execution_test": execution_test_position,
+        }
+
+    def _management_source_bars(
+        self,
+        management_mode: str,
+    ) -> list[dict[str, Any]]:
+        mode = str(management_mode).lower()
+        if mode == "daily_swing":
+            return list(self.bars_1d)
+        if mode == "swing":
+            return list(self.bars_1h)
+        if mode == "scalp":
+            return list(self.bars)
+        return resample_bars(
+            list(self.bars),
+            15,
+            require_complete=True,
         )
 
     def snapshot_strategy(
@@ -407,6 +506,24 @@ class PairBook:
                 "routing_horizon": snap.get(
                     "routing_horizon"
                 ),
+                "originating_horizon": (
+                    snap.get("routing_horizon")
+                    or self.routing_horizon
+                ),
+                "management_mode": (
+                    execution_mode(
+                        self.id,
+                        str(
+                            snap.get("routing_horizon")
+                            or self.routing_horizon
+                        ),
+                    )
+                    if (
+                        snap.get("routing_horizon")
+                        or self.routing_horizon
+                    )
+                    else None
+                ),
                 "clock_horizon": snap.get("clock_horizon"),
                 "strategy_id": snap.get("strategy_id"),
                 "strategy_version": snap.get(
@@ -564,30 +681,22 @@ class PairBook:
         self.lowest = min(self.lowest or mark, mark)
 
         profile = playbook_profile(self.id)
-        mode = str(
-            self.entry_mode
-            or profile["primary"]
-        )
         position = self.position() or {}
         metadata = position.get("metadata") or {}
-        execution_test_position = bool(
-            position.get("execution_test_funded")
-            or metadata.get("execution_test")
+        contract = self.management_contract(position)
+        management_mode = str(
+            contract["management_mode"]
         )
-        management_mode = (
-            str(profile["primary"])
-            if execution_test_position
-            else mode
+        entry_mode = str(
+            position.get("mode")
+            or self.entry_mode
+            or management_mode
         )
-        strategy_mode = (
-            "daily_swing"
-            if self.id in {"btc", "eth"}
-            else management_mode
-        )
+
         snap = self.snapshot_strategy(
             btc_bias_on=btc_bias_on,
             btc_in_position=btc_in_position,
-            requested_mode=strategy_mode,
+            requested_mode=management_mode,
         )
         rate = fee_rate(
             self.id,
@@ -600,18 +709,9 @@ class PairBook:
             rate * 200,
         )
 
-        if management_mode == "daily_swing":
-            source_bars = list(self.bars_1d)
-        elif management_mode == "swing":
-            source_bars = list(self.bars_1h)
-        elif management_mode == "scalp":
-            source_bars = list(self.bars)
-        else:
-            source_bars = resample_bars(
-                list(self.bars),
-                15,
-                require_complete=True,
-            )
+        source_bars = self._management_source_bars(
+            management_mode
+        )
 
         if side == "short":
             trail_pct = max(
@@ -713,9 +813,7 @@ class PairBook:
             if notional > 0
             else 0.0
         )
-        limit = (
-            profile.get("time_stop_minutes") or {}
-        ).get(management_mode)
+        limit = contract.get("time_stop_minutes")
         timed = bool(
             limit is not None
             and time_stop_due(
@@ -940,6 +1038,16 @@ class PairBook:
             result["exit_efficiency_pct"] = None
 
         result["net_capture_pct"] = result["net_return_pct"]
+        result["originating_horizon"] = contract.get(
+            "originating_horizon"
+        )
+        result["management_mode"] = management_mode
+        result["management_clock"] = contract.get(
+            "management_clock"
+        )
+        result["management_time_stop_minutes"] = (
+            contract.get("time_stop_minutes")
+        )
         annotate = getattr(
             self.wallet,
             "annotate_closed_trade",
@@ -974,11 +1082,20 @@ class PairBook:
                     "exit_slippage_usd": result.get(
                         "exit_slippage_usd"
                     ),
+                    "originating_horizon": result.get(
+                        "originating_horizon"
+                    ),
+                    "management_mode": result.get(
+                        "management_mode"
+                    ),
+                    "management_clock": result.get(
+                        "management_clock"
+                    ),
                     "actor": f"bot-playbook-{reason.replace('_', '-')}",
                 },
             )
         result["actor"] = f"bot-playbook-{reason.replace('_', '-')}"
-        result["entry_mode"] = mode
+        result["entry_mode"] = entry_mode
         result["position_side"] = side
         result["execution_side"] = exit_side
         result["event"] = "exit"
@@ -1190,6 +1307,11 @@ class PairBook:
         )
         side = self.position_side()
         position = self.position()
+        management = (
+            self.management_contract(position)
+            if position
+            else None
+        )
         mark = float(self.mark or 0.0)
         notional = (
             float(
@@ -1265,6 +1387,22 @@ class PairBook:
             "context_bars_1h": len(self.bars_1h),
             "context_bars_1d": len(self.bars_1d),
             "entry_mode": self.entry_mode,
+            "originating_horizon": (
+                (management or {}).get(
+                    "originating_horizon"
+                )
+            ),
+            "management_mode": (
+                (management or {}).get("management_mode")
+            ),
+            "management_clock": (
+                (management or {}).get("management_clock")
+            ),
+            "management_time_stop_minutes": (
+                (management or {}).get(
+                    "time_stop_minutes"
+                )
+            ),
             "last_entry_signal_key": self.last_entry_signal_key,
             "broker": self.broker,
             "playbook": playbook_profile(self.id),
