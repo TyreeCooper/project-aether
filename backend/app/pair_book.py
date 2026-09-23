@@ -268,11 +268,15 @@ class PairBook:
             for row in clock.get("sessions") or []
             if row.get("active")
         }
-        rate = fee_rate(
-            self.id,
-            qty=max(self.qty(), 1.0),
-            price=float(self.mark or 1.0),
-            side="buy",
+        rate = (
+            0.0
+            if instrument_spec(self.id)["product_type"] == "fx"
+            else fee_rate(
+                self.id,
+                qty=max(self.qty(), 1.0),
+                price=float(self.mark or 1.0),
+                side="buy",
+            )
         )
         snap = playbook_snapshot(
             self.id,
@@ -860,16 +864,43 @@ class PairBook:
             btc_in_position=btc_in_position,
             requested_mode=management_mode,
         )
-        rate = fee_rate(
-            self.id,
-            qty=max(qty, 1.0),
-            price=mark,
-            side="buy" if side == "short" else "sell",
+        cost_estimator = getattr(
+            self.wallet,
+            "round_trip_cost_estimate",
+            None,
         )
-        cost_pct = max(
-            float(snap.get("cost_pct") or 0.0),
-            rate * 200,
+        live_cost = (
+            cost_estimator(
+                self.id,
+                position_side=side,
+                quantity=qty,
+                bid=self.bid,
+                ask=self.ask,
+                mark=self.mark,
+                slippage_bps=SLIPPAGE_BPS,
+            )
+            if callable(cost_estimator)
+            else {"ok": False}
         )
+        if live_cost.get("ok"):
+            cost_pct = float(
+                live_cost.get("cost_pct") or 0.0
+            )
+        else:
+            rate = fee_rate(
+                self.id,
+                qty=max(qty, 1.0),
+                price=mark,
+                side=(
+                    "buy"
+                    if side == "short"
+                    else "sell"
+                ),
+            )
+            cost_pct = max(
+                float(snap.get("cost_pct") or 0.0),
+                rate * 200,
+            )
 
         source_bars = self._management_source_bars(
             management_mode
