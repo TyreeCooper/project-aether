@@ -43,6 +43,8 @@ def test_production_workflow_verifies_load_002_contract():
     ).read_text(encoding="utf-8")
     assert "/api/v1/load-status/aether-load-002" in workflow
     assert "AETHER-LOAD-002-B7" in workflow
+    assert "Waiting for deployed release AETHER-LOAD-002-B7" in workflow
+    assert "Expected LOAD-002-B7 release never became active after deploy." in workflow
     assert "/api/v1/desk/execution-matrix" in workflow
     assert 'execution_test_mode") is False' in workflow
     assert "supported_cells" in workflow
