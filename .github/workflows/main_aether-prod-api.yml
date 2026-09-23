@@ -100,6 +100,21 @@ jobs:
           assert body.get("paper_mode") is True, body
           assert body.get("live_blocked") is True, body
           PY
+
+          echo "Waiting for deployed release AETHER-LOAD-002-B7 to become active..."
+          for attempt in $(seq 1 18); do
+            if curl --fail --silent --show-error --max-time 20 "$base/api/v1/load-status/aether-load-002" >/tmp/aether-load-002.json               && python -c 'import json; b=json.load(open("/tmp/aether-load-002.json", encoding="utf-8")); assert b.get("release")=="AETHER-LOAD-002-B7"; assert b.get("ready") is True'; then
+              echo "Expected release is active."
+              break
+            fi
+            if [ "$attempt" -eq 18 ]; then
+              echo "Expected LOAD-002-B7 release never became active after deploy."
+              cat /tmp/aether-load-002.json 2>/dev/null || true
+              exit 1
+            fi
+            sleep 10
+          done
+
           curl --fail --silent --show-error --max-time 20 "$base/" >/tmp/aether-root.html
           grep -q "Aether Trading Desk" /tmp/aether-root.html
           grep -q 'AETHER-LOAD-002-B7' /tmp/aether-root.html
