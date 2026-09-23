@@ -480,8 +480,41 @@ def test_normal_mode_does_not_retire_normal_strategy_position(monkeypatch):
     assert desk.wallet.position("btc") is not None
 
 
-def test_production_desk_constructor_is_normal_paper_mode():
+def test_production_desk_constructor_resumes_real_desk_experiment():
     import app.desk as desk_module
 
-    assert desk_module.desk.execution_test_mode is False
+    assert desk_module.desk.execution_test_mode is True
+    assert desk_module.desk.armed is True
     assert desk_module.desk.engine_status()["live_blocked"] is True
+
+
+
+def test_resumed_experiment_tags_positions_with_current_run():
+    desk = _test_desk()
+    rows = desk._allocate()
+    assert len(rows) == 12
+    for book in desk.books:
+        pos = desk.wallet.position(book.id)
+        assert pos is not None
+        assert pos["metadata"]["execution_test_run"] == "EXP-R1"
+
+
+def test_execution_test_position_management_uses_valid_playbook_mode(monkeypatch):
+    desk = _test_desk()
+    book = desk.by_id["mes"]
+    rows = desk._allocate()
+    opened = next(row for row in rows if row["pair"] == book.pair)
+    assert opened["ok"] is True
+    assert book.entry_mode == "execution_test"
+
+    calls = []
+    original = book.snapshot_strategy
+
+    def wrapped(**kwargs):
+        calls.append(kwargs.get("requested_mode"))
+        return original(**kwargs)
+
+    monkeypatch.setattr(book, "snapshot_strategy", wrapped)
+    book.manage()
+    assert "execution_test" not in calls
+    assert calls

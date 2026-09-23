@@ -109,10 +109,10 @@ def test_engine_exposes_operator_gated_execution_matrix_validation():
 def test_load_002_release_marker_and_cache_busted_assets_are_present():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     js = (STATIC / "aether-app.js").read_text(encoding="utf-8")
-    assert 'content="AETHER-LOAD-002-B7"' in html
-    assert "/static/aether-app.css?v=AETHER-LOAD-002-B7" in html
-    assert "/static/aether-app.js?v=AETHER-LOAD-002-B7" in html
+    assert 'content="AETHER-LOAD-002-EXP-R1"' in html
+    assert "/static/aether-app.css?v=AETHER-LOAD-002-EXP-R1" in html
+    assert "/static/aether-app.js?v=AETHER-LOAD-002-EXP-R1" in html
     assert 'id="settingsLoadBadge"' in html
     assert 'id="settingsLoadStatus"' in html
-    assert "Runtime contract" in js
-    assert "Matrix cells" in js
+    assert "Runtime safety" in js
+    assert "Observed books" in js
