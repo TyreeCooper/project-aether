@@ -2,6 +2,82 @@
 from __future__ import annotations
 from dataclasses import dataclass
 
+SLIPPAGE_BPS = 5.0
+
+
+def market_reference_price(
+    *,
+    bid: float | None,
+    ask: float | None,
+    mark: float | None,
+) -> float | None:
+    if (
+        bid is not None
+        and ask is not None
+        and float(bid) > 0
+        and float(ask) >= float(bid)
+    ):
+        return (float(bid) + float(ask)) / 2.0
+    if mark is not None and float(mark) > 0:
+        return float(mark)
+    if bid is not None and float(bid) > 0:
+        return float(bid)
+    if ask is not None and float(ask) > 0:
+        return float(ask)
+    return None
+
+
+def quote_reference_price(
+    side: str,
+    *,
+    bid: float | None,
+    ask: float | None,
+    mark: float | None,
+) -> float | None:
+    execution_side = str(side).lower()
+    if execution_side == "buy":
+        if ask is not None and float(ask) > 0:
+            return float(ask)
+    elif execution_side == "sell":
+        if bid is not None and float(bid) > 0:
+            return float(bid)
+    else:
+        return None
+    return market_reference_price(
+        bid=bid,
+        ask=ask,
+        mark=mark,
+    )
+
+
+def modeled_fill_price(
+    side: str,
+    *,
+    bid: float | None,
+    ask: float | None,
+    mark: float | None,
+    slippage_bps: float = SLIPPAGE_BPS,
+) -> float | None:
+    execution_side = str(side).lower()
+    reference = quote_reference_price(
+        execution_side,
+        bid=bid,
+        ask=ask,
+        mark=mark,
+    )
+    if reference is None:
+        return None
+    slip = float(reference) * max(
+        float(slippage_bps),
+        0.0,
+    ) / 10_000.0
+    return (
+        float(reference) + slip
+        if execution_side == "buy"
+        else float(reference) - slip
+    )
+
+
 @dataclass(frozen=True)
 class FillCost:
     side: str
@@ -18,13 +94,23 @@ def fill_cost(side: str, qty: float, *, bid: float | None, ask: float | None, ma
     side = str(side).lower()
     if side not in {"buy", "sell"} or qty <= 0:
         return None
-    reference = ask if side == "buy" else bid
+    reference = quote_reference_price(
+        side,
+        bid=bid,
+        ask=ask,
+        mark=mark,
+    )
     if reference is None:
-        reference = mark
-    if reference is None or reference <= 0:
         return None
-    slip = float(reference) * max(float(slippage_bps), 0.0) / 10_000.0
-    price = float(reference) + slip if side == "buy" else float(reference) - slip
+    price = modeled_fill_price(
+        side,
+        bid=bid,
+        ask=ask,
+        mark=mark,
+        slippage_bps=slippage_bps,
+    )
+    if price is None:
+        return None
     notional = price * float(qty)
     fee = notional * max(float(fee_rate), 0.0)
     slippage = abs(price - float(reference)) * float(qty)
