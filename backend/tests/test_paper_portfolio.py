@@ -190,3 +190,55 @@ def test_legacy_spot_wallet_payload_migrates_without_second_cash_debit():
     assert p.avg_entry("btc") == 100_000.0
     assert p.position("btc")["legacy_migrated"] is True
     assert p.equity({"btc": 100_000.0}) == 10_000.0
+
+
+def test_default_paper_bank_is_300k():
+    p = PaperPortfolio()
+    assert p.starting_usd == 300_000.0
+    assert p.usd == 300_000.0
+
+
+def test_restore_upgrades_legacy_starting_bank_without_erasing_pnl():
+    restored = PaperPortfolio(300_000.0)
+    restored.restore(
+        {
+            "starting_usd": 10_000.0,
+            "usd": 10_125.0,
+            "positions": {},
+            "closed_trades": [],
+        }
+    )
+    assert restored.starting_usd == 300_000.0
+    assert restored.usd == 300_125.0
+
+
+def test_restore_migrates_legacy_zero_margin_execution_test_position():
+    restored = PaperPortfolio(300_000.0)
+    restored.restore(
+        {
+            "starting_usd": 10_000.0,
+            "usd": 9_999.0,
+            "positions": {
+                "btc": {
+                    "trade_id": "legacy-test",
+                    "asset_id": "btc",
+                    "product_type": "crypto_spot",
+                    "side": "long",
+                    "quantity": 0.0001,
+                    "quantity_unit": "BTC",
+                    "entry_price": 100_000.0,
+                    "entry_fee_usd": 1.0,
+                    "margin_reserved_usd": 0.0,
+                    "normal_required_margin_usd": 10.0,
+                    "execution_test_funded": True,
+                    "opened_at": "2026-09-23T08:00:00+00:00",
+                }
+            },
+            "closed_trades": [],
+        }
+    )
+    pos = restored.position("btc")
+    assert pos is not None
+    assert pos["margin_reserved_usd"] == 10.0
+    assert pos["execution_test_margin_migrated"] is True
+    assert restored.starting_usd == 300_000.0

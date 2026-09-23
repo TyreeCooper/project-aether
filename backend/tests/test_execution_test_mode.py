@@ -36,7 +36,8 @@ def test_execution_test_mode_opens_all_twelve_books_at_minimum_step():
         assert pos["execution_test_funded"] is True
         assert pos["metadata"]["execution_test"] is True
         assert pos["metadata"]["execution_test_load"] == "AETHER-LOAD-002"
-        assert pos["margin_reserved_usd"] == 0.0
+        assert pos["margin_reserved_usd"] == pos["normal_required_margin_usd"]
+        assert pos["margin_reserved_usd"] > 0.0
 
 
 def test_execution_test_mode_does_not_change_normal_constructor_default():
@@ -45,7 +46,7 @@ def test_execution_test_mode_does_not_change_normal_constructor_default():
     assert desk.engine_status()["execution_test_mode"] is False
 
 
-def test_execution_test_funding_does_not_reserve_normal_margin():
+def test_execution_test_reserves_configured_margin():
     portfolio = PaperPortfolio(10_000.0)
     before = portfolio.usd
     opened = portfolio.open_position(
@@ -60,9 +61,8 @@ def test_execution_test_funding_does_not_reserve_normal_margin():
     )
     assert opened["ok"] is True
     assert opened["normal_required_margin_usd"] > 0
-    assert opened["margin_reserved_usd"] == 0.0
-    assert portfolio.usd <= before
-    assert portfolio.usd > before - opened["normal_required_margin_usd"]
+    assert opened["margin_reserved_usd"] == opened["normal_required_margin_usd"]
+    assert portfolio.usd == before - opened["margin_reserved_usd"] - opened["entry_fee_usd"]
 
 
 def test_test_mode_status_is_explicit_and_live_boundary_remains_blocked():
@@ -351,8 +351,8 @@ def test_closed_execution_test_identity_survives_portfolio_restore():
     assert durable["metadata"]["execution_test_load"] == "AETHER-LOAD-002"
 
 
-def test_execution_test_synthetic_funding_does_not_change_normal_cash_or_margin():
-    portfolio = PaperPortfolio(10_000.0)
+def test_execution_test_margin_accounting_and_overflow_are_explicit():
+    portfolio = PaperPortfolio(5.0)
     before_cash = portfolio.usd
 
     opened = portfolio.open_position(
@@ -369,13 +369,14 @@ def test_execution_test_synthetic_funding_does_not_change_normal_cash_or_margin(
         },
     )
     assert opened["ok"] is True
-    assert opened["margin_reserved_usd"] == 0.0
-    assert opened["normal_required_margin_usd"] > 0.0
-    entry_fee = float(opened["entry_fee_usd"])
-    assert portfolio.usd == before_cash - entry_fee
+    assert opened["margin_reserved_usd"] == opened["normal_required_margin_usd"]
+    assert opened["margin_reserved_usd"] == 10.0
+    assert opened["test_overflow_usd"] > 0.0
 
     snap = portfolio.snapshot({"btc": 100_000.0})
-    assert snap["reserved_margin_usd"] == 0.0
+    assert snap["reserved_margin_usd"] == 10.0
+    assert snap["test_overflow_usd"] == opened["test_overflow_usd"]
+    assert snap["equity"] < before_cash
 
     closed = portfolio.close_position(
         "btc",
@@ -384,7 +385,9 @@ def test_execution_test_synthetic_funding_does_not_change_normal_cash_or_margin(
     )
     assert closed["ok"] is True
     assert closed["gross_pnl_usd"] == 0.0
-    assert portfolio.usd == before_cash - closed["fees_usd"]
+    assert closed["test_overflow_repaid_usd"] > 0.0
+    assert portfolio.test_overflow_usd == 0.0
+    assert round(portfolio.usd, 6) == round(before_cash - closed["fees_usd"], 6)
 
 
 def test_normal_trade_still_reserves_real_paper_capital():

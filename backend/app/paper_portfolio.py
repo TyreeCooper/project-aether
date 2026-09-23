@@ -8,6 +8,7 @@ from typing import Any
 
 from app.fees import TAKER_FEE, fee_quote
 from app.instruments import instrument_spec, supports_side
+from app.wallet import STARTING_USD
 
 
 def _now() -> str:
@@ -33,9 +34,10 @@ def _round_step(value: float, step: float) -> float:
 class PaperPortfolio:
     """One paper account with product-specific P/L and margin semantics."""
 
-    def __init__(self, usd: float = 10_000.0) -> None:
+    def __init__(self, usd: float = STARTING_USD) -> None:
         self.starting_usd = float(usd)
         self.usd = float(usd)
+        self.test_overflow_usd = 0.0
         self.positions: dict[str, dict[str, Any]] = {}
         self.closed_trades: list[dict[str, Any]] = []
 
@@ -294,19 +296,23 @@ class PaperPortfolio:
             return {"ok": False, "error": "bad_qty_or_price", "asset_id": aid}
         fee = self._entry_fee(aid, qty, price, side)
         normal_margin = self._required_margin(aid, side, qty, price)
-        # Test-mode positions are synthetically funded so risk sizing, margin,
-        # and cash thresholds cannot prevent the execution-rail experiment.
-        # Only actual modeled fees touch paper cash. Live execution stays blocked.
-        margin = 0.0 if execution_test else normal_margin
-        debit = fee if execution_test else margin + fee
+        margin = normal_margin
+        debit = margin + fee
+        test_overflow = 0.0
         if self.usd + 1e-9 < debit:
-            return {
-                "ok": False,
-                "error": "insufficient_usd",
-                "need": debit,
-                "have": self.usd,
-                "asset_id": aid,
-            }
+            if not execution_test:
+                return {
+                    "ok": False,
+                    "error": "insufficient_usd",
+                    "need": debit,
+                    "have": self.usd,
+                    "asset_id": aid,
+                }
+            # Matrix coverage may borrow explicit test-only buying power, but
+            # the position still reserves its configured paper margin in full.
+            test_overflow = max(debit - self.usd, 0.0)
+            self.test_overflow_usd += test_overflow
+            self.usd += test_overflow
         self.usd -= debit
         trade_id = uuid.uuid4().hex
         ts = opened_at or _now()
@@ -329,6 +335,7 @@ class PaperPortfolio:
             "metadata": dict(metadata or {}),
             "execution_test_funded": bool(execution_test),
             "normal_required_margin_usd": normal_margin,
+            "test_overflow_usd": test_overflow,
         }
         self.positions[aid] = pos
         return {
@@ -370,16 +377,21 @@ class PaperPortfolio:
         margin = float(pos.get("margin_reserved_usd") or 0.0)
         kind = str(pos["product_type"])
 
-        if bool(pos.get("execution_test_funded")):
-            # Synthetic test capital never enters/leaves cash; settle only P/L
-            # and exit fees so the experiment cannot consume the normal wallet.
-            self.usd += gross - exit_fee
-        elif kind in {"crypto_spot", "equity"} and side == "long":
+        if kind in {"crypto_spot", "equity"} and side == "long":
             # Cash long: reserved margin is the purchase notional. Return sale proceeds.
             self.usd += qty * price - exit_fee
         else:
             # Margin/short products: release margin and realize gross P/L.
             self.usd += margin + gross - exit_fee
+
+        overflow = float(pos.get("test_overflow_usd") or 0.0)
+        overflow_repaid = min(max(self.usd, 0.0), overflow)
+        if overflow_repaid > 0:
+            self.usd -= overflow_repaid
+            self.test_overflow_usd = max(
+                self.test_overflow_usd - overflow_repaid,
+                0.0,
+            )
 
         ts = closed_at or _now()
         opened = _parse_ts(str(pos.get("opened_at") or ""))
@@ -401,6 +413,8 @@ class PaperPortfolio:
             "exit_reason": exit_reason,
             "duration_seconds": duration,
             "status": "closed",
+            "test_overflow_repaid_usd": overflow_repaid,
+            "test_overflow_outstanding_usd": self.test_overflow_usd,
         }
         del self.positions[aid]
         self.closed_trades.append(trade)
@@ -434,14 +448,12 @@ class PaperPortfolio:
             kind = str(pos["product_type"])
             side = str(pos["side"])
             qty = float(pos["quantity"])
-            if bool(pos.get("execution_test_funded")):
-                total += self.gross_pnl(aid, mark)
-            elif kind in {"crypto_spot", "equity"} and side == "long":
+            if kind in {"crypto_spot", "equity"} and side == "long":
                 total += qty * mark
             else:
                 total += float(pos.get("margin_reserved_usd") or 0.0)
                 total += self.gross_pnl(aid, mark)
-        return total
+        return total - self.test_overflow_usd
 
     def snapshot(self, marks: dict[str, float]) -> dict[str, Any]:
         rows: list[dict[str, Any]] = []
@@ -465,11 +477,15 @@ class PaperPortfolio:
                 }
             )
         return {
+            "starting_usd": round(self.starting_usd, 4),
             "usd": round(self.usd, 4),
             "cash": round(self.usd, 4),
             "equity": round(self.equity(marks), 4),
             "reserved_margin_usd": round(reserved, 4),
+            "free_margin_usd": round(max(self.usd, 0.0), 4),
+            "available_buying_power_usd": round(max(self.usd, 0.0), 4),
             "gross_exposure_usd": round(gross_exposure, 4),
+            "test_overflow_usd": round(self.test_overflow_usd, 4),
             "open_pnl_usd": round(open_pnl, 4),
             "positions": rows,
             "holdings": rows,
@@ -480,19 +496,48 @@ class PaperPortfolio:
         return {
             "starting_usd": self.starting_usd,
             "usd": self.usd,
+            "test_overflow_usd": self.test_overflow_usd,
             "positions": self.positions,
             "closed_trades": self.closed_trades[-1000:],
         }
 
     def restore(self, data: dict[str, Any]) -> None:
-        self.starting_usd = float(data.get("starting_usd", self.starting_usd))
-        self.usd = float(data.get("usd", self.usd))
+        target_starting_usd = float(self.starting_usd)
+        saved_starting_usd = float(
+            data.get("starting_usd", target_starting_usd)
+        )
+        saved_usd = float(data.get("usd", self.usd))
+        capital_upgrade = max(target_starting_usd - saved_starting_usd, 0.0)
+        self.starting_usd = max(saved_starting_usd, target_starting_usd)
+        self.usd = saved_usd + capital_upgrade
+        self.test_overflow_usd = float(data.get("test_overflow_usd", 0.0) or 0.0)
         positions = data.get("positions") or {}
         self.positions = {
             str(k): dict(v)
             for k, v in positions.items()
             if isinstance(v, dict)
         }
+
+        # Upgrade open execution-test positions created by the former
+        # zero-margin experiment so restored accounting uses real paper margin.
+        for pos in self.positions.values():
+            if not bool(pos.get("execution_test_funded")):
+                continue
+            if float(pos.get("margin_reserved_usd") or 0.0) > 0:
+                continue
+            required = float(pos.get("normal_required_margin_usd") or 0.0)
+            if required <= 0:
+                continue
+            overflow = max(required - self.usd, 0.0)
+            if overflow > 0:
+                self.test_overflow_usd += overflow
+                self.usd += overflow
+            self.usd -= required
+            pos["margin_reserved_usd"] = required
+            pos["test_overflow_usd"] = (
+                float(pos.get("test_overflow_usd") or 0.0) + overflow
+            )
+            pos["execution_test_margin_migrated"] = True
 
         # One-time compatibility with the former SpotWallet payload.
         # Its cash balance already reflected the purchase debit, so migration

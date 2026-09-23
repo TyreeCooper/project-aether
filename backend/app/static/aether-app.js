@@ -89,8 +89,8 @@
     const floorKey=selected("floorSort","pnl"),floorDir=selected("floorSortDir","desc");
     const floorRows=sortRows(rows,floorKey,floorDir,(a,key)=>key==="asset"?(a.symbol||a.pair||""):key==="move"?Number(a.intelligence?.opportunity_24h?.net_change_pct||0):key==="position"?Number(a.position_value||0):Number(a.open_pnl||0));
     setText("floorEquity",money(p.equity));setText("floorPnl",(Number(p.total_pnl)>=0?"+":"")+money(p.total_pnl).replace("$","")+" total P&L",pnlClass(p.total_pnl));
-    setText("floorCash",money(p.cash));setText("floorExposure",pct(p.exposure_pct)+" exposure");
-    setText("floorInvested",money(p.invested));setText("floorPositions",(p.active_positions||0)+" active positions");
+    setText("floorCash",money(p.cash));setText("floorExposure","Free margin "+money(p.free_margin));
+    setText("floorInvested",money(p.margin_used));setText("floorPositions","Gross exposure "+money(p.gross_exposure));
     setText("floorRealized",money(p.realized_pnl),pnlClass(p.realized_pnl));setText("floorTrades",(p.trades||0)+" completed trades");
     const live=state.live||{},open=live.items||[];
     const strip=$("floorLiveStrip");
@@ -119,7 +119,7 @@
     $("assetBoard").querySelectorAll(".asset-row").forEach(r=>r.onclick=()=>go("asset/"+r.dataset.id));
     const e=f.engine||{};const armed=Boolean(e.accepting_entries);const engineLabel=armed?"ARMED":(e.armed&&!e.running?"STARTING":"DISARMED");
     $("floorHealth").innerHTML=metric("Engine",engineLabel,armed?"up":"")+metric("Loop",e.running?"RUNNING":"STOPPED",e.running?"up":"down")+metric("Live execution",f.live_blocked?"BLOCKED":"READY",f.live_blocked?"up":"down")+metric("Books",String(p.assets||0))+metric("Active positions",String(p.active_positions||0))+metric("Exposure",pct(p.exposure_pct));
-    $("floorPerformance").innerHTML=metric("Open P&L",money(p.open_pnl),pnlClass(p.open_pnl))+metric("Realized P&L",money(p.realized_pnl),pnlClass(p.realized_pnl))+metric("Fees",money(p.fees))+metric("Win rate",pct(p.win_rate_pct))+metric("W / L",(p.wins||0)+" / "+(p.losses||0));
+    $("floorPerformance").innerHTML=metric("Starting Bank",money(p.starting_bank))+metric("Open P&L",money(p.open_pnl),pnlClass(p.open_pnl))+metric("Realized P&L",money(p.realized_pnl),pnlClass(p.realized_pnl))+metric("Margin Used",money(p.margin_used))+metric("Free Margin",money(p.free_margin))+metric("Gross Exposure",money(p.gross_exposure))+metric("Test Overflow",money(p.test_overflow),p.test_overflow>0?"amber":"")+metric("Fees",money(p.fees))+metric("Win rate",pct(p.win_rate_pct))+metric("W / L",(p.wins||0)+" / "+(p.losses||0));
     $("engineBadge").textContent=armed?"ARMED":(e.armed?"STARTING":"DISARMED");$("engineBadge").className="badge "+(armed?"good":"");
     const ds=$("drawerState");if(ds){ds.textContent=$("engineBadge").textContent;ds.className=$("engineBadge").className;}
   }

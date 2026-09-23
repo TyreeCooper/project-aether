@@ -684,7 +684,13 @@ class MultiDesk:
             "model": "multi_market_paper_portfolio",
             "portfolio": {
                 "equity": round(equity, 4),
+                "starting_bank": round(float(wallet.get("starting_usd") or STARTING_USD), 4),
                 "cash": round(float(wallet["usd"]), 4),
+                "free_margin": round(float(wallet.get("free_margin_usd") or 0.0), 4),
+                "available_buying_power": round(float(wallet.get("available_buying_power_usd") or 0.0), 4),
+                "margin_used": round(float(wallet.get("reserved_margin_usd") or 0.0), 4),
+                "gross_exposure": round(float(wallet.get("gross_exposure_usd") or 0.0), 4),
+                "test_overflow": round(float(wallet.get("test_overflow_usd") or 0.0), 4),
                 "invested": round(invested, 4),
                 "open_pnl": round(open_pnl, 4),
                 "realized_pnl": round(realized, 4),

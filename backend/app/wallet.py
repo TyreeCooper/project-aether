@@ -5,7 +5,7 @@ from typing import Any
 
 from app.fees import TAKER_FEE
 
-STARTING_USD = 10_000.0
+STARTING_USD = 300_000.0
 
 
 class SpotWallet:

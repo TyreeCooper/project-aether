@@ -62,3 +62,13 @@ def test_trade_list_sort_and_filter_controls_are_present():
         assert f'id="{control_id}"' in html
     assert "sortRows" in js
     assert "pnlClass" in js
+
+
+def test_floor_exposes_margin_and_bank_labels():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    js = (STATIC / "aether-app.js").read_text(encoding="utf-8")
+    assert "Margin Used" in html
+    assert "Starting Bank" in js
+    assert "Free Margin" in js
+    assert "Gross Exposure" in js
+    assert "Test Overflow" in js
