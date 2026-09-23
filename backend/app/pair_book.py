@@ -85,6 +85,7 @@ class PairBook:
         self.fills: list[dict[str, Any]] = []
         self.last_reason = "warming"
         self.signal: str | None = None
+        self.entry_filter_settings: dict[str, bool] | None = None
 
     def apply_quote(self, item: dict[str, Any]) -> None:
         if item.get("last") is not None:
@@ -293,6 +294,7 @@ class PairBook:
             btc_in_position=btc_in_position,
             position_side=self.position_side(),
             requested_mode=requested_mode,
+            filter_settings=self.entry_filter_settings,
         )
         if (
             snap.get("executable_signal") in {"buy", "short"}
@@ -454,8 +456,18 @@ class PairBook:
         cost_hurdle_pct = (
             modeled_cost_pct * COST_EDGE_MULTIPLE
         )
+        filter_settings = dict(
+            snap.get("trade_filter_settings") or {}
+        )
+        cost_edge_enabled = bool(
+            filter_settings.get(
+                "cost_edge_hurdle",
+                True,
+            )
+        )
         if (
             not execution_test
+            and cost_edge_enabled
             and opportunity_pct > 0
             and modeled_cost_pct > 0
             and opportunity_pct + 1e-12
@@ -477,6 +489,7 @@ class PairBook:
                     )
                     or 0.0
                 ),
+                "cost_edge_filter_status": "rejected",
             }
 
         entry_leg = dict(
@@ -512,6 +525,11 @@ class PairBook:
                 modeled_cost_pct
             ),
             "cost_hurdle_pct": cost_hurdle_pct,
+            "cost_edge_filter_status": (
+                "passed"
+                if cost_edge_enabled
+                else "bypassed"
+            ),
             "opportunity_pct": opportunity_pct,
             "stop_risk_usd": float(stop_risk),
         }
