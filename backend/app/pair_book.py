@@ -116,6 +116,7 @@ class PairBook:
         *,
         btc_bias_on: bool = False,
         btc_in_position: bool = False,
+        requested_mode: str | None = None,
     ) -> dict[str, Any]:
         clock = for_asset(self.id)
         active_ids = {
@@ -143,6 +144,7 @@ class PairBook:
             btc_bias_on=btc_bias_on,
             btc_in_position=btc_in_position,
             position_side=self.position_side(),
+            requested_mode=requested_mode,
         )
         if (
             snap.get("executable_signal") in {"buy", "short"}
@@ -283,6 +285,10 @@ class PairBook:
                 "matrix_cell_id": snap.get("matrix_cell_id"),
                 "matrix_horizon": snap.get("matrix_horizon"),
                 "matrix_side": snap.get("matrix_side"),
+                "routing_horizon": snap.get("routing_horizon"),
+                "clock_horizon": snap.get("clock_horizon"),
+                "strategy_id": snap.get("strategy_id"),
+                "strategy_version": snap.get("strategy_version"),
             },
             execution_test=execution_test,
         )
@@ -391,15 +397,15 @@ class PairBook:
         self.highest = max(self.highest or mark, mark)
         self.lowest = min(self.lowest or mark, mark)
 
-        snap = self.snapshot_strategy(
-            btc_bias_on=btc_bias_on,
-            btc_in_position=btc_in_position,
-        )
         profile = playbook_profile(self.id)
         mode = str(
             self.entry_mode
-            or snap.get("mode")
             or profile["primary"]
+        )
+        snap = self.snapshot_strategy(
+            btc_bias_on=btc_bias_on,
+            btc_in_position=btc_in_position,
+            requested_mode=mode,
         )
         rate = fee_rate(
             self.id,
@@ -416,6 +422,8 @@ class PairBook:
             source_bars = list(self.bars_1d)
         elif mode == "swing":
             source_bars = list(self.bars_1h)
+        elif mode == "scalp":
+            source_bars = list(self.bars)
         else:
             source_bars = resample_bars(
                 list(self.bars),

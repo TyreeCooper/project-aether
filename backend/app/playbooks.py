@@ -1,14 +1,15 @@
 """Asset-class playbooks for the official 12-book Aether desk.
 
 One portfolio philosophy: follow the dominant grain. Each asset gets the
-timeframes and session rules appropriate to its market. The current execution
-layer is long-only; short setups are detected and exposed but not fabricated
-as executable trades.
+timeframes and session rules appropriate to its market. Paper execution can
+route long/short setups across enabled horizons where the product adapter
+supports that side. Live execution remains blocked by the runtime boundary.
 """
 from __future__ import annotations
 
 from typing import Any
 
+from app.execution_matrix import supported_horizons
 from app.strategy import atr, normalize_bar, resample_bars, round_trip_cost_pct, sma
 
 Bar = dict[str, Any]
@@ -226,6 +227,20 @@ PLAYBOOKS: dict[str, dict[str, Any]] = {
 def playbook_profile(asset_id: str) -> dict[str, Any]:
     aid = str(asset_id).lower()
     base = dict(PLAYBOOKS[aid])
+    base["sessions"] = {
+        str(mode): set(values or set())
+        for mode, values in (base.get("sessions") or {}).items()
+    }
+    base["time_stop_minutes"] = dict(
+        base.get("time_stop_minutes") or {}
+    )
+    if "scalp" in supported_horizons(aid):
+        base["sessions"]["scalp"] = set(
+            base["sessions"].get("intraday")
+            or base["sessions"].get("swing")
+            or set()
+        )
+        base["time_stop_minutes"]["scalp"] = 15
     base["asset_id"] = aid
     base["short_setup_detection"] = aid not in {"btc", "eth"}
     base["paper_long_execution_supported"] = True
@@ -248,6 +263,15 @@ def playbook_profile(asset_id: str) -> dict[str, Any]:
         else "intraday"
     )
     base["clocks"] = _clocks(clock_mode)
+    if "scalp" in supported_horizons(aid):
+        for row in base["clocks"]:
+            if row.get("id") == "1m":
+                row["role"] = "Scalp trigger / tape"
+                row["plain"] = (
+                    "Completed 1-minute continuation breakouts can trigger "
+                    "paper scalp entries when higher-timeframe grain agrees."
+                )
+                break
     return base
 
 
@@ -370,6 +394,74 @@ def _mode_snapshot(
     four = _direction(bars_4h, 8, 20)
     hourly = _direction(bars_1h, 8, 20)
     session_ok = _session_ok(profile, mode, active_session_ids)
+
+    if mode == "scalp":
+        trigger_bars = [
+            normalize_bar(bar)
+            for bar in bars_1m
+            if float(bar.get("close", bar.get("c", 0)) or 0) > 0
+        ]
+        trigger = _breakout_direction(trigger_bars, 10)
+        aligned = (
+            daily == four == hourly
+            and daily in {"long", "short"}
+        )
+        direction = daily if aligned else None
+        score = (
+            (20 if daily in {"long", "short"} else 0)
+            + (20 if direction and four == direction else 0)
+            + (20 if direction and hourly == direction else 0)
+            + (30 if direction and trigger == direction else 0)
+            + (10 if session_ok else 0)
+        )
+        if (
+            "warming" in {daily, four, hourly}
+            or len(trigger_bars) < 11
+        ):
+            reason = "warming"
+        elif not session_ok:
+            reason = "session_closed"
+        elif not aligned:
+            reason = "grain_not_aligned"
+        elif trigger != direction:
+            reason = "no_1m_continuation"
+        else:
+            reason = "qualified_scalp_grain"
+        signal = (
+            "buy"
+            if direction == "long"
+            and reason == "qualified_scalp_grain"
+            else "short"
+            if direction == "short"
+            and reason == "qualified_scalp_grain"
+            else None
+        )
+        stop_pct = _risk_stop_pct(
+            trigger_bars[-60:],
+            profile,
+            cost_pct,
+        )
+        signal_key = (
+            f"{mode}:{int(trigger_bars[-1]['ts'])}"
+            if trigger_bars
+            else None
+        )
+        return {
+            "mode": mode,
+            "signal": signal,
+            "signal_key": signal_key,
+            "reason": reason,
+            "direction": direction or "flat",
+            "daily_grain": daily,
+            "four_hour_grain": four,
+            "one_hour_grain": hourly,
+            "trigger": trigger,
+            "session_ok": session_ok,
+            "quality_score": score,
+            "risk_stop_pct": stop_pct,
+            "entry_clock": "1m",
+            "bias_clock": "1d/4h/1h",
+        }
 
     if mode == "intraday":
         trigger_bars = resample_bars(
@@ -642,6 +734,7 @@ def playbook_snapshot(
     btc_bias_on: bool = False,
     btc_in_position: bool = False,
     position_side: str | None = None,
+    requested_mode: str | None = None,
 ) -> dict[str, Any]:
     aid = str(asset_id).lower()
     profile = playbook_profile(aid)
@@ -654,6 +747,11 @@ def playbook_snapshot(
     )
 
     if aid in {"btc", "eth"}:
+        requested = str(requested_mode or "").lower()
+        if requested and requested not in {"swing", "daily_swing"}:
+            raise ValueError(
+                f"horizon_not_configured_for_asset:{aid}:{requested}"
+            )
         return _crypto_daily(
             aid,
             profile,
@@ -673,9 +771,17 @@ def playbook_snapshot(
         )
 
     active = set(active_session_ids or set())
-    modes = [profile["primary"]]
-    if profile.get("secondary"):
-        modes.append(profile["secondary"])
+    if requested_mode is not None:
+        requested = str(requested_mode).lower()
+        if requested not in set(supported_horizons(aid)):
+            raise ValueError(
+                f"horizon_not_configured_for_asset:{aid}:{requested}"
+            )
+        modes = [requested]
+    else:
+        modes = [profile["primary"]]
+        if profile.get("secondary"):
+            modes.append(profile["secondary"])
 
     opportunities = [
         _mode_snapshot(
@@ -713,7 +819,7 @@ def playbook_snapshot(
         selected.get("daily_grain") == "short"
         or selected.get("four_hour_grain") == "short"
         or (
-            selected.get("mode") == "intraday"
+            selected.get("mode") in {"scalp", "intraday"}
             and selected.get("one_hour_grain") == "short"
         )
     )
@@ -721,7 +827,7 @@ def playbook_snapshot(
         selected.get("daily_grain") == "long"
         or selected.get("four_hour_grain") == "long"
         or (
-            selected.get("mode") == "intraday"
+            selected.get("mode") in {"scalp", "intraday"}
             and selected.get("one_hour_grain") == "long"
         )
     )

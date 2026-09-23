@@ -298,3 +298,46 @@ def test_pair_book_can_open_and_close_short_future():
     assert closed is not None
     assert closed["position_side"] == "short"
     assert book.qty() == 0
+
+
+
+def test_scalp_playbook_uses_completed_1m_trigger_and_15m_time_stop():
+    daily = _daily(100, start=50.0, step=0.5)
+    hourly = _hourly(240, start=80.0, step=0.25)
+    minute = _minutes(120, start=120.0, step=0.03)
+    snap = playbook_snapshot(
+        "mes",
+        minute,
+        hourly,
+        daily,
+        mark=minute[-1]["close"],
+        active_session_ids={"rth"},
+        requested_mode="scalp",
+    )
+    assert snap["mode"] == "scalp"
+    assert snap["entry_clock"] == "1m"
+    assert snap["signal"] == "buy"
+    assert snap["executable_signal"] == "buy"
+    assert snap["reason"] == "qualified_scalp_grain"
+    assert snap["signal_key"].startswith("scalp:")
+    assert snap["playbook"]["time_stop_minutes"]["scalp"] == 15
+
+
+def test_non_scalp_asset_rejects_requested_scalp_mode():
+    daily = _daily(100, start=50.0, step=0.5)
+    hourly = _hourly(240, start=80.0, step=0.25)
+    minute = _minutes(120, start=120.0, step=0.03)
+    try:
+        playbook_snapshot(
+            "mgc",
+            minute,
+            hourly,
+            daily,
+            mark=minute[-1]["close"],
+            active_session_ids={"rth"},
+            requested_mode="scalp",
+        )
+    except ValueError as exc:
+        assert "horizon_not_configured_for_asset:mgc:scalp" in str(exc)
+    else:
+        raise AssertionError("MGC must not receive scalp routing")
