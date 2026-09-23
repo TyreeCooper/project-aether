@@ -132,3 +132,56 @@ def test_live_order_rail_remains_hard_blocked_in_execution_test(monkeypatch):
     assert result["live_flag"] is True
     assert result["live_armed"] is False
     assert result["orders_enabled"] is False
+
+
+def test_normal_mode_never_forces_entry_when_strategy_has_no_signal(monkeypatch):
+    desk = _test_desk()
+    desk.execution_test_mode = False
+
+    for book in desk.books:
+        monkeypatch.setattr(
+            book,
+            "snapshot_strategy",
+            lambda **_kwargs: {
+                "signal": None,
+                "executable_signal": None,
+                "reason": "no_setup",
+                "execution_status": "waiting",
+                "quality_score": 0,
+            },
+        )
+
+    assert desk._allocate() == []
+    assert desk.wallet.positions == {}
+
+
+def test_execution_override_preserves_baseline_strategy_diagnostics(monkeypatch):
+    desk = _test_desk()
+
+    for book in desk.books:
+        monkeypatch.setattr(
+            book,
+            "snapshot_strategy",
+            lambda **_kwargs: {
+                "signal": None,
+                "executable_signal": None,
+                "reason": "normal_gate_blocked",
+                "execution_status": "waiting_for_setup",
+                "quality_score": 37,
+            },
+        )
+
+    rows = desk._allocate()
+    assert len(rows) == 12
+    assert all(row["ok"] is True for row in rows)
+
+    for book in desk.books:
+        pos = desk.wallet.position(book.id)
+        assert pos is not None
+        metadata = pos["metadata"]
+        assert metadata["execution_test"] is True
+        assert metadata["execution_test_load"] == "AETHER-LOAD-002"
+        assert metadata["would_have_blocked_by"] == "normal_gate_blocked"
+        assert metadata["normal_execution_status"] == "waiting_for_setup"
+        assert metadata["normal_signal"] is None
+        assert metadata["normal_quality_score"] == 37
