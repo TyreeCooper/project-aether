@@ -24,6 +24,7 @@ def test_live_ui_uses_canonical_live_trade_endpoint_and_local_timer():
 
 def test_blotter_renders_round_trip_duration_fields():
     js = (STATIC / "aether-app.js").read_text(encoding="utf-8")
+    assert "<th>Time in Trade</th>" in js
     assert "realized_pnl_usd" in js
     assert "entry_price" in js
     assert "exit_price" in js
