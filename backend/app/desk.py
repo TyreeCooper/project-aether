@@ -2171,6 +2171,10 @@ class MultiDesk:
                         ),
                     },
                 )
+                if self.execution_test_mode:
+                    # Preserve LOAD-002 validation evidence immediately.
+                    # Strategy-test route evidence persists once per due cycle.
+                    self.persist()
 
                 if book.kraken and not self.execution_test_mode:
                     asyncio.create_task(
