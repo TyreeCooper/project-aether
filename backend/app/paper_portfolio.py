@@ -90,6 +90,22 @@ class PaperPortfolio:
             return matches[0][0]
         return None
 
+    def _position_rows(
+        self,
+        asset_id: str,
+        position_key: str | None = None,
+    ) -> list[tuple[str, dict[str, Any]]]:
+        aid = str(asset_id).lower()
+        if position_key is not None:
+            key = str(position_key).lower()
+            row = self.positions.get(key)
+            return [(key, row)] if row is not None else []
+        key = self._resolve_position_key(aid)
+        if key is not None:
+            row = self.positions.get(key)
+            return [(key, row)] if row is not None else []
+        return self._position_items_for_asset(aid)
+
     def positions_for_asset(
         self,
         asset_id: str,
@@ -105,10 +121,19 @@ class PaperPortfolio:
         *,
         position_key: str | None = None,
     ) -> float:
-        key = self._resolve_position_key(asset_id, position_key)
+        if position_key is not None:
+            pos = self.positions.get(
+                str(position_key).lower()
+            ) or {}
+            return abs(
+                float(pos.get("quantity") or 0.0)
+            )
+        key = self._resolve_position_key(asset_id)
         if key is not None:
             pos = self.positions.get(key) or {}
-            return abs(float(pos.get("quantity") or 0.0))
+            return abs(
+                float(pos.get("quantity") or 0.0)
+            )
         return sum(
             abs(float(pos.get("quantity") or 0.0))
             for _, pos in self._position_items_for_asset(asset_id)
@@ -120,10 +145,19 @@ class PaperPortfolio:
         *,
         position_key: str | None = None,
     ) -> float:
-        key = self._resolve_position_key(asset_id, position_key)
+        if position_key is not None:
+            pos = self.positions.get(
+                str(position_key).lower()
+            ) or {}
+            return float(
+                pos.get("entry_price") or 0.0
+            )
+        key = self._resolve_position_key(asset_id)
         if key is not None:
             pos = self.positions.get(key) or {}
-            return float(pos.get("entry_price") or 0.0)
+            return float(
+                pos.get("entry_price") or 0.0
+            )
         rows = self._position_items_for_asset(asset_id)
         total_qty = sum(
             abs(float(pos.get("quantity") or 0.0))
@@ -146,7 +180,22 @@ class PaperPortfolio:
         *,
         position_key: str | None = None,
     ) -> str | None:
-        key = self._resolve_position_key(asset_id, position_key)
+        if position_key is not None:
+            value = str(
+                (
+                    self.positions.get(
+                        str(position_key).lower()
+                    )
+                    or {}
+                ).get("side")
+                or ""
+            ).lower()
+            return (
+                value
+                if value in {"long", "short"}
+                else None
+            )
+        key = self._resolve_position_key(asset_id)
         if key is not None:
             value = str(
                 (self.positions.get(key) or {}).get("side") or ""
@@ -166,8 +215,17 @@ class PaperPortfolio:
         *,
         position_key: str | None = None,
     ) -> dict[str, Any] | None:
-        key = self._resolve_position_key(asset_id, position_key)
-        row = self.positions.get(key) if key is not None else None
+        if position_key is not None:
+            row = self.positions.get(
+                str(position_key).lower()
+            )
+            return dict(row) if row else None
+        key = self._resolve_position_key(asset_id)
+        row = (
+            self.positions.get(key)
+            if key is not None
+            else None
+        )
         return dict(row) if row else None
 
     def rekey_position(
@@ -262,11 +320,9 @@ class PaperPortfolio:
         position_key: str | None = None,
     ) -> float:
         aid = str(asset_id).lower()
-        key = self._resolve_position_key(aid, position_key)
-        rows = (
-            [(key, self.positions[key])]
-            if key is not None
-            else self._position_items_for_asset(aid)
+        rows = self._position_rows(
+            aid,
+            position_key,
         )
         return sum(
             self.move_pnl(
@@ -287,11 +343,9 @@ class PaperPortfolio:
         position_key: str | None = None,
     ) -> float:
         aid = str(asset_id).lower()
-        key = self._resolve_position_key(aid, position_key)
-        rows = (
-            [(key, self.positions[key])]
-            if key is not None
-            else self._position_items_for_asset(aid)
+        rows = self._position_rows(
+            aid,
+            position_key,
         )
         return sum(
             self.move_pnl(
@@ -313,11 +367,9 @@ class PaperPortfolio:
         position_key: str | None = None,
     ) -> float:
         aid = str(asset_id).lower()
-        key = self._resolve_position_key(aid, position_key)
-        rows = (
-            [(key, self.positions[key])]
-            if key is not None
-            else self._position_items_for_asset(aid)
+        rows = self._position_rows(
+            aid,
+            position_key,
         )
         spec = instrument_spec(aid)
         kind = spec["product_type"]
@@ -456,11 +508,9 @@ class PaperPortfolio:
         position_key: str | None = None,
     ) -> float:
         aid = str(asset_id).lower()
-        key = self._resolve_position_key(aid, position_key)
-        rows = (
-            [(key, self.positions[key])]
-            if key is not None
-            else self._position_items_for_asset(aid)
+        rows = self._position_rows(
+            aid,
+            position_key,
         )
         total = 0.0
         for _, pos in rows:
