@@ -79,6 +79,19 @@ def save_learn(payload: dict[str, Any]) -> None:
     tmp.replace(path)
 
 
+def _is_execution_test_fill(fill: dict[str, Any]) -> bool:
+    """Return True for AETHER-LOAD experiment fills that are not strategy evidence."""
+    metadata = fill.get("metadata")
+    meta = metadata if isinstance(metadata, dict) else {}
+    return bool(
+        fill.get("execution_test")
+        or fill.get("execution_test_funded")
+        or str(fill.get("mode") or "").lower() == "execution_test"
+        or meta.get("execution_test")
+        or meta.get("execution_test_load")
+    )
+
+
 def score_exits(
     fills: list[dict[str, Any]],
     actor_prefix: str = STRATEGY_ACTOR_PREFIX,
@@ -89,7 +102,7 @@ def score_exits(
     week_start = today.fromordinal(today.toordinal() - today.weekday())
     month_start = today.replace(day=1)
     year_start = today.replace(month=1, day=1)
-    wins = losses = flat = ignored_sells = 0
+    wins = losses = flat = ignored_sells = ignored_execution_test_sells = 0
     pnl = daily = weekly = monthly = annual = 0.0
     gross_profit = gross_loss = 0.0
     by_reason: dict[str, int] = {}
@@ -97,6 +110,9 @@ def score_exits(
     last_ts = first_ts = None
     for fill in sorted(fills, key=lambda x: str(x.get("ts", ""))):
         if str(fill.get("side", "")).lower() != "sell":
+            continue
+        if _is_execution_test_fill(fill):
+            ignored_execution_test_sells += 1
             continue
         actor = str(fill.get("actor") or "unknown")
         if not actor.startswith(actor_prefix):
@@ -140,6 +156,7 @@ def score_exits(
         "losses": losses,
         "breakeven": flat,
         "ignored_noncohort_sells": ignored_sells,
+        "ignored_execution_test_sells": ignored_execution_test_sells,
         "realized_pnl_usd": round(pnl, 4),
         "gross_profit_usd": round(gross_profit, 4),
         "gross_loss_usd": round(gross_loss, 4),

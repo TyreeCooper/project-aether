@@ -43,3 +43,38 @@ def test_noncohort_sells_are_excluded_from_forward_evidence():
     assert evidence["ignored_noncohort_sells"] == 1
     assert evidence["realized_pnl_usd"] == 3.0
     assert out["forward_gate_pass"] is True
+
+
+def test_execution_test_sells_are_excluded_even_with_strategy_actor():
+    fills = [
+        _fill(3.0, "2026-09-22T19:00:00+00:00"),
+        {
+            **_fill(1000.0, "2026-09-22T19:01:00+00:00"),
+            "execution_test": True,
+            "mode": "execution_test",
+            "metadata": {
+                "execution_test": True,
+                "execution_test_load": "AETHER-LOAD-002",
+            },
+        },
+        _fill(-1.0, "2026-09-22T19:02:00+00:00"),
+    ]
+    out = forward_paper_evidence(fills, minimum_exits=2)
+    evidence = out["evidence"]
+    assert evidence["closed"] == 2
+    assert evidence["ignored_execution_test_sells"] == 1
+    assert evidence["realized_pnl_usd"] == 2.0
+    assert out["forward_gate_pass"] is True
+
+
+def test_execution_test_metadata_alone_is_enough_to_exclude_fill():
+    fill = {
+        **_fill(1000.0, "2026-09-22T19:01:00+00:00"),
+        "metadata": {"execution_test_load": "AETHER-LOAD-002"},
+    }
+    out = forward_paper_evidence([fill], minimum_exits=1)
+    evidence = out["evidence"]
+    assert evidence["closed"] == 0
+    assert evidence["ignored_execution_test_sells"] == 1
+    assert out["profitability_gate_pass"] is False
+    assert out["forward_gate_pass"] is False
