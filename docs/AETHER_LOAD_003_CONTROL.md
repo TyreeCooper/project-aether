@@ -3,9 +3,9 @@
 ## CONTROL STATUS
 
 - Load: AETHER-LOAD-003
-- State: B6 COMPLETE — WAITING FOR J.A.R.V.I.S. REVIEW
+- State: B7 COMPLETE — WAITING FOR J.A.R.V.I.S. REVIEW
 - Active implementation batch: NONE
-- Waiting on: GROK BOT J.A.R.V.I.S. CLEARANCE TO START B7
+- Waiting on: GROK BOT J.A.R.V.I.S. CLEARANCE TO START B8
 - Starting main SHA: 09dfdb510bd5b54f43cef7e9c5f20389d3636ae1
 - Live-money execution: HARD BLOCKED
 - Paper testing: remains the target runtime
@@ -174,11 +174,11 @@ ChatGPT must not advance while the batch is on HOLD.
 - B4: [COMPLETE] Portfolio risk & qualified concurrency — final head 28c33641b7d891ee2e3f64793102ff2d04703800
 - B5: [COMPLETE] Instrument sizing hard ceilings — 151ad2fb2e2a5a5648b18cfe3393dcf7ff6d596c
 - B6: [COMPLETE] Horizon-specific trade management — final head d7089c2d85c623020136bd445a57183a74021073
-- B7: [WAITING] Realistic fill & cost model
+- B7: [COMPLETE] Realistic fill & cost model — final head 102746f16b30239e48912dd5f8b6895340a06c03
 - B8: [WAITING] Operator/UI evidence & telemetry
 - B9: [WAITING] Integration, deployment contract & closeout
 
-Implementation progress: 6 / 9 batches complete.
+Implementation progress: 7 / 9 batches complete.
 
 ---
 
@@ -1008,7 +1008,7 @@ ChatGPT must not start B6 without the explicit B6 clearance.
 
 ## B6 — Horizon-Specific Trade Management
 
-Status: COMPLETE — WAITING FOR J.A.R.V.I.S. REVIEW
+Status: COMPLETE — VERIFIED/CLEARED BY J.A.R.V.I.S.
 
 Final implementation head:
 `d7089c2d85c623020136bd445a57183a74021073`
@@ -1097,4 +1097,100 @@ If a B6 defect exists, respond:
 `J.A.R.V.I.S. HOLD — AETHER-LOAD-003 — B6 — <concrete defect/reason>`
 
 ChatGPT must not start B7 without the explicit B7 clearance.
+
+## B7 — Realistic Fill & Cost Model
+
+Status: COMPLETE — WAITING FOR J.A.R.V.I.S. REVIEW
+
+Final validation head:
+`102746f16b30239e48912dd5f8b6895340a06c03`
+
+B7 commit chain:
+- `a7921a6bbbc7f7ac2b73a55b8ae501b67a30a8f0` — `refactor: canonicalize paper fill references [skip ci]`
+- `9f91d14d30b73b0b72fdeef81282eca69869f01b` — `refactor: share canonical modeled fill price [skip ci]`
+- `30cba62222f986c6eb51218293444d327f1771ed` — `feat: add instrument-aware execution cost ledger [skip ci]`
+- `b3a47e341c295f1f606a2449722b4bf24eba6aaf` — `feat: expose route opportunity for cost hurdle [skip ci]`
+- `b9d2fbfcb841fa6eb7a42e5d542a75d0f595c381` — `feat: apply actual-sized cost hurdle at entry [skip ci]`
+- `20c7373a978960ea66892ffccc8beba14136aaff` — `feat: reconcile entry exit friction and net pnl [skip ci]`
+- `279d74aa508ba34bde13ee46d26756c7e5e19c18` — `feat: record modeled cost hurdle decisions [skip ci]`
+- `96d6733c0d8d260cbb36f25a1f80451b0a8aede3` — `test: advance execution safety contract to B7 [skip ci]`
+- `6ec9eb416aa8ec6da687b534b9c06525787b0e4c` — `test: advance deployment assertions to B7 [skip ci]`
+- `0dc32620efe754326177a3c9896e6333e13281d6` — `ci: verify B7 production runtime [skip ci]`
+- `19fd7b15640aac8c5c385df9a5ed72310e5f4987` — `fix: use actual open quantity for management costs [skip ci]`
+- `102746f16b30239e48912dd5f8b6895340a06c03` — `test: prove realistic paper cost reconciliation`
+
+Scope completed:
+- one canonical deterministic paper-fill model now separates neutral market reference, crossed quote reference, and adverse-slippage fill price;
+- modeled slippage remains 5 bps per execution leg;
+- pre-entry transaction cost is calculated after risk/capital/hard-cap sizing, using the actual final quantity rather than a one-unit placeholder;
+- the entry cost model includes observed spread, modeled adverse slippage, and instrument-specific fees;
+- weak-edge strategy setups can be rejected by `edge_below_cost_hurdle` before a paper position is opened;
+- cost hurdle uses a 1.40x modeled round-trip cost multiple against the route's observable opportunity envelope;
+- route opportunity percentage is exposed for scalp, intraday, swing, and crypto daily-swing routes using only available bars;
+- paper positions persist market reference, quote reference, fill price, entry spread, entry slippage, modeled round-trip cost, cost hurdle, and opportunity percentage;
+- exit accounting uses the same market/quote/fill separation and opposite execution side appropriate to long or short positions;
+- FX observed bid/ask spread is the FX transaction-cost representation and is not charged again as a synthetic FX fee;
+- equity commissions remain quantity-aware under the existing IBKR model;
+- futures fees remain contract-aware under the existing NinjaTrader per-side model, while spread/slippage P&L uses the instrument point value;
+- crypto continues to use the existing Kraken taker-fee model;
+- management-time cost percentage now uses the actual open quantity through the same canonical round-trip estimator when available;
+- closed trades expose spread drag, slippage drag, fee drag, total cost drag, and a direct dollar reconciliation check;
+- canonical reconciliation is `reference_pnl - spread - slippage - fees = net_pnl`;
+- existing MFE/MAE, capture efficiency, missed-opportunity, and entry/exit efficiency analytics remain in place;
+- opportunity evaluations retain cost-hurdle values and the direct `edge_below_cost_hurdle` rejection reason.
+
+Required B7 proof:
+- neutral market reference, quote-cross price, and modeled fill are distinct and deterministic — PROVEN;
+- entry and exit slippage are adverse by execution side — PROVEN;
+- equity fees use actual final quantity — PROVEN;
+- futures transaction friction uses contract fees and point-value P&L semantics — PROVEN;
+- FX spread is not double-charged as a separate fee — PROVEN;
+- high-friction / weak-edge setup can be rejected before entry — PROVEN;
+- a setup whose opportunity clears the same hurdle can proceed — PROVEN;
+- long trade reference/gross/net P&L reconciles with spread, slippage, and fees — PROVEN;
+- short trade uses opposite execution sides and reconciles through the same model — PROVEN;
+- no cost leg is omitted or double charged in final reconciliation — PROVEN.
+
+Safety/invariant evidence:
+- production runtime remains `strategy_test`;
+- forced strategy entries remain OFF;
+- live-money execution remains HARD BLOCKED;
+- isolated LOAD-002 execution validation remains available;
+- B4 portfolio/asset/cluster risk ceilings remain intact;
+- B5 hard sizing ceilings remain intact;
+- B6 horizon-specific management remains intact;
+- B8 operator/UI presentation was NOT implemented in B7;
+- B9 final integration closeout was NOT pulled forward.
+
+Validation evidence on final B7 head:
+- CI run #451 — SUCCESS;
+- final backend suite — 254 passed, 1 warning;
+- Azure workflow run #334 — SUCCESS;
+- Azure build backend tests — SUCCESS;
+- Azure Web App deployment — SUCCESS;
+- production runtime verification — SUCCESS;
+- deployed release asserted `AETHER-LOAD-003-B7`;
+- deployed runtime remained `strategy_test`;
+- deployed runtime asserted forced entries OFF;
+- deployed runtime asserted live execution blocked.
+
+Execution note:
+- the first attempted all-in-one B7 commit exceeded the GitHub orchestration call ceiling before mutation;
+- main was immediately verified unchanged at the B6 evidence tip before continuing;
+- B7 was then split into deterministic B7-only commits, with intermediate commits marked `[skip ci]` and the final validation head receiving the full CI/Azure run;
+- no B8 or B9 implementation was started.
+
+### J.A.R.V.I.S. REVIEW GATE
+
+Review final B7 head `102746f16b30239e48912dd5f8b6895340a06c03` and the evidence above.
+
+If clear, respond exactly:
+
+`J.A.R.V.I.S. CLEAR — AETHER-LOAD-003 — START B8`
+
+If a B7 defect exists, respond:
+
+`J.A.R.V.I.S. HOLD — AETHER-LOAD-003 — B7 — <concrete defect/reason>`
+
+ChatGPT must not start B8 without the explicit B8 clearance.
 
