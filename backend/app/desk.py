@@ -11,7 +11,6 @@ from typing import Any
 
 from app import live, venue
 from app.asset_sources import merge_source_registry, registry_summary, set_trust_state
-from app.clock import is_new_five_minute
 from app.community import fetch_reddit
 from app.crypto_events import fetch_crypto_calendar
 from app.db import db_store
@@ -20,8 +19,16 @@ from app.news import fetch_asset_news
 from app.official_macro import verify_macro_events
 from app.desk_persist import load_desk, save_desk
 from app.events import active_risk, fetch_calendar
-from app.execution_matrix import capability_cells, directional_summary
+from app.execution_matrix import (
+    capability_cells,
+    clock_horizon,
+    directional_summary,
+    execution_mode,
+    supported_horizons,
+)
+from app.horizons import TradingHorizon
 from app.playbooks import playbook_profile
+from app.routing import PaperStrategyRouter
 from app.universe import ASSETS, export_assets, register_asset
 from app.wallet import STARTING_USD
 from app.paper_portfolio import PaperPortfolio
@@ -65,6 +72,7 @@ class MultiDesk:
         self.by_id = {b.id: b for b in self.books}
         self._task: asyncio.Task | None = None
         self.execution_test_mode = bool(execution_test_mode)
+        self.strategy_router = PaperStrategyRouter()
         self.armed = os.getenv("AETHER_AUTO_RUN", "1").strip() not in {"0", "false", "FALSE"}
         self.risk_slice = max(
             0.01,
@@ -114,6 +122,21 @@ class MultiDesk:
     def marks(self) -> dict[str, float]:
         return {b.id: float(b.mark or 0.0) for b in self.books}
 
+    def _latest_closed_minute_ts(self) -> int | None:
+        latest: list[int] = []
+        now = int(time.time())
+        for book in self.books:
+            rows = completed_bars(
+                list(book.bars),
+                60,
+                now_ts=now,
+            )
+            if rows:
+                ts = int(rows[-1].get("ts") or 0)
+                if ts > 0:
+                    latest.append(ts)
+        return max(latest) if latest else None
+
     def _btc_gate(self) -> tuple[bool, bool]:
         btc = self.by_id.get("btc")
         if btc is None:
@@ -150,6 +173,12 @@ class MultiDesk:
                 },
                 "asset_source_registry": self.asset_source_registry,
                 "activity_events": self.activity_events[-300:],
+                "strategy_route_buckets": {
+                    horizon.value: int(bucket)
+                    for horizon, bucket in (
+                        self.strategy_router.clock.last_bucket.items()
+                    )
+                },
                 "saved_at": time.time(),
             }
         )
@@ -222,6 +251,17 @@ class MultiDesk:
                 for row in activity[-300:]
                 if isinstance(row, dict)
             ]
+
+        route_buckets = data.get("strategy_route_buckets") or {}
+        if isinstance(route_buckets, dict):
+            for raw_horizon, raw_bucket in route_buckets.items():
+                try:
+                    horizon = TradingHorizon(str(raw_horizon))
+                    self.strategy_router.clock.last_bucket[horizon] = int(
+                        raw_bucket
+                    )
+                except (TypeError, ValueError):
+                    continue
 
         if "armed" in data:
             self.armed = bool(data["armed"])
@@ -550,6 +590,18 @@ class MultiDesk:
                         "normal_quality_score": (
                             position.get("metadata") or {}
                         ).get("normal_quality_score"),
+                        "routing_horizon": (
+                            position.get("metadata") or {}
+                        ).get("routing_horizon"),
+                        "clock_horizon": (
+                            position.get("metadata") or {}
+                        ).get("clock_horizon"),
+                        "strategy_id": (
+                            position.get("metadata") or {}
+                        ).get("strategy_id"),
+                        "strategy_version": (
+                            position.get("metadata") or {}
+                        ).get("strategy_version"),
                         "management_state": (
                             "EXIT WATCH"
                             if strategy.get("exit_signal")
@@ -1001,6 +1053,10 @@ class MultiDesk:
                 book.seed_daily(daily)
             except Exception as exc:
                 logger.warning("seed failed %s %s", book.pair, exc)
+        if not self.strategy_router.clock.last_bucket:
+            closed_ts = self._latest_closed_minute_ts()
+            if closed_ts is not None:
+                self.strategy_router.due(closed_ts)
         seeded_at = time.time()
         self._last_context_refresh = seeded_at
         self._last_daily_refresh = seeded_at
@@ -1339,6 +1395,15 @@ class MultiDesk:
                 group_counts.get(group, 0) + 1
             )
 
+        due_routes = ()
+        if not self.execution_test_mode:
+            closed_ts = self._latest_closed_minute_ts()
+            if closed_ts is None:
+                return []
+            due_routes = self.strategy_router.due(closed_ts)
+            if not due_routes:
+                return []
+
         candidates: list[
             tuple[int, PairBook, dict[str, Any]]
         ] = []
@@ -1388,31 +1453,57 @@ class MultiDesk:
                 )
                 continue
 
-            fresh, bucket = is_new_five_minute(
-                list(book.bars),
-                book.last_5m,
-            )
-            if book.last_5m is None and bucket is not None:
-                book.last_5m = bucket
-                continue
-            if bucket is not None:
-                book.last_5m = bucket
-            if not fresh:
-                continue
+            route_candidates: list[
+                tuple[int, dict[str, Any]]
+            ] = []
+            for route in due_routes:
+                for horizon in supported_horizons(book.id):
+                    if (
+                        clock_horizon(book.id, horizon)
+                        != route.horizon.value
+                    ):
+                        continue
+                    mode = execution_mode(book.id, horizon)
+                    try:
+                        snap = book.snapshot_strategy(
+                            btc_bias_on=btc_bias,
+                            btc_in_position=btc_long,
+                            requested_mode=mode,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "strategy route failed asset=%s horizon=%s",
+                            book.id,
+                            horizon,
+                        )
+                        continue
+                    snap = {
+                        **snap,
+                        "routing_horizon": horizon,
+                        "clock_horizon": route.horizon.value,
+                        "strategy_id": route.strategy_id,
+                        "strategy_version": route.strategy_version,
+                    }
+                    if snap.get("executable_signal") not in {
+                        "buy",
+                        "short",
+                    }:
+                        continue
+                    route_candidates.append(
+                        (
+                            int(snap.get("quality_score") or 0),
+                            snap,
+                        )
+                    )
 
-            snap = book.snapshot_strategy(
-                btc_bias_on=btc_bias,
-                btc_in_position=btc_long,
-            )
-            if snap.get("executable_signal") not in {"buy", "short"}:
+            if not route_candidates:
                 continue
-            candidates.append(
-                (
-                    int(snap.get("quality_score") or 0),
-                    book,
-                    snap,
-                )
+            route_candidates.sort(
+                key=lambda row: row[0],
+                reverse=True,
             )
+            quality, snap = route_candidates[0]
+            candidates.append((quality, book, snap))
 
         out: list[dict[str, Any]] = []
         candidates.sort(
@@ -1492,6 +1583,16 @@ class MultiDesk:
                             "quality_score"
                         ),
                         "execution_test": self.execution_test_mode,
+                        "routing_horizon": snap.get(
+                            "routing_horizon"
+                        ),
+                        "clock_horizon": snap.get(
+                            "clock_horizon"
+                        ),
+                        "strategy_id": snap.get("strategy_id"),
+                        "strategy_version": snap.get(
+                            "strategy_version"
+                        ),
                         "would_have_blocked_by": snap.get(
                             "would_have_blocked_by"
                         ),
@@ -1512,6 +1613,12 @@ class MultiDesk:
                             ),
                         )
                     )
+        if (
+            due_routes
+            and not self.execution_test_mode
+            and not any(row.get("ok") for row in out)
+        ):
+            self.persist()
         return out
 
     async def tick(self) -> None:
