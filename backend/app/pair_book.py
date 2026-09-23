@@ -22,8 +22,25 @@ def _now() -> str:
 
 
 class PairBook:
-    def __init__(self, asset: dict[str, Any], wallet) -> None:
+    def __init__(
+        self,
+        asset: dict[str, Any],
+        wallet,
+        *,
+        position_key: str | None = None,
+        routing_horizon: str | None = None,
+    ) -> None:
         self.id = str(asset["id"])
+        self.position_key = (
+            str(position_key).lower()
+            if position_key is not None
+            else None
+        )
+        self.routing_horizon = (
+            str(routing_horizon).lower()
+            if routing_horizon is not None
+            else None
+        )
         self.name = str(asset.get("name") or asset["symbol"])
         self.symbol = str(asset["symbol"])
         self.pair = str(asset["pair"])
@@ -105,13 +122,32 @@ class PairBook:
             self.bars_1d.append(bar)
 
     def qty(self) -> float:
-        return self.wallet.qty(self.id)
+        return self.wallet.qty(
+            self.id,
+            position_key=self.position_key,
+        )
 
     def position_side(self) -> str | None:
         side = getattr(self.wallet, "side", None)
-        return side(self.id) if callable(side) else ("long" if self.qty() > 0 else None)
+        return (
+            side(
+                self.id,
+                position_key=self.position_key,
+            )
+            if callable(side)
+            else ("long" if self.qty() > 0 else None)
+        )
 
-    def snapshot_strategy(
+    def position(self) -> dict[str, Any] | None:
+        getter = getattr(self.wallet, "position", None)
+        if not callable(getter):
+            return None
+        return getter(
+            self.id,
+            position_key=self.position_key,
+        )
+
+    def snapshot_strategy(    def snapshot_strategy(
         self,
         *,
         btc_bias_on: bool = False,
@@ -249,6 +285,11 @@ class PairBook:
                 "error": "paper_portfolio_required",
                 "pair": self.pair,
             }
+        route_position_key = str(
+            snap.get("position_key")
+            or self.position_key
+            or self.id
+        ).lower()
         result = open_position(
             self.id,
             side=position_side,
@@ -290,8 +331,10 @@ class PairBook:
                 "clock_horizon": snap.get("clock_horizon"),
                 "strategy_id": snap.get("strategy_id"),
                 "strategy_version": snap.get("strategy_version"),
+                "position_key": route_position_key,
             },
             execution_test=execution_test,
+            position_key=route_position_key,
         )
         result["pair"] = self.pair
         result["actor"] = "bot-playbook-entry"
@@ -349,7 +392,14 @@ class PairBook:
         return result
 
     def current_excursion(self, entry_price: float | None = None) -> dict[str, Any]:
-        entry = float(entry_price or self.wallet.avg_entry(self.id) or 0.0)
+        entry = float(
+            entry_price
+            or self.wallet.avg_entry(
+                self.id,
+                position_key=self.position_key,
+            )
+            or 0.0
+        )
         if entry <= 0 or not self.entry_at:
             return {"mfe_pct": None, "mae_pct": None, "available_move_pct": None}
         try:
@@ -403,7 +453,7 @@ class PairBook:
             self.entry_mode
             or profile["primary"]
         )
-        position = self.wallet.position(self.id) or {}
+        position = self.position() or {}
         metadata = position.get("metadata") or {}
         execution_test_position = bool(
             position.get("execution_test_funded")
@@ -468,7 +518,10 @@ class PairBook:
         else:
             plan = exit_plan(
                 list(self.bars),
-                self.wallet.avg_entry(self.id),
+                self.wallet.avg_entry(
+                    self.id,
+                    position_key=self.position_key,
+                ),
                 self.highest,
                 mark,
                 float(profile["max_stop_pct"]),
@@ -484,7 +537,11 @@ class PairBook:
 
         update_stop = getattr(self.wallet, "update_stop", None)
         if callable(update_stop):
-            update_stop(self.id, self.stop or None)
+            update_stop(
+                self.id,
+                self.stop or None,
+                position_key=self.position_key,
+            )
 
         bar_low = float(self.bars[-1]["low"]) if self.bars else mark
         bar_high = float(self.bars[-1]["high"]) if self.bars else mark
@@ -512,9 +569,19 @@ class PairBook:
             except ValueError:
                 held = None
 
-        avg = float(self.wallet.avg_entry(self.id) or mark)
+        avg = float(
+            self.wallet.avg_entry(
+                self.id,
+                position_key=self.position_key,
+            )
+            or mark
+        )
         notional = float(
-            getattr(self.wallet, "notional_usd")(self.id, avg)
+            getattr(self.wallet, "notional_usd")(
+                self.id,
+                avg,
+                position_key=self.position_key,
+            )
         )
         move_pnl = getattr(self.wallet, "move_pnl")
         current_gross_pnl = float(
@@ -608,6 +675,7 @@ class PairBook:
             price=float(raw),
             exit_reason=reason,
             reference_price=exit_reference,
+            position_key=self.position_key,
         )
         if not result.get("ok"):
             return None
@@ -948,7 +1016,7 @@ class PairBook:
             float(row.get("fees_usd") or 0.0)
             for row in closed
         )
-        open_pos = getattr(self.wallet, "position", lambda _aid: None)(self.id)
+        open_pos = self.position()
         if open_pos:
             fees += float(open_pos.get("entry_fee_usd") or 0.0)
         gross_profit = sum(
@@ -1001,19 +1069,19 @@ class PairBook:
 
     def view(self) -> dict[str, Any]:
         qty = self.qty()
-        avg = self.wallet.avg_entry(self.id)
+        avg = self.wallet.avg_entry(
+            self.id,
+            position_key=self.position_key,
+        )
         side = self.position_side()
-        position = getattr(
-            self.wallet,
-            "position",
-            lambda _aid: None,
-        )(self.id)
+        position = self.position()
         mark = float(self.mark or 0.0)
         notional = (
             float(
                 getattr(self.wallet, "notional_usd")(
                     self.id,
                     mark,
+                    position_key=self.position_key,
                 )
             )
             if qty > 0 and hasattr(self.wallet, "notional_usd")
@@ -1024,6 +1092,7 @@ class PairBook:
                 getattr(self.wallet, "open_pnl")(
                     self.id,
                     mark,
+                    position_key=self.position_key,
                 )
             )
             if qty > 0 and hasattr(self.wallet, "open_pnl")
@@ -1031,6 +1100,8 @@ class PairBook:
         )
         return {
             "id": self.id,
+            "position_key": self.position_key,
+            "routing_horizon": self.routing_horizon,
             "name": self.name,
             "symbol": self.symbol,
             "pair": self.pair,

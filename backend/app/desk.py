@@ -34,7 +34,10 @@ from app.playbooks import playbook_profile
 from app.routing import PaperStrategyRouter, ROUTES
 from app.universe import ASSETS, export_assets, register_asset
 from app.wallet import STARTING_USD
-from app.paper_portfolio import PaperPortfolio
+from app.paper_portfolio import (
+    PaperPortfolio,
+    strategy_position_key,
+)
 from app.pair_book import PairBook
 
 logger = logging.getLogger("aether.desk")
@@ -44,7 +47,7 @@ MAX_ACTIVE_POSITIONS = 4
 POLL = 20
 LOAD_002_RELEASE = "AETHER-LOAD-002-EXP-R1"
 LOAD_002_EXPERIMENT_RUN = "EXP-R1"
-LOAD_003_RELEASE = "AETHER-LOAD-003-B2"
+LOAD_003_RELEASE = "AETHER-LOAD-003-B3"
 STRATEGY_TEST_MODE = "strategy_test"
 EXECUTION_VALIDATION_MODE = "execution_validation"
 
@@ -78,6 +81,25 @@ class MultiDesk:
         self.wallet = PaperPortfolio(STARTING_USD)
         self.books = [PairBook(asset, self.wallet) for asset in ASSETS]
         self.by_id = {b.id: b for b in self.books}
+        self.route_books: dict[str, PairBook] = {}
+        assets_by_id = {
+            str(asset["id"]).lower(): asset
+            for asset in ASSETS
+        }
+        for book in self.books:
+            asset = assets_by_id[book.id]
+            for horizon in supported_horizons(book.id):
+                key = strategy_position_key(book.id, horizon)
+                route_book = PairBook(
+                    asset,
+                    self.wallet,
+                    position_key=key,
+                    routing_horizon=horizon,
+                )
+                route_book.bars = book.bars
+                route_book.bars_1h = book.bars_1h
+                route_book.bars_1d = book.bars_1d
+                self.route_books[key] = route_book
         self._task: asyncio.Task | None = None
         self.execution_test_mode = bool(execution_test_mode)
         self.strategy_router = PaperStrategyRouter()
@@ -132,6 +154,77 @@ class MultiDesk:
     def marks(self) -> dict[str, float]:
         return {b.id: float(b.mark or 0.0) for b in self.books}
 
+    def _sync_route_book_market(
+        self,
+        source: PairBook,
+        target: PairBook,
+    ) -> None:
+        for attr in (
+            "mark",
+            "bid",
+            "ask",
+            "watch_last",
+            "open_24h",
+            "high_24h",
+            "low_24h",
+            "volume_24h",
+            "vwap_24h",
+            "trades_24h",
+        ):
+            setattr(target, attr, getattr(source, attr))
+
+    def _sync_asset_route_books(self, asset_id: str) -> None:
+        source = self.by_id.get(str(asset_id).lower())
+        if source is None:
+            return
+        for horizon in supported_horizons(source.id):
+            target = self.route_books.get(
+                strategy_position_key(source.id, horizon)
+            )
+            if target is not None:
+                self._sync_route_book_market(source, target)
+
+    def _migrate_legacy_strategy_position_keys(self) -> None:
+        for raw_key, position in list(self.wallet.positions.items()):
+            aid = str(position.get("asset_id") or raw_key).lower()
+            if str(raw_key).lower() != aid:
+                continue
+            metadata = position.get("metadata") or {}
+            if bool(
+                position.get("execution_test_funded")
+                or metadata.get("execution_test")
+            ):
+                continue
+            requested = str(
+                metadata.get("routing_horizon")
+                or position.get("mode")
+                or playbook_profile(aid).get("primary")
+                or ""
+            ).lower()
+            if requested == "daily_swing":
+                requested = "swing"
+            supported = set(supported_horizons(aid))
+            if requested not in supported:
+                primary = str(
+                    playbook_profile(aid).get("primary") or ""
+                ).lower()
+                requested = (
+                    "swing"
+                    if primary == "daily_swing"
+                    else primary
+                )
+            if requested not in supported:
+                continue
+            target = strategy_position_key(aid, requested)
+            if self.wallet.rekey_position(raw_key, target):
+                migrated = self.wallet.positions[target]
+                migrated_metadata = dict(
+                    migrated.get("metadata") or {}
+                )
+                migrated_metadata["routing_horizon"] = requested
+                migrated_metadata["position_key"] = target
+                migrated["metadata"] = migrated_metadata
+
     def _latest_closed_minute_ts(self) -> int | None:
         latest: list[int] = []
         now = int(time.time())
@@ -183,6 +276,19 @@ class MultiDesk:
                 },
                 "asset_source_registry": self.asset_source_registry,
                 "activity_events": self.activity_events[-300:],
+                "route_books": {
+                    key: {
+                        "stop": book.stop,
+                        "highest": book.highest,
+                        "lowest": book.lowest,
+                        "entry_at": book.entry_at,
+                        "entry_mode": book.entry_mode,
+                        "last_entry_signal_key": book.last_entry_signal_key,
+                        "last_reason": book.last_reason,
+                        "fills": list(book.fills)[-200:],
+                    }
+                    for key, book in self.route_books.items()
+                },
                 "opportunity_evaluations": self.opportunity_evaluation_log[-500:],
                 "execution_matrix_ledger": self.execution_matrix_ledger,
                 "strategy_route_buckets": {
@@ -202,6 +308,7 @@ class MultiDesk:
         wallet = data.get("wallet")
         if isinstance(wallet, dict) and "usd" in wallet:
             self.wallet.restore(wallet)
+            self._migrate_legacy_strategy_position_keys()
         rows = data.get("books") or {}
         if isinstance(rows, dict):
             for asset_id, row in rows.items():
@@ -218,21 +325,81 @@ class MultiDesk:
                 fills = row.get("fills") or []
                 if isinstance(fills, list):
                     book.fills = [f for f in fills[-200:] if isinstance(f, dict)]
-        for book in self.books:
-            position = self.wallet.position(book.id)
+        route_rows = data.get("route_books") or {}
+        if not isinstance(route_rows, dict):
+            route_rows = {}
+        for key, route_book in self.route_books.items():
+            row = route_rows.get(key)
+            if isinstance(row, dict):
+                route_book.stop = float(row.get("stop") or 0)
+                route_book.highest = float(row.get("highest") or 0)
+                route_book.lowest = float(row.get("lowest") or 0)
+                route_book.entry_at = row.get("entry_at")
+                route_book.entry_mode = row.get("entry_mode")
+                route_book.last_entry_signal_key = row.get(
+                    "last_entry_signal_key"
+                )
+                route_book.last_reason = str(
+                    row.get("last_reason")
+                    or route_book.last_reason
+                )
+                fills = row.get("fills") or []
+                if isinstance(fills, list):
+                    route_book.fills = [
+                        fill
+                        for fill in fills[-200:]
+                        if isinstance(fill, dict)
+                    ]
+
+            position = self.wallet.position(
+                route_book.id,
+                position_key=key,
+            )
             if not position:
                 continue
+            base_book = self.by_id[route_book.id]
+            if not isinstance(row, dict):
+                route_book.stop = float(
+                    position.get("current_stop")
+                    or position.get("initial_stop")
+                    or base_book.stop
+                    or 0.0
+                )
+                route_book.highest = float(
+                    base_book.highest
+                    or position.get("entry_price")
+                    or 0.0
+                )
+                route_book.lowest = float(
+                    base_book.lowest
+                    or position.get("entry_price")
+                    or 0.0
+                )
+                route_book.entry_at = (
+                    position.get("opened_at")
+                    or base_book.entry_at
+                )
+                route_book.entry_mode = (
+                    position.get("mode")
+                    or base_book.entry_mode
+                )
+                route_book.last_entry_signal_key = (
+                    position.get("signal_key")
+                    or base_book.last_entry_signal_key
+                )
+                route_book.fills = list(base_book.fills)[-200:]
+            if not position.get("opened_at") and route_book.entry_at:
+                stored = self.wallet.positions.get(key)
+                if stored is not None:
+                    stored["opened_at"] = route_book.entry_at
 
-            # Legacy SpotWallet migrations may have preserved the original
-            # book entry timestamp even though the migrated portfolio position
-            # has opened_at=None. Promote that known timestamp into the
-            # canonical position rather than inventing a new trade start time.
-            if not position.get("opened_at") and book.entry_at:
-                stored_position = self.wallet.positions.get(book.id)
-                if stored_position is not None:
-                    stored_position["opened_at"] = book.entry_at
-                    position["opened_at"] = book.entry_at
-
+        for book in self.books:
+            position = self.wallet.position(
+                book.id,
+                position_key=book.id,
+            )
+            if not position:
+                continue
             book.entry_at = (
                 book.entry_at
                 or position.get("opened_at")
@@ -949,145 +1116,153 @@ class MultiDesk:
         items: list[dict[str, Any]] = []
         watch: list[dict[str, Any]] = []
 
-        for book in self.books:
-            position = self.wallet.position(book.id)
-            if position:
-                mark = float(
-                    book.mark
-                    or position.get("entry_price")
-                    or 0.0
-                )
-                notional = self.wallet.notional_usd(
-                    book.id,
-                    mark,
-                )
-                open_pnl = self.wallet.open_pnl(
-                    book.id,
-                    mark,
-                )
-                try:
-                    strategy = book.snapshot_strategy(
-                        btc_bias_on=btc_bias,
-                        btc_in_position=btc_long,
-                    )
-                except Exception as exc:
-                    strategy = {
-                        "reason": f"strategy_error:{exc}",
-                    }
-                excursion = book.current_excursion()
-                entry = float(
-                    position.get("entry_price") or 0.0
-                )
-                side = str(position.get("side") or "long")
-                move = (
-                    ((mark / entry) - 1) * 100
-                    if side == "long" and entry > 0
-                    else ((entry / mark) - 1) * 100
-                    if side == "short" and mark > 0
-                    else 0.0
-                )
-                opened_at = position.get("opened_at") or book.entry_at
-                items.append(
-                    {
-                        "trade_id": position.get("trade_id"),
-                        "asset_id": book.id,
-                        "symbol": book.symbol,
-                        "pair": book.pair,
-                        "broker": book.broker,
-                        "product_type": position.get(
-                            "product_type"
-                        ),
-                        "side": side,
-                        "mode": position.get("mode"),
-                        "opened_at": opened_at,
-                        "duration_seconds": self._duration_seconds(
-                            opened_at
-                        ),
-                        "entry_price": entry,
-                        "current_price": mark,
-                        "stop_price": book.stop or position.get(
-                            "current_stop"
-                        ),
-                        "quantity": position.get("quantity"),
-                        "quantity_unit": position.get(
-                            "quantity_unit"
-                        ),
-                        "notional_usd": round(notional, 4),
-                        "margin_reserved_usd": position.get(
-                            "margin_reserved_usd"
-                        ),
-                        "open_pnl_usd": round(open_pnl, 4),
-                        "price_move_pct": round(move, 4),
-                        "mfe_pct": excursion.get("mfe_pct"),
-                        "mae_pct": excursion.get("mae_pct"),
-                        "entry_reason": (
-                            position.get("metadata") or {}
-                        ).get("entry_reason"),
-                        "quality_score": (
-                            position.get("metadata") or {}
-                        ).get("quality_score"),
-                        "entry_clock": (
-                            position.get("metadata") or {}
-                        ).get("entry_clock"),
-                        "bias_clock": (
-                            position.get("metadata") or {}
-                        ).get("bias_clock"),
-                        "execution_test": bool(
-                            position.get("execution_test_funded")
-                            or (position.get("metadata") or {}).get(
-                                "execution_test"
-                            )
-                        ),
-                        "execution_test_load": (
-                            position.get("metadata") or {}
-                        ).get("execution_test_load"),
-                        "would_have_blocked_by": (
-                            position.get("metadata") or {}
-                        ).get("would_have_blocked_by"),
-                        "normal_execution_status": (
-                            position.get("metadata") or {}
-                        ).get("normal_execution_status"),
-                        "normal_signal": (
-                            position.get("metadata") or {}
-                        ).get("normal_signal"),
-                        "normal_quality_score": (
-                            position.get("metadata") or {}
-                        ).get("normal_quality_score"),
-                        "routing_horizon": (
-                            position.get("metadata") or {}
-                        ).get("routing_horizon"),
-                        "clock_horizon": (
-                            position.get("metadata") or {}
-                        ).get("clock_horizon"),
-                        "strategy_id": (
-                            position.get("metadata") or {}
-                        ).get("strategy_id"),
-                        "strategy_version": (
-                            position.get("metadata") or {}
-                        ).get("strategy_version"),
-                        "management_state": (
-                            "EXIT WATCH"
-                            if strategy.get("exit_signal")
-                            else "MANAGING"
-                        ),
-                        "strategy": {
-                            "reason": strategy.get("reason"),
-                            "direction": strategy.get("direction"),
-                            "daily_grain": strategy.get(
-                                "daily_grain"
-                            ),
-                            "four_hour_grain": strategy.get(
-                                "four_hour_grain"
-                            ),
-                            "one_hour_grain": strategy.get(
-                                "one_hour_grain"
-                            ),
-                            "signal": strategy.get("signal"),
-                        },
-                    }
-                )
+        for position_key, position in self.wallet.positions.items():
+            aid = str(position.get("asset_id") or "").lower()
+            base_book = self.by_id.get(aid)
+            if base_book is None:
                 continue
+            route_book = self.route_books.get(position_key)
+            book = route_book or base_book
+            if route_book is not None:
+                self._sync_route_book_market(base_book, route_book)
+            mark = float(
+                book.mark
+                or position.get("entry_price")
+                or 0.0
+            )
+            notional = self.wallet.notional_usd(
+                aid,
+                mark,
+                position_key=position_key,
+            )
+            open_pnl = self.wallet.open_pnl(
+                aid,
+                mark,
+                position_key=position_key,
+            )
+            try:
+                strategy = book.snapshot_strategy(
+                    btc_bias_on=btc_bias,
+                    btc_in_position=btc_long,
+                    requested_mode=(
+                        str(position.get("mode"))
+                        if route_book is not None
+                        else None
+                    ),
+                )
+            except Exception as exc:
+                strategy = {
+                    "reason": f"strategy_error:{exc}",
+                }
+            excursion = book.current_excursion()
+            entry = float(
+                position.get("entry_price") or 0.0
+            )
+            side = str(position.get("side") or "long")
+            move = (
+                ((mark / entry) - 1) * 100
+                if side == "long" and entry > 0
+                else ((entry / mark) - 1) * 100
+                if side == "short" and mark > 0
+                else 0.0
+            )
+            opened_at = position.get("opened_at") or book.entry_at
+            metadata = position.get("metadata") or {}
+            items.append(
+                {
+                    "trade_id": position.get("trade_id"),
+                    "position_key": position_key,
+                    "asset_id": aid,
+                    "symbol": book.symbol,
+                    "pair": book.pair,
+                    "broker": book.broker,
+                    "product_type": position.get(
+                        "product_type"
+                    ),
+                    "side": side,
+                    "mode": position.get("mode"),
+                    "opened_at": opened_at,
+                    "duration_seconds": self._duration_seconds(
+                        opened_at
+                    ),
+                    "entry_price": entry,
+                    "current_price": mark,
+                    "stop_price": book.stop or position.get(
+                        "current_stop"
+                    ),
+                    "quantity": position.get("quantity"),
+                    "quantity_unit": position.get(
+                        "quantity_unit"
+                    ),
+                    "notional_usd": round(notional, 4),
+                    "margin_reserved_usd": position.get(
+                        "margin_reserved_usd"
+                    ),
+                    "open_pnl_usd": round(open_pnl, 4),
+                    "price_move_pct": round(move, 4),
+                    "mfe_pct": excursion.get("mfe_pct"),
+                    "mae_pct": excursion.get("mae_pct"),
+                    "entry_reason": metadata.get("entry_reason"),
+                    "quality_score": metadata.get(
+                        "quality_score"
+                    ),
+                    "entry_clock": metadata.get("entry_clock"),
+                    "bias_clock": metadata.get("bias_clock"),
+                    "execution_test": bool(
+                        position.get("execution_test_funded")
+                        or metadata.get("execution_test")
+                    ),
+                    "execution_test_load": metadata.get(
+                        "execution_test_load"
+                    ),
+                    "would_have_blocked_by": metadata.get(
+                        "would_have_blocked_by"
+                    ),
+                    "normal_execution_status": metadata.get(
+                        "normal_execution_status"
+                    ),
+                    "normal_signal": metadata.get(
+                        "normal_signal"
+                    ),
+                    "normal_quality_score": metadata.get(
+                        "normal_quality_score"
+                    ),
+                    "routing_horizon": metadata.get(
+                        "routing_horizon"
+                    )
+                    or book.routing_horizon,
+                    "clock_horizon": metadata.get(
+                        "clock_horizon"
+                    ),
+                    "strategy_id": metadata.get("strategy_id"),
+                    "strategy_version": metadata.get(
+                        "strategy_version"
+                    ),
+                    "management_state": (
+                        "EXIT WATCH"
+                        if strategy.get("exit_signal")
+                        else "MANAGING"
+                    ),
+                    "strategy": {
+                        "reason": strategy.get("reason"),
+                        "direction": strategy.get("direction"),
+                        "daily_grain": strategy.get(
+                            "daily_grain"
+                        ),
+                        "four_hour_grain": strategy.get(
+                            "four_hour_grain"
+                        ),
+                        "one_hour_grain": strategy.get(
+                            "one_hour_grain"
+                        ),
+                        "signal": strategy.get("signal"),
+                    },
+                }
+            )
 
+        for book in self.books:
+            if book.qty() > 0:
+                continue
             try:
                 snap = book.snapshot_strategy(
                     btc_bias_on=btc_bias,
@@ -1118,7 +1293,10 @@ class MultiDesk:
             reverse=True,
         )
         items.sort(
-            key=lambda row: str(row.get("opened_at") or "")
+            key=lambda row: (
+                str(row.get("opened_at") or ""),
+                str(row.get("position_key") or ""),
+            )
         )
         return {
             "state": "trading" if items else "scanning",
@@ -1831,6 +2009,7 @@ class MultiDesk:
                 continue
             book.apply_quote(item)
             book.push_px(ts)
+            self._sync_asset_route_books(book.id)
 
     def _allocate(self) -> list[dict[str, Any]]:
         if not self.armed:
@@ -1844,16 +2023,12 @@ class MultiDesk:
         )
         btc_bias, btc_long = self._btc_gate()
 
-        open_books = [
-            book
-            for book in self.books
-            if book.qty() > 0
-        ]
         group_counts: dict[str, int] = {}
-        for book in open_books:
-            group = str(
-                playbook_profile(book.id)["cluster"]
-            )
+        for position in self.wallet.positions.values():
+            aid = str(position.get("asset_id") or "").lower()
+            if aid not in self.by_id:
+                continue
+            group = str(playbook_profile(aid)["cluster"])
             group_counts[group] = (
                 group_counts.get(group, 0) + 1
             )
@@ -1877,8 +2052,10 @@ class MultiDesk:
         ] = []
         for book in self.books:
             if self.execution_test_mode:
-                # LOAD-002 execution validation keeps one position per book.
-                if book.qty() > 0:
+                if self.wallet.position(
+                    book.id,
+                    position_key=book.id,
+                ) is not None:
                     continue
                 try:
                     baseline = book.snapshot_strategy(
@@ -1910,6 +2087,7 @@ class MultiDesk:
                     "normal_execution_status": baseline.get("execution_status"),
                     "normal_signal": baseline.get("executable_signal"),
                     "normal_quality_score": baseline.get("quality_score"),
+                    "position_key": book.id,
                 }
                 candidates.append(
                     (
@@ -1921,13 +2099,6 @@ class MultiDesk:
                 )
                 continue
 
-            route_candidates: list[
-                tuple[
-                    int,
-                    dict[str, Any],
-                    dict[str, Any],
-                ]
-            ] = []
             for route in due_routes:
                 for horizon in supported_horizons(book.id):
                     if (
@@ -1935,9 +2106,15 @@ class MultiDesk:
                         != route.horizon.value
                     ):
                         continue
+                    position_key = strategy_position_key(
+                        book.id,
+                        horizon,
+                    )
+                    route_book = self.route_books[position_key]
+                    self._sync_route_book_market(book, route_book)
                     mode = execution_mode(book.id, horizon)
                     try:
-                        snap = book.snapshot_strategy(
+                        snap = route_book.snapshot_strategy(
                             btc_bias_on=btc_bias,
                             btc_in_position=btc_long,
                             requested_mode=mode,
@@ -1949,7 +2126,7 @@ class MultiDesk:
                             horizon,
                         )
                         self._record_opportunity_evaluation(
-                            book,
+                            route_book,
                             routing_horizon=horizon,
                             clock_horizon_value=route.horizon.value,
                             strategy_id=route.strategy_id,
@@ -1975,6 +2152,7 @@ class MultiDesk:
                         "clock_horizon": route.horizon.value,
                         "strategy_id": route.strategy_id,
                         "strategy_version": route.strategy_version,
+                        "position_key": position_key,
                     }
                     executable = snap.get("executable_signal")
                     if executable not in {"buy", "short"}:
@@ -1994,7 +2172,7 @@ class MultiDesk:
                             )
                         )
                         self._record_opportunity_evaluation(
-                            book,
+                            route_book,
                             routing_horizon=horizon,
                             clock_horizon_value=route.horizon.value,
                             strategy_id=route.strategy_id,
@@ -2006,9 +2184,9 @@ class MultiDesk:
                         )
                         continue
 
-                    if book.qty() > 0:
+                    if route_book.qty() > 0:
                         self._record_opportunity_evaluation(
-                            book,
+                            route_book,
                             routing_horizon=horizon,
                             clock_horizon_value=route.horizon.value,
                             strategy_id=route.strategy_id,
@@ -2021,7 +2199,7 @@ class MultiDesk:
                         continue
 
                     evaluation = self._record_opportunity_evaluation(
-                        book,
+                        route_book,
                         routing_horizon=horizon,
                         clock_horizon_value=route.horizon.value,
                         strategy_id=route.strategy_id,
@@ -2030,35 +2208,21 @@ class MultiDesk:
                         snapshot=snap,
                         status="qualified",
                     )
-                    route_candidates.append(
+                    candidates.append(
                         (
                             int(snap.get("quality_score") or 0),
+                            route_book,
                             snap,
                             evaluation,
                         )
                     )
-
-            if not route_candidates:
-                continue
-            route_candidates.sort(
-                key=lambda row: row[0],
-                reverse=True,
-            )
-            quality, snap, evaluation = route_candidates[0]
-            for _, _, lower_ranked in route_candidates[1:]:
-                self._update_opportunity_evaluation(
-                    lower_ranked,
-                    status="blocked",
-                    rejection_reason="lower_ranked_same_asset_route",
-                )
-            candidates.append((quality, book, snap, evaluation))
 
         out: list[dict[str, Any]] = []
         candidates.sort(
             key=lambda row: row[0],
             reverse=True,
         )
-        active_count = len(open_books)
+        active_count = len(self.wallet.positions)
         active_limit = (
             len(self.books)
             if self.execution_test_mode
@@ -2144,6 +2308,7 @@ class MultiDesk:
                     book,
                     {
                         "trade_id": result.get("trade_id"),
+                        "position_key": result.get("position_key"),
                         "side": result.get("position_side"),
                         "mode": result.get("entry_mode"),
                         "price": result.get("price"),
@@ -2172,8 +2337,6 @@ class MultiDesk:
                     },
                 )
                 if self.execution_test_mode:
-                    # Preserve LOAD-002 validation evidence immediately.
-                    # Strategy-test route evidence persists once per due cycle.
                     self.persist()
 
                 if book.kraken and not self.execution_test_mode:
@@ -2231,6 +2394,7 @@ class MultiDesk:
                 price=mark,
                 exit_reason="execution_test_retired",
                 reference_price=mark,
+                position_key=book.id,
             )
             if not row.get("ok"):
                 continue
@@ -2289,16 +2453,41 @@ class MultiDesk:
 
         retired = await self._retire_execution_test_positions()
         exits = list(retired)
-        ordered_books = sorted(
-            self.books,
-            key=lambda item: 0 if item.id == "btc" else 1,
+
+        if self.execution_test_mode:
+            managed_books = [
+                book
+                for book in self.books
+                if self.wallet.position(
+                    book.id,
+                    position_key=book.id,
+                )
+                is not None
+            ]
+        else:
+            managed_books = [
+                route_book
+                for key, route_book in self.route_books.items()
+                if self.wallet.position(
+                    route_book.id,
+                    position_key=key,
+                )
+                is not None
+            ]
+            for route_book in managed_books:
+                self._sync_asset_route_books(route_book.id)
+
+        managed_books.sort(
+            key=lambda item: (
+                0 if item.id == "btc" else 1,
+                str(item.position_key or item.id),
+            )
         )
-        for book in ordered_books:
-            # Re-read the BTC gate before every managed book. If BTC exits
-            # earlier in this tick, ETH sees the closed rider gate immediately.
+
+        for book in managed_books:
             btc_bias, btc_long = self._btc_gate()
             before_stop = float(book.stop or 0.0)
-            before_trade = self.wallet.position(book.id)
+            before_trade = book.position()
             row = book.manage(
                 btc_bias_on=btc_bias,
                 btc_in_position=btc_long,
@@ -2317,6 +2506,9 @@ class MultiDesk:
                         "trade_id": before_trade.get(
                             "trade_id"
                         ),
+                        "position_key": before_trade.get(
+                            "position_key"
+                        ),
                         "side": before_trade.get("side"),
                         "from_price": (
                             before_stop
@@ -2324,6 +2516,7 @@ class MultiDesk:
                             else None
                         ),
                         "to_price": after_stop,
+                        "routing_horizon": book.routing_horizon,
                     },
                 )
                 self.persist()
@@ -2334,6 +2527,7 @@ class MultiDesk:
                     book,
                     {
                         "trade_id": row.get("trade_id"),
+                        "position_key": row.get("position_key"),
                         "side": row.get("position_side"),
                         "mode": row.get("entry_mode"),
                         "price": row.get("price"),
@@ -2342,6 +2536,7 @@ class MultiDesk:
                             "duration_seconds"
                         ),
                         "exit_reason": row.get("exit_reason"),
+                        "routing_horizon": book.routing_horizon,
                     },
                 )
                 durable_row = self._durable_trade_row(row)
