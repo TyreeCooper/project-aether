@@ -185,3 +185,64 @@ def test_restore_backfills_legacy_open_timestamp_for_live_timer():
     assert trade["duration_seconds"] is not None
     assert trade["duration_seconds"] > 0
 
+def test_blotter_merge_keeps_durable_history_when_runtime_memory_is_empty():
+    desk = _fresh_desk()
+    durable = [
+        {
+            "trade_id": "persisted-1",
+            "asset_id": "btc",
+            "symbol": "BTC",
+            "pair": "XBTUSD",
+            "side": "long",
+            "opened_at": "2026-09-21T12:00:00+00:00",
+            "closed_at": "2026-09-21T13:00:00+00:00",
+            "entry_price": 87000.0,
+            "exit_price": 87500.0,
+            "realized_pnl_usd": 5.0,
+            "duration_seconds": 3600,
+        }
+    ]
+
+    rows = desk.merge_blotter_history(durable, 200)
+    assert len(rows) == 1
+    assert rows[0]["trade_id"] == "persisted-1"
+    assert rows[0]["duration_seconds"] == 3600
+
+
+def test_blotter_merge_deduplicates_trade_id_and_prefers_runtime_annotations():
+    desk = _fresh_desk()
+    opened = desk.wallet.open_position(
+        "eurusd",
+        side="short",
+        quantity=10_000,
+        price=1.1000,
+        opened_at="2026-09-22T12:00:00+00:00",
+        mode="intraday",
+        signal_key="persist:1",
+    )
+    assert opened["ok"] is True
+    closed = desk.wallet.close_position(
+        "eurusd",
+        price=1.0990,
+        closed_at="2026-09-22T12:30:00+00:00",
+        exit_reason="rule_exit",
+    )
+    assert closed["ok"] is True
+    desk.wallet.annotate_closed_trade(
+        opened["trade_id"],
+        {"capture_efficiency_pct": 42.0},
+    )
+
+    durable = [
+        {
+            "trade_id": opened["trade_id"],
+            "asset_id": "eurusd",
+            "closed_at": "2026-09-22T12:30:00+00:00",
+            "capture_efficiency_pct": None,
+        }
+    ]
+    rows = desk.merge_blotter_history(durable, 200)
+    assert len(rows) == 1
+    assert rows[0]["trade_id"] == opened["trade_id"]
+    assert rows[0]["capture_efficiency_pct"] == 42.0
+

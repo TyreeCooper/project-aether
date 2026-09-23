@@ -275,6 +275,19 @@ class MultiDesk:
             "state_persistence": True,
         }
 
+    async def initialize_history_persistence(self) -> None:
+        """Backfill any file-restored closed trades into durable PostgreSQL."""
+        if not db_store.initialized:
+            return
+        rows = self.blotter(5000)
+        if rows:
+            ok = await db_store.save_desk_trades(rows)
+            if not ok and db_store.last_error:
+                logger.warning(
+                    "desk trade-history backfill failed %s",
+                    db_store.last_error,
+                )
+
     @staticmethod
     def _age_seconds(timestamp: float, now: float) -> float | None:
         return round(now - timestamp, 2) if timestamp > 0 else None
@@ -730,6 +743,58 @@ class MultiDesk:
             "risk_calendar": self.risk_snapshot(),
         }
 
+    def _durable_trade_row(
+        self,
+        trade: dict[str, Any],
+    ) -> dict[str, Any]:
+        aid = str(trade.get("asset_id") or "")
+        book = self.by_id.get(aid)
+        return {
+            **dict(trade),
+            "symbol": trade.get("symbol") or (book.symbol if book else aid.upper()),
+            "pair": trade.get("pair") or (book.pair if book else aid.upper()),
+            "broker": trade.get("broker") or (book.broker if book else None),
+        }
+
+    def merge_blotter_history(
+        self,
+        durable: list[dict[str, Any]],
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        """Merge durable PostgreSQL history with current in-memory/file history."""
+        combined: dict[str, dict[str, Any]] = {}
+
+        def key_for(row: dict[str, Any]) -> str:
+            trade_id = str(row.get("trade_id") or "").strip()
+            if trade_id:
+                return trade_id
+            return "|".join(
+                (
+                    str(row.get("asset_id") or row.get("pair") or ""),
+                    str(row.get("opened_at") or ""),
+                    str(row.get("closed_at") or row.get("ts") or ""),
+                    str(row.get("entry_price") or ""),
+                    str(row.get("exit_price") or row.get("price") or ""),
+                )
+            )
+
+        for row in durable:
+            if isinstance(row, dict):
+                combined[key_for(row)] = dict(row)
+        for row in self.blotter(max(int(limit), 1000)):
+            # Current runtime rows may contain newer annotations; prefer them.
+            combined[key_for(row)] = {
+                **combined.get(key_for(row), {}),
+                **dict(row),
+            }
+
+        rows = list(combined.values())
+        rows.sort(
+            key=lambda row: str(row.get("closed_at") or row.get("ts") or ""),
+            reverse=True,
+        )
+        return rows[: max(1, int(limit))]
+
     def blotter(self, limit: int = 200) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
         seen: set[str] = set()
@@ -739,14 +804,7 @@ class MultiDesk:
             trade_id = str(trade.get("trade_id") or "")
             if trade_id:
                 seen.add(trade_id)
-            rows.append(
-                {
-                    **dict(trade),
-                    "symbol": book.symbol if book else aid.upper(),
-                    "pair": book.pair if book else aid.upper(),
-                    "broker": book.broker if book else None,
-                }
-            )
+            rows.append(self._durable_trade_row(trade))
 
         # Preserve pre-upgrade paper history. These rows may not have enough
         # information for exact duration, but are never discarded.
@@ -1414,6 +1472,14 @@ class MultiDesk:
                         "exit_reason": row.get("exit_reason"),
                     },
                 )
+                durable_row = self._durable_trade_row(row)
+                if db_store.initialized:
+                    saved = await db_store.save_desk_trades([durable_row])
+                    if not saved and db_store.last_error:
+                        logger.warning(
+                            "closed trade durable write failed %s",
+                            db_store.last_error,
+                        )
                 self.persist()
                 if book.kraken:
                     await live.place_order(

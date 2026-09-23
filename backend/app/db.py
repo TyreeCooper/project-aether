@@ -343,6 +343,18 @@ class DatabaseStore:
                     CREATE INDEX IF NOT EXISTS
                         idx_aether_observation_type_first_seen
                     ON aether_intelligence_observation (source_type, first_seen_at DESC);
+
+                    CREATE TABLE IF NOT EXISTS aether_desk_trade (
+                        trade_id TEXT PRIMARY KEY,
+                        closed_at TIMESTAMPTZ NOT NULL,
+                        asset_id TEXT,
+                        payload JSONB NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    );
+                    CREATE INDEX IF NOT EXISTS
+                        idx_aether_desk_trade_closed_at
+                    ON aether_desk_trade (closed_at DESC);
                     """
                 )
             finally:
@@ -732,6 +744,88 @@ class DatabaseStore:
                 await conn.close()
             self.last_error = None
             return [self._row_to_dict(row) for row in rows]
+        except Exception as exc:
+            self.last_error = f"{type(exc).__name__}: {exc}"
+            return []
+
+    async def save_desk_trades(
+        self,
+        rows: list[dict[str, Any]],
+    ) -> bool:
+        """Persist completed multi-asset paper trades as durable history.
+
+        This table is append/update by trade_id and is independent of the
+        mutable runtime state file, so the Blotter survives restarts/deploys.
+        """
+        if not self.initialized or not rows:
+            return False
+        safe_rows = json.loads(json.dumps(rows))
+        try:
+            async with self._lock:
+                conn = await self._connect()
+                try:
+                    async with conn.transaction():
+                        for row in safe_rows:
+                            trade_id = str(row.get("trade_id") or "").strip()
+                            closed_at = row.get("closed_at") or row.get("ts")
+                            if not trade_id or not closed_at:
+                                continue
+                            await conn.execute(
+                                """
+                                INSERT INTO aether_desk_trade
+                                    (trade_id, closed_at, asset_id, payload)
+                                VALUES ($1, $2::timestamptz, $3, $4::jsonb)
+                                ON CONFLICT (trade_id)
+                                DO UPDATE SET
+                                    closed_at = EXCLUDED.closed_at,
+                                    asset_id = EXCLUDED.asset_id,
+                                    payload = EXCLUDED.payload,
+                                    updated_at = NOW()
+                                """,
+                                trade_id,
+                                str(closed_at),
+                                str(row.get("asset_id") or "") or None,
+                                json.dumps(row),
+                            )
+                finally:
+                    await conn.close()
+            self.last_write_at = datetime.now(timezone.utc).isoformat()
+            self.last_error = None
+            return True
+        except Exception as exc:
+            self.last_error = f"{type(exc).__name__}: {exc}"
+            return False
+
+    async def history_desk_trades(
+        self,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        if not self.initialized:
+            return []
+        safe_limit = max(1, min(int(limit), 5000))
+        try:
+            conn = await self._connect()
+            try:
+                rows = await conn.fetch(
+                    """
+                    SELECT payload
+                    FROM aether_desk_trade
+                    ORDER BY closed_at DESC
+                    LIMIT $1
+                    """,
+                    safe_limit,
+                )
+            finally:
+                await conn.close()
+            out: list[dict[str, Any]] = []
+            for row in rows:
+                payload = row["payload"]
+                if isinstance(payload, str):
+                    payload = json.loads(payload)
+                if isinstance(payload, dict):
+                    out.append(dict(payload))
+            self.last_error = None
+            return out
         except Exception as exc:
             self.last_error = f"{type(exc).__name__}: {exc}"
             return []

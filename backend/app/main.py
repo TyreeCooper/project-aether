@@ -49,6 +49,7 @@ logger.propagate = False
 async def lifespan(_: FastAPI):
     logger.info("event=app_start phase=begin version=2.1.0")
     await engine.initialize_persistence()
+    await desk.initialize_history_persistence()
     install_harsh_paper(engine)
     engine.start_loop()
     logger.info(
@@ -418,7 +419,8 @@ async def desk_trade_events(
 
 @app.get("/api/v1/desk/blotter")
 async def desk_blotter(limit: int = Query(default=200, ge=1, le=500)):
-    return {"items": desk.blotter(limit)}
+    durable = await db_store.history_desk_trades(limit)
+    return {"items": desk.merge_blotter_history(durable, limit)}
 
 
 @app.get("/api/v1/desk/fills")
