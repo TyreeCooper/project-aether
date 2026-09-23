@@ -142,4 +142,3 @@ def forced_execution_snapshot(
         "normal_signal": normal.get("executable_signal"),
         "normal_quality_score": normal.get("quality_score"),
     }
-}
