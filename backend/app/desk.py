@@ -29,9 +29,9 @@ from app.execution_matrix import (
     supported_horizons,
     validation_reference_price,
 )
-from app.horizons import TradingHorizon
+from app.horizons import TradingHorizon, horizon_spec
 from app.playbooks import playbook_profile
-from app.routing import PaperStrategyRouter
+from app.routing import PaperStrategyRouter, ROUTES
 from app.universe import ASSETS, export_assets, register_asset
 from app.wallet import STARTING_USD
 from app.paper_portfolio import PaperPortfolio
@@ -42,6 +42,7 @@ RISK_SLICE = 0.08
 TRADE_RISK_FRACTION = 0.0075
 MAX_ACTIVE_POSITIONS = 4
 POLL = 20
+LOAD_002_RELEASE = "AETHER-LOAD-002-B7"
 
 
 def completed_bars(
@@ -546,6 +547,72 @@ class MultiDesk:
         self.execution_matrix_ledger["completed_at"] = now
         self.persist()
         return self.execution_matrix_snapshot()
+
+    def load_002_status_snapshot(self) -> dict[str, Any]:
+        matrix = self.execution_matrix_snapshot()
+        cells = matrix.get("cells") or []
+        directional = directional_summary()
+        wallet = self.wallet.snapshot(self.marks())
+        live_state = live.status()
+        scalp_assets = sorted(
+            book.id
+            for book in self.books
+            if "scalp" in supported_horizons(book.id)
+        )
+        supported_count = sum(
+            1 for row in cells if bool(row.get("supported"))
+        )
+        unsupported_count = len(cells) - supported_count
+        checks = {
+            "official_books_12": len(self.books) == 12,
+            "paper_starting_bank_300k": (
+                float(STARTING_USD) == 300_000.0
+                and float(wallet.get("starting_usd") or 0.0) == 300_000.0
+            ),
+            "execution_test_off": self.execution_test_mode is False,
+            "live_orders_blocked": (
+                self.live_blocked is True
+                and live_state.get("orders_enabled") is False
+                and live_state.get("live_armed") is False
+            ),
+            "directional_long_12": directional["long_supported_count"] == 12,
+            "directional_short_10": directional["short_supported_count"] == 10,
+            "matrix_72_cells": len(cells) == 72,
+            "matrix_54_supported": supported_count == 54,
+            "matrix_18_na": unsupported_count == 18,
+            "scalp_route_enabled": (
+                TradingHorizon.SCALP in ROUTES
+                and horizon_spec(TradingHorizon.SCALP).execution_enabled
+            ),
+            "scalp_assets_7": len(scalp_assets) == 7,
+            "margin_fields_exposed": all(
+                key in wallet
+                for key in (
+                    "reserved_margin_usd",
+                    "free_margin_usd",
+                    "gross_exposure_usd",
+                )
+            ),
+        }
+        return {
+            "load": "AETHER-LOAD-002",
+            "release": LOAD_002_RELEASE,
+            "status": "ready" if all(checks.values()) else "not_ready",
+            "ready": all(checks.values()),
+            "checks": checks,
+            "scalp_assets": scalp_assets,
+            "matrix": {
+                "run_status": matrix.get("run_status"),
+                "run_id": matrix.get("run_id"),
+                "counts": matrix.get("counts"),
+                "supported_cells": supported_count,
+                "unsupported_cells": unsupported_count,
+                "production_wallet_unchanged": matrix.get(
+                    "production_wallet_unchanged"
+                ),
+                "live_order_attempted": matrix.get("live_order_attempted"),
+            },
+        }
 
     def settings_snapshot(self) -> dict[str, Any]:
         return {

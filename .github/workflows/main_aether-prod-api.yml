@@ -102,12 +102,65 @@ jobs:
           PY
           curl --fail --silent --show-error --max-time 20 "$base/" >/tmp/aether-root.html
           grep -q "Aether Trading Desk" /tmp/aether-root.html
+          grep -q 'AETHER-LOAD-002-B7' /tmp/aether-root.html
+          grep -q 'id="runExecutionMatrix"' /tmp/aether-root.html
+          grep -q 'id="disconnectOperator"' /tmp/aether-root.html
+
+          curl --fail --silent --show-error --max-time 20 "$base/static/aether-app.js?v=AETHER-LOAD-002-B7" >/tmp/aether-app.js
+          grep -q 'Trade Duration' /tmp/aether-app.js
+          grep -q 'operatorAuthenticated:false' /tmp/aether-app.js
+          grep -q 'runExecutionMatrix' /tmp/aether-app.js
+          grep -q 'Starting Bank' /tmp/aether-app.js
+          grep -q 'Free Margin' /tmp/aether-app.js
+          grep -q 'Gross Exposure' /tmp/aether-app.js
+
           curl --fail --silent --show-error --max-time 20 "$base/api/v1/floor" >/tmp/aether-floor.json
           python - <<'PY'
           import json
           with open("/tmp/aether-floor.json", encoding="utf-8") as fh:
               body = json.load(fh)
           assert isinstance(body.get("assets"), list), body
-          assert len(body["assets"]) >= 12, len(body["assets"])
-          assert isinstance(body.get("portfolio"), dict), body
+          assert len(body["assets"]) == 12, len(body["assets"])
+          portfolio = body.get("portfolio") or {}
+          assert float(portfolio.get("starting_bank") or 0) == 300000.0, portfolio
+          engine = body.get("engine") or {}
+          assert engine.get("execution_test_mode") is False, engine
+          assert body.get("live_blocked") is True, body
           PY
+
+          curl --fail --silent --show-error --max-time 20 "$base/api/v1/desk/execution-matrix" >/tmp/aether-matrix.json
+          python - <<'PY'
+          import json
+          with open("/tmp/aether-matrix.json", encoding="utf-8") as fh:
+              body = json.load(fh)
+          cells = body.get("cells") or []
+          assert len(cells) == 72, len(cells)
+          assert body.get("long_supported_count") == 12, body
+          assert body.get("short_supported_count") == 10, body
+          assert sum(1 for row in cells if row.get("supported")) == 54, body
+          assert sum(1 for row in cells if not row.get("supported")) == 18, body
+          assert body.get("live_order_attempted") is False, body
+          PY
+
+          curl --fail --silent --show-error --max-time 20 "$base/api/v1/load-status/aether-load-002" >/tmp/aether-load-002.json
+          python - <<'PY'
+          import json
+          with open("/tmp/aether-load-002.json", encoding="utf-8") as fh:
+              body = json.load(fh)
+          assert body.get("release") == "AETHER-LOAD-002-B7", body
+          assert body.get("ready") is True, body
+          assert body.get("status") == "ready", body
+          checks = body.get("checks") or {}
+          assert checks and all(checks.values()), checks
+          matrix = body.get("matrix") or {}
+          assert matrix.get("supported_cells") == 54, matrix
+          assert matrix.get("unsupported_cells") == 18, matrix
+          assert matrix.get("live_order_attempted") is False, matrix
+          PY
+
+          auth_code="$(curl --silent --show-error --max-time 20 -o /tmp/aether-auth.json -w '%{http_code}' -X POST "$base/api/v1/auth/verify")"
+          if [ "$auth_code" != "401" ] && [ "$auth_code" != "503" ]; then
+            echo "Unauthenticated operator verification unexpectedly returned HTTP $auth_code"
+            cat /tmp/aether-auth.json || true
+            exit 1
+          fi

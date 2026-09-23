@@ -4,10 +4,11 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
 <meta name="theme-color" content="#080a0f"/>
+<meta name="aether-release" content="AETHER-LOAD-002-B7"/>
 <title>Aether Trading Desk</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml"/>
-<link rel="stylesheet" href="/static/aether-app.css"/>
-<link rel="stylesheet" href="/static/aether-fit.css"/>
+<link rel="stylesheet" href="/static/aether-app.css?v=AETHER-LOAD-002-B7"/>
+<link rel="stylesheet" href="/static/aether-fit.css?v=AETHER-LOAD-002-B7"/>
 </head>
 <body>
 <div class="app-shell">
@@ -129,6 +130,7 @@
         <article class="panel"><header><div><p class="eyebrow">DATA</p><h2>Market & Persistence</h2></div></header><div id="settingsData" class="metric-list"></div></article>
         <article class="panel span-2"><header><div><p class="eyebrow">INTELLIGENCE</p><h2>Source & Risk Feed Health</h2></div><span class="badge">SHADOW</span></header><div id="settingsIntelligence" class="metric-list"></div></article>
         <article class="panel span-2"><header><div><p class="eyebrow">SECURITY</p><h2>Operator Access</h2></div><span id="settingsAuthBadge" class="badge">LOCKED</span></header><div class="control-row"><input id="settingsOperatorToken" class="input" type="password" placeholder="Operator token" autocomplete="off"/><button id="settingsConnectOperator" class="action primary" type="button">Connect</button><button id="settingsDisconnectOperator" class="action" type="button">Disconnect</button></div><div id="settingsSecurity" class="metric-list settings-inline-list"></div></article>
+        <article class="panel span-2"><header><div><p class="eyebrow">LOAD 002 CLOSEOUT</p><h2>Runtime Contract</h2></div><span id="settingsLoadBadge" class="badge">—</span></header><div id="settingsLoadStatus" class="metric-list"></div></article>
         <article class="panel span-2"><header><div><p class="eyebrow">KRAKEN LIVE READINESS</p><h2>Execution Safety Gate</h2></div><span id="settingsLiveBadge" class="badge amber">BLOCKED</span></header><div id="settingsLive" class="metric-list"></div></article>
       </section>
     </section>
@@ -160,7 +162,7 @@
   </section>
 </div>
 <div id="toast" class="toast"></div>
-<script src="/static/aether-app.js"></script>
-<script src="/static/aether-chart.js"></script>
+<script src="/static/aether-app.js?v=AETHER-LOAD-002-B7"></script>
+<script src="/static/aether-chart.js?v=AETHER-LOAD-002-B7"></script>
 </body>
 </html>
