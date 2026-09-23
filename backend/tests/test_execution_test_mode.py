@@ -47,7 +47,7 @@ def test_execution_test_mode_does_not_change_normal_constructor_default():
 
 
 def test_execution_test_reserves_configured_margin():
-    portfolio = PaperPortfolio(10_000.0)
+    portfolio = PaperPortfolio(20_000.0)
     before = portfolio.usd
     opened = portfolio.open_position(
         "us10y",
