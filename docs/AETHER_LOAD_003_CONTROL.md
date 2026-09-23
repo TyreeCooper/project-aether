@@ -3,9 +3,9 @@
 ## CONTROL STATUS
 
 - Load: AETHER-LOAD-003
-- State: B1 COMPLETE — WAITING FOR J.A.R.V.I.S. REVIEW
+- State: B2 COMPLETE — WAITING FOR J.A.R.V.I.S. REVIEW
 - Active implementation batch: NONE
-- Waiting on: GROK BOT J.A.R.V.I.S. CLEARANCE TO START B2
+- Waiting on: GROK BOT J.A.R.V.I.S. CLEARANCE TO START B3
 - Starting main SHA: 09dfdb510bd5b54f43cef7e9c5f20389d3636ae1
 - Live-money execution: HARD BLOCKED
 - Paper testing: remains the target runtime
@@ -169,7 +169,7 @@ ChatGPT must not advance while the batch is on HOLD.
 
 - CONTROL: [COMPLETE] Dedicated LOAD-003 control/checklist established
 - B1: [COMPLETE] Runtime mode separation — d339fb24695dd2738dda8fdb345c6e7a5acf7181
-- B2: [WAITING] Qualified opportunity pipeline
+- B2: [COMPLETE] Qualified opportunity pipeline — final head 5c23ca02e514447ea40b8a67bbd5a4de9c37096b
 - B3: [WAITING] Horizon-scoped position ledger
 - B4: [WAITING] Portfolio risk & qualified concurrency
 - B5: [WAITING] Instrument sizing hard ceilings
@@ -178,7 +178,7 @@ ChatGPT must not advance while the batch is on HOLD.
 - B8: [WAITING] Operator/UI evidence & telemetry
 - B9: [WAITING] Integration, deployment contract & closeout
 
-Implementation progress: 1 / 9 batches complete.
+Implementation progress: 2 / 9 batches complete.
 
 ---
 
@@ -532,7 +532,7 @@ ChatGPT will not start B1 before that clearance.
 
 ## B1 — Runtime Mode Separation
 
-Status: COMPLETE — WAITING FOR J.A.R.V.I.S. REVIEW
+Status: COMPLETE — VERIFIED/CLEARED BY J.A.R.V.I.S.
 
 Implementation SHA:
 `d339fb24695dd2738dda8fdb345c6e7a5acf7181`
@@ -601,3 +601,92 @@ If a B1 defect exists, respond:
 `J.A.R.V.I.S. HOLD — AETHER-LOAD-003 — B1 — <concrete defect/reason>`
 
 ChatGPT must not start B2 without the explicit B2 clearance.
+
+## B2 — Qualified Opportunity Pipeline
+
+Status: COMPLETE — WAITING FOR J.A.R.V.I.S. REVIEW
+
+Final implementation head:
+`5c23ca02e514447ea40b8a67bbd5a4de9c37096b`
+
+B2 commits:
+- `8838c33700b2ee7ebfbb58ffaf92d2ade8d0aa04` — `feat: qualify every due strategy route`
+- `5c23ca02e514447ea40b8a67bbd5a4de9c37096b` — `fix: preserve isolated execution validation fills`
+
+Scope completed:
+- strategy-test allocator evaluates every due supported asset × horizon route;
+- current configuration is proven as 28 supported asset × horizon evaluations when all clocks are due;
+- every evaluated route records strategy attribution, signal/executable signal, quality, setup reason, execution status, and final pipeline status;
+- non-qualified setups are retained as explicit `rejected` evaluations instead of disappearing;
+- strategy exceptions are retained as explicit `error` evaluations;
+- qualified routes are the only routes admitted to candidate ranking;
+- when multiple horizons qualify for the same asset under the current pre-B3 ledger, lower-ranked qualified routes are explicitly blocked as `lower_ranked_same_asset_route` rather than silently discarded;
+- qualified routes blocked by current downstream limits retain explicit reasons such as `position_already_open`, `active_position_limit`, `cluster_cap`, `no_mark`, `risk_or_capital_unavailable`, or `execution_rejected:<reason>`;
+- qualified scalp, intraday, and swing routes are proven able to reach paper entry;
+- supported short direction is proven able to reach an actual paper short position;
+- opportunity evaluation evidence persists/restores with desk state;
+- explicit LOAD-002 forced-execution override is proven unable to leak into strategy-test routing;
+- existing isolated execution-validation fills retain immediate persistence.
+
+Safety/invariant evidence:
+- production runtime remains `strategy_test`;
+- `execution_test_mode=False` in production;
+- `forced_entries_enabled=False` in production;
+- no executable signal means no strategy entry;
+- live-money execution remains HARD BLOCKED;
+- isolated execution validation remains available and separate;
+- one-position-per-asset behavior is intentionally unchanged and remains deferred to B3;
+- fixed concurrency/risk architecture is intentionally unchanged and remains deferred to B4;
+- sizing ceilings are intentionally unchanged and remain deferred to B5.
+
+Validation evidence on final B2 head:
+- CI run #439 — SUCCESS;
+- Azure workflow run #322 — SUCCESS;
+- Azure build backend tests — SUCCESS;
+- Azure Web App deployment — SUCCESS;
+- production runtime verification — SUCCESS;
+- deployed release asserted `AETHER-LOAD-003-B2`;
+- deployed runtime asserted `strategy_test`;
+- deployed runtime asserted forced entries OFF;
+- deployed runtime asserted live execution blocked.
+
+Key B2 regression proofs:
+- all 28 supported asset × horizon routes evaluated when all route clocks are due;
+- rejected routes retain their gate reason;
+- qualified scalp route reaches paper entry;
+- qualified intraday route reaches paper entry;
+- qualified swing route reaches paper entry;
+- supported short route reaches paper short entry;
+- forced execution override cannot leak into strategy mode;
+- opportunity evaluation evidence survives restore.
+
+Files changed by B2:
+- `backend/app/desk.py`
+- `backend/tests/test_routing.py`
+- `backend/tests/test_execution_test_mode.py`
+- `backend/tests/test_load_002_closeout.py`
+- `.github/workflows/main_aether-prod-api.yml`
+
+Not changed / deferred:
+- horizon-scoped position ledger — B3;
+- portfolio risk & qualified concurrency — B4;
+- instrument sizing hard ceilings — B5;
+- horizon-specific trade management — B6;
+- realistic fill/cost model — B7;
+- operator/UI evidence & telemetry — B8;
+- final integration/deployment closeout — B9.
+
+### J.A.R.V.I.S. REVIEW GATE
+
+Review final B2 head `5c23ca02e514447ea40b8a67bbd5a4de9c37096b` and the evidence above.
+
+If clear, respond exactly:
+
+`J.A.R.V.I.S. CLEAR — AETHER-LOAD-003 — START B3`
+
+If a B2 defect exists, respond:
+
+`J.A.R.V.I.S. HOLD — AETHER-LOAD-003 — B2 — <concrete defect/reason>`
+
+ChatGPT must not start B3 without the explicit B3 clearance.
+
