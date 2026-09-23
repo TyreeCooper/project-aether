@@ -7,6 +7,12 @@ import uuid
 from typing import Any
 
 from app.fees import TAKER_FEE, fee_quote
+from app.fill_model import (
+    SLIPPAGE_BPS,
+    market_reference_price,
+    modeled_fill_price,
+    quote_reference_price,
+)
 from app.instruments import (
     instrument_spec,
     quantity_metadata,
@@ -250,36 +256,263 @@ class PaperPortfolio:
     def can_buy(self, amount: float) -> bool:
         return float(amount) > 0 and self.usd + 1e-9 >= float(amount)
 
-    def _entry_fee(self, asset_id: str, quantity: float, price: float, side: str) -> float:
-        spec = instrument_spec(asset_id)
+    def _execution_fee(
+        self,
+        asset_id: str,
+        quantity: float,
+        price: float,
+        execution_side: str,
+    ) -> float:
+        aid = str(asset_id).lower()
+        spec = instrument_spec(aid)
         kind = spec["product_type"]
+        qty = abs(float(quantity))
+        px = float(price)
         if kind == "crypto_spot":
-            return abs(quantity * price) * float(TAKER_FEE)
+            return abs(qty * px) * float(TAKER_FEE)
         if kind == "fx":
-            # Bid/ask plus paper slippage carry FX transaction cost.
             return 0.0
-        q = fee_quote(
-            asset_id,
-            qty=quantity,
-            price=price,
-            side="sell" if side == "short" else "buy",
+        quote = fee_quote(
+            aid,
+            qty=qty,
+            price=px,
+            side=str(execution_side).lower(),
         )
-        return float(q.get("fee_usd") or 0.0)
+        return float(quote.get("fee_usd") or 0.0)
 
-    def _exit_fee(self, asset_id: str, quantity: float, price: float, side: str) -> float:
-        spec = instrument_spec(asset_id)
-        kind = spec["product_type"]
-        if kind == "crypto_spot":
-            return abs(quantity * price) * float(TAKER_FEE)
-        if kind == "fx":
-            return 0.0
-        q = fee_quote(
-            asset_id,
-            qty=quantity,
-            price=price,
-            side="buy" if side == "short" else "sell",
+    def _entry_fee(
+        self,
+        asset_id: str,
+        quantity: float,
+        price: float,
+        side: str,
+    ) -> float:
+        execution_side = (
+            "sell"
+            if str(side).lower() == "short"
+            else "buy"
         )
-        return float(q.get("fee_usd") or 0.0)
+        return self._execution_fee(
+            asset_id,
+            quantity,
+            price,
+            execution_side,
+        )
+
+    def _exit_fee(
+        self,
+        asset_id: str,
+        quantity: float,
+        price: float,
+        side: str,
+    ) -> float:
+        execution_side = (
+            "buy"
+            if str(side).lower() == "short"
+            else "sell"
+        )
+        return self._execution_fee(
+            asset_id,
+            quantity,
+            price,
+            execution_side,
+        )
+
+    def quantity_notional_usd(
+        self,
+        asset_id: str,
+        quantity: float,
+        price: float,
+    ) -> float:
+        aid = str(asset_id).lower()
+        spec = instrument_spec(aid)
+        kind = spec["product_type"]
+        qty = abs(float(quantity))
+        px = abs(float(price))
+        if kind in {"crypto_spot", "equity"}:
+            return qty * px
+        if kind == "future":
+            return (
+                qty
+                * px
+                * float(spec["point_value_usd"])
+            )
+        if kind == "fx":
+            if spec.get("base_currency") == "USD":
+                return qty
+            if spec.get("quote_currency") == "USD":
+                return qty * px
+            return qty * px
+        return qty * px
+
+    def execution_leg_cost(
+        self,
+        asset_id: str,
+        *,
+        execution_side: str,
+        quantity: float,
+        bid: float | None,
+        ask: float | None,
+        mark: float | None,
+        slippage_bps: float = SLIPPAGE_BPS,
+    ) -> dict[str, Any]:
+        aid = str(asset_id).lower()
+        side = str(execution_side).lower()
+        qty = abs(float(quantity))
+        market_reference = market_reference_price(
+            bid=bid,
+            ask=ask,
+            mark=mark,
+        )
+        quote_reference = quote_reference_price(
+            side,
+            bid=bid,
+            ask=ask,
+            mark=mark,
+        )
+        fill_price = modeled_fill_price(
+            side,
+            bid=bid,
+            ask=ask,
+            mark=mark,
+            slippage_bps=slippage_bps,
+        )
+        if (
+            qty <= 0
+            or market_reference is None
+            or quote_reference is None
+            or fill_price is None
+        ):
+            return {
+                "ok": False,
+                "error": "execution_cost_unavailable",
+            }
+
+        adverse_side = (
+            "long"
+            if side == "buy"
+            else "short"
+        )
+        spread_usd = max(
+            float(
+                self.move_pnl(
+                    aid,
+                    side=adverse_side,
+                    quantity=qty,
+                    entry_price=market_reference,
+                    mark=quote_reference,
+                )
+            ),
+            0.0,
+        )
+        slippage_usd = max(
+            float(
+                self.move_pnl(
+                    aid,
+                    side=adverse_side,
+                    quantity=qty,
+                    entry_price=quote_reference,
+                    mark=fill_price,
+                )
+            ),
+            0.0,
+        )
+        fee_usd = self._execution_fee(
+            aid,
+            qty,
+            fill_price,
+            side,
+        )
+        notional = self.quantity_notional_usd(
+            aid,
+            qty,
+            market_reference,
+        )
+        total = spread_usd + slippage_usd + fee_usd
+        return {
+            "ok": True,
+            "execution_side": side,
+            "market_reference_price": float(
+                market_reference
+            ),
+            "quote_reference_price": float(
+                quote_reference
+            ),
+            "fill_price": float(fill_price),
+            "quantity": qty,
+            "notional_usd": float(notional),
+            "spread_usd": float(spread_usd),
+            "slippage_usd": float(slippage_usd),
+            "fee_usd": float(fee_usd),
+            "total_cost_usd": float(total),
+        }
+
+    def round_trip_cost_estimate(
+        self,
+        asset_id: str,
+        *,
+        position_side: str,
+        quantity: float,
+        bid: float | None,
+        ask: float | None,
+        mark: float | None,
+        slippage_bps: float = SLIPPAGE_BPS,
+    ) -> dict[str, Any]:
+        side = str(position_side).lower()
+        entry_execution = (
+            "sell" if side == "short" else "buy"
+        )
+        exit_execution = (
+            "buy" if side == "short" else "sell"
+        )
+        entry = self.execution_leg_cost(
+            asset_id,
+            execution_side=entry_execution,
+            quantity=quantity,
+            bid=bid,
+            ask=ask,
+            mark=mark,
+            slippage_bps=slippage_bps,
+        )
+        exit_leg = self.execution_leg_cost(
+            asset_id,
+            execution_side=exit_execution,
+            quantity=quantity,
+            bid=bid,
+            ask=ask,
+            mark=mark,
+            slippage_bps=slippage_bps,
+        )
+        if not entry.get("ok") or not exit_leg.get("ok"):
+            return {
+                "ok": False,
+                "error": "execution_cost_unavailable",
+            }
+        notional = max(
+            float(entry.get("notional_usd") or 0.0),
+            1e-12,
+        )
+        spread = float(entry["spread_usd"]) + float(
+            exit_leg["spread_usd"]
+        )
+        slippage = float(
+            entry["slippage_usd"]
+        ) + float(exit_leg["slippage_usd"])
+        fees = float(entry["fee_usd"]) + float(
+            exit_leg["fee_usd"]
+        )
+        total = spread + slippage + fees
+        return {
+            "ok": True,
+            "entry": entry,
+            "exit": exit_leg,
+            "notional_usd": notional,
+            "spread_usd": spread,
+            "slippage_usd": slippage,
+            "fees_usd": fees,
+            "total_cost_usd": total,
+            "cost_pct": total / notional * 100.0,
+        }
 
     @staticmethod
     def _fx_pnl(spec: dict[str, Any], side: str, quantity: float, entry: float, mark: float) -> float:
@@ -561,6 +794,14 @@ class PaperPortfolio:
         signal_key: str | None = None,
         opened_at: str | None = None,
         reference_price: float | None = None,
+        market_reference_price: float | None = None,
+        quote_reference_price: float | None = None,
+        entry_spread_usd: float | None = None,
+        entry_slippage_usd: float | None = None,
+        modeled_round_trip_cost_usd: float | None = None,
+        modeled_round_trip_cost_pct: float | None = None,
+        cost_hurdle_pct: float | None = None,
+        opportunity_pct: float | None = None,
         metadata: dict[str, Any] | None = None,
         execution_test: bool = False,
         position_key: str | None = None,
@@ -624,7 +865,47 @@ class PaperPortfolio:
             "requested_quantity": requested_qty,
             "hard_quantity_cap_applied": hard_cap_applied,
             "entry_price": price,
-            "entry_reference_price": float(reference_price or price),
+            "entry_reference_price": float(
+                market_reference_price
+                or reference_price
+                or price
+            ),
+            "entry_market_reference_price": float(
+                market_reference_price
+                or reference_price
+                or price
+            ),
+            "entry_quote_price": float(
+                quote_reference_price
+                or reference_price
+                or price
+            ),
+            "entry_spread_usd": float(
+                entry_spread_usd or 0.0
+            ),
+            "entry_slippage_usd": float(
+                entry_slippage_usd or 0.0
+            ),
+            "modeled_round_trip_cost_usd": (
+                None
+                if modeled_round_trip_cost_usd is None
+                else float(modeled_round_trip_cost_usd)
+            ),
+            "modeled_round_trip_cost_pct": (
+                None
+                if modeled_round_trip_cost_pct is None
+                else float(modeled_round_trip_cost_pct)
+            ),
+            "cost_hurdle_pct": (
+                None
+                if cost_hurdle_pct is None
+                else float(cost_hurdle_pct)
+            ),
+            "opportunity_pct": (
+                None
+                if opportunity_pct is None
+                else float(opportunity_pct)
+            ),
             "entry_fee_usd": fee,
             "margin_reserved_usd": margin,
             "opened_at": ts,
@@ -669,6 +950,10 @@ class PaperPortfolio:
         closed_at: str | None = None,
         exit_reason: str | None = None,
         reference_price: float | None = None,
+        market_reference_price: float | None = None,
+        quote_reference_price: float | None = None,
+        exit_spread_usd: float | None = None,
+        exit_slippage_usd: float | None = None,
         position_key: str | None = None,
     ) -> dict[str, Any]:
         aid = str(asset_id).lower()
@@ -725,7 +1010,27 @@ class PaperPortfolio:
             **pos,
             "closed_at": ts,
             "exit_price": price,
-            "exit_reference_price": float(reference_price or price),
+            "exit_reference_price": float(
+                market_reference_price
+                or reference_price
+                or price
+            ),
+            "exit_market_reference_price": float(
+                market_reference_price
+                or reference_price
+                or price
+            ),
+            "exit_quote_price": float(
+                quote_reference_price
+                or reference_price
+                or price
+            ),
+            "exit_spread_usd": float(
+                exit_spread_usd or 0.0
+            ),
+            "exit_slippage_usd": float(
+                exit_slippage_usd or 0.0
+            ),
             "exit_fee_usd": exit_fee,
             "fees_usd": entry_fee + exit_fee,
             "gross_pnl_usd": gross,
