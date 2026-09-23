@@ -3,9 +3,9 @@
 ## CONTROL STATUS
 
 - Load: AETHER-LOAD-003
-- State: B7 COMPLETE — WAITING FOR J.A.R.V.I.S. REVIEW
+- State: B8 COMPLETE — WAITING FOR J.A.R.V.I.S. REVIEW
 - Active implementation batch: NONE
-- Waiting on: GROK BOT J.A.R.V.I.S. CLEARANCE TO START B8
+- Waiting on: GROK BOT J.A.R.V.I.S. CLEARANCE TO START B9
 - Starting main SHA: 09dfdb510bd5b54f43cef7e9c5f20389d3636ae1
 - Live-money execution: HARD BLOCKED
 - Paper testing: remains the target runtime
@@ -175,10 +175,10 @@ ChatGPT must not advance while the batch is on HOLD.
 - B5: [COMPLETE] Instrument sizing hard ceilings — 151ad2fb2e2a5a5648b18cfe3393dcf7ff6d596c
 - B6: [COMPLETE] Horizon-specific trade management — final head d7089c2d85c623020136bd445a57183a74021073
 - B7: [COMPLETE] Realistic fill & cost model — final head 102746f16b30239e48912dd5f8b6895340a06c03
-- B8: [WAITING] Operator/UI evidence & telemetry
+- B8: [COMPLETE] Operator/UI evidence & telemetry — final head 914884c65645102e6c0115ef1214f1f8a3be13a9
 - B9: [WAITING] Integration, deployment contract & closeout
 
-Implementation progress: 7 / 9 batches complete.
+Implementation progress: 8 / 9 batches complete.
 
 ---
 
@@ -1100,7 +1100,7 @@ ChatGPT must not start B7 without the explicit B7 clearance.
 
 ## B7 — Realistic Fill & Cost Model
 
-Status: COMPLETE — WAITING FOR J.A.R.V.I.S. REVIEW
+Status: COMPLETE — VERIFIED/CLEARED BY J.A.R.V.I.S.
 
 Final validation head:
 `102746f16b30239e48912dd5f8b6895340a06c03`
@@ -1193,4 +1193,118 @@ If a B7 defect exists, respond:
 `J.A.R.V.I.S. HOLD — AETHER-LOAD-003 — B7 — <concrete defect/reason>`
 
 ChatGPT must not start B8 without the explicit B8 clearance.
+
+## B8 — Operator/UI Evidence & Telemetry
+
+Status: COMPLETE — WAITING FOR J.A.R.V.I.S. REVIEW
+
+Final validation head:
+`914884c65645102e6c0115ef1214f1f8a3be13a9`
+
+B8 commit chain:
+- `b2491176a7e31d19c017dccb1157f50fa84ca2b5` — `feat: expose operator strategy telemetry [skip ci]`
+- `0f09964191e4048e08415515c90d4dcc45344257` — `ui: add B8 operator telemetry surfaces [skip ci]`
+- `56623d3cabe22c18e5c47bb25dd5b7e777e8c631` — `ui: render strategy risk and route evidence [skip ci]`
+- `97c237acd27b290f09e9c82eb5e96ebcd3ce0de0` — `ui: style strategy and validation telemetry [skip ci]`
+- `0e1f32a62513cf2271a26387c356e02994e8f2df` — `test: advance execution safety contract to B8 [skip ci]`
+- `b7da3808da263acd828f6c63b9f34f173165794e` — `test: advance deployment assertions to B8 [skip ci]`
+- `376a3a87de1fdb56719731006d2e13f91c677482` — `test: prove B8 operator UI evidence [skip ci]`
+- `831d4dcd0e949c47088e02d55a302b93da4c3617` — `ci: verify B8 operator telemetry in production [skip ci]`
+- `914884c65645102e6c0115ef1214f1f8a3be13a9` — `test: prove B8 operator telemetry and trade identity`
+
+Scope completed:
+- Live Trades API now exposes explicit runtime state, strategy-test/paper identity, forced-entry state, live-block state, and strategy-vs-validation open counts;
+- every open trade is explicitly classified as `strategy` or `execution_validation`;
+- execution-validation positions retain `execution_test=true`, LOAD-002 identity, and the normal strategy gate that would have blocked the forced validation fill;
+- strategy positions expose position/route key, originating horizon, management mode/clock, current stop-risk dollars, stop-risk as percent of current equity, target risk, entry reason, and quality;
+- FX open trades expose raw base units plus standard lots;
+- futures expose contracts;
+- equities expose shares;
+- crypto exposes coin quantity;
+- Live Trades exposes modeled cost/opportunity/hurdle telemetry from B7 when available;
+- Setup Watch now uses the latest actual asset × horizon opportunity evaluations instead of one generic base-book snapshot per asset;
+- Setup Watch exposes route key, route status, signal, quality, cost/hurdle fields when available, and the final gate/rejection reason;
+- live runtime response exposes aggregate open strategy stop-risk, remaining portfolio-risk capacity, and configured maximum portfolio risk;
+- Floor portfolio response also includes the same strategy-risk snapshot;
+- UI clearly displays `STRATEGY TEST / PAPER` vs `EXECUTION VALIDATION`;
+- validation trades receive a distinct amber operator treatment and cannot visually masquerade as normal strategy positions;
+- Live Trade cards show route/horizon, side, duration, entry/current/stop, exact quantity units, current risk, MFE/MAE, management identity, entry reason, and cost/edge evidence;
+- Setup Watch visibly renders latest route decision status and reason;
+- Blotter now renders trade class, horizon, duration, return, MFE, MAE, capture efficiency, and total modeled cost drag while retaining historical rows;
+- top-level static asset cache marker advanced to `AETHER-LOAD-003-B8`;
+- production deploy verification checks the actual B8 HTML/JS release marker and the deployed `/api/v1/desk/live-trades` telemetry contract.
+
+Required B8 proof:
+- execution-validation trade cannot appear as a normal strategy trade — PROVEN;
+- mixed strategy + validation positions remain separately counted/classified — PROVEN;
+- validation-only position risk is excluded from strategy portfolio-risk telemetry — PROVEN;
+- operator can see each strategy trade's route/horizon and stop-risk — PROVEN;
+- FX API/UI evidence includes base units + standard lots — PROVEN;
+- futures API/UI evidence includes contracts — PROVEN;
+- operator can see why a candidate did not trade through route gate/rejection reason — PROVEN;
+- Setup Watch preserves modeled cost/hurdle evidence when present — PROVEN;
+- aggregate open risk, remaining capacity, and max portfolio risk are visible — PROVEN;
+- Blotter preserves and displays duration/MFE/MAE/capture/cost analytics — PROVEN;
+- deployed UI uses the B8 cache-busted assets and deployed API reports the B8 telemetry contract — PROVEN.
+
+Safety/invariant evidence:
+- production runtime remains `strategy_test`;
+- desk remains paper-mode;
+- forced strategy entries remain OFF;
+- live-money execution remains HARD BLOCKED;
+- LOAD-002 execution validation remains isolated and visibly labeled;
+- B4 risk ceilings remain intact;
+- B5 instrument hard ceilings remain intact;
+- B6 horizon-specific management remains intact;
+- B7 realistic fill/cost reconciliation remains intact;
+- B9 final integration/closeout was NOT started.
+
+Validation evidence on final B8 head:
+- CI run #452 — SUCCESS;
+- final backend/UI regression suite — 260 passed, 1 warning;
+- browser JavaScript syntax check — SUCCESS;
+- Azure workflow run #335 — SUCCESS;
+- Azure build backend tests — SUCCESS;
+- Azure Web App deployment — SUCCESS;
+- production runtime verification — SUCCESS;
+- deployed release asserted `AETHER-LOAD-003-B8`;
+- deployed runtime remained `strategy_test`;
+- deployed runtime asserted forced entries OFF;
+- deployed runtime asserted live execution blocked;
+- deployed root HTML asserted B8 release marker;
+- deployed JS asserted strategy/validation labels, risk telemetry, unit telemetry, and Blotter analytics;
+- deployed Live Trades endpoint asserted runtime, risk, item/watch/event schema and classification invariants.
+
+Files changed by B8:
+- `backend/app/desk.py`
+- `backend/app/static/index.html`
+- `backend/app/static/aether-app.js`
+- `backend/app/static/aether-app.css`
+- `backend/tests/test_operator_telemetry.py`
+- `backend/tests/test_live_ui.py`
+- `backend/tests/test_execution_test_mode.py`
+- `backend/tests/test_load_002_closeout.py`
+- `.github/workflows/main_aether-prod-api.yml`
+
+Not changed / deferred:
+- final cross-module LOAD-003 integration closeout — B9;
+- no live-money enablement;
+- no new strategy/gate logic;
+- no risk-ceiling changes;
+- no sizing-ceiling changes;
+- no management-policy changes.
+
+### J.A.R.V.I.S. REVIEW GATE
+
+Review final B8 head `914884c65645102e6c0115ef1214f1f8a3be13a9` and the evidence above.
+
+If clear, respond exactly:
+
+`J.A.R.V.I.S. CLEAR — AETHER-LOAD-003 — START B9`
+
+If a B8 defect exists, respond:
+
+`J.A.R.V.I.S. HOLD — AETHER-LOAD-003 — B8 — <concrete defect/reason>`
+
+ChatGPT must not start B9 without the explicit B9 clearance.
 
