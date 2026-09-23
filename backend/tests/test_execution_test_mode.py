@@ -278,3 +278,74 @@ def test_normal_blotter_trade_is_not_mislabeled_as_execution_test():
     assert row["mode"] == "intraday"
     assert row["execution_test_funded"] is False
     assert row["metadata"].get("execution_test") is not True
+
+
+def test_execution_test_identity_survives_portfolio_restore():
+    source = PaperPortfolio(10_000.0)
+    opened = source.open_position(
+        "btc",
+        side="long",
+        quantity=0.0001,
+        price=100_000.0,
+        stop_price=90_000.0,
+        mode="execution_test",
+        execution_test=True,
+        metadata={
+            "execution_test": True,
+            "execution_test_load": "AETHER-LOAD-002",
+            "would_have_blocked_by": "normal_gate_blocked",
+            "normal_execution_status": "waiting_for_setup",
+            "normal_signal": None,
+            "normal_quality_score": 29,
+        },
+    )
+    assert opened["ok"] is True
+
+    restored = PaperPortfolio(1.0)
+    restored.restore(source.payload())
+    position = restored.position("btc")
+
+    assert position is not None
+    assert position["trade_id"] == opened["trade_id"]
+    assert position["mode"] == "execution_test"
+    assert position["execution_test_funded"] is True
+    assert position["metadata"]["execution_test"] is True
+    assert position["metadata"]["execution_test_load"] == "AETHER-LOAD-002"
+    assert position["metadata"]["would_have_blocked_by"] == "normal_gate_blocked"
+    assert position["metadata"]["normal_execution_status"] == "waiting_for_setup"
+    assert position["metadata"]["normal_signal"] is None
+    assert position["metadata"]["normal_quality_score"] == 29
+
+
+def test_closed_execution_test_identity_survives_portfolio_restore():
+    source = PaperPortfolio(10_000.0)
+    opened = source.open_position(
+        "btc",
+        side="long",
+        quantity=0.0001,
+        price=100_000.0,
+        stop_price=90_000.0,
+        mode="execution_test",
+        execution_test=True,
+        metadata={
+            "execution_test": True,
+            "execution_test_load": "AETHER-LOAD-002",
+        },
+    )
+    assert opened["ok"] is True
+    closed = source.close_position(
+        "btc",
+        price=101_000.0,
+        exit_reason="execution_test_close",
+    )
+    assert closed["ok"] is True
+
+    restored = PaperPortfolio(1.0)
+    restored.restore(source.payload())
+    durable = restored.closed_trades[-1]
+
+    assert durable["trade_id"] == opened["trade_id"]
+    assert durable["mode"] == "execution_test"
+    assert durable["execution_test_funded"] is True
+    assert durable["metadata"]["execution_test"] is True
+    assert durable["metadata"]["execution_test_load"] == "AETHER-LOAD-002"
