@@ -60,13 +60,17 @@ def test_desk_scalp_route_reaches_actual_allocator_and_records_attribution(monke
                 "volume": 1.0,
             }
         )
+        desk._sync_asset_route_books(book.id)
+
+    for route_book in desk.route_books.values():
+        route_book.wallet = desk.wallet
 
         def snapshot_strategy(
             *,
             btc_bias_on=False,
             btc_in_position=False,
             requested_mode=None,
-            _book=book,
+            _book=route_book,
         ):
             if requested_mode == "scalp":
                 scalp_calls.append(_book.id)
@@ -92,14 +96,17 @@ def test_desk_scalp_route_reaches_actual_allocator_and_records_attribution(monke
                 "quality_score": 0,
             }
 
-        book.snapshot_strategy = snapshot_strategy
+        route_book.snapshot_strategy = snapshot_strategy
 
     out = desk._allocate()
     successful = [row for row in out if row.get("ok")]
     assert len(successful) == 1
     assert successful[0]["pair"] == desk.by_id["mes"].pair
 
-    position = desk.wallet.position("mes")
+    position = desk.wallet.position(
+        "mes",
+        position_key="mes:scalp",
+    )
     assert position is not None
     assert position["mode"] == "scalp"
     assert position["metadata"]["routing_horizon"] == "scalp"
@@ -185,6 +192,9 @@ def _prepare_strategy_test_desk(monkeypatch, due_routes):
                 "volume": 1.0,
             }
         )
+        desk._sync_asset_route_books(book.id)
+    for route_book in desk.route_books.values():
+        route_book.wallet = desk.wallet
     return desk
 
 
@@ -200,7 +210,7 @@ def test_strategy_test_evaluates_all_28_supported_asset_horizon_routes(monkeypat
     )
     calls = []
 
-    for book in desk.books:
+    for book in desk.route_books.values():
         def snapshot_strategy(
             *,
             btc_bias_on=False,
@@ -255,7 +265,7 @@ def test_rejected_route_preserves_gate_reason(monkeypatch):
         monkeypatch,
         (ROUTES[TradingHorizon.SCALP],),
     )
-    for book in desk.books:
+    for book in desk.route_books.values():
         def snapshot_strategy(
             *,
             btc_bias_on=False,
@@ -286,7 +296,7 @@ def test_qualified_intraday_route_reaches_paper_entry(monkeypatch):
         monkeypatch,
         (ROUTES[TradingHorizon.INTRADAY],),
     )
-    for book in desk.books:
+    for book in desk.route_books.values():
         def snapshot_strategy(
             *,
             btc_bias_on=False,
@@ -319,7 +329,10 @@ def test_qualified_intraday_route_reaches_paper_entry(monkeypatch):
 
     out = desk._allocate()
     assert sum(bool(row.get("ok")) for row in out) == 1
-    position = desk.wallet.position("mes")
+    position = desk.wallet.position(
+        "mes",
+        position_key="mes:intraday",
+    )
     assert position is not None
     assert position["mode"] == "intraday"
     row = next(
@@ -337,7 +350,7 @@ def test_qualified_swing_route_reaches_paper_entry(monkeypatch):
         monkeypatch,
         (ROUTES[TradingHorizon.SWING],),
     )
-    for book in desk.books:
+    for book in desk.route_books.values():
         def snapshot_strategy(
             *,
             btc_bias_on=False,
@@ -370,7 +383,10 @@ def test_qualified_swing_route_reaches_paper_entry(monkeypatch):
 
     out = desk._allocate()
     assert sum(bool(row.get("ok")) for row in out) == 1
-    position = desk.wallet.position("mcl")
+    position = desk.wallet.position(
+        "mcl",
+        position_key="mcl:swing",
+    )
     assert position is not None
     assert position["mode"] == "swing"
     row = next(
@@ -387,7 +403,7 @@ def test_qualified_short_route_preserves_supported_direction(monkeypatch):
         monkeypatch,
         (ROUTES[TradingHorizon.SCALP],),
     )
-    for book in desk.books:
+    for book in desk.route_books.values():
         def snapshot_strategy(
             *,
             btc_bias_on=False,
@@ -420,7 +436,10 @@ def test_qualified_short_route_preserves_supported_direction(monkeypatch):
 
     out = desk._allocate()
     assert sum(bool(row.get("ok")) for row in out) == 1
-    position = desk.wallet.position("mes")
+    position = desk.wallet.position(
+        "mes",
+        position_key="mes:scalp",
+    )
     assert position is not None
     assert position["side"] == "short"
 
@@ -441,7 +460,7 @@ def test_execution_validation_override_cannot_leak_into_strategy_mode(monkeypatc
         "forced_execution_snapshot",
         forbidden_override,
     )
-    for book in desk.books:
+    for book in desk.route_books.values():
         book.snapshot_strategy = lambda **_kwargs: {
             "signal": None,
             "executable_signal": None,
