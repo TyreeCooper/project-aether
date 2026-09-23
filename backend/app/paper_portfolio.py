@@ -185,7 +185,7 @@ class PaperPortfolio:
         self.positions[target] = row
         return True
 
-    def can_buy    def can_buy(self, amount: float) -> bool:
+    def can_buy(self, amount: float) -> bool:
         return float(amount) > 0 and self.usd + 1e-9 >= float(amount)
 
     def _entry_fee(self, asset_id: str, quantity: float, price: float, side: str) -> float:
@@ -346,7 +346,7 @@ class PaperPortfolio:
                 total += abs(qty * price)
         return total
 
-    def _required_margin    def _required_margin(
+    def _required_margin(
         self,
         asset_id: str,
         side: str,
