@@ -12,6 +12,11 @@ from app.execution_matrix import (
     supported_horizons,
 )
 from app.fees import fee_rate
+from app.fill_model import (
+    SLIPPAGE_BPS,
+    market_reference_price,
+    quote_reference_price,
+)
 from app.instruments import (
     instrument_spec,
     quantity_metadata,
@@ -22,6 +27,7 @@ from app.sessions import for_asset
 from app.strategy import exit_plan, resample_bars
 
 BAR_HISTORY = 720
+COST_EDGE_MULTIPLE = 1.40
 
 
 def _now() -> str:
@@ -330,16 +336,28 @@ class PairBook:
             }
         position_side = "short" if executable == "short" else "long"
         fill_side = "sell" if position_side == "short" else "buy"
-        reference = (
-            self.bid
-            if position_side == "short" and self.bid is not None
-            else self.ask
-            if position_side == "long" and self.ask is not None
-            else self.mark
+        market_reference = market_reference_price(
+            bid=self.bid,
+            ask=self.ask,
+            mark=self.mark,
+        )
+        quote_reference = quote_reference_price(
+            fill_side,
+            bid=self.bid,
+            ask=self.ask,
+            mark=self.mark,
         )
         px = self.fill_px(fill_side)
-        if not px:
-            return {"ok": False, "error": "no_mark", "pair": self.pair}
+        if (
+            market_reference is None
+            or quote_reference is None
+            or not px
+        ):
+            return {
+                "ok": False,
+                "error": "no_mark",
+                "pair": self.pair,
+            }
 
         stop_pct = max(
             float(snap.get("risk_stop_pct") or 2.0),
@@ -404,17 +422,93 @@ class PairBook:
             or self.position_key
             or self.id
         ).lower()
+
+        cost_estimator = getattr(
+            self.wallet,
+            "round_trip_cost_estimate",
+            None,
+        )
+        cost_model = (
+            cost_estimator(
+                self.id,
+                position_side=position_side,
+                quantity=qty,
+                bid=self.bid,
+                ask=self.ask,
+                mark=self.mark,
+                slippage_bps=SLIPPAGE_BPS,
+            )
+            if callable(cost_estimator)
+            else {"ok": False}
+        )
+        opportunity_pct = float(
+            snap.get("opportunity_pct") or 0.0
+        )
+        modeled_cost_pct = float(
+            cost_model.get("cost_pct") or 0.0
+        )
+        cost_hurdle_pct = (
+            modeled_cost_pct * COST_EDGE_MULTIPLE
+        )
+        if (
+            not execution_test
+            and opportunity_pct > 0
+            and modeled_cost_pct > 0
+            and opportunity_pct + 1e-12
+            < cost_hurdle_pct
+        ):
+            return {
+                "ok": False,
+                "error": "edge_below_cost_hurdle",
+                "pair": self.pair,
+                "position_key": route_position_key,
+                "opportunity_pct": opportunity_pct,
+                "modeled_round_trip_cost_pct": (
+                    modeled_cost_pct
+                ),
+                "cost_hurdle_pct": cost_hurdle_pct,
+                "modeled_round_trip_cost_usd": float(
+                    cost_model.get(
+                        "total_cost_usd"
+                    )
+                    or 0.0
+                ),
+            }
+
+        entry_leg = dict(
+            cost_model.get("entry") or {}
+        )
         return {
             "ok": True,
             "position_key": route_position_key,
             "position_side": position_side,
             "execution_side": fill_side,
-            "reference_price": float(reference or px),
+            "reference_price": float(quote_reference),
+            "market_reference_price": float(
+                market_reference
+            ),
+            "quote_reference_price": float(
+                quote_reference
+            ),
             "price": float(px),
             "stop_price": float(stop_price),
             "risk_stop_pct": float(stop_pct),
             "qty": float(qty),
             **quantity_metadata(self.id, qty),
+            "entry_spread_usd": float(
+                entry_leg.get("spread_usd") or 0.0
+            ),
+            "entry_slippage_usd": float(
+                entry_leg.get("slippage_usd") or 0.0
+            ),
+            "modeled_round_trip_cost_usd": float(
+                cost_model.get("total_cost_usd") or 0.0
+            ),
+            "modeled_round_trip_cost_pct": (
+                modeled_cost_pct
+            ),
+            "cost_hurdle_pct": cost_hurdle_pct,
+            "opportunity_pct": opportunity_pct,
             "stop_risk_usd": float(stop_risk),
         }
 
@@ -443,6 +537,14 @@ class PairBook:
         position_side = str(plan["position_side"])
         fill_side = str(plan["execution_side"])
         reference = float(plan["reference_price"])
+        market_reference = float(
+            plan.get("market_reference_price")
+            or reference
+        )
+        quote_reference = float(
+            plan.get("quote_reference_price")
+            or reference
+        )
         px = float(plan["price"])
         stop_price = float(plan["stop_price"])
         stop_pct = float(plan["risk_stop_pct"])
@@ -474,7 +576,33 @@ class PairBook:
                 if snap.get("signal_key") is not None
                 else None
             ),
-            reference_price=reference,
+            reference_price=market_reference,
+            market_reference_price=market_reference,
+            quote_reference_price=quote_reference,
+            entry_spread_usd=float(
+                plan.get("entry_spread_usd") or 0.0
+            ),
+            entry_slippage_usd=float(
+                plan.get("entry_slippage_usd") or 0.0
+            ),
+            modeled_round_trip_cost_usd=float(
+                plan.get(
+                    "modeled_round_trip_cost_usd"
+                )
+                or 0.0
+            ),
+            modeled_round_trip_cost_pct=float(
+                plan.get(
+                    "modeled_round_trip_cost_pct"
+                )
+                or 0.0
+            ),
+            cost_hurdle_pct=float(
+                plan.get("cost_hurdle_pct") or 0.0
+            ),
+            opportunity_pct=float(
+                plan.get("opportunity_pct") or 0.0
+            ),
             metadata={
                 "entry_reason": snap.get("reason"),
                 "quality_score": snap.get("quality_score"),
@@ -552,6 +680,18 @@ class PairBook:
                 "cluster_risk_limit_usd": snap.get(
                     "cluster_risk_limit_usd"
                 ),
+                "opportunity_pct": plan.get(
+                    "opportunity_pct"
+                ),
+                "modeled_round_trip_cost_pct": plan.get(
+                    "modeled_round_trip_cost_pct"
+                ),
+                "modeled_round_trip_cost_usd": plan.get(
+                    "modeled_round_trip_cost_usd"
+                ),
+                "cost_hurdle_pct": plan.get(
+                    "cost_hurdle_pct"
+                ),
             },
             execution_test=execution_test,
             position_key=route_position_key,
@@ -581,33 +721,55 @@ class PairBook:
                 result["signal_key"] = (
                     self.last_entry_signal_key
                 )
-            move_pnl = getattr(
-                self.wallet,
-                "move_pnl",
-                None,
+            slippage_usd = float(
+                plan.get("entry_slippage_usd") or 0.0
             )
-            if callable(move_pnl):
-                adverse = float(
-                    move_pnl(
-                        self.id,
-                        side=position_side,
-                        quantity=qty,
-                        entry_price=reference,
-                        mark=px,
-                    )
-                )
-                slippage_usd = abs(adverse)
-            else:
-                slippage_usd = 0.0
             slippage_bps = (
-                abs(px / reference - 1) * 10_000
-                if reference > 0
+                abs(px / quote_reference - 1)
+                * 10_000
+                if quote_reference > 0
                 else None
             )
-            result["reference_price"] = reference
+            result["reference_price"] = quote_reference
+            result["market_reference_price"] = (
+                market_reference
+            )
+            result["quote_reference_price"] = (
+                quote_reference
+            )
+            result["spread_usd"] = round(
+                float(plan.get("entry_spread_usd") or 0.0),
+                8,
+            )
             result["slippage_usd"] = round(
                 slippage_usd,
                 8,
+            )
+            result["modeled_round_trip_cost_usd"] = round(
+                float(
+                    plan.get(
+                        "modeled_round_trip_cost_usd"
+                    )
+                    or 0.0
+                ),
+                8,
+            )
+            result["modeled_round_trip_cost_pct"] = round(
+                float(
+                    plan.get(
+                        "modeled_round_trip_cost_pct"
+                    )
+                    or 0.0
+                ),
+                6,
+            )
+            result["cost_hurdle_pct"] = round(
+                float(plan.get("cost_hurdle_pct") or 0.0),
+                6,
+            )
+            result["opportunity_pct"] = round(
+                float(plan.get("opportunity_pct") or 0.0),
+                6,
             )
             result["slippage_bps"] = (
                 None
