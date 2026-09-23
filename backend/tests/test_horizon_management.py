@@ -191,6 +191,17 @@ def test_sibling_horizons_manage_stops_independently(monkeypatch):
     scalp.bid = 89.99
     scalp.ask = 90.01
     scalp.lowest = 90.0
+    scalp.bars.clear()
+    scalp.bars.append(
+        {
+            "ts": int(datetime.now(timezone.utc).timestamp()),
+            "open": 90.0,
+            "high": 90.0,
+            "low": 90.0,
+            "close": 90.0,
+            "volume": 1.0,
+        }
+    )
     swing.mark = 100.0
 
     monkeypatch.setattr(
