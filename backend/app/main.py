@@ -106,6 +106,7 @@ async def request_telemetry(request: Request, call_next):
 class DeskSettingsBody(BaseModel):
     allocation_per_entry_pct: float = Field(ge=1, le=25)
     quote_poll_seconds: int = Field(ge=5, le=120)
+    trade_filters: dict[str, bool] | None = None
 
 
 class AddAssetBody(BaseModel):
@@ -305,6 +306,7 @@ async def update_settings(
         "desk": desk.update_settings(
             allocation_per_entry_pct=body.allocation_per_entry_pct,
             quote_poll_seconds=body.quote_poll_seconds,
+            trade_filters=body.trade_filters,
         ),
         "engine": desk.engine_status(),
     }
