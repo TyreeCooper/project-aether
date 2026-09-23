@@ -37,7 +37,7 @@ jobs:
         env:
           PYTHONPATH: .
           PYTHONUNBUFFERED: "1"
-        run: python -m pytest -vv
+        run: python -m pytest -q
       - uses: actions/upload-artifact@v4
         with:
           name: python-app
