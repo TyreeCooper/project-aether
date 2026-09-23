@@ -33,9 +33,11 @@ jobs:
             node --check "$file"
           done
       - name: Run backend tests
+        timeout-minutes: 5
         env:
           PYTHONPATH: .
-        run: python -m pytest -q
+          PYTHONUNBUFFERED: "1"
+        run: python -m pytest -vv
       - uses: actions/upload-artifact@v4
         with:
           name: python-app
