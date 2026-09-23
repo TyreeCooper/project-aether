@@ -50,7 +50,7 @@ def completed_bars(
 
 
 class MultiDesk:
-    def __init__(self) -> None:
+    def __init__(self, execution_test_mode: bool = False) -> None:
         restored = load_desk()
         if isinstance(restored, dict):
             for asset in restored.get("assets") or []:
@@ -63,6 +63,7 @@ class MultiDesk:
         self.books = [PairBook(asset, self.wallet) for asset in ASSETS]
         self.by_id = {b.id: b for b in self.books}
         self._task: asyncio.Task | None = None
+        self.execution_test_mode = bool(execution_test_mode)
         self.armed = os.getenv("AETHER_AUTO_RUN", "1").strip() not in {"0", "false", "FALSE"}
         self.risk_slice = max(
             0.01,
@@ -265,6 +266,7 @@ class MultiDesk:
             "accepting_entries": bool(self.armed and running),
             "live_blocked": True,
             "source": "multi_asset_desk",
+            "execution_test_mode": self.execution_test_mode,
         }
 
     def settings_snapshot(self) -> dict[str, Any]:
@@ -273,6 +275,8 @@ class MultiDesk:
             "quote_poll_seconds": int(self.poll_seconds),
             "resume_armed_after_restart": True,
             "state_persistence": True,
+            "execution_test_mode": self.execution_test_mode,
+            "execution_test_load": "AETHER-LOAD-002" if self.execution_test_mode else None,
         }
 
     async def initialize_history_persistence(self) -> None:
@@ -1296,7 +1300,49 @@ class MultiDesk:
             tuple[int, PairBook, dict[str, Any]]
         ] = []
         for book in self.books:
+            # Keep one-position-per-book intact even during the experiment.
+            # This is an execution invariant, not a strategy threshold.
             if book.qty() > 0:
+                continue
+
+            if self.execution_test_mode:
+                try:
+                    baseline = book.snapshot_strategy(
+                        btc_bias_on=btc_bias,
+                        btc_in_position=btc_long,
+                    )
+                except Exception as exc:
+                    baseline = {
+                        "reason": f"strategy_error:{type(exc).__name__}",
+                        "execution_status": "strategy_error",
+                        "quality_score": 0,
+                    }
+                snap = {
+                    **baseline,
+                    "signal": "buy",
+                    "executable_signal": "buy",
+                    "mode": "execution_test",
+                    "reason": "execution_test_mode",
+                    "execution_status": "execution_test_forced",
+                    "signal_key": (
+                        f"execution-test:{book.id}:{int(time.time()) // 60}"
+                    ),
+                    "risk_stop_pct": 10.0,
+                    "entry_clock": "desk_tick",
+                    "bias_clock": "bypassed",
+                    "execution_test": True,
+                    "would_have_blocked_by": baseline.get("reason"),
+                    "normal_execution_status": baseline.get("execution_status"),
+                    "normal_signal": baseline.get("executable_signal"),
+                    "normal_quality_score": baseline.get("quality_score"),
+                }
+                candidates.append(
+                    (
+                        int(baseline.get("quality_score") or 0),
+                        book,
+                        snap,
+                    )
+                )
                 continue
 
             fresh, bucket = is_new_five_minute(
@@ -1331,27 +1377,41 @@ class MultiDesk:
             reverse=True,
         )
         active_count = len(open_books)
+        active_limit = (
+            len(self.books)
+            if self.execution_test_mode
+            else MAX_ACTIVE_POSITIONS
+        )
 
         for _, book, snap in candidates:
-            if active_count >= MAX_ACTIVE_POSITIONS:
+            if active_count >= active_limit:
                 break
 
             profile = playbook_profile(book.id)
             group = str(profile["cluster"])
             if (
-                group_counts.get(group, 0)
+                not self.execution_test_mode
+                and group_counts.get(group, 0)
                 >= int(profile["cluster_cap"])
             ):
                 continue
             if float(book.mark or 0.0) <= 0:
                 continue
-            if risk_budget_usd <= 0 or capital_cap_usd <= 0:
+            if (
+                not self.execution_test_mode
+                and (risk_budget_usd <= 0 or capital_cap_usd <= 0)
+            ):
                 continue
 
             result = book.enter(
                 risk_budget_usd,
                 strategy_snapshot=snap,
-                max_capital_usd=capital_cap_usd,
+                max_capital_usd=(
+                    None
+                    if self.execution_test_mode
+                    else capital_cap_usd
+                ),
+                execution_test=self.execution_test_mode,
             )
             result["playbook"] = snap.get("mode")
             result["quality_score"] = snap.get(
@@ -1388,11 +1448,15 @@ class MultiDesk:
                         "quality_score": result.get(
                             "quality_score"
                         ),
+                        "execution_test": self.execution_test_mode,
+                        "would_have_blocked_by": snap.get(
+                            "would_have_blocked_by"
+                        ),
                     },
                 )
                 self.persist()
 
-                if book.kraken:
+                if book.kraken and not self.execution_test_mode:
                     asyncio.create_task(
                         live.place_order(
                             pair=book.kraken,
@@ -1481,7 +1545,7 @@ class MultiDesk:
                             db_store.last_error,
                         )
                 self.persist()
-                if book.kraken:
+                if book.kraken and not self.execution_test_mode:
                     await live.place_order(
                         pair=book.kraken,
                         side=str(
@@ -1538,4 +1602,6 @@ class MultiDesk:
         return data
 
 
-desk = MultiDesk()
+# Temporary paper-only execution experiment.
+# Change this single constructor flag back to False when AETHER-LOAD-002 closes.
+desk = MultiDesk(execution_test_mode=True)

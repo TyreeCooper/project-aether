@@ -278,6 +278,7 @@ class PaperPortfolio:
         opened_at: str | None = None,
         reference_price: float | None = None,
         metadata: dict[str, Any] | None = None,
+        execution_test: bool = False,
     ) -> dict[str, Any]:
         aid = str(asset_id).lower()
         side = str(side).lower()
@@ -292,8 +293,12 @@ class PaperPortfolio:
         if qty <= 0 or price <= 0:
             return {"ok": False, "error": "bad_qty_or_price", "asset_id": aid}
         fee = self._entry_fee(aid, qty, price, side)
-        margin = self._required_margin(aid, side, qty, price)
-        debit = margin + fee
+        normal_margin = self._required_margin(aid, side, qty, price)
+        # Test-mode positions are synthetically funded so risk sizing, margin,
+        # and cash thresholds cannot prevent the execution-rail experiment.
+        # Only actual modeled fees touch paper cash. Live execution stays blocked.
+        margin = 0.0 if execution_test else normal_margin
+        debit = fee if execution_test else margin + fee
         if self.usd + 1e-9 < debit:
             return {
                 "ok": False,
@@ -322,6 +327,8 @@ class PaperPortfolio:
             "initial_stop": float(stop_price) if stop_price else None,
             "current_stop": float(stop_price) if stop_price else None,
             "metadata": dict(metadata or {}),
+            "execution_test_funded": bool(execution_test),
+            "normal_required_margin_usd": normal_margin,
         }
         self.positions[aid] = pos
         return {
@@ -363,7 +370,11 @@ class PaperPortfolio:
         margin = float(pos.get("margin_reserved_usd") or 0.0)
         kind = str(pos["product_type"])
 
-        if kind in {"crypto_spot", "equity"} and side == "long":
+        if bool(pos.get("execution_test_funded")):
+            # Synthetic test capital never enters/leaves cash; settle only P/L
+            # and exit fees so the experiment cannot consume the normal wallet.
+            self.usd += gross - exit_fee
+        elif kind in {"crypto_spot", "equity"} and side == "long":
             # Cash long: reserved margin is the purchase notional. Return sale proceeds.
             self.usd += qty * price - exit_fee
         else:
@@ -423,7 +434,9 @@ class PaperPortfolio:
             kind = str(pos["product_type"])
             side = str(pos["side"])
             qty = float(pos["quantity"])
-            if kind in {"crypto_spot", "equity"} and side == "long":
+            if bool(pos.get("execution_test_funded")):
+                total += self.gross_pnl(aid, mark)
+            elif kind in {"crypto_spot", "equity"} and side == "long":
                 total += qty * mark
             else:
                 total += float(pos.get("margin_reserved_usd") or 0.0)

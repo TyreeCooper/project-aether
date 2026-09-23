@@ -8,6 +8,7 @@ from typing import Any
 from app.clock import is_new_five_minute
 from app.exits import stop_fill_price, time_stop_due
 from app.fees import fee_rate
+from app.instruments import instrument_spec
 from app.paper_exec import slipped_price
 from app.playbooks import playbook_profile, playbook_snapshot
 from app.sessions import for_asset
@@ -177,6 +178,7 @@ class PairBook:
         *,
         strategy_snapshot: dict[str, Any] | None = None,
         max_capital_usd: float | None = None,
+        execution_test: bool = False,
     ) -> dict[str, Any]:
         snap = dict(strategy_snapshot or {})
         executable = str(snap.get("executable_signal") or "").lower()
@@ -212,17 +214,25 @@ class PairBook:
                 "error": "paper_portfolio_required",
                 "pair": self.pair,
             }
-        qty = float(
-            size_for_risk(
-                self.id,
-                side=position_side,
-                risk_usd=float(risk_usd),
-                entry_price=px,
-                stop_price=stop_price,
-                max_capital_usd=max_capital_usd,
+        if execution_test:
+            # AETHER-LOAD-002 is testing the execution rail, not sizing.
+            # Use exactly one legal quantity step so every official book can
+            # prove that it can open a paper position.
+            qty = float(
+                instrument_spec(self.id).get("quantity_step") or 1.0
             )
-            or 0.0
-        )
+        else:
+            qty = float(
+                size_for_risk(
+                    self.id,
+                    side=position_side,
+                    risk_usd=float(risk_usd),
+                    entry_price=px,
+                    stop_price=stop_price,
+                    max_capital_usd=max_capital_usd,
+                )
+                or 0.0
+            )
         if qty <= 0:
             return {
                 "ok": False,
@@ -256,13 +266,29 @@ class PairBook:
                 "entry_clock": snap.get("entry_clock"),
                 "bias_clock": snap.get("bias_clock"),
                 "cluster": playbook_profile(self.id).get("cluster"),
+                "execution_test": bool(execution_test),
+                "execution_test_load": (
+                    "AETHER-LOAD-002" if execution_test else None
+                ),
+                "would_have_blocked_by": snap.get(
+                    "would_have_blocked_by"
+                ),
+                "normal_execution_status": snap.get(
+                    "normal_execution_status"
+                ),
+                "normal_signal": snap.get("normal_signal"),
+                "normal_quality_score": snap.get(
+                    "normal_quality_score"
+                ),
             },
+            execution_test=execution_test,
         )
         result["pair"] = self.pair
         result["actor"] = "bot-playbook-entry"
         result["position_side"] = position_side
         result["execution_side"] = fill_side
         result["event"] = "entry"
+        result["execution_test"] = bool(execution_test)
         if result.get("ok"):
             self.entry_at = str(result.get("opened_at") or _now())
             self.entry_mode = str(snap.get("mode") or "intraday")

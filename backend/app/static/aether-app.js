@@ -231,7 +231,7 @@
     const s=state.settings;if(!s)return;const d=s.desk||{},e=s.engine||{},x=s.execution||{},sec=s.security||{},live=s.live||{};
     const armed=Boolean(e.accepting_entries);
     setText("settingsArmedBadge",armed?"ARMED":(e.armed?"STARTING":"DISARMED"));$("settingsArmedBadge").className="badge "+(armed?"good":"");
-    $("settingsEngineState").innerHTML=metric("Accepting entries",armed?"YES":"NO",armed?"up":"")+metric("Engine loop",e.running?"RUNNING":"STOPPED",e.running?"up":"down")+metric("State source",e.source||"multi_asset_desk")+metric("Live execution",e.live_blocked?"BLOCKED":"READY",e.live_blocked?"up":"down");
+    $("settingsEngineState").innerHTML=metric("Accepting entries",armed?"YES":"NO",armed?"up":"")+metric("Engine loop",e.running?"RUNNING":"STOPPED",e.running?"up":"down")+metric("Execution test mode",e.execution_test_mode?"ON · AETHER-LOAD-002":"OFF",e.execution_test_mode?"down":"")+metric("State source",e.source||"multi_asset_desk")+metric("Live execution",e.live_blocked?"BLOCKED":"READY",e.live_blocked?"up":"down");
     $("settingAllocation").value=d.allocation_per_entry_pct??8;
     $("settingPoll").value=d.quote_poll_seconds??20;
     $("settingsExecution").innerHTML=metric("Taker fee",pct(x.taker_fee_pct))+metric("Slippage",num(x.slippage_bps,1)+" bps")+metric("Max spread",num(x.max_spread_bps,1)+" bps")+metric("Max watch basis",money(x.max_basis_usd));
