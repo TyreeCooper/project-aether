@@ -44,7 +44,7 @@ MAX_ACTIVE_POSITIONS = 4
 POLL = 20
 LOAD_002_RELEASE = "AETHER-LOAD-002-EXP-R1"
 LOAD_002_EXPERIMENT_RUN = "EXP-R1"
-LOAD_003_B1_RELEASE = "AETHER-LOAD-003-B1"
+LOAD_003_RELEASE = "AETHER-LOAD-003-B2"
 STRATEGY_TEST_MODE = "strategy_test"
 EXECUTION_VALIDATION_MODE = "execution_validation"
 
@@ -116,6 +116,7 @@ class MultiDesk:
         self._last_news_refresh = 0.0
         self._last_intelligence_persist = 0.0
         self.activity_events: list[dict[str, Any]] = []
+        self.opportunity_evaluation_log: list[dict[str, Any]] = []
         self.execution_matrix_ledger: dict[str, Any] = {}
         restored_sources = (
             restored.get("asset_source_registry")
@@ -182,6 +183,7 @@ class MultiDesk:
                 },
                 "asset_source_registry": self.asset_source_registry,
                 "activity_events": self.activity_events[-300:],
+                "opportunity_evaluations": self.opportunity_evaluation_log[-500:],
                 "execution_matrix_ledger": self.execution_matrix_ledger,
                 "strategy_route_buckets": {
                     horizon.value: int(bucket)
@@ -262,6 +264,16 @@ class MultiDesk:
                 if isinstance(row, dict)
             ]
 
+        opportunity_evaluations = (
+            data.get("opportunity_evaluations") or []
+        )
+        if isinstance(opportunity_evaluations, list):
+            self.opportunity_evaluation_log = [
+                dict(row)
+                for row in opportunity_evaluations[-500:]
+                if isinstance(row, dict)
+            ]
+
         matrix_ledger = data.get("execution_matrix_ledger") or {}
         if isinstance(matrix_ledger, dict):
             self.execution_matrix_ledger = copy.deepcopy(matrix_ledger)
@@ -330,7 +342,7 @@ class MultiDesk:
             "paper_mode": True,
             "live_blocked": True,
             "source": "multi_asset_desk",
-            "runtime_release": LOAD_003_B1_RELEASE,
+            "runtime_release": LOAD_003_RELEASE,
             "runtime_mode": runtime_mode,
             "strategy_test_mode": runtime_mode == STRATEGY_TEST_MODE,
             "execution_validation_mode": (
@@ -693,7 +705,7 @@ class MultiDesk:
             "quote_poll_seconds": int(self.poll_seconds),
             "resume_armed_after_restart": True,
             "state_persistence": True,
-            "runtime_release": LOAD_003_B1_RELEASE,
+            "runtime_release": LOAD_003_RELEASE,
             "runtime_mode": runtime_mode,
             "strategy_test_mode": runtime_mode == STRATEGY_TEST_MODE,
             "execution_validation_mode": (
@@ -860,6 +872,77 @@ class MultiDesk:
         self.activity_events.append(row)
         self.activity_events = self.activity_events[-300:]
         return row
+
+    def _record_opportunity_evaluation(
+        self,
+        book: PairBook,
+        *,
+        routing_horizon: str,
+        clock_horizon_value: str,
+        strategy_id: str,
+        strategy_version: str,
+        mode: str,
+        snapshot: dict[str, Any] | None = None,
+        status: str,
+        rejection_reason: str | None = None,
+    ) -> dict[str, Any]:
+        snap = dict(snapshot or {})
+        row = {
+            "evaluation_id": uuid.uuid4().hex,
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "asset_id": book.id,
+            "symbol": book.symbol,
+            "pair": book.pair,
+            "broker": book.broker,
+            "routing_horizon": str(routing_horizon),
+            "clock_horizon": str(clock_horizon_value),
+            "mode": str(mode),
+            "strategy_id": str(strategy_id),
+            "strategy_version": str(strategy_version),
+            "signal": snap.get("signal"),
+            "executable_signal": snap.get("executable_signal"),
+            "quality_score": int(snap.get("quality_score") or 0),
+            "setup_reason": snap.get("reason"),
+            "execution_status": snap.get("execution_status"),
+            "strategy_qualified": snap.get("executable_signal")
+            in {"buy", "short"},
+            "entry_eligible": status == "qualified",
+            "status": str(status),
+            "rejection_reason": rejection_reason,
+            "trade_id": None,
+        }
+        self.opportunity_evaluation_log.append(row)
+        self.opportunity_evaluation_log = (
+            self.opportunity_evaluation_log[-500:]
+        )
+        return row
+
+    @staticmethod
+    def _update_opportunity_evaluation(
+        row: dict[str, Any] | None,
+        *,
+        status: str,
+        rejection_reason: str | None = None,
+        trade_id: str | None = None,
+    ) -> None:
+        if row is None:
+            return
+        row["status"] = str(status)
+        row["entry_eligible"] = status in {"qualified", "entered"}
+        row["rejection_reason"] = rejection_reason
+        if trade_id is not None:
+            row["trade_id"] = str(trade_id)
+
+    def opportunity_evaluations_snapshot(
+        self,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        rows = [dict(row) for row in self.opportunity_evaluation_log]
+        rows.sort(
+            key=lambda row: str(row.get("ts") or ""),
+            reverse=True,
+        )
+        return rows[: max(1, int(limit))]
 
     def live_trades(self) -> dict[str, Any]:
         btc_bias, btc_long = self._btc_gate()
@@ -1785,15 +1868,18 @@ class MultiDesk:
                 return []
 
         candidates: list[
-            tuple[int, PairBook, dict[str, Any]]
+            tuple[
+                int,
+                PairBook,
+                dict[str, Any],
+                dict[str, Any] | None,
+            ]
         ] = []
         for book in self.books:
-            # Keep one-position-per-book intact even during the experiment.
-            # This is an execution invariant, not a strategy threshold.
-            if book.qty() > 0:
-                continue
-
             if self.execution_test_mode:
+                # LOAD-002 execution validation keeps one position per book.
+                if book.qty() > 0:
+                    continue
                 try:
                     baseline = book.snapshot_strategy(
                         btc_bias_on=btc_bias,
@@ -1830,12 +1916,17 @@ class MultiDesk:
                         int(baseline.get("quality_score") or 0),
                         book,
                         snap,
+                        None,
                     )
                 )
                 continue
 
             route_candidates: list[
-                tuple[int, dict[str, Any]]
+                tuple[
+                    int,
+                    dict[str, Any],
+                    dict[str, Any],
+                ]
             ] = []
             for route in due_routes:
                 for horizon in supported_horizons(book.id):
@@ -1851,13 +1942,33 @@ class MultiDesk:
                             btc_in_position=btc_long,
                             requested_mode=mode,
                         )
-                    except Exception:
+                    except Exception as exc:
                         logger.exception(
                             "strategy route failed asset=%s horizon=%s",
                             book.id,
                             horizon,
                         )
+                        self._record_opportunity_evaluation(
+                            book,
+                            routing_horizon=horizon,
+                            clock_horizon_value=route.horizon.value,
+                            strategy_id=route.strategy_id,
+                            strategy_version=route.strategy_version,
+                            mode=mode,
+                            snapshot={
+                                "reason": (
+                                    f"strategy_error:{type(exc).__name__}"
+                                ),
+                                "execution_status": "strategy_error",
+                                "quality_score": 0,
+                            },
+                            status="error",
+                            rejection_reason=(
+                                f"strategy_error:{type(exc).__name__}"
+                            ),
+                        )
                         continue
+
                     snap = {
                         **snap,
                         "routing_horizon": horizon,
@@ -1865,15 +1976,65 @@ class MultiDesk:
                         "strategy_id": route.strategy_id,
                         "strategy_version": route.strategy_version,
                     }
-                    if snap.get("executable_signal") not in {
-                        "buy",
-                        "short",
-                    }:
+                    executable = snap.get("executable_signal")
+                    if executable not in {"buy", "short"}:
+                        raw_signal = snap.get("signal")
+                        execution_status = str(
+                            snap.get("execution_status") or ""
+                        )
+                        rejection_reason = str(
+                            (
+                                execution_status
+                                if raw_signal in {"buy", "short"}
+                                and execution_status
+                                not in {"", "no_trade"}
+                                else snap.get("reason")
+                                or execution_status
+                                or "no_executable_signal"
+                            )
+                        )
+                        self._record_opportunity_evaluation(
+                            book,
+                            routing_horizon=horizon,
+                            clock_horizon_value=route.horizon.value,
+                            strategy_id=route.strategy_id,
+                            strategy_version=route.strategy_version,
+                            mode=mode,
+                            snapshot=snap,
+                            status="rejected",
+                            rejection_reason=rejection_reason,
+                        )
                         continue
+
+                    if book.qty() > 0:
+                        self._record_opportunity_evaluation(
+                            book,
+                            routing_horizon=horizon,
+                            clock_horizon_value=route.horizon.value,
+                            strategy_id=route.strategy_id,
+                            strategy_version=route.strategy_version,
+                            mode=mode,
+                            snapshot=snap,
+                            status="blocked",
+                            rejection_reason="position_already_open",
+                        )
+                        continue
+
+                    evaluation = self._record_opportunity_evaluation(
+                        book,
+                        routing_horizon=horizon,
+                        clock_horizon_value=route.horizon.value,
+                        strategy_id=route.strategy_id,
+                        strategy_version=route.strategy_version,
+                        mode=mode,
+                        snapshot=snap,
+                        status="qualified",
+                    )
                     route_candidates.append(
                         (
                             int(snap.get("quality_score") or 0),
                             snap,
+                            evaluation,
                         )
                     )
 
@@ -1883,8 +2044,14 @@ class MultiDesk:
                 key=lambda row: row[0],
                 reverse=True,
             )
-            quality, snap = route_candidates[0]
-            candidates.append((quality, book, snap))
+            quality, snap, evaluation = route_candidates[0]
+            for _, _, lower_ranked in route_candidates[1:]:
+                self._update_opportunity_evaluation(
+                    lower_ranked,
+                    status="blocked",
+                    rejection_reason="lower_ranked_same_asset_route",
+                )
+            candidates.append((quality, book, snap, evaluation))
 
         out: list[dict[str, Any]] = []
         candidates.sort(
@@ -1898,9 +2065,14 @@ class MultiDesk:
             else MAX_ACTIVE_POSITIONS
         )
 
-        for _, book, snap in candidates:
+        for _, book, snap, evaluation in candidates:
             if active_count >= active_limit:
-                break
+                self._update_opportunity_evaluation(
+                    evaluation,
+                    status="blocked",
+                    rejection_reason="active_position_limit",
+                )
+                continue
 
             profile = playbook_profile(book.id)
             group = str(profile["cluster"])
@@ -1909,13 +2081,28 @@ class MultiDesk:
                 and group_counts.get(group, 0)
                 >= int(profile["cluster_cap"])
             ):
+                self._update_opportunity_evaluation(
+                    evaluation,
+                    status="blocked",
+                    rejection_reason="cluster_cap",
+                )
                 continue
             if float(book.mark or 0.0) <= 0:
+                self._update_opportunity_evaluation(
+                    evaluation,
+                    status="blocked",
+                    rejection_reason="no_mark",
+                )
                 continue
             if (
                 not self.execution_test_mode
                 and (risk_budget_usd <= 0 or capital_cap_usd <= 0)
             ):
+                self._update_opportunity_evaluation(
+                    evaluation,
+                    status="blocked",
+                    rejection_reason="risk_or_capital_unavailable",
+                )
                 continue
 
             result = book.enter(
@@ -1943,6 +2130,11 @@ class MultiDesk:
             out.append(result)
 
             if result.get("ok"):
+                self._update_opportunity_evaluation(
+                    evaluation,
+                    status="entered",
+                    trade_id=result.get("trade_id"),
+                )
                 active_count += 1
                 group_counts[group] = (
                     group_counts.get(group, 0) + 1
@@ -1979,7 +2171,6 @@ class MultiDesk:
                         ),
                     },
                 )
-                self.persist()
 
                 if book.kraken and not self.execution_test_mode:
                     asyncio.create_task(
@@ -1994,11 +2185,17 @@ class MultiDesk:
                             ),
                         )
                     )
-        if (
-            due_routes
-            and not self.execution_test_mode
-            and not any(row.get("ok") for row in out)
-        ):
+            else:
+                self._update_opportunity_evaluation(
+                    evaluation,
+                    status="blocked",
+                    rejection_reason=(
+                        f"execution_rejected:"
+                        f"{result.get('error') or 'unknown'}"
+                    ),
+                )
+
+        if due_routes and not self.execution_test_mode:
             self.persist()
         return out
 
