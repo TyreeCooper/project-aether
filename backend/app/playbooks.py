@@ -358,6 +358,28 @@ def _session_ok(
     return bool(required & set(active_session_ids))
 
 
+def _opportunity_pct(
+    source: list[Bar],
+    lookback: int,
+) -> float:
+    clean = [
+        normalize_bar(bar)
+        for bar in source
+        if float(
+            bar.get("close", bar.get("c", 0)) or 0
+        ) > 0
+    ]
+    if not clean:
+        return 0.0
+    window = clean[-max(int(lookback), 2):]
+    current = float(window[-1]["close"])
+    if current <= 0:
+        return 0.0
+    high = max(float(row["high"]) for row in window)
+    low = min(float(row["low"]) for row in window)
+    return max((high - low) / current * 100.0, 0.0)
+
+
 def _risk_stop_pct(
     source: list[Bar],
     profile: dict[str, Any],
@@ -441,6 +463,10 @@ def _mode_snapshot(
             profile,
             cost_pct,
         )
+        opportunity_pct = _opportunity_pct(
+            trigger_bars,
+            10,
+        )
         signal_key = (
             f"{mode}:{int(trigger_bars[-1]['ts'])}"
             if trigger_bars
@@ -459,6 +485,10 @@ def _mode_snapshot(
             "session_ok": session_ok,
             "quality_score": score,
             "risk_stop_pct": stop_pct,
+            "opportunity_pct": round(
+                opportunity_pct,
+                6,
+            ),
             "entry_clock": "1m",
             "bias_clock": "1d/4h/1h",
         }
@@ -509,6 +539,10 @@ def _mode_snapshot(
             profile,
             cost_pct,
         )
+        opportunity_pct = _opportunity_pct(
+            trigger_bars,
+            20,
+        )
         signal_key = (
             f"{mode}:{int(trigger_bars[-1]['ts'])}"
             if trigger_bars
@@ -527,6 +561,10 @@ def _mode_snapshot(
             "session_ok": session_ok,
             "quality_score": score,
             "risk_stop_pct": stop_pct,
+            "opportunity_pct": round(
+                opportunity_pct,
+                6,
+            ),
             "entry_clock": "15m",
             "bias_clock": "1d/4h",
         }
@@ -562,6 +600,10 @@ def _mode_snapshot(
         profile,
         cost_pct,
     )
+    opportunity_pct = _opportunity_pct(
+        bars_1h,
+        20,
+    )
     signal_key = (
         f"{mode}:{int(normalize_bar(bars_1h[-1])['ts'])}"
         if bars_1h
@@ -580,6 +622,10 @@ def _mode_snapshot(
         "session_ok": session_ok,
         "quality_score": score,
         "risk_stop_pct": stop_pct,
+        "opportunity_pct": round(
+            opportunity_pct,
+            6,
+        ),
         "entry_clock": "1h",
         "bias_clock": "1d/4h",
     }
@@ -698,6 +744,10 @@ def _crypto_daily(
         "prior_20d_close_high": round(prior_high, 8),
         "prior_20d_close_low": round(prior_low, 8),
         "structure_distance_pct": round(
+            structure_distance,
+            6,
+        ),
+        "opportunity_pct": round(
             structure_distance,
             6,
         ),
