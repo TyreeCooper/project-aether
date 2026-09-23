@@ -272,6 +272,7 @@ class PairBook:
                 "execution_test_load": (
                     "AETHER-LOAD-002" if execution_test else None
                 ),
+                "execution_test_run": snap.get("execution_test_run"),
                 "would_have_blocked_by": snap.get(
                     "would_have_blocked_by"
                 ),
@@ -402,10 +403,21 @@ class PairBook:
             self.entry_mode
             or profile["primary"]
         )
+        position = self.wallet.position(self.id) or {}
+        metadata = position.get("metadata") or {}
+        execution_test_position = bool(
+            position.get("execution_test_funded")
+            or metadata.get("execution_test")
+        )
+        management_mode = (
+            str(profile["primary"])
+            if execution_test_position
+            else mode
+        )
         strategy_mode = (
             "daily_swing"
             if self.id in {"btc", "eth"}
-            else mode
+            else management_mode
         )
         snap = self.snapshot_strategy(
             btc_bias_on=btc_bias_on,
@@ -423,11 +435,11 @@ class PairBook:
             rate * 200,
         )
 
-        if mode == "daily_swing":
+        if management_mode == "daily_swing":
             source_bars = list(self.bars_1d)
-        elif mode == "swing":
+        elif management_mode == "swing":
             source_bars = list(self.bars_1h)
-        elif mode == "scalp":
+        elif management_mode == "scalp":
             source_bars = list(self.bars)
         else:
             source_bars = resample_bars(
@@ -521,7 +533,7 @@ class PairBook:
         )
         limit = (
             profile.get("time_stop_minutes") or {}
-        ).get(mode)
+        ).get(management_mode)
         timed = bool(
             limit is not None
             and time_stop_due(
