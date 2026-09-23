@@ -410,3 +410,78 @@ def test_normal_trade_still_reserves_real_paper_capital():
 
     snap = portfolio.snapshot({"btc": 100_000.0})
     assert snap["reserved_margin_usd"] == opened["margin_reserved_usd"]
+
+
+
+def test_normal_mode_retires_restored_execution_test_position_before_routing(monkeypatch):
+    import asyncio
+
+    desk = MultiDesk(execution_test_mode=False)
+    desk.wallet = PaperPortfolio(300_000.0)
+    book = desk.by_id["btc"]
+    book.wallet = desk.wallet
+    book.mark = 100_000.0
+    book.bid = 99_999.0
+    book.ask = 100_001.0
+    monkeypatch.setattr(desk, "persist", lambda: None)
+
+    opened = desk.wallet.open_position(
+        "btc",
+        side="long",
+        quantity=0.0001,
+        price=100_000.0,
+        stop_price=90_000.0,
+        mode="execution_test",
+        execution_test=True,
+        metadata={
+            "execution_test": True,
+            "execution_test_load": "AETHER-LOAD-002",
+        },
+    )
+    assert opened["ok"] is True
+    book.entry_at = opened["opened_at"]
+    book.entry_mode = "execution_test"
+    book.stop = 90_000.0
+
+    retired = asyncio.run(desk._retire_execution_test_positions())
+
+    assert len(retired) == 1
+    assert retired[0]["exit_reason"] == "execution_test_retired"
+    assert desk.wallet.position("btc") is None
+    assert book.entry_at is None
+    assert book.entry_mode is None
+    assert book.stop == 0.0
+
+
+def test_normal_mode_does_not_retire_normal_strategy_position(monkeypatch):
+    import asyncio
+
+    desk = MultiDesk(execution_test_mode=False)
+    desk.wallet = PaperPortfolio(300_000.0)
+    book = desk.by_id["btc"]
+    book.wallet = desk.wallet
+    book.mark = 100_000.0
+    monkeypatch.setattr(desk, "persist", lambda: None)
+
+    opened = desk.wallet.open_position(
+        "btc",
+        side="long",
+        quantity=0.0001,
+        price=100_000.0,
+        stop_price=98_000.0,
+        mode="daily_swing",
+        metadata={"entry_reason": "normal_strategy"},
+    )
+    assert opened["ok"] is True
+
+    retired = asyncio.run(desk._retire_execution_test_positions())
+
+    assert retired == []
+    assert desk.wallet.position("btc") is not None
+
+
+def test_production_desk_constructor_is_normal_paper_mode():
+    import app.desk as desk_module
+
+    assert desk_module.desk.execution_test_mode is False
+    assert desk_module.desk.engine_status()["live_blocked"] is True

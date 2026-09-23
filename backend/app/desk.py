@@ -1621,6 +1621,81 @@ class MultiDesk:
             self.persist()
         return out
 
+    async def _retire_execution_test_positions(
+        self,
+    ) -> list[dict[str, Any]]:
+        """Close legacy LOAD-002 experiment positions before normal routing."""
+        if self.execution_test_mode:
+            return []
+
+        retired: list[dict[str, Any]] = []
+        for book in self.books:
+            position = self.wallet.position(book.id)
+            if not position:
+                continue
+            metadata = position.get("metadata") or {}
+            if not (
+                bool(position.get("execution_test_funded"))
+                or bool(metadata.get("execution_test"))
+            ):
+                continue
+
+            mark = float(book.mark or 0.0)
+            if mark <= 0:
+                continue
+
+            row = self.wallet.close_position(
+                book.id,
+                price=mark,
+                exit_reason="execution_test_retired",
+                reference_price=mark,
+            )
+            if not row.get("ok"):
+                continue
+
+            row["pair"] = book.pair
+            row["symbol"] = book.symbol
+            row["broker"] = book.broker
+            row["actor"] = "system-execution-test-retirement"
+            row["event"] = "exit"
+            row["position_side"] = position.get("side")
+            row["entry_mode"] = position.get("mode")
+
+            book.entry_at = None
+            book.entry_mode = None
+            book.stop = 0.0
+            book.highest = 0.0
+            book.lowest = 0.0
+
+            self._record_event(
+                "position_closed",
+                book,
+                {
+                    "trade_id": row.get("trade_id"),
+                    "side": row.get("position_side"),
+                    "mode": row.get("entry_mode"),
+                    "price": row.get("price"),
+                    "realized_pnl_usd": row.get("pnl"),
+                    "duration_seconds": row.get("duration_seconds"),
+                    "exit_reason": "execution_test_retired",
+                    "execution_test": True,
+                },
+            )
+            retired.append(row)
+
+            if db_store.initialized:
+                durable = self._durable_trade_row(row)
+                saved = await db_store.save_desk_trades([durable])
+                if not saved and db_store.last_error:
+                    logger.warning(
+                        "execution-test retirement durable write failed %s",
+                        db_store.last_error,
+                    )
+
+        if retired:
+            self.persist()
+        return retired
+
     async def tick(self) -> None:
         await self._refresh_risk_calendar()
         await self._refresh_crypto_calendar()
@@ -1630,7 +1705,8 @@ class MultiDesk:
         await self._refresh_context_bars()
         await self._persist_intelligence()
 
-        exits = []
+        retired = await self._retire_execution_test_positions()
+        exits = list(retired)
         ordered_books = sorted(
             self.books,
             key=lambda item: 0 if item.id == "btc" else 1,
@@ -1706,7 +1782,7 @@ class MultiDesk:
                             row.get("qty") or 0
                         ),
                     )
-        entries = self._allocate()
+        entries = [] if retired else self._allocate()
         if entries or exits:
             logger.info(
                 "desk entries=%s exits=%s usd=%.2f",
@@ -1752,6 +1828,6 @@ class MultiDesk:
         return data
 
 
-# Temporary paper-only execution experiment.
-# Change this single constructor flag back to False when AETHER-LOAD-002 closes.
-desk = MultiDesk(execution_test_mode=True)
+# LOAD-002 execution rail experiment is complete. Production now runs the
+# normal paper strategy router; live orders remain hard-blocked in app.live.
+desk = MultiDesk(execution_test_mode=False)
