@@ -101,15 +101,15 @@ jobs:
           assert body.get("live_blocked") is True, body
           PY
 
-          echo "Waiting for AETHER-LOAD-003-B8 strategy-test runtime to become active..."
+          echo "Waiting for AETHER-LOAD-003-B9 strategy-test runtime to become active..."
           for attempt in $(seq 1 18); do
             if curl --fail --silent --show-error --max-time 20 "$base/api/v1/floor" >/tmp/aether-floor-mode.json \
-              && python -c 'import json; b=json.load(open("/tmp/aether-floor-mode.json", encoding="utf-8")); e=b.get("engine") or {}; assert e.get("runtime_release")=="AETHER-LOAD-003-B8"; assert e.get("runtime_mode") == "strategy_test"; assert e.get("strategy_test_mode") is True; assert e.get("execution_test_mode") is False; assert e.get("forced_entries_enabled") is False; assert e.get("live_blocked") is True'; then
+              && python -c 'import json; b=json.load(open("/tmp/aether-floor-mode.json", encoding="utf-8")); e=b.get("engine") or {}; assert e.get("runtime_release")=="AETHER-LOAD-003-B9"; assert e.get("runtime_mode") == "strategy_test"; assert e.get("strategy_test_mode") is True; assert e.get("execution_test_mode") is False; assert e.get("forced_entries_enabled") is False; assert e.get("live_blocked") is True; assert e.get("armed") is True; assert e.get("running") is True; assert e.get("accepting_entries") is True'; then
               echo "Expected strategy-test runtime is active."
               break
             fi
             if [ "$attempt" -eq 18 ]; then
-              echo "Expected LOAD-003-B8 strategy-test runtime never became active."
+              echo "Expected LOAD-003-B9 strategy-test runtime never became active."
               cat /tmp/aether-floor-mode.json 2>/dev/null || true
               exit 1
             fi
@@ -118,11 +118,11 @@ jobs:
 
           curl --fail --silent --show-error --max-time 20 "$base/" >/tmp/aether-root.html
           grep -q "Aether Trading Desk" /tmp/aether-root.html
-          grep -q 'AETHER-LOAD-003-B8' /tmp/aether-root.html
+          grep -q 'AETHER-LOAD-003-B9' /tmp/aether-root.html
           grep -q 'id="runExecutionMatrix"' /tmp/aether-root.html
           grep -q 'id="disconnectOperator"' /tmp/aether-root.html
 
-          curl --fail --silent --show-error --max-time 20 "$base/static/aether-app.js?v=AETHER-LOAD-003-B8" >/tmp/aether-app.js
+          curl --fail --silent --show-error --max-time 20 "$base/static/aether-app.js?v=AETHER-LOAD-003-B9" >/tmp/aether-app.js
           grep -q 'Trade Duration' /tmp/aether-app.js
           grep -q 'operatorAuthenticated:false' /tmp/aether-app.js
           grep -q 'runExecutionMatrix' /tmp/aether-app.js
@@ -143,7 +143,7 @@ jobs:
               body = json.load(fh)
           runtime = body.get("runtime") or {}
           risk = body.get("risk") or {}
-          assert runtime.get("runtime_release") == "AETHER-LOAD-003-B8", runtime
+          assert runtime.get("runtime_release") == "AETHER-LOAD-003-B9", runtime
           assert runtime.get("runtime_mode") == "strategy_test", runtime
           assert runtime.get("strategy_test_mode") is True, runtime
           assert runtime.get("execution_test_mode") is False, runtime
@@ -157,6 +157,7 @@ jobs:
           assert "open_stop_risk_usd" in risk, risk
           assert "remaining_portfolio_risk_usd" in risk, risk
           assert "max_portfolio_risk_usd" in risk, risk
+          assert float(risk.get("open_stop_risk_usd") or 0) <= float(risk.get("max_portfolio_risk_usd") or 0) + 1e-6, risk
           for item in body["items"]:
               assert item.get("trade_class") in {"strategy", "execution_validation"}, item
               assert "position_risk_usd" in item, item
@@ -179,12 +180,49 @@ jobs:
           portfolio = body.get("portfolio") or {}
           assert float(portfolio.get("starting_bank") or 0) == 300000.0, portfolio
           engine = body.get("engine") or {}
-          assert engine.get("runtime_release") == "AETHER-LOAD-003-B8", engine
+          assert engine.get("runtime_release") == "AETHER-LOAD-003-B9", engine
           assert engine.get("runtime_mode") == "strategy_test", engine
           assert engine.get("strategy_test_mode") is True, engine
           assert engine.get("execution_test_mode") is False, engine
           assert engine.get("forced_entries_enabled") is False, engine
+          assert engine.get("armed") is True, engine
+          assert engine.get("running") is True, engine
+          assert engine.get("accepting_entries") is True, engine
           assert body.get("live_blocked") is True, body
+          strategy_risk = portfolio.get("strategy_risk") or {}
+          assert float(strategy_risk.get("open_stop_risk_usd") or 0) <= float(strategy_risk.get("max_portfolio_risk_usd") or 0) + 1e-6, strategy_risk
+          PY
+
+          curl --fail --silent --show-error --max-time 20 "$base/api/v1/settings" >/tmp/aether-settings.json
+          python - <<'PY'
+          import json
+          with open("/tmp/aether-settings.json", encoding="utf-8") as fh:
+              body = json.load(fh)
+          assert body.get("mode") == "paper", body
+          desk = body.get("desk") or {}
+          engine = body.get("engine") or {}
+          risk = desk.get("strategy_risk_policy") or {}
+          sizing = desk.get("instrument_sizing_policy") or {}
+          intelligence = body.get("intelligence") or {}
+          live = body.get("live") or {}
+          assert desk.get("runtime_release") == "AETHER-LOAD-003-B9", desk
+          assert desk.get("runtime_mode") == "strategy_test", desk
+          assert desk.get("forced_entries_enabled") is False, desk
+          assert engine.get("armed") is True, engine
+          assert engine.get("accepting_entries") is True, engine
+          assert risk.get("max_trade_risk_pct") == 0.75, risk
+          assert risk.get("max_portfolio_risk_pct") == 3.0, risk
+          assert risk.get("fixed_strategy_position_limit") is None, risk
+          assert sizing.get("fx_max_standard_lots") == 1.0, sizing
+          assert sizing.get("fx_max_base_units") == 100000.0, sizing
+          assert sizing.get("micro_future_max_contracts") == 1.0, sizing
+          assert sizing.get("equity_quantity_unit") == "shares", sizing
+          assert sizing.get("crypto_quantity_unit") == "coin_quantity", sizing
+          assert intelligence.get("community_trade_influence_enabled") is False, intelligence
+          assert (intelligence.get("crypto_calendar") or {}).get("trade_influence_enabled") is False, intelligence
+          assert (intelligence.get("event_policy") or {}).get("mode") == "observe_only", intelligence
+          assert live.get("orders_enabled") is False, live
+          assert live.get("live_blocked") is True, live
           PY
 
           curl --fail --silent --show-error --max-time 20 "$base/api/v1/desk/execution-matrix" >/tmp/aether-matrix.json
