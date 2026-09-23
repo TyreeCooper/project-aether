@@ -5,7 +5,7 @@
 - Load: AETHER-LOAD-003
 - State: CONTROL FILE ESTABLISHED
 - Active implementation batch: NONE
-- Waiting on: GROK BOT CLEARANCE TO START B1
+- Waiting on: GROK BOT J.A.R.V.I.S. CLEARANCE TO START B1
 - Starting main SHA: 09dfdb510bd5b54f43cef7e9c5f20389d3636ae1
 - Live-money execution: HARD BLOCKED
 - Paper testing: remains the target runtime
@@ -122,15 +122,15 @@ A downstream gate may NEVER create a trade when the setup/trigger layer did not 
 
 ---
 
-# Grok Bot Coordination Protocol
+# Grok bot J.A.R.V.I.S. Coordination Protocol
 
-## GROK BOT — THIS IS THE CANONICAL LOAD-003 CONTROL FILE
+## GROK BOT J.A.R.V.I.S. — THIS IS THE CANONICAL LOAD-003 CONTROL FILE
 
 Path:
 
 `docs/AETHER_LOAD_003_CONTROL.md`
 
-Grok should read this file first on every LOAD-003 review.
+J.A.R.V.I.S. should read this file first on every LOAD-003 review.
 
 ### Rules
 
@@ -138,9 +138,9 @@ Grok should read this file first on every LOAD-003 review.
 2. ChatGPT implements and commits only that batch.
 3. ChatGPT records the completed batch evidence in THIS FILE.
 4. ChatGPT then STOPS.
-5. Grok reviews the committed diff, tests, safety boundaries, and evidence.
-6. The next batch does not start until Grok explicitly clears it.
-7. If Grok finds a defect, repair it inside the CURRENT batch. Do not advance.
+5. J.A.R.V.I.S. reviews the committed diff, tests, safety boundaries, and evidence.
+6. The next batch does not start until J.A.R.V.I.S. explicitly clears it.
+7. If J.A.R.V.I.S. finds a defect, repair it inside the CURRENT batch. Do not advance.
 8. No weakening/deleting tests merely to obtain green CI.
 9. No loosening paper-only/live-blocked safety.
 10. No unrelated cleanup/refactor mixed into a batch.
@@ -149,17 +149,17 @@ Grok should read this file first on every LOAD-003 review.
 
 ### Clearance format
 
-Grok must use:
+J.A.R.V.I.S. must use:
 
-`GROK CLEAR — AETHER-LOAD-003 — START B<n>`
+`J.A.R.V.I.S. CLEAR — AETHER-LOAD-003 — START B<n>`
 
 Example for the first implementation batch:
 
-`GROK CLEAR — AETHER-LOAD-003 — START B1`
+`J.A.R.V.I.S. CLEAR — AETHER-LOAD-003 — START B1`
 
-If not cleared, Grok should use:
+If not cleared, J.A.R.V.I.S. should use:
 
-`GROK HOLD — AETHER-LOAD-003 — B<n> — <concrete defect/reason>`
+`J.A.R.V.I.S. HOLD — AETHER-LOAD-003 — B<n> — <concrete defect/reason>`
 
 ChatGPT must not advance while the batch is on HOLD.
 
@@ -214,7 +214,7 @@ After B1 commit, update this file with SHA + evidence and STOP.
 
 Next batch requires:
 
-`GROK CLEAR — AETHER-LOAD-003 — START B2`
+`J.A.R.V.I.S. CLEAR — AETHER-LOAD-003 — START B2`
 
 ---
 
@@ -250,7 +250,7 @@ After B2 commit, update this file with SHA + evidence and STOP.
 
 Next batch requires:
 
-`GROK CLEAR — AETHER-LOAD-003 — START B3`
+`J.A.R.V.I.S. CLEAR — AETHER-LOAD-003 — START B3`
 
 ---
 
@@ -283,7 +283,7 @@ After B3 commit, update this file with SHA + evidence and STOP.
 
 Next batch requires:
 
-`GROK CLEAR — AETHER-LOAD-003 — START B4`
+`J.A.R.V.I.S. CLEAR — AETHER-LOAD-003 — START B4`
 
 ---
 
@@ -317,7 +317,7 @@ After B4 commit, update this file with SHA + evidence and STOP.
 
 Next batch requires:
 
-`GROK CLEAR — AETHER-LOAD-003 — START B5`
+`J.A.R.V.I.S. CLEAR — AETHER-LOAD-003 — START B5`
 
 ---
 
@@ -351,7 +351,7 @@ After B5 commit, update this file with SHA + evidence and STOP.
 
 Next batch requires:
 
-`GROK CLEAR — AETHER-LOAD-003 — START B6`
+`J.A.R.V.I.S. CLEAR — AETHER-LOAD-003 — START B6`
 
 ---
 
@@ -385,7 +385,7 @@ After B6 commit, update this file with SHA + evidence and STOP.
 
 Next batch requires:
 
-`GROK CLEAR — AETHER-LOAD-003 — START B7`
+`J.A.R.V.I.S. CLEAR — AETHER-LOAD-003 — START B7`
 
 ---
 
@@ -419,7 +419,7 @@ After B7 commit, update this file with SHA + evidence and STOP.
 
 Next batch requires:
 
-`GROK CLEAR — AETHER-LOAD-003 — START B8`
+`J.A.R.V.I.S. CLEAR — AETHER-LOAD-003 — START B8`
 
 ---
 
@@ -453,7 +453,7 @@ After B8 commit, update this file with SHA + evidence and STOP.
 
 Next batch requires:
 
-`GROK CLEAR — AETHER-LOAD-003 — START B9`
+`J.A.R.V.I.S. CLEAR — AETHER-LOAD-003 — START B9`
 
 ---
 
@@ -519,12 +519,12 @@ Purpose:
 Starting SHA:
 `09dfdb510bd5b54f43cef7e9c5f20389d3636ae1`
 
-### GROK BOT — FIRST ACTION
+### GROK BOT J.A.R.V.I.S. — FIRST ACTION
 
 Review this control file and confirm the load structure and safety boundaries.
 
 If clear, respond exactly:
 
-`GROK CLEAR — AETHER-LOAD-003 — START B1`
+`J.A.R.V.I.S. CLEAR — AETHER-LOAD-003 — START B1`
 
 ChatGPT will not start B1 before that clearance.
