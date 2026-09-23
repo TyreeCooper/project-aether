@@ -837,10 +837,17 @@ class MultiDesk:
             for fill in book.fills:
                 if fill.get("event"):
                     continue
-                if str(fill.get("side") or "").lower() != "sell":
+                fill_side = str(fill.get("side") or "").lower()
+                if fill_side not in {"buy", "sell"}:
                     continue
                 if fill.get("pnl") is None:
                     continue
+                position_side = str(
+                    fill.get("position_side")
+                    or ("short" if fill_side == "buy" else "long")
+                ).lower()
+                if position_side not in {"long", "short"}:
+                    position_side = "long"
                 legacy_id = str(
                     fill.get("trade_id")
                     or f"legacy-{book.id}-{fill.get('ts')}"
@@ -854,7 +861,7 @@ class MultiDesk:
                         "symbol": book.symbol,
                         "pair": book.pair,
                         "broker": book.broker,
-                        "side": "long",
+                        "side": position_side,
                         "mode": fill.get("entry_mode"),
                         "entry_price": fill.get(
                             "entry_fill_price"

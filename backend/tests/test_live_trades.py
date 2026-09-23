@@ -246,3 +246,23 @@ def test_blotter_merge_deduplicates_trade_id_and_prefers_runtime_annotations():
     assert rows[0]["trade_id"] == opened["trade_id"]
     assert rows[0]["capture_efficiency_pct"] == 42.0
 
+
+
+def test_legacy_blotter_infers_short_from_buy_close_fill():
+    desk = _fresh_desk()
+    book = desk.by_id["eurusd"]
+    book.fills = [
+        {
+            "trade_id": "legacy-short-1",
+            "side": "buy",
+            "position_side": "short",
+            "qty": 10000,
+            "price": 1.0990,
+            "pnl": 10.0,
+            "ts": "2026-09-22T12:30:00+00:00",
+        }
+    ]
+    rows = desk.blotter()
+    assert len(rows) == 1
+    assert rows[0]["trade_id"] == "legacy-short-1"
+    assert rows[0]["side"] == "short"

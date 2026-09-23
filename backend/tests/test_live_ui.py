@@ -24,7 +24,10 @@ def test_live_ui_uses_canonical_live_trade_endpoint_and_local_timer():
 
 def test_blotter_renders_round_trip_duration_fields():
     js = (STATIC / "aether-app.js").read_text(encoding="utf-8")
-    assert "<th>Time in Trade</th>" in js
+    assert "<th>Trade Duration</th>" in js
+    assert 'String(h).padStart(2,"0")' in js
+    assert 'String(m).padStart(2,"0")' in js
+    assert 'String(sec).padStart(2,"0")' in js
     assert "realized_pnl_usd" in js
     assert "entry_price" in js
     assert "exit_price" in js
@@ -38,3 +41,24 @@ def test_live_trade_styles_are_present():
     assert ".live-trade-card" in css
     assert ".live-duration" in css
     assert ".event-stream" in css
+
+
+def test_trade_list_sort_and_filter_controls_are_present():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    js = (STATIC / "aether-app.js").read_text(encoding="utf-8")
+    for control_id in (
+        "floorSort",
+        "fillSort",
+        "fillSideFilter",
+        "liveSort",
+        "liveSortDir",
+        "liveSideFilter",
+        "liveModeFilter",
+        "blotterSort",
+        "blotterSortDir",
+        "blotterSideFilter",
+        "blotterModeFilter",
+    ):
+        assert f'id="{control_id}"' in html
+    assert "sortRows" in js
+    assert "pnlClass" in js

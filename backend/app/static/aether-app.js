@@ -7,11 +7,17 @@
   const when=v=>{if(!v)return "—";const d=new Date(v);return Number.isFinite(d.getTime())?d.toLocaleString([], {month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}):String(v);};
   const duration=s=>{
     const n=Math.max(0,Math.floor(Number(s)||0));
-    if(n<60)return n+"s";
-    const d=Math.floor(n/86400),h=Math.floor((n%86400)/3600),m=Math.floor((n%3600)/60),sec=n%60;
-    if(d)return d+"d "+h+"h";
-    if(h)return h+"h "+m+"m";
-    return m+"m "+String(sec).padStart(2,"0")+"s";
+    const h=Math.floor(n/3600),m=Math.floor((n%3600)/60),sec=n%60;
+    return String(h).padStart(2,"0")+":"+String(m).padStart(2,"0")+":"+String(sec).padStart(2,"0");
+  };
+  const selected=(id,fallback)=>$(id)?.value||fallback;
+  const sortRows=(rows,key,dir,valueFn)=>{
+    const sign=dir==="asc"?1:-1;
+    return rows.slice().sort((a,b)=>{
+      const av=valueFn(a,key),bv=valueFn(b,key);
+      if(typeof av==="string"||typeof bv==="string")return String(av??"").localeCompare(String(bv??""))*sign;
+      return ((Number(av)||0)-(Number(bv)||0))*sign;
+    });
   };
   const liveDuration=opened=>{
     if(!opened)return null;
@@ -66,7 +72,7 @@
   function bars(hostId,rows,valueFn,formatFn){
     const host=$(hostId);if(!host)return;
     const vals=rows.map(valueFn);const max=Math.max(...vals.map(v=>Math.abs(Number(v)||0)),1e-9);
-    host.innerHTML=rows.map(r=>{const v=Number(valueFn(r))||0;const w=Math.max(Math.abs(v)/max*100,1);return '<div class="bar-row"><label>'+esc(r.symbol||r.pair)+'</label><div class="track"><div class="fill '+(v>=0?"good":"bad")+'" style="width:'+w+'%"></div></div><output class="'+pnlClass(v)+'">'+esc(formatFn(v))+'</output></div>';}).join("");
+    host.innerHTML=rows.map(r=>{const v=Number(valueFn(r))||0;const w=Math.max(Math.abs(v)/max*100,1);return '<div class="bar-row"><label>'+esc(r.symbol||r.pair)+'</label><div class="track"><div class="fill '+(v>0?"good":v<0?"bad":"flat")+'" style="width:'+w+'%"></div></div><output class="'+pnlClass(v)+'">'+esc(formatFn(v))+'</output></div>';}).join("");
   }
   function lineChart(series){
     const host=$("assetChart");if(!host)return;
@@ -80,6 +86,8 @@
   }
   function renderFloor(){
     const f=state.floor;if(!f)return;const p=f.portfolio||{},rows=f.assets||[];
+    const floorKey=selected("floorSort","pnl"),floorDir=selected("floorSortDir","desc");
+    const floorRows=sortRows(rows,floorKey,floorDir,(a,key)=>key==="asset"?(a.symbol||a.pair||""):key==="move"?Number(a.intelligence?.opportunity_24h?.net_change_pct||0):key==="position"?Number(a.position_value||0):Number(a.open_pnl||0));
     setText("floorEquity",money(p.equity));setText("floorPnl",(Number(p.total_pnl)>=0?"+":"")+money(p.total_pnl).replace("$","")+" total P&L",pnlClass(p.total_pnl));
     setText("floorCash",money(p.cash));setText("floorExposure",pct(p.exposure_pct)+" exposure");
     setText("floorInvested",money(p.invested));setText("floorPositions",(p.active_positions||0)+" active positions");
@@ -107,7 +115,7 @@
     $("floorCatalysts").innerHTML=catalystRows.length?catalystRows.join(""):metric("Catalysts","No loaded macro/crypto catalysts");
     $("floorRisk").innerHTML=metric("State",String(risk.state||"unknown").toUpperCase())+metric("New entries",risk.new_entries_allowed?"ALLOWED":"RESTRICTED",risk.new_entries_allowed?"up":"down")+metric("Macro feed",risk.calendar_connected?"CONNECTED":"NOT CONNECTED",risk.calendar_connected?"up":"")+metric("Next macro",nextEvent?nextEvent.title:"None in next 24h")+metric("Macro impact",nextEvent?String(nextEvent.impact||"—").toUpperCase():"—")+metric("Primary verification",nextEvent?(nextEvent.verified_official?"VERIFIED":String(nextEvent.official_verification_status||"UNVERIFIED").replaceAll("_"," ").toUpperCase()):"—",nextEvent?.verified_official?"up":"")+metric("Crypto events",String(cryptoCal.status||"unconfigured").toUpperCase(),cryptoCal.connected?"up":"")+metric("Next crypto",nextCrypto?nextCrypto.title:"No tracked event loaded")+metric("Crypto date",nextCrypto?String(nextCrypto.displayed_date||"—"):"—")+metric("Crypto policy","OBSERVE ONLY");
     const sources=intel.sources||[];$("floorSources").innerHTML=metric("Connected",String(sources.filter(x=>x.status==="connected").length))+metric("Planned",String(sources.filter(x=>x.status==="planned").length))+metric("Market",sources.find(x=>x.id==="kraken")?.status?.toUpperCase()||"—")+metric("Macro calendar",sources.find(x=>x.id==="forex_factory")?.status?.toUpperCase()||"—")+metric("Crypto calendar",sources.find(x=>x.id==="coinmarketcal")?.status?.toUpperCase()||"—")+metric("News",sources.find(x=>x.id==="gdelt")?.status?.toUpperCase()||"—")+metric("Community",sources.find(x=>x.id==="community")?.status?.toUpperCase()||"—");
-    $("assetBoard").innerHTML=rows.map(a=>'<div class="asset-row" data-id="'+a.id+'"><b class="pair">'+esc(a.pair)+'</b><span>'+money(a.mark)+'</span><span class="'+pnlClass(a.intelligence?.opportunity_24h?.net_change_pct)+'">'+pct(a.intelligence?.opportunity_24h?.net_change_pct)+'</span><span>'+money(a.position_value)+'</span><span class="'+pnlClass(a.open_pnl)+'">'+money(a.open_pnl)+'</span><span>'+esc((a.signal||a.reason||"watch").toUpperCase())+'</span></div>').join("");
+    $("assetBoard").innerHTML=floorRows.map(a=>'<div class="asset-row" data-id="'+a.id+'"><b class="pair">'+esc(a.pair)+'</b><span>'+money(a.mark)+'</span><span class="'+pnlClass(a.intelligence?.opportunity_24h?.net_change_pct)+'">'+pct(a.intelligence?.opportunity_24h?.net_change_pct)+'</span><span>'+money(a.position_value)+'</span><span class="'+pnlClass(a.open_pnl)+'">'+money(a.open_pnl)+'</span><span>'+esc((a.signal||a.reason||"watch").toUpperCase())+'</span></div>').join("");
     $("assetBoard").querySelectorAll(".asset-row").forEach(r=>r.onclick=()=>go("asset/"+r.dataset.id));
     const e=f.engine||{};const armed=Boolean(e.accepting_entries);const engineLabel=armed?"ARMED":(e.armed&&!e.running?"STARTING":"DISARMED");
     $("floorHealth").innerHTML=metric("Engine",engineLabel,armed?"up":"")+metric("Loop",e.running?"RUNNING":"STOPPED",e.running?"up":"down")+metric("Live execution",f.live_blocked?"BLOCKED":"READY",f.live_blocked?"up":"down")+metric("Books",String(p.assets||0))+metric("Active positions",String(p.active_positions||0))+metric("Exposure",pct(p.exposure_pct));
@@ -121,7 +129,7 @@
     setText("assetStateBadge",Number(a.qty)>0?"IN POSITION":"FLAT");$("assetStateBadge").className="badge "+(Number(a.qty)>0?"good":"");
     setText("assetMark",money(a.mark));setText("assetChange",pct(an.change_pct),"delta "+pnlClass(an.change_pct));
     setText("assetBid",money(a.bid));setText("assetAsk",money(a.ask));setText("assetWatch",money(a.watch_last));
-    const basis=(Number(a.watch_last)-Number(a.mark));setText("assetBasis",Number.isFinite(basis)?money(basis):"—");
+    const basis=(Number(a.watch_last)-Number(a.mark));setText("assetBasis",Number.isFinite(basis)?money(basis):"—",pnlClass(basis));
     setText("assetChartTitle",(a.pair||"")+" price");setText("assetWindow",(w.bars||0)+" recent 1m bars");
     lineChart(d.series);
     const held=a.opened_at?liveDuration(a.opened_at):null;
@@ -132,7 +140,7 @@
     $("assetRange").innerHTML=metric("Window high",money(w.high))+metric("Window low",money(w.low))+metric("Book bars",String(a.bars||0))+metric("Kraken pair",String(a.kraken||"—"))+metric("Live execution","BLOCKED","up");
     const intel=d.intelligence||{},opp=intel.opportunity_24h||{},quality=intel.market_quality||{},regime=intel.regime||{},cross=intel.cross_asset||{},attr=intel.attribution||{},news=intel.news||{},comm=intel.community||{},risk=intel.risk||{},cap=d.capture||{};
     $("assetIntelligence").innerHTML=metric("24h open",money(opp.open))+metric("24h high",money(opp.high))+metric("24h low",money(opp.low))+metric("24h net",money(opp.net_move),pnlClass(opp.net_move))+metric("24h change",pct(opp.net_change_pct),pnlClass(opp.net_change_pct))+metric("Opportunity range",money(opp.opportunity_range))+metric("Range %",pct(opp.opportunity_range_pct))+metric("Range position",opp.range_position_pct==null?"—":pct(opp.range_position_pct))+metric("24h volume",num(opp.volume,2))+metric("Relative volume",quality.relative_volume_24h==null?"—":num(quality.relative_volume_24h,2)+"×")+metric("ATR 14 · 1m",quality.atr_14_1m==null?"—":money(quality.atr_14_1m))+metric("Realized vol · 60m",quality.realized_vol_60m_pct==null?"—":pct(quality.realized_vol_60m_pct))+metric("Spread",opp.spread_bps==null?"—":num(opp.spread_bps,2)+" bps")+metric("Liquidity",String(quality.liquidity_state||"unavailable").toUpperCase())+metric("Regime",String(regime.state||"unavailable").replaceAll("_"," ").toUpperCase())+metric("Regime influence",regime.trade_influence_enabled?"ENABLED":"SHADOW ONLY");
-    $("assetCrossAsset").innerHTML=metric("BTC correlation 4h",cross.btc_correlation_4h==null?"—":num(cross.btc_correlation_4h,2))+metric("BTC correlation regime",String(cross.btc_correlation_regime||"unavailable").replaceAll("_"," ").toUpperCase())+metric("Beta vs BTC 4h",cross.beta_vs_btc_4h==null?"—":num(cross.beta_vs_btc_4h,2))+metric("ETH correlation 4h",cross.eth_correlation_4h==null?"—":num(cross.eth_correlation_4h,2))+metric("Relative strength vs BTC",cross.relative_strength_vs_btc_24h_pct==null?"—":pct(cross.relative_strength_vs_btc_24h_pct))+metric("Relative strength vs desk",cross.relative_strength_vs_desk_24h_pct==null?"—":pct(cross.relative_strength_vs_desk_24h_pct))+metric("Desk mean 24h",cross.desk_mean_change_24h_pct==null?"—":pct(cross.desk_mean_change_24h_pct))+metric("1h change",pct(intel.windows?.["1h"]?.change_pct))+metric("4h change",pct(intel.windows?.["4h"]?.change_pct))+metric("12h change",pct(intel.windows?.["12h"]?.change_pct))+metric("3d change",pct(intel.windows?.["3d"]?.change_pct))+metric("7d change",pct(intel.windows?.["7d"]?.change_pct))+metric("30d change",pct(intel.windows?.["30d"]?.change_pct));
+    $("assetCrossAsset").innerHTML=metric("BTC correlation 4h",cross.btc_correlation_4h==null?"—":num(cross.btc_correlation_4h,2))+metric("BTC correlation regime",String(cross.btc_correlation_regime||"unavailable").replaceAll("_"," ").toUpperCase())+metric("Beta vs BTC 4h",cross.beta_vs_btc_4h==null?"—":num(cross.beta_vs_btc_4h,2))+metric("ETH correlation 4h",cross.eth_correlation_4h==null?"—":num(cross.eth_correlation_4h,2))+metric("Relative strength vs BTC",cross.relative_strength_vs_btc_24h_pct==null?"—":pct(cross.relative_strength_vs_btc_24h_pct),pnlClass(cross.relative_strength_vs_btc_24h_pct))+metric("Relative strength vs desk",cross.relative_strength_vs_desk_24h_pct==null?"—":pct(cross.relative_strength_vs_desk_24h_pct),pnlClass(cross.relative_strength_vs_desk_24h_pct))+metric("Desk mean 24h",cross.desk_mean_change_24h_pct==null?"—":pct(cross.desk_mean_change_24h_pct),pnlClass(cross.desk_mean_change_24h_pct))+metric("1h change",pct(intel.windows?.["1h"]?.change_pct),pnlClass(intel.windows?.["1h"]?.change_pct))+metric("4h change",pct(intel.windows?.["4h"]?.change_pct),pnlClass(intel.windows?.["4h"]?.change_pct))+metric("12h change",pct(intel.windows?.["12h"]?.change_pct),pnlClass(intel.windows?.["12h"]?.change_pct))+metric("3d change",pct(intel.windows?.["3d"]?.change_pct),pnlClass(intel.windows?.["3d"]?.change_pct))+metric("7d change",pct(intel.windows?.["7d"]?.change_pct),pnlClass(intel.windows?.["7d"]?.change_pct))+metric("30d change",pct(intel.windows?.["30d"]?.change_pct),pnlClass(intel.windows?.["30d"]?.change_pct));
     const drivers=attr.drivers||[];
     const newsNarratives=news.narratives||[];
     $("assetAttribution").innerHTML=metric("Status",String(attr.status||"unavailable").toUpperCase())+metric("Driver candidates",String(drivers.length))+drivers.slice(0,3).map((x,i)=>metric("Driver "+(i+1),String(x.label||"—")+" · "+String(x.confidence_pct||0)+"%")).join("")+metric("News feed",String(news.status||"unavailable").toUpperCase())+metric("News articles",news.articles_analyzed==null?"—":String(news.articles_analyzed))+metric("News domains",news.independent_domains==null?"—":String(news.independent_domains))+metric("News narrative",newsNarratives[0]?String(newsNarratives[0].term)+" · "+String(newsNarratives[0].mentions):"—")+metric("Note",attr.note||news.note||"—");
@@ -142,7 +150,9 @@
     const assetCal=d.risk_calendar||{};const nextRisk=(assetCal.upcoming_24h||[])[0];const assetCrypto=(assetCal.crypto_calendar?.events||[]).find(e=>(e.coins||[]).some(c=>String(c.symbol||"").toUpperCase()===String(a.symbol||"").toUpperCase()));
     $("assetRisk").innerHTML=metric("State",String(risk.state||"unknown").toUpperCase())+metric("New entries",risk.new_entries_allowed?"ALLOWED":"RESTRICTED",risk.new_entries_allowed?"up":"down")+metric("Macro calendar",risk.calendar_connected?"CONNECTED":"NOT CONNECTED")+metric("Next macro",nextRisk?nextRisk.title:"None in next 24h")+metric("Macro impact",nextRisk?String(nextRisk.impact||"—").toUpperCase():"—")+metric("Primary verification",nextRisk?(nextRisk.verified_official?"VERIFIED":String(nextRisk.official_verification_status||"UNVERIFIED").replaceAll("_"," ").toUpperCase()):"—",nextRisk?.verified_official?"up":"")+metric("Crypto event",assetCrypto?assetCrypto.title:"No tracked event loaded")+metric("Crypto date",assetCrypto?String(assetCrypto.displayed_date||"—"):"—")+metric("Crypto timing",assetCrypto?(assetCrypto.is_estimated?"ESTIMATED WINDOW":"EXACT PROVIDER TIME"):"—")+metric("Policy",assetCal.policy?.mode==="observe_only"?"OBSERVE ONLY":"ACTIVE")+metric("Note",risk.note||"—");
     setText("assetLedgerTitle",(a.pair||"")+" fills");
-    const fills=(d.fills||[]).slice().reverse();
+    const fillSide=selected("fillSideFilter","all"),fillKey=selected("fillSort","time"),fillDir=selected("fillSortDir","desc");
+    const fillBase=(d.fills||[]).filter(f=>fillSide==="all"||String(f.side||"").toLowerCase()===fillSide);
+    const fills=sortRows(fillBase,fillKey,fillDir,(f,key)=>key==="time"?Date.parse(f.ts||0):key==="pnl"?Number(f.pnl||0):key==="qty"?Number(f.qty||0):key==="price"?Number(f.price||0):key==="fee"?Number(f.fee||0):String(f.side||""));
     $("assetLedger").innerHTML=fills.length?'<table><thead><tr><th>Time</th><th>Side</th><th>Qty</th><th>Price</th><th>Fee</th><th>P&L</th><th>Actor</th></tr></thead><tbody>'+fills.map(f=>'<tr><td>'+esc(String(f.ts||"").replace("T"," ").slice(0,19))+'</td><td>'+esc(String(f.side||"").toUpperCase())+'</td><td>'+num(f.qty,8)+'</td><td>'+money(f.price)+'</td><td>'+money(f.fee)+'</td><td class="'+pnlClass(f.pnl)+'">'+money(f.pnl)+'</td><td>'+esc(f.actor||"—")+'</td></tr>').join("")+'</tbody></table>':'<div class="empty">No fills yet for '+esc(a.pair||"this asset")+'.</div>';
   }
   function renderEngine(){
@@ -152,8 +162,11 @@
     $("engineMatrix").querySelectorAll(".asset-row").forEach(r=>r.onclick=()=>go("asset/"+r.dataset.id));
   }
   function renderLive(){
-    const d=state.live||{},items=d.items||[],watch=d.watch||[],events=d.events||[];
-    const openPnl=items.reduce((s,x)=>s+Number(x.open_pnl_usd||0),0);
+    const d=state.live||{},rawItems=d.items||[],watch=d.watch||[],events=d.events||[];
+    const liveSide=selected("liveSideFilter","all"),liveMode=selected("liveModeFilter","all"),liveKey=selected("liveSort","pnl"),liveDir=selected("liveSortDir","desc");
+    const filteredItems=rawItems.filter(x=>(liveSide==="all"||String(x.side||"").toLowerCase()===liveSide)&&(liveMode==="all"||String(x.mode||"").toLowerCase()===liveMode));
+    const items=sortRows(filteredItems,liveKey,liveDir,(x,key)=>key==="pnl"?Number(x.open_pnl_usd||0):key==="return"?Number(x.price_move_pct||0):key==="duration"?Number(x.duration_seconds??liveDuration(x.opened_at)??0):key==="asset"?String(x.symbol||x.pair||""):key==="side"?String(x.side||""):key==="mode"?String(x.mode||""):key==="entry"?Date.parse(x.opened_at||0):Number(x.quantity||0));
+    const openPnl=rawItems.reduce((s,x)=>s+Number(x.open_pnl_usd||0),0);
     setText("liveOpenCount",String(d.open_count||0));
     setText("liveOpenSummary",items.length?items.map(x=>x.symbol+" "+String(x.side||"").toUpperCase()).join(" · "):"Aether is scanning.");
     setText("liveOpenPnl",money(openPnl),pnlClass(openPnl));
@@ -166,15 +179,17 @@
     $("liveStateBadge").className="badge "+(items.length?"good":"");
     $("liveTradeCards").innerHTML=items.length?items.map(t=>{
       const held=liveDuration(t.opened_at);
-      return '<article class="live-trade-card" data-asset="'+esc(t.asset_id)+'"><header><div><p class="eyebrow">'+esc(String(t.mode||"trade").toUpperCase())+'</p><h3>'+esc(t.symbol||t.pair||"—")+' <span>'+esc(String(t.side||"").toUpperCase())+'</span></h3></div><b class="live-duration" data-opened="'+esc(t.opened_at||"")+'">'+(held==null&&t.duration_seconds==null?"—":duration(held??t.duration_seconds))+'</b></header><div class="live-price-row"><div><span>Entry</span><b>'+money(t.entry_price)+'</b></div><div><span>Current</span><b>'+money(t.current_price)+'</b></div><div><span>Stop</span><b>'+money(t.stop_price)+'</b></div></div><div class="live-pnl '+pnlClass(t.open_pnl_usd)+'">'+money(t.open_pnl_usd)+' <small>'+pct(t.price_move_pct)+'</small></div><div class="metric-list">'+metric("MFE",t.mfe_pct==null?"—":pct(t.mfe_pct))+metric("MAE",t.mae_pct==null?"—":pct(t.mae_pct))+metric("Quantity",num(t.quantity,8)+" "+String(t.quantity_unit||""))+metric("Management",String(t.management_state||"MANAGING"))+metric("Entry reason",String(t.entry_reason||"—"))+'</div></article>';
+      return '<article class="live-trade-card" data-asset="'+esc(t.asset_id)+'"><header><div><p class="eyebrow">'+esc(String(t.mode||"trade").toUpperCase())+'</p><h3>'+esc(t.symbol||t.pair||"—")+' <span>'+esc(String(t.side||"").toUpperCase())+'</span></h3></div><b class="live-duration" data-opened="'+esc(t.opened_at||"")+'">'+(held==null&&t.duration_seconds==null?"—":duration(held??t.duration_seconds))+'</b></header><div class="live-price-row"><div><span>Entry</span><b>'+money(t.entry_price)+'</b></div><div><span>Current</span><b>'+money(t.current_price)+'</b></div><div><span>Stop</span><b>'+money(t.stop_price)+'</b></div></div><div class="live-pnl '+pnlClass(t.open_pnl_usd)+'">'+money(t.open_pnl_usd)+' <small>'+pct(t.price_move_pct)+'</small></div><div class="metric-list">'+metric("MFE",t.mfe_pct==null?"—":pct(t.mfe_pct),pnlClass(t.mfe_pct))+metric("MAE",t.mae_pct==null?"—":pct(t.mae_pct),pnlClass(t.mae_pct))+metric("Quantity",num(t.quantity,8)+" "+String(t.quantity_unit||""))+metric("Management",String(t.management_state||"MANAGING"))+metric("Entry reason",String(t.entry_reason||"—"))+'</div></article>';
     }).join(""):'<div class="empty live-empty"><b>AETHER SCANNING</b><span>No paper position is open right now. Valid setups can appear below while Aether waits for an executable trigger.</span></div>';
     $("liveTradeCards").querySelectorAll("[data-asset]").forEach(x=>x.onclick=()=>go("asset/"+x.dataset.asset));
     $("liveWatch").innerHTML=watch.length?watch.slice(0,5).map((x,i)=>metric((i+1)+". "+String(x.symbol||x.pair||"—"),String(x.signal||x.direction||"WATCH").toUpperCase()+" · "+String(x.quality_score||0)+"/100 · "+String(x.reason||"waiting"))).join(""):metric("Watch","No setup data yet");
     $("liveEvents").innerHTML=events.length?events.slice(0,12).map(e=>'<div class="event-row"><span>'+esc(when(e.ts))+'</span><b>'+esc(String(e.event_type||"event").replaceAll("_"," ").toUpperCase())+'</b><em>'+esc(e.symbol||e.pair||"—")+'</em></div>').join(""):'<div class="empty">No trade lifecycle events yet.</div>';
   }
   function renderBlotter(){
-    const rows=state.blotter||[];
-    $("deskBlotter").innerHTML=rows.length?'<table><thead><tr><th>Net P&L</th><th>Asset</th><th>Side</th><th>Mode</th><th>Entry</th><th>Exit</th><th>Time in Trade</th><th>Return</th><th>Fees</th><th>Exit reason</th><th>Closed</th></tr></thead><tbody>'+rows.map(t=>'<tr><td class="'+pnlClass(t.realized_pnl_usd)+'">'+money(t.realized_pnl_usd)+'</td><td><b>'+esc(t.pair||t.symbol||"—")+'</b></td><td>'+esc(String(t.side||"").toUpperCase())+'</td><td>'+esc(String(t.mode||"—").toUpperCase())+'</td><td>'+money(t.entry_price)+'</td><td>'+money(t.exit_price)+'</td><td>'+esc(t.duration_seconds==null?"—":duration(t.duration_seconds))+'</td><td class="'+pnlClass(t.net_return_pct)+'">'+(t.net_return_pct==null?"—":pct(t.net_return_pct))+'</td><td>'+money(t.fees_usd)+'</td><td>'+esc(String(t.exit_reason||"—").replaceAll("_"," "))+'</td><td>'+esc(when(t.closed_at))+'</td></tr>').join("")+'</tbody></table>':'<div class="empty">No completed round-trip paper trades yet.</div>';
+    const side=selected("blotterSideFilter","all"),mode=selected("blotterModeFilter","all"),key=selected("blotterSort","closed"),dir=selected("blotterSortDir","desc");
+    const base=(state.blotter||[]).filter(t=>(side==="all"||String(t.side||"").toLowerCase()===side)&&(mode==="all"||String(t.mode||"").toLowerCase()===mode));
+    const rows=sortRows(base,key,dir,(t,k)=>k==="closed"?Date.parse(t.closed_at||0):k==="pnl"?Number(t.realized_pnl_usd||0):k==="return"?Number(t.net_return_pct||0):k==="duration"?Number(t.duration_seconds||0):k==="asset"?String(t.pair||t.symbol||""):k==="side"?String(t.side||""):k==="mode"?String(t.mode||""):Number(t.fees_usd||0));
+    $("deskBlotter").innerHTML=rows.length?'<table><thead><tr><th>Net P&L</th><th>Asset</th><th>Side</th><th>Mode</th><th>Entry</th><th>Exit</th><th>Trade Duration</th><th>Return</th><th>Fees</th><th>Exit reason</th><th>Closed</th></tr></thead><tbody>'+rows.map(t=>'<tr><td class="'+pnlClass(t.realized_pnl_usd)+'">'+money(t.realized_pnl_usd)+'</td><td><b>'+esc(t.pair||t.symbol||"—")+'</b></td><td>'+esc(String(t.side||"").toUpperCase())+'</td><td>'+esc(String(t.mode||"—").toUpperCase())+'</td><td>'+money(t.entry_price)+'</td><td>'+money(t.exit_price)+'</td><td>'+esc(t.duration_seconds==null?"—":duration(t.duration_seconds))+'</td><td class="'+pnlClass(t.net_return_pct)+'">'+(t.net_return_pct==null?"—":pct(t.net_return_pct))+'</td><td>'+money(t.fees_usd)+'</td><td>'+esc(String(t.exit_reason||"—").replaceAll("_"," "))+'</td><td>'+esc(when(t.closed_at))+'</td></tr>').join("")+'</tbody></table>':'<div class="empty">No completed round-trip paper trades match these filters.</div>';
   }
   function openAssetPicker(){
     $("assetPicker").classList.remove("hidden");
@@ -263,6 +278,10 @@
       markNav();
     }catch(e){toast("Data refresh failed");}
   }
+  ["floorSort","floorSortDir"].forEach(id=>$(id)?.addEventListener("change",renderFloor));
+  ["fillSort","fillSortDir","fillSideFilter"].forEach(id=>$(id)?.addEventListener("change",renderAsset));
+  ["liveSort","liveSortDir","liveSideFilter","liveModeFilter"].forEach(id=>$(id)?.addEventListener("change",renderLive));
+  ["blotterSort","blotterSortDir","blotterSideFilter","blotterModeFilter"].forEach(id=>$(id)?.addEventListener("change",renderBlotter));
   document.querySelectorAll(".bottom-nav button").forEach(b=>b.onclick=()=>go(b.dataset.route));
   $("floorLiveStrip")?.addEventListener("click",()=>go("live"));
   $("backFloor").onclick=()=>go("floor");
