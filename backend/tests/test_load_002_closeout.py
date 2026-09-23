@@ -48,9 +48,9 @@ def test_production_workflow_verifies_strategy_test_runtime_contract():
         ROOT / ".github" / "workflows" / "main_aether-prod-api.yml"
     ).read_text(encoding="utf-8")
     assert "/api/v1/load-status/aether-load-002" in workflow
-    assert "AETHER-LOAD-003-B8" in workflow
-    assert "Waiting for AETHER-LOAD-003-B8 strategy-test runtime" in workflow
-    assert "Expected LOAD-003-B8 strategy-test runtime never became active." in workflow
+    assert "AETHER-LOAD-003-B9" in workflow
+    assert "Waiting for AETHER-LOAD-003-B9 strategy-test runtime" in workflow
+    assert "Expected LOAD-003-B9 strategy-test runtime never became active." in workflow
     assert "/api/v1/desk/execution-matrix" in workflow
     assert 'runtime_mode") == "strategy_test"' in workflow
     assert 'execution_test_mode") is False' in workflow
