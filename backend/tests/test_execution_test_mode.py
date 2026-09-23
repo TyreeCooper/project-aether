@@ -349,3 +349,61 @@ def test_closed_execution_test_identity_survives_portfolio_restore():
     assert durable["execution_test_funded"] is True
     assert durable["metadata"]["execution_test"] is True
     assert durable["metadata"]["execution_test_load"] == "AETHER-LOAD-002"
+
+
+def test_execution_test_synthetic_funding_does_not_change_normal_cash_or_margin():
+    portfolio = PaperPortfolio(10_000.0)
+    before_cash = portfolio.usd
+
+    opened = portfolio.open_position(
+        "btc",
+        side="long",
+        quantity=0.0001,
+        price=100_000.0,
+        stop_price=90_000.0,
+        mode="execution_test",
+        execution_test=True,
+        metadata={
+            "execution_test": True,
+            "execution_test_load": "AETHER-LOAD-002",
+        },
+    )
+    assert opened["ok"] is True
+    assert opened["margin_reserved_usd"] == 0.0
+    assert opened["normal_required_margin_usd"] > 0.0
+    entry_fee = float(opened["entry_fee_usd"])
+    assert portfolio.usd == before_cash - entry_fee
+
+    snap = portfolio.snapshot({"btc": 100_000.0})
+    assert snap["reserved_margin_usd"] == 0.0
+
+    closed = portfolio.close_position(
+        "btc",
+        price=100_000.0,
+        exit_reason="execution_test_flat_close",
+    )
+    assert closed["ok"] is True
+    assert closed["gross_pnl_usd"] == 0.0
+    assert portfolio.usd == before_cash - closed["fees_usd"]
+
+
+def test_normal_trade_still_reserves_real_paper_capital():
+    portfolio = PaperPortfolio(10_000.0)
+    before_cash = portfolio.usd
+
+    opened = portfolio.open_position(
+        "btc",
+        side="long",
+        quantity=0.0001,
+        price=100_000.0,
+        stop_price=98_000.0,
+        mode="intraday",
+        metadata={"entry_reason": "normal_strategy"},
+    )
+    assert opened["ok"] is True
+    assert opened["execution_test_funded"] is False
+    assert opened["margin_reserved_usd"] > 0.0
+    assert portfolio.usd < before_cash - opened["entry_fee_usd"]
+
+    snap = portfolio.snapshot({"btc": 100_000.0})
+    assert snap["reserved_margin_usd"] == opened["margin_reserved_usd"]
