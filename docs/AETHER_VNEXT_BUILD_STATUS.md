@@ -1,6 +1,6 @@
 # AETHER vNext — Build Status
 
-**AETHER TRACE:** 2026-09-26 01:18 EDT  
+**AETHER TRACE:** 2026-09-26 13:55 EDT  
 **Branch:** `aether-vnext-swapout`  
 **Draft PR:** #12  
 **Legacy baseline:** `879736630edf5f41ede90258a4596bf3fff8c053`
@@ -153,21 +153,56 @@ Phase 4 completion evidence:
 - **382 repository tests passed, 1 warning.**
 - PR remains DRAFT; PAPER ONLY / LIVE HARD BLOCKED remained intact.
 
-### Phase 5 — Execution Engine: IN PROGRESS
+### Phase 5 — Execution Engine: COMPLETE
 
-Scope:
-- two-phase READY → RESERVED → SUBMITTED → FILLED/REJECTED/CANCELLED lifecycle;
-- broker-local cash/margin reservation without holding SQL open during adapter wait;
-- 250 ms paper acknowledgement/fill latency;
-- 15 s paper stale-submit timeout;
-- all-or-none seed-twelve paper fills by default; PARTIAL remains first-class but disabled
-  unless Policy explicitly enables it;
-- conservative bid/ask entry and exit fills with 5 bps adverse slippage;
-- market-changed/stale rejection and spread-doubling guard at fill time;
-- signal consumption only on successful OPEN;
-- terminal-state idempotency and crash/restart reconciliation;
-- flatten path with conservative through-price stop handling;
-- no live orders.
+Implemented:
+- two-phase READY → RESERVED → SUBMITTED → FILLED / REJECTED / CANCELLED_STALE lifecycle;
+- broker-local Phase-A cash/margin reserve committed before any adapter wait;
+- persisted MarketObservation required at reserve and re-read at fill;
+- source-owned reserve formulas for Kraken spot, tastyfx FX, Ninja futures and IBKR equities;
+- canonical paper-sleeve routing per asset; no cross-sleeve borrowing;
+- binding OPEN idempotency key `sha256(ticket_id|side|qty|asset|horizon|signal_key)`;
+- signal_key remains unconsumed until successful OPEN;
+- one active `asset:horizon` occupancy enforced through the durable book;
+- 250 ms paper fill latency and 15-second durable submit timeout;
+- 2-second stale-intent reconciler with terminal-state-wins late-fill behavior;
+- all-or-none seed-twelve fills; paper PARTIAL remains disabled rather than invented;
+- healthy/fresh market requirement, spread-doubling entry guard and conservative bid/ask fills;
+- 5 bps adverse paper slip on entry and exit;
+- protective stop gap-through exit pricing rather than perfect-stop fills;
+- explicit AETH-VN-004 erratum for the contradictory `bad_fill_through_stop` inequality;
+- frozen ExitPlan identity from READY through OPEN;
+- transactional OPEN creation, signal consumption, active-position claim and EventLedger write;
+- transactional FLATTEN_REQUEST → close OrderIntent → FILLED → FLAT lifecycle;
+- OPEN reserve/margin retained through the trade and released exactly once at FLAT;
+- normalized spot/equity-long inventory keyed by `(broker_account_id, asset_id)`;
+- BTC/ETH inventory isolation inside Kraken and no cash-inventory rows for futures/FX;
+- self-contained ClosedTrade execution evidence including entry/exit identity, prices, costs,
+  duration, MFE/MAE, capture and exit reason;
+- product-correct gross-P&L math for crypto/equity, FX, micro futures and US10Y/ZN execution;
+- zero-fill OPEN failure releases reserve without consuming signal and preserves
+  `first_killed_by` / `first_kill_reason`;
+- failed CLOSE attempts leave the successful OPEN lineage and position intact;
+- exact v4.2.1 OrderIntent vocabulary under schema revision 0010:
+  `symbol_executed`, `requested_qty`, `expected_fill_price`, `slip_usd`,
+  `slip_bps`, `observation_id_at_reserve`, `observation_id_at_fill`, `version`,
+  with `order_type=MARKET_PAPER`;
+- PAPER ONLY / LIVE HARD BLOCKED remains non-bypassable.
+
+Phase 5 completion evidence:
+- AETHER vNext CI run #338: SUCCESS — **160 isolated vNext tests passed**.
+- repository-wide CI run #647: SUCCESS — **455 tests passed, 1 warning**.
+- PR #12 remains DRAFT and mergeable.
+- production `main` remains untouched.
+- no strategy/playbook conversion, forward evidence, or live authorization was introduced.
+
+Phase-boundary handoff:
+- AETH-VN-007 remains CONTAINED and does not invalidate Phase 5 execution.
+- It **must be resolved before Phase 6 uses consolidated/sleeve equity as a Risk denominator**,
+  because literal spot/equity reserve + inventory marking can double-count purchase notional.
+- Conservative mark-to-market, consolidated-equity projection, and the four-layer
+  Risk/Governor envelope are therefore the first Phase 6 accounting gate.
+
 
 ## CI state
 
@@ -192,9 +227,11 @@ pileups are cancelled automatically and both workflows have a 10-minute timeout.
 
 ## Next build target
 
-Continue Phase 5 Execution Engine. Implement only the execution physics that are
-unambiguous in the frozen sources; any conflicting execution rule is logged and held
-out rather than guessed.
+Phase 6 — Risk + Governor.
+
+First close AETH-VN-007 by implementing a non-double-counted conservative broker-sleeve
+equity projection and consolidated Firm equity. Only after that projection is frozen
+and tested may Risk consume equity for the trade / asset / cluster / portfolio envelope.
 
 Strategy conversion remains later in the locked roadmap:
-Phase 6 Risk + Governor → Phase 7 Playbook Runtime → Phase 8 Scout/Sniper/Clerk.
+Phase 7 Playbook Runtime → Phase 8 Scout/Sniper/Clerk.
