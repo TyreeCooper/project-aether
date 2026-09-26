@@ -20,6 +20,12 @@ from aether_vnext.registry import ProductRegistryRow
 
 
 @dataclass(frozen=True, slots=True)
+class FirmEquityProjection:
+    sleeves: tuple["SleeveEquityProjection", ...]
+    consolidated_equity_usd: float
+
+
+@dataclass(frozen=True, slots=True)
 class SleeveEquityProjection:
     broker_account_id: str
     cash_available_usd: float
@@ -137,3 +143,14 @@ def consolidated_equity_usd(
     if len(ids) != len(set(ids)):
         raise ValueError("duplicate broker_account_id in consolidated projection")
     return sum(row.sleeve_equity_usd for row in rows)
+
+
+
+def firm_equity_projection(
+    projections: Iterable[SleeveEquityProjection],
+) -> FirmEquityProjection:
+    rows = tuple(sorted(projections, key=lambda row: row.broker_account_id))
+    return FirmEquityProjection(
+        sleeves=rows,
+        consolidated_equity_usd=consolidated_equity_usd(rows),
+    )
