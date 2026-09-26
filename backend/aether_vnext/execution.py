@@ -226,6 +226,28 @@ def entry_fill_price(
     return float(observation.bid) * (1.0 - slip_bps / 10_000.0)
 
 
+def computed_entry_through_protective_stop(
+    *,
+    position_side: str,
+    computed_fill_price: float,
+    hard_stop_price: float,
+) -> bool:
+    """AETH-VN-004 explicit erratum: compare fill in the protective-loss direction.
+
+    The v4.2.1 source says "long fill >= stop", but executable playbooks freeze
+    LONG stops below entry and SHORT stops above entry. The normalized executable
+    meaning is therefore LONG fill <= stop, SHORT fill >= stop.
+    """
+    side = _position_side(position_side)
+    fill = float(computed_fill_price)
+    stop = float(hard_stop_price)
+    if fill <= 0 or stop <= 0:
+        raise ValueError("computed fill and hard stop must be positive")
+    if side == "long":
+        return fill <= stop
+    return fill >= stop
+
+
 def exit_fill_price(
     observation: MarketObservation,
     *,
@@ -453,6 +475,7 @@ def fill_submitted_paper_intent(
         hard_stop_price=hard_stop_price,
         ready_spread_bps=ready_spread_bps,
         max_age_ms=max_age_ms,
+        slip_bps=policy.slip_bps,
     )
     if reject is not None:
         updated = replace(
@@ -500,6 +523,7 @@ def fill_time_reject_code(
     hard_stop_price: float,
     ready_spread_bps: float,
     max_age_ms: int,
+    slip_bps: float = DEFAULT_SLIP_BPS,
 ) -> str | None:
     if ready_spread_bps < 0:
         raise ValueError("ready_spread_bps cannot be negative")
@@ -525,6 +549,18 @@ def fill_time_reject_code(
         return "market_changed"
     if float(observation.spread_bps) > 2.0 * float(ready_spread_bps):
         return "market_changed"
+
+    computed_fill = entry_fill_price(
+        observation,
+        position_side=position_side,
+        slip_bps=slip_bps,
+    )
+    if computed_entry_through_protective_stop(
+        position_side=position_side,
+        computed_fill_price=computed_fill,
+        hard_stop_price=hard_stop_price,
+    ):
+        return "bad_fill_through_stop"
     return None
 
 
