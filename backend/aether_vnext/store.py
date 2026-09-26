@@ -8,7 +8,7 @@ provisioning/migration primitive, not a boot hook.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 from typing import Any, Mapping
@@ -42,6 +42,14 @@ def canonical_payload_hash(payload: Mapping[str, Any]) -> str:
         default=str,
     ).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
+
+
+def _stored_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _horizon_from_position_key(value: str) -> str:
@@ -148,7 +156,7 @@ class VNextStore:
                 policy_version=row["policy_version"],
                 configuration_hash=row["configuration_hash"],
                 market_observation_id=row["market_observation_id"],
-                created_at_utc=row["created_at_utc"],
+                created_at_utc=_stored_utc(row["created_at_utc"]),
                 firm_event_id=row["firm_event_id"],
                 ticket_id=row["ticket_id"],
                 order_intent_id=row["order_intent_id"],
@@ -165,9 +173,9 @@ class VNextStore:
             reference_price=row["reference_price"],
             expected_fill=row["expected_fill"],
             state=OrderIntentState(row["state"]),
-            submitted_at=row["submitted_at"],
-            acknowledged_at=row["acknowledged_at"],
-            filled_at=row["filled_at"],
+            submitted_at=_stored_utc(row["submitted_at"]),
+            acknowledged_at=_stored_utc(row["acknowledged_at"]),
+            filled_at=_stored_utc(row["filled_at"]),
             filled_qty=float(row["filled_qty"]),
             avg_fill_price=row["avg_fill_price"],
             reject_code=row["reject_code"],
@@ -182,7 +190,7 @@ class VNextStore:
             reserved_margin_usd=float(row["reserved_margin_usd"]),
             ready_spread_bps=row["ready_spread_bps"],
             hard_stop_price=row["hard_stop_price"],
-            submit_timeout_at=row["submit_timeout_at"],
+            submit_timeout_at=_stored_utc(row["submit_timeout_at"]),
             fill_market_observation_id=row["fill_market_observation_id"],
             trade_id=row["trade_id"],
             row_version=int(row["row_version"]),
