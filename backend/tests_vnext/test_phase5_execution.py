@@ -40,6 +40,7 @@ from aether_vnext.reconciler import (
     reconcile_stale_intents,
 )
 from aether_vnext.registry import SEED_REGISTRY
+from aether_vnext.reservations import reservation_requirement
 from aether_vnext.store import VNextStore, open_intent_idempotency_key
 
 
@@ -339,12 +340,57 @@ def _open_idem(
     )
 
 
+def _btc_reservation():
+    return reservation_requirement(
+        SEED_REGISTRY["btc"],
+        side="long",
+        qty=0.01,
+        bid=99_990.0,
+        ask=100_010.0,
+        modeled_round_trip_cost_pct=0.1,
+    )
+
+
+def _mes_reservation():
+    return reservation_requirement(
+        SEED_REGISTRY["mes"],
+        side="long",
+        qty=1.0,
+        bid=5_999.75,
+        ask=6_000.0,
+        modeled_round_trip_cost_pct=0.1,
+    )
+
+
 def _store_fixture():
     engine = sa.create_engine("sqlite+pysqlite:///:memory:", future=True)
     store = VNextStore(schema=None)
     with engine.begin() as conn:
         store.create_all_for_test(conn)
         assert store.provision_seed_ledgers_once(conn) is True
+        store.record_market_observation(
+            conn,
+            replace(
+                _obs(),
+                observation_id="obs-ready",
+            ),
+        )
+        store.record_market_observation(
+            conn,
+            replace(
+                _obs(
+                    bid=5_999.75,
+                    ask=6_000.0,
+                    spread_bps=0.42,
+                ),
+                observation_id="obs-ready-mes",
+                asset_id="mes",
+                venue="NinjaTrader",
+                source="ninja-paper",
+                last=6_000.0,
+                mark=5_999.875,
+            ),
+        )
         _insert_exit_plan_row(
             conn,
             store,
@@ -393,8 +439,8 @@ def _reserve_btc(
     *,
     order_intent_id: str = "intent-reserve-1",
     idempotency_key: str | None = None,
-    reserve_cash_usd: float = 100.0,
-    reserve_margin_usd: float = 0.0,
+    reserve_cash_usd: float | None = None,
+    reserve_margin_usd: float | None = None,
 ):
     return store.reserve_order_intent(
         conn,
@@ -410,8 +456,8 @@ def _reserve_btc(
         side="long",
         qty=0.01,
         order_type="market",
-        reference_price=100_000.0,
-        expected_fill=100_060.0,
+        reference_price=None,
+        expected_fill=None,
         idempotency_key=(
             idempotency_key
             or _open_idem(
@@ -451,8 +497,13 @@ def test_phase_a_reserve_moves_only_target_broker_ledger_and_not_signal() -> Non
             row["broker_account_id"]: row
             for row in store.ledger_rows(conn)
         }
-        assert rows["kraken_paper"]["cash_available_usd"] == pytest.approx(3900.0)
-        assert rows["kraken_paper"]["cash_reserved_usd"] == pytest.approx(100.0)
+        btc_req = _btc_reservation()
+        assert rows["kraken_paper"]["cash_available_usd"] == pytest.approx(
+            4000.0 - btc_req.reserve_cash_usd
+        )
+        assert rows["kraken_paper"]["cash_reserved_usd"] == pytest.approx(
+            btc_req.reserve_cash_usd
+        )
         assert rows["tastyfx_paper"]["cash_available_usd"] == pytest.approx(2000.0)
         assert rows["ninja_paper"]["cash_available_usd"] == pytest.approx(2000.0)
         assert rows["ibkr_paper"]["cash_available_usd"] == pytest.approx(2000.0)
@@ -478,18 +529,32 @@ def test_phase_a_duplicate_idempotency_does_not_double_reserve() -> None:
             row["broker_account_id"]: row
             for row in store.ledger_rows(conn)
         }["kraken_paper"]
-        assert ledger["cash_available_usd"] == pytest.approx(3900.0)
-        assert ledger["cash_reserved_usd"] == pytest.approx(100.0)
+        btc_req = _btc_reservation()
+        assert ledger["cash_available_usd"] == pytest.approx(
+            4000.0 - btc_req.reserve_cash_usd
+        )
+        assert ledger["cash_reserved_usd"] == pytest.approx(
+            btc_req.reserve_cash_usd
+        )
 
 
 def test_phase_a_insufficient_broker_cash_rolls_back_reservation_shape() -> None:
     engine, store = _store_fixture()
     with engine.begin() as conn:
+        ledgers = store.tables["broker_account_ledgers"]
+        conn.execute(
+            ledgers.update()
+            .where(ledgers.c.broker_account_id == "kraken_paper")
+            .values(
+                cash_available_usd=500.0,
+                margin_available_usd=500.0,
+                settled_cash_usd=500.0,
+            )
+        )
         out = _reserve_btc(
             conn,
             store,
             order_intent_id="intent-too-big",
-            reserve_cash_usd=5000.0,
         )
         assert out["ok"] is False
         assert out["error"] == "insufficient_capital"
@@ -497,7 +562,7 @@ def test_phase_a_insufficient_broker_cash_rolls_back_reservation_shape() -> None
             row["broker_account_id"]: row
             for row in store.ledger_rows(conn)
         }["kraken_paper"]
-        assert ledger["cash_available_usd"] == pytest.approx(4000.0)
+        assert ledger["cash_available_usd"] == pytest.approx(500.0)
         assert ledger["cash_reserved_usd"] == 0.0
         intents = conn.execute(
             sa.select(sa.func.count()).select_from(store.tables["order_intents"])
@@ -596,8 +661,8 @@ def test_margin_reservation_and_release_use_same_broker_ledger() -> None:
             ),
             signal_key="signal-mes-1",
             position_key="mes:intraday",
-            reserve_cash_usd=1201.0,
-            reserve_margin_usd=1200.0,
+            reserve_cash_usd=None,
+            reserve_margin_usd=None,
             ready_spread_bps=1.0,
             hard_stop_price=5900.0,
             exit_plan_id="exit-plan-mes",
@@ -614,10 +679,19 @@ def test_margin_reservation_and_release_use_same_broker_ledger() -> None:
             row["broker_account_id"]: row
             for row in store.ledger_rows(conn)
         }["ninja_paper"]
-        assert ledger["cash_available_usd"] == pytest.approx(799.0)
-        assert ledger["cash_reserved_usd"] == pytest.approx(1201.0)
-        assert ledger["margin_used_usd"] == pytest.approx(1200.0)
-        assert ledger["margin_available_usd"] == pytest.approx(800.0)
+        mes_req = _mes_reservation()
+        assert ledger["cash_available_usd"] == pytest.approx(
+            2000.0 - mes_req.reserve_cash_usd
+        )
+        assert ledger["cash_reserved_usd"] == pytest.approx(
+            mes_req.reserve_cash_usd
+        )
+        assert ledger["margin_used_usd"] == pytest.approx(
+            mes_req.margin_need_usd
+        )
+        assert ledger["margin_available_usd"] == pytest.approx(
+            2000.0 - mes_req.margin_need_usd
+        )
 
     with engine.begin() as conn:
         store.release_order_reservation(
@@ -719,8 +793,13 @@ def test_successful_fill_atomically_opens_consumes_signal_and_retains_reserve() 
             for row in store.ledger_rows(conn)
         }["kraken_paper"]
         # v4.2.1: reservation remains locked while OPEN; it is released on FLAT.
-        assert ledger["cash_available_usd"] == pytest.approx(3900.0)
-        assert ledger["cash_reserved_usd"] == pytest.approx(100.0)
+        btc_req = _btc_reservation()
+        assert ledger["cash_available_usd"] == pytest.approx(
+            4000.0 - btc_req.reserve_cash_usd
+        )
+        assert ledger["cash_reserved_usd"] == pytest.approx(
+            btc_req.reserve_cash_usd
+        )
 
         inventory = conn.execute(
             sa.select(store.tables["sleeve_inventory"])
@@ -774,7 +853,9 @@ def test_partial_fill_is_refused_without_consuming_signal_or_opening() -> None:
             row["broker_account_id"]: row
             for row in store.ledger_rows(conn)
         }["kraken_paper"]
-        assert ledger["cash_reserved_usd"] == pytest.approx(100.0)
+        assert ledger["cash_reserved_usd"] == pytest.approx(
+            _btc_reservation().reserve_cash_usd
+        )
 
 
 def test_reservation_timeout_is_durable_from_phase_a_not_submit_time() -> None:
@@ -1668,8 +1749,13 @@ def test_rejected_close_releases_no_open_reserve_and_keeps_position_open() -> No
             row["broker_account_id"]: row
             for row in store.ledger_rows(conn)
         }["kraken_paper"]
-        assert ledger["cash_available_usd"] == pytest.approx(3900.0)
-        assert ledger["cash_reserved_usd"] == pytest.approx(100.0)
+        btc_req = _btc_reservation()
+        assert ledger["cash_available_usd"] == pytest.approx(
+            4000.0 - btc_req.reserve_cash_usd
+        )
+        assert ledger["cash_reserved_usd"] == pytest.approx(
+            btc_req.reserve_cash_usd
+        )
         assert conn.execute(
             sa.select(sa.func.count()).select_from(
                 store.tables["active_positions"]
@@ -1687,53 +1773,57 @@ def test_rejected_close_releases_no_open_reserve_and_keeps_position_open() -> No
         ).scalar_one() == 1
 
 
-def test_margin_reservation_cannot_exist_without_matching_cash_reserve() -> None:
+def test_caller_cannot_override_source_owned_reservation_amounts() -> None:
     engine, store = _store_fixture()
     with engine.begin() as conn:
-        with pytest.raises(
-            ValueError,
-            match="reserve_cash_usd must include at least the locked margin",
-        ):
-            store.reserve_order_intent(
-                conn,
-                order_intent_id="intent-mes-invalid",
+        result = store.reserve_order_intent(
+            conn,
+            order_intent_id="intent-mes-invalid",
+            ticket_id="ticket-mes",
+            firm_event_id=None,
+            asset_id="mes",
+            route_id="mes:intraday:long",
+            broker_account_id="ninja_paper",
+            broker="NinjaTrader",
+            venue="NinjaTrader",
+            symbol="MESZ26",
+            side="long",
+            qty=1.0,
+            order_type="market",
+            reference_price=None,
+            expected_fill=None,
+            idempotency_key=_open_idem(
                 ticket_id="ticket-mes",
-                firm_event_id=None,
-                asset_id="mes",
-                route_id="mes:intraday:long",
-                broker_account_id="ninja_paper",
-                broker="NinjaTrader",
-                venue="NinjaTrader",
-                symbol="MESZ26",
                 side="long",
-                qty=1.0,
-                order_type="market",
-                reference_price=6000.0,
-                expected_fill=6003.0,
-                idempotency_key=_open_idem(
-                    ticket_id="ticket-mes",
-                    side="long",
-                    quantity=1.0,
-                    asset_id="mes",
-                    horizon="intraday",
-                    signal_key="signal-mes-1",
-                ),
+                quantity=1.0,
+                asset_id="mes",
+                horizon="intraday",
                 signal_key="signal-mes-1",
-                position_key="mes:intraday",
-                reserve_cash_usd=100.0,
-                reserve_margin_usd=1200.0,
-                ready_spread_bps=1.0,
-                hard_stop_price=5900.0,
-                exit_plan_id="exit-plan-mes",
-                submit_timeout_at=None,
-                policy_version="policy-v1",
-                configuration_hash="cfg",
-                market_observation_id="obs-ready-mes",
-                created_at_utc=T0,
-                event_id="evt-mes-invalid",
-                actor="test",
-            )
-
+            ),
+            signal_key="signal-mes-1",
+            position_key="mes:intraday",
+            reserve_cash_usd=100.0,
+            reserve_margin_usd=1200.0,
+            ready_spread_bps=1.0,
+            hard_stop_price=5900.0,
+            exit_plan_id="exit-plan-mes",
+            submit_timeout_at=None,
+            policy_version="policy-v1",
+            configuration_hash="cfg",
+            market_observation_id="obs-ready-mes",
+            created_at_utc=T0,
+            event_id="evt-mes-invalid",
+            actor="test",
+        )
+        assert result["ok"] is False
+        assert result["error"] == "reservation_mismatch"
+        ledger = {
+            row["broker_account_id"]: row
+            for row in store.ledger_rows(conn)
+        }["ninja_paper"]
+        assert ledger["cash_available_usd"] == pytest.approx(2000.0)
+        assert ledger["cash_reserved_usd"] == 0.0
+        assert ledger["margin_used_usd"] == 0.0
 
 def test_futures_open_to_flat_releases_cash_and_margin_and_books_net() -> None:
     engine, store = _store_fixture()
@@ -1765,8 +1855,8 @@ def test_futures_open_to_flat_releases_cash_and_margin_and_books_net() -> None:
             ),
             signal_key="signal-mes-1",
             position_key="mes:intraday",
-            reserve_cash_usd=1201.0,
-            reserve_margin_usd=1200.0,
+            reserve_cash_usd=None,
+            reserve_margin_usd=None,
             ready_spread_bps=1.0,
             hard_stop_price=5900.0,
             exit_plan_id="exit-plan-mes",
@@ -1811,10 +1901,19 @@ def test_futures_open_to_flat_releases_cash_and_margin_and_books_net() -> None:
             row["broker_account_id"]: row
             for row in store.ledger_rows(conn)
         }["ninja_paper"]
-        assert ledger["cash_available_usd"] == pytest.approx(799.0)
-        assert ledger["cash_reserved_usd"] == pytest.approx(1201.0)
-        assert ledger["margin_used_usd"] == pytest.approx(1200.0)
-        assert ledger["margin_available_usd"] == pytest.approx(800.0)
+        mes_req = _mes_reservation()
+        assert ledger["cash_available_usd"] == pytest.approx(
+            2000.0 - mes_req.reserve_cash_usd
+        )
+        assert ledger["cash_reserved_usd"] == pytest.approx(
+            mes_req.reserve_cash_usd
+        )
+        assert ledger["margin_used_usd"] == pytest.approx(
+            mes_req.margin_need_usd
+        )
+        assert ledger["margin_available_usd"] == pytest.approx(
+            2000.0 - mes_req.margin_need_usd
+        )
         assert conn.execute(
             sa.select(sa.func.count()).select_from(
                 store.tables["sleeve_inventory"]
@@ -1994,6 +2093,22 @@ def test_kraken_btc_and_eth_inventory_rows_never_mix_units_or_average_price() ->
             exit_plan_id="exit-plan-eth",
             hard_stop_price=3800.0,
         )
+        store.record_market_observation(
+            conn,
+            replace(
+                _obs(
+                    bid=3_999.0,
+                    ask=4_001.0,
+                    spread_bps=5.0,
+                ),
+                observation_id="obs-ready-eth",
+                asset_id="eth",
+                venue="Kraken",
+                source="kraken_public",
+                last=4_000.0,
+                mark=4_000.0,
+            ),
+        )
         _insert_ready_ticket_row(
             conn,
             store,
@@ -2039,8 +2154,8 @@ def test_kraken_btc_and_eth_inventory_rows_never_mix_units_or_average_price() ->
             ),
             signal_key="signal-eth-1",
             position_key="eth:daily_swing",
-            reserve_cash_usd=80.0,
-            reserve_margin_usd=0.0,
+            reserve_cash_usd=None,
+            reserve_margin_usd=None,
             ready_spread_bps=2.0,
             hard_stop_price=3800.0,
             exit_plan_id="exit-plan-eth",
@@ -2162,8 +2277,8 @@ def test_phase_a_rejects_wrong_broker_sleeve_without_reserving() -> None:
             ),
             signal_key="signal-1",
             position_key="btc:daily_swing",
-            reserve_cash_usd=100.0,
-            reserve_margin_usd=0.0,
+            reserve_cash_usd=None,
+            reserve_margin_usd=None,
             ready_spread_bps=2.0,
             hard_stop_price=95_000.0,
             exit_plan_id="exit-plan-btc",
@@ -2186,3 +2301,40 @@ def test_phase_a_rejects_wrong_broker_sleeve_without_reserving() -> None:
         }
         assert ledgers["kraken_paper"]["cash_available_usd"] == pytest.approx(4000.0)
         assert ledgers["ibkr_paper"]["cash_available_usd"] == pytest.approx(2000.0)
+
+
+def test_phase_a_stores_source_derived_reserve_and_prices() -> None:
+    engine, store = _store_fixture()
+    with engine.begin() as conn:
+        result = _reserve_btc(conn, store)
+        assert result["ok"] is True
+        intent = conn.execute(
+            sa.select(store.tables["order_intents"]).where(
+                store.tables["order_intents"].c.order_intent_id
+                == "intent-reserve-1"
+            )
+        ).mappings().one()
+        req = _btc_reservation()
+        assert intent["reserved_cash_usd"] == pytest.approx(req.reserve_cash_usd)
+        assert intent["reserved_margin_usd"] == pytest.approx(req.margin_need_usd)
+        assert intent["reference_price"] == pytest.approx(
+            req.entry_reference_price
+        )
+        assert intent["expected_fill"] == pytest.approx(
+            req.computed_entry_price
+        )
+
+
+def test_phase_a_rejects_missing_persisted_market_observation() -> None:
+    engine, store = _store_fixture()
+    with engine.begin() as conn:
+        obs = store.tables["market_observations"]
+        conn.execute(
+            obs.delete().where(obs.c.observation_id == "obs-ready")
+        )
+        result = _reserve_btc(conn, store)
+        assert result["ok"] is False
+        assert result["error"] == "market_observation_missing"
+        assert conn.execute(
+            sa.select(sa.func.count()).select_from(store.tables["order_intents"])
+        ).scalar_one() == 0
