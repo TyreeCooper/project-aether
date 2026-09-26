@@ -1,6 +1,6 @@
 # AETHER vNext — Build Status
 
-**AETHER TRACE:** 2026-09-26 13:55 EDT  
+**AETHER TRACE:** 2026-09-26 15:50 EDT  
 **Branch:** `aether-vnext-swapout`  
 **Draft PR:** #12  
 **Legacy baseline:** `879736630edf5f41ede90258a4596bf3fff8c053`
@@ -197,11 +197,60 @@ Phase 5 completion evidence:
 - no strategy/playbook conversion, forward evidence, or live authorization was introduced.
 
 Phase-boundary handoff:
-- AETH-VN-007 remains CONTAINED and does not invalidate Phase 5 execution.
-- It **must be resolved before Phase 6 uses consolidated/sleeve equity as a Risk denominator**,
-  because literal spot/equity reserve + inventory marking can double-count purchase notional.
-- Conservative mark-to-market, consolidated-equity projection, and the four-layer
-  Risk/Governor envelope are therefore the first Phase 6 accounting gate.
+- AETH-VN-007 was carried into Phase 6 as a blocking accounting gate and is now CLOSED.
+- Phase 5 execution semantics remain unchanged; Phase 6 consumes a conservative,
+  non-double-counted Firm-equity denominator.
+
+
+### Phase 6 — Risk + Governor: COMPLETE
+
+Implemented:
+- conservative sleeve-equity projection that removes spot/equity-long purchase backing
+  reserve once before adding marked inventory, closing AETH-VN-007;
+- consolidated Firm equity from the durable broker-local book;
+- constitutional stop-risk ceilings fixed at trade 0.75%, asset 1.50%, cluster 2.25%,
+  and portfolio 3.00% of Firm equity;
+- product-correct stop-loss economics and quantity-step floor-down before final
+  dollar-risk verification;
+- product/broker/capital quantity caps can only reduce Risk-derived size;
+- active-book stop-risk recomputed from actual entry plus frozen hard stop and checked
+  against persisted initial stop-risk;
+- deterministic asset / cluster / portfolio exposure aggregation;
+- atomic Phase-A admission through a durable Firm risk-admission guard;
+- RESERVED and SUBMITTED OPEN intents consume persistent pending stop-risk so concurrent
+  candidates cannot spend the same capacity;
+- schema revision 0011 adds the Firm admission guard and durable pending-risk records;
+- pending stop-risk transitions atomically to OpenTrade risk on FILLED and is released
+  on zero-fill terminal outcomes;
+- restart snapshots preserve the admission guard, pending risk, Governor state, and
+  deterministic reconciliation findings without recreating missing safety state;
+- reconciliation detects missing/orphaned/nonpending/mismatched risk-reservation state;
+- durable Governor NORMAL/HALT state enforced ahead of new Risk admission;
+- route, venue, product and desk HALTs are supported; product HALT uses the existing
+  canonical lifecycle_ineligible reason rather than inventing product_halted;
+- authenticated operator-reset contract, audit EventLedger entry, and optimistic
+  Governor row-version protection;
+- Review BENCH remains separate from Governor HALT;
+- public OPEN reservation now has one checked path:
+  reserve_risk_checked_open_intent; the lower-level reservation primitive is private
+  and statically forbidden from other vNext runtime modules;
+- risk-reducing FLATTEN remains outside the OPEN-admission veto path;
+- PAPER ONLY / LIVE HARD BLOCKED remains non-bypassable.
+
+Phase 6 completion evidence:
+- implementation head before documentation closeout:
+  `5a151572a9665f3848811fee81a9d3e11f32649c`;
+- AETHER vNext CI run #354: SUCCESS — **212 isolated vNext tests passed**;
+- repository-wide CI run #663: SUCCESS — **507 tests passed, 2 warnings**;
+- no live authorization, strategy/playbook conversion, or legacy runtime import was introduced.
+
+Contained source-policy dependencies carried forward:
+- AETH-VN-008: the exact canonical seed-12 cluster assignment is not present in the
+  frozen source. Risk requires explicit cluster identity and fails closed rather than
+  importing the historical legacy map.
+- AETH-VN-009: the Master requires a versioned daily-loss HALT threshold but supplies
+  no binding numeric value. Governor HALT enforcement is complete; automatic
+  daily-loss triggering remains unbound until an approved Policy Book value exists.
 
 
 ## CI state
@@ -227,11 +276,15 @@ pileups are cancelled automatically and both workflows have a 10-minute timeout.
 
 ## Next build target
 
-Phase 6 — Risk + Governor.
+Phase 7 — Playbook Runtime.
 
-First close AETH-VN-007 by implementing a non-double-counted conservative broker-sleeve
-equity projection and consolidated Firm equity. Only after that projection is frozen
-and tested may Risk consume equity for the trade / asset / cluster / portfolio envelope.
+Phase 7 may convert the frozen Playbook Pack into deterministic vNext playbook/runtime
+objects without importing legacy strategy behavior. Before any real route can reach
+Risk admission, its cluster identity must come from an approved canonical binding
+(AETH-VN-008), not from the historical legacy cluster map.
 
-Strategy conversion remains later in the locked roadmap:
-Phase 7 Playbook Runtime → Phase 8 Scout/Sniper/Clerk.
+The automatic daily-loss Governor trigger remains separately unbound under AETH-VN-009
+until a versioned Policy Book supplies a numeric threshold.
+
+Locked roadmap after Phase 7:
+Phase 8 Scout/Sniper/Clerk.

@@ -1,6 +1,6 @@
 # AETHER vNext — Issue Ledger
 
-**AETHER TRACE:** 2026-09-25 23:49 EDT  
+**AETHER TRACE:** 2026-09-26 15:50 EDT  
 **Branch:** `aether-vnext-swapout`  
 **Rule:** no hidden debt. Every discovered issue is fixed, explicitly deferred with a dependency, or proven irrelevant.
 
@@ -226,9 +226,9 @@ risk fraction, playbook state, or evidence sample.
 
 **Class:** binding accounting ambiguity  
 **Discovered:** Phase 5 closeout audit  
-**Status:** CONTAINED — must be implemented before Phase 6 Risk uses consolidated equity  
+**Status:** CLOSED  
 **Blocks Phase 5 two-phase execution:** NO  
-**Blocks Phase 6 consolidated-equity/risk denominator:** YES
+**Blocks Phase 6 consolidated-equity/risk denominator:** NO — resolved and verified
 
 ### Conflict
 
@@ -255,3 +255,78 @@ equity.
 The existing Phase 5 OPEN/FLAT cash-reservation lifecycle remains unchanged and is
 already tested for conservation. No profitability/evidence calculation may use a
 double-counted equity figure.
+
+### Resolution
+
+Phase 6 implemented the controlled normalization in `aether_vnext/equity.py` and the
+durable-book Firm projection in `VNextStore.project_firm_equity()`.
+
+For cash-purchase inventory, the projection subtracts the portion of
+`cash_reserved_usd` backing spot/equity-long inventory before adding conservative
+inventory market value. Margin-style positions keep reserved cash as capital and add
+conservative unrealized P&L instead.
+
+Risk now consumes the resulting consolidated Firm-equity projection. The projection
+fails closed when an OPEN asset lacks a healthy two-sided current observation.
+
+Verification:
+- AETHER vNext CI #345 first proved the repaired book-backed equity path:
+  **173 passed**.
+- Phase 6 final implementation evidence at CI #354:
+  **212 isolated vNext tests passed**.
+- repository-wide CI #663:
+  **507 passed, 2 warnings**.
+
+**AETH-VN-007 status:** CLOSED.
+
+
+## AETH-VN-008 — Exact canonical seed-12 cluster assignment is not source-bound
+
+**Class:** binding policy gap / anti-invention control  
+**Discovered:** Phase 6 Risk integration  
+**Status:** CONTAINED  
+**Blocks generic Risk engine:** NO  
+**Blocks route admission without approved cluster identity:** YES
+
+### Facts
+
+- The Master requires a 2.25% cluster/factor stop-risk ceiling.
+- The Master gives factor examples such as crypto, FX USD concentration, US beta,
+  metals, energy and rates.
+- The frozen vNext source does not provide one binding twelve-asset assignment table.
+- Historical legacy code used a plausible mapping, but legacy behavior has no design
+  authority over vNext.
+
+### Control
+
+vNext does not import the legacy cluster table. Book-risk projection and atomic
+admission require an explicit nonblank cluster identity. Missing active-asset cluster
+identity fails closed.
+
+Phase 7/route integration must bind a canonical cluster map from approved source
+authority before those routes can reach Risk admission.
+
+
+## AETH-VN-009 — Daily-loss Governor threshold has no binding numeric value
+
+**Class:** versioned policy dependency / anti-invention control  
+**Discovered:** Phase 6 Governor integration  
+**Status:** CONTAINED  
+**Blocks durable Governor HALT enforcement:** NO  
+**Blocks automatic daily-loss HALT trigger:** YES
+
+### Facts
+
+- The Master requires a versioned daily-loss threshold.
+- At the threshold, new risk must HALT while existing exposure remains managed unless
+  an explicit flatten policy says otherwise.
+- No binding numeric daily-loss threshold was found in the frozen source.
+
+### Control
+
+vNext does not invent a percentage or dollar threshold. Durable route/venue/product/
+desk HALT enforcement, restart persistence, authenticated reset contract, and audit
+history are implemented independently.
+
+Automatic daily-loss triggering remains disabled/unbound until an approved versioned
+Policy Book supplies the numeric threshold.
