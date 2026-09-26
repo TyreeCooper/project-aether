@@ -201,6 +201,8 @@ def test_phase3_migration_seeds_once_and_makes_event_ledger_append_only() -> Non
     assert "trg_exit_plans_immutable" in migration
     assert "trg_closed_trades_immutable" in migration
     assert "trg_signal_consumptions_immutable" in migration
+    assert "AS $aether$" in migration
+    assert "$aether$;" in migration
     assert "schema_v0003" in migration
 
 
