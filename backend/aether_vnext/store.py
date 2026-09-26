@@ -305,7 +305,13 @@ class VNextStore:
         ).mappings().first()
         if row is None:
             raise KeyError(f"unknown order intent: {order_intent_id}")
-        if row["state"] in {"FILLED", "REJECTED", "CANCELLED", "CANCELLED_STALE"}:
+        if row["state"] in {
+            "SUBMITTED",
+            "FILLED",
+            "REJECTED",
+            "CANCELLED",
+            "CANCELLED_STALE",
+        }:
             return {"ok": True, "duplicate": True, "state": row["state"]}
         if row["state"] != "RESERVED":
             return {"ok": False, "error": "illegal_state", "state": row["state"]}
