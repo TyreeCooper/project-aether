@@ -301,3 +301,24 @@ def test_cost_edge_multiple_cannot_drop_below_one() -> None:
             exit_side="sell",
             cost_edge_multiple=0.99,
         )
+
+
+def test_futures_early_close_blocks_new_session_eligibility_after_close() -> None:
+    when = datetime(2026, 11, 27, 18, 30, tzinfo=UTC)  # 13:30 ET
+    provider = StaticExceptions(
+        {
+            ("us_fut_idx", date(2026, 11, 27)): CalendarException(
+                calendar_id="us_fut_idx",
+                session_date=date(2026, 11, 27),
+                kind=CalendarExceptionKind.EARLY_CLOSE,
+                early_close_et=time(13, 0),
+            )
+        }
+    )
+    decision = calendar_decision(
+        calendar_id="us_fut_idx",
+        at_utc=when,
+        exception_provider=provider,
+    )
+    assert decision.eligible is False
+    assert decision.reason == "early_close"
