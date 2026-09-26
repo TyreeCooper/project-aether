@@ -349,6 +349,92 @@ Issue transitions at Phase 8 closeout:
   normalization until current authority binds a different convention.
 
 
+
+
+### Phase 9 — Profitability Evidence / Review: IMPLEMENTATION COMPLETE
+
+Status distinction:
+- **Part-IV P1–P11 implementation is complete.**
+- **Empirical P11 burn-in is not complete merely because the code exists.**
+- **Aether profitability_ready has NOT been established from real sustained forward-paper/OOS evidence.**
+- PAPER ONLY / LIVE HARD BLOCKED remains unchanged.
+
+Implemented:
+- P1 immutable ProfitabilityEvidence plus ReviewCard persistence and deterministic
+  promotion/demotion gates;
+- P2 durable F-006 research-integrity ledger for hypotheses, append-only annotations,
+  PIT dataset snapshots, parameterized experiments, backtest runs, chronological folds,
+  and failed/retired candidate retention;
+- P3 candidate/baseline benchmark evidence on the same economic path with explicit
+  base/+25%/+50% cost stress;
+- P4 point-in-time six-family regime tagging persisted from Setup through ClosedTrade;
+- P5 intended-size capacity evidence covering marginal slippage, spread readiness,
+  depth/product capacity, locate/borrow, carry, and gap/tail cost; KEEP_TRUSTED now
+  fails closed unless persisted capacity evidence is ready;
+- P6 portfolio contribution diagnostics for realized co-loss, simultaneous stop-risk
+  stress, marginal expected-return/stop-risk/drawdown contribution, broker-local
+  capital fragmentation, and explicit same-bet overlap;
+- P7 direct path diagnostics for max drawdown, losing streak, recovery duration, tail
+  loss versus initial stop-risk, and explicit unbound status for source-unspecified
+  resampling parameters;
+- P8 rolling/reference decay evidence with immutable automatic Review queueing and no
+  automatic strategy mutation;
+- P9 configuration-isolated Scout/Sniper/Clerk traffic experiments, WAIT/DEFER
+  separation, first-killer diagnostics, and shadow prior-policy comparison that can
+  never create orders;
+- P10 read-only profitability operator projection covering Firm strip, route board,
+  traffic funnel, execution panel, Review panel, and model-risk panel without seat,
+  Risk, Governor, or execution authority;
+- P11 immutable Firm-level burn-in/profitability-readiness assessment with actual
+  burn-in window, route counts, defect gates, held-out/net-cost/execution/regime/Risk/
+  portfolio completeness, decay-to-BENCH capability, lineage integrity, full-history
+  retention, and a hard invariant that profitability readiness cannot authorize live.
+
+Phase 9 implementation evidence:
+- P1 persistence: `adc995c848ca3a915ab8f12d2aa51120973ca58f`;
+- P2/P11-supporting research ledger: `0bdcfff6ef94472346f075a938ef1ad3a2b61e9c`;
+- deterministic Review gates: `96d6a2d87ce09aa793f7c08443c95adf589363ae`;
+- EvidenceWindow/sample-domain isolation: `52cb10460eb1cf0a053ad342cc64ed8bc05c9d4a`;
+- benchmark/cost stress: `01fac4853826388fb48a0377d7cd881ca73a1831`;
+- portfolio/concentration/path diagnostics: `931b4bcba1791a02814d54b476add4c66ca34225`;
+- PIT regime lineage: `7798a8f663bcfa3d5338786242d3007b8a669341`;
+- decay Review queue: `568080b1dc2fe366019e0b71241d7d2985751773`;
+- intended-size capacity gate: `4a3c9618ed91f143994fcef4ecba033540b9a531`;
+- traffic/config isolation: `853df7af487ac72b4572aa5a5600c298e5586937`;
+- P10 operator projection: `a63131c661c8cd91aa9f48afb26254fca2b5b657`;
+- P10 projection fix: `fa3fc7e26d430b2aadae0871a040f1ebc988bd96`;
+- P11 readiness gate: `b6d9b22bb369d96ec505baf43180ae8287022307`.
+
+Latest verified implementation CI:
+- P10 fix — repository CI #695: SUCCESS;
+- P10 fix — AETHER vNext CI #386: SUCCESS;
+- P11 — repository CI #696: SUCCESS;
+- P11 — AETHER vNext CI #387: SUCCESS.
+
+Contained source/policy dependencies carried forward:
+- AETH-VN-009 — numeric daily-loss Governor trigger remains unbound;
+- AETH-VN-010 — three source-incomplete ExitPlan contracts remain fail-closed;
+- AETH-VN-012 — Allocator percentile tie convention is explicit but not source-bound;
+- AETH-VN-013 — universal benchmark "not worse" scalar comparator is not source-bound;
+- AETH-VN-014 — resampled-path parameters and universal concentration normalization
+  are not source-bound;
+- AETH-VN-015 — decay materiality thresholds/window sizes require versioned policy;
+- AETH-VN-016 — capacity readiness thresholds are route/product policy inputs;
+- AETH-VN-017 — traffic-experiment drawdown/cost/cluster deterioration tolerances
+  require explicit evidence;
+- AETH-VN-018 — burn-in duration and OOS/trusted-route sufficiency thresholds require
+  versioned policy decisions.
+
+P11 operational gate still pending:
+- actual sustained forward-paper operation;
+- no unresolved accounting/model defects during that burn-in;
+- sufficient clean OOS/trusted-route evidence under an approved sufficiency policy;
+- a real Firm snapshot that satisfies the P11 readiness assessment.
+
+No synthetic duration, fake trusted-route count, fabricated OOS evidence, or paper
+equity-curve shortcut may set profitability_ready=true.
+
+
 ## CI state
 
 ### vNext CI
@@ -366,27 +452,26 @@ pileups are cancelled automatically and both workflows have a 10-minute timeout.
 - no vNext production deployment;
 - no live orders;
 - no forced strategy entries;
-- Phase 8 paper Scout/Sniper/Allocator/Risk/Clerk pipeline is active on the replacement branch;
+- Phase 9 Part-IV implementation is complete on the replacement branch;
+- P11 empirical burn-in / profitability readiness is NOT yet established;
 - no live authorization or production cutover;
 - no legacy evidence imported into vNext;
 - PR #12 remains DRAFT.
 
 ## Next build target
 
-Phase 9 — Evidence / Review integration.
+Forward-paper burn-in + cutover readiness.
 
-First Phase-9 gate:
-- derive evidence only from canonical ClosedTrade records, never execution-validation
-  fills or synthetic forced entries;
-- preserve independent playbook evidence for ETH standalone vs rider behavior;
-- implement evidence-state promotion/demotion without allowing Review to rewrite
-  historical trades;
-- connect profitability evidence, ROS/expectancy inputs, sample-quality state, and
-  operator ReviewCard workflow to the durable book;
-- keep allocator inputs versioned and auditable;
-- preserve AETH-VN-010 fail-closed route restrictions;
-- keep AETH-VN-009 daily-loss numeric trigger unbound until current authority supplies
-  the policy value.
+Immediate gates:
+- run natural PAPER setups with forced strategy entries OFF;
+- accumulate clean paper-forward/OOS evidence without mixing execution-validation,
+  historical/in-sample, or future-live domains;
+- exercise the P11 profitability-readiness assessment against real Firm snapshots;
+- keep profitability_ready=false until approved sustained-operation and OOS/trusted-route
+  sufficiency policies are actually satisfied;
+- resolve or explicitly continue to contain AETH-VN-009/010/012–018;
+- complete operator UI integration against the read-only P10 projection;
+- preserve PAPER ONLY / LIVE HARD BLOCKED throughout burn-in.
 
-After Phase 9:
-cutover readiness, forward-paper evidence, operator UI completion, and final swap-out gates.
+Only after those evidence/cutover gates pass may the project evaluate a separate,
+explicitly authorized live-readiness phase. Phase 9 does not grant live authority.
