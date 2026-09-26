@@ -332,21 +332,22 @@ def test_phase5_execution_reservation_columns_are_in_current_schema() -> None:
     } <= columns
 
 
-def test_runtime_schema_facade_is_pinned_to_revision_0008() -> None:
+def test_runtime_schema_facade_is_pinned_to_revision_0009() -> None:
     backend = Path(__file__).resolve().parents[1]
     facade = (backend / "aether_vnext" / "schema.py").read_text(encoding="utf-8")
-    assert "schema_v0008" in facade
+    assert "schema_v0009" in facade
     migration = (
         backend
         / "alembic"
         / "versions"
-        / "0008_aether_vnext_sleeve_ledger_fields.py"
+        / "0009_aether_vnext_normalized_sleeve_inventory.py"
     ).read_text(encoding="utf-8")
-    assert 'revision: str = "0008"' in migration
-    assert 'down_revision: Union[str, None] = "0007"' in migration
-    assert "inventory_qty" in migration
-    assert "inventory_avg" in migration
-    assert "carry_accrued_usd" in migration
+    assert 'revision: str = "0009"' in migration
+    assert 'down_revision: Union[str, None] = "0008"' in migration
+    assert "sleeve_inventory" in migration
+    assert "broker_account_id" in migration
+    assert "asset_id" in migration
+    assert "revision 0009 cannot infer asset_id" in migration
 
 
 def test_closed_trade_is_self_contained_execution_evidence() -> None:
@@ -382,16 +383,14 @@ def test_close_order_intent_persists_exit_reason() -> None:
     assert "exit_reason" in store.tables["order_intents"].c
 
 
-def test_broker_ledger_contains_complete_v421_sleeve_fields() -> None:
+def test_broker_ledger_and_normalized_inventory_cover_v421_sleeve_fields() -> None:
     _, store = _engine_and_store()
-    columns = set(store.tables["broker_account_ledgers"].c.keys())
+    ledger_columns = set(store.tables["broker_account_ledgers"].c.keys())
     assert {
         "cash_available_usd",
         "cash_reserved_usd",
         "margin_used_usd",
         "margin_available_usd",
-        "inventory_qty",
-        "inventory_avg",
         "realized_pnl_usd",
         "unrealized_pnl_usd",
         "fees_accrued_usd",
@@ -400,4 +399,20 @@ def test_broker_ledger_contains_complete_v421_sleeve_fields() -> None:
         "last_reconciled_at",
         "reconciliation_state",
         "row_version",
-    } <= columns
+    } <= ledger_columns
+    assert "inventory_qty" not in ledger_columns
+    assert "inventory_avg" not in ledger_columns
+
+    inventory = store.tables["sleeve_inventory"]
+    assert {
+        "broker_account_id",
+        "asset_id",
+        "inventory_qty",
+        "inventory_avg",
+        "updated_at_utc",
+        "row_version",
+    } <= set(inventory.c.keys())
+    assert tuple(inventory.primary_key.columns.keys()) == (
+        "broker_account_id",
+        "asset_id",
+    )
