@@ -1,6 +1,6 @@
 # AETHER vNext — Build Status
 
-**AETHER TRACE:** 2026-09-26 16:40 EDT  
+**AETHER TRACE:** 2026-09-26 17:54 EDT  
 **Branch:** `aether-vnext-swapout`  
 **Draft PR:** #12  
 **Legacy baseline:** `879736630edf5f41ede90258a4596bf3fff8c053`
@@ -303,6 +303,52 @@ Issue transitions at Phase 7 closeout:
   playbooks can create tickets.
 
 
+### Phase 8 — Scout / Sniper / Allocator / Risk / Clerk: COMPLETE
+
+Implemented:
+- revision 0012 durable Scout WATCH lineage with immutable playbook_id/playbook_version,
+  canonical risk_cluster_id, asset-risk hitch metadata, trigger-bar close timestamp,
+  and exit-contract completeness;
+- one Scout evaluation per playbook/asset/horizon/side/completed trigger bar;
+- Sniper completed-bar-only WATCH -> FIRE contract with exact deterministic signal_key,
+  grain revalidation, invalidation/staleness/product-side/legal-stop checks, and
+  duplicate-signal rejection;
+- deterministic F-005 FIRE allocator sequencing with frozen 45/20/15/10/10 weights,
+  evidence/diversification/execution-quality scoring, correlation hard block, and
+  deterministic tie-break chain; allocator has no sizing or reservation authority;
+- cost-aware Risk sizing: per-unit modeled loss = stop-loss economics + estimated
+  round-trip execution cost;
+- cross-asset Risk hitch caps applied before quantity is accepted;
+- FIRE -> SIZE persistence with durable playbook identity and no Clerk authority;
+- ETH -> BTC 50% hitch persists as BTC asset-cap occupancy while pending and OPEN,
+  does not double-count cluster/portfolio risk, survives restart reconstruction,
+  and fails closed on reconciliation drift;
+- Clerk source-bound opportunity geometry and exact product cost model;
+- strict cost-edge hurdle, source-bound product/shortability/locate checks, and
+  SIZE -> READY / REJECTED transition;
+- Clerk never changes Risk-derived quantity;
+- incomplete ExitPlan definitions under AETH-VN-010 are allowed to WATCH but remain
+  blocked from executable ticket progression;
+- PAPER ONLY / LIVE HARD BLOCKED remains intact.
+
+Phase 8 completion evidence:
+- implementation head before documentation closeout:
+  `58338b3c55d216a80e3c93cc65ea49664751103c`;
+- AETHER vNext CI #373: SUCCESS — **392 isolated vNext tests passed**;
+- repository-wide CI #682 clean rerun: SUCCESS — **687 tests passed, 1 warning**;
+- the first repository #682 attempt timed out in legacy TestClient smoke teardown
+  with exit 124 and no assertion failure; the single rerun completed green.
+
+Issue transitions at Phase 8 closeout:
+- AETH-VN-010: remains CONTAINED — three source-incomplete ExitPlan contracts stay
+  fail-closed before executable ticket progression.
+- AETH-VN-011: CLOSED — ETH cross-asset Risk hitch is now durable through pending,
+  OPEN, restart reconstruction, reconciliation, and release semantics.
+- AETH-VN-012: CONTAINED / NON-BLOCKING — F-005 says percentile rank but does not
+  specify ties/singletons; vNext uses an explicit deterministic average-rank
+  normalization until current authority binds a different convention.
+
+
 ## CI state
 
 ### vNext CI
@@ -320,26 +366,27 @@ pileups are cancelled automatically and both workflows have a 10-minute timeout.
 - no vNext production deployment;
 - no live orders;
 - no forced strategy entries;
-- Phase 7 playbook runtime exists, but no Phase 8 Scout/Sniper/Clerk ticket pipeline is active;
+- Phase 8 paper Scout/Sniper/Allocator/Risk/Clerk pipeline is active on the replacement branch;
+- no live authorization or production cutover;
 - no legacy evidence imported into vNext;
 - PR #12 remains DRAFT.
 
 ## Next build target
 
-Phase 8 — Scout / Sniper / Clerk.
+Phase 9 — Evidence / Review integration.
 
-First Phase-8 gate:
-- stamp immutable playbook_id / playbook_version identity on durable Setup lineage;
-- carry canonical cluster_id and any playbook asset-risk hitches into Risk admission;
-- persist the ETH -> BTC 50% hitch across pending reservation, OPEN, restart, and
-  reconciliation before enabling either affected ETH playbook for ticket creation;
-- refuse ticket materialization when Playbook Runtime reports an incomplete exit
-  contract under AETH-VN-010;
-- preserve A -> B -> C precedence and one OPEN per asset:horizon;
-- keep Clerk cost-edge, product, locate, and venue checks separate from Scout/Sniper.
+First Phase-9 gate:
+- derive evidence only from canonical ClosedTrade records, never execution-validation
+  fills or synthetic forced entries;
+- preserve independent playbook evidence for ETH standalone vs rider behavior;
+- implement evidence-state promotion/demotion without allowing Review to rewrite
+  historical trades;
+- connect profitability evidence, ROS/expectancy inputs, sample-quality state, and
+  operator ReviewCard workflow to the durable book;
+- keep allocator inputs versioned and auditable;
+- preserve AETH-VN-010 fail-closed route restrictions;
+- keep AETH-VN-009 daily-loss numeric trigger unbound until current authority supplies
+  the policy value.
 
-AETH-VN-009 remains separately contained: automatic daily-loss HALT remains unbound
-until the current frozen authority explicitly binds the numeric policy value.
-
-Locked roadmap after Phase 8:
-Phase 9 Evidence / Review integration and later cutover gates.
+After Phase 9:
+cutover readiness, forward-paper evidence, operator UI completion, and final swap-out gates.

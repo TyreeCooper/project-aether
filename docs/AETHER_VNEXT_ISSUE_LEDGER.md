@@ -1,6 +1,6 @@
 # AETHER vNext — Issue Ledger
 
-**AETHER TRACE:** 2026-09-26 16:40 EDT  
+**AETHER TRACE:** 2026-09-26 17:54 EDT  
 **Branch:** `aether-vnext-swapout`  
 **Rule:** no hidden debt. Every discovered issue is fixed, explicitly deferred with a dependency, or proven irrelevant.
 
@@ -380,37 +380,66 @@ is incomplete.
 
 **Class:** cross-asset Risk attribution / persistence dependency  
 **Discovered:** Phase 7 closeout audit  
-**Status:** CONTAINED  
+**Status:** CLOSED  
 **Blocks generic Phase 6 Risk engine:** NO  
-**Blocks affected ETH playbook Ticket creation:** YES
+**Blocks affected ETH playbook Ticket creation:** NO — hitch lifecycle is durable
+
+### Resolution
+
+Phase 8 carries the source-bound 50% BTC asset-cap hitch end to end:
+
+- Scout Setup lineage persists the playbook hitch metadata.
+- Risk sizing applies the hitch as an additional BTC asset-cap constraint.
+- pending RESERVED/SUBMITTED occupancy persists the hitch in the durable risk reservation.
+- OPEN trades reconstruct hitch occupancy from durable playbook lineage after restart.
+- hitch occupancy affects the BTC asset bucket only; it is not counted again against
+  the ETH cluster or Firm portfolio totals.
+- reconciliation detects hitch drift and fails closed.
+- zero-fill terminal release and FLAT lifecycle remove the pending/open occupancy with
+  the surrounding Risk reservation/trade lifecycle.
+
+Verification:
+- `test_phase8_risk_cost_hitches.py` proves cross-asset capacity capping and no
+  cluster/portfolio double count.
+- `test_phase8_durable_risk_hitches.py` proves pending occupancy, drift detection,
+  and restart reconstruction.
+- AETHER vNext CI #373: **392 passed**.
+- repository-wide CI #682 clean rerun: **687 passed, 1 warning**.
+
+**AETH-VN-011 status:** CLOSED.
+
+
+## AETH-VN-012 — F-005 percentile-rank tie convention is not source-bound
+
+**Class:** deterministic implementation normalization  
+**Discovered:** Phase 8 Allocator v1 conversion  
+**Status:** CONTAINED  
+**Blocks Allocator operation:** NO  
+**Blocks reproducibility:** NO — convention is explicit and tested
 
 ### Facts
 
-The source requires:
+F-005 requires the conservative-expectancy component to be a percentile rank inside
+the current eligible FIRE batch. The frozen source does not specify:
 
-- `pb_eth_rider_v1_2`: 50% of ETH initial stop-risk also consumes BTC asset-risk
-  capacity.
-- `pb_eth_failed_break_v1_3`: the same 50% BTC asset-cap hitch if that currently
-  disabled short playbook is ever operationally enabled.
-
-The Phase 6 generic Risk book correctly aggregates ordinary asset/cluster/portfolio
-risk but does not yet carry playbook identity or cross-asset hitch attribution through
-pending reservation, OPEN, restart, and reconciliation.
+- tie handling;
+- whether the endpoints are inclusive/exclusive;
+- the singleton-batch value.
 
 ### Control
 
-Phase 7 binds the exact metadata in
-`aether_vnext.playbooks.PLAYBOOK_ASSET_RISK_HITCHES`.
+vNext uses one explicit deterministic normalization:
 
-Phase 8 must:
-- durably stamp playbook_id / playbook_version on Setup lineage;
-- include candidate hitch occupancy before Risk admission;
-- persist pending hitch occupancy while RESERVED/SUBMITTED;
-- retain the hitch while OPEN;
-- restore and reconcile it after restart;
-- release it exactly once at FLAT or zero-fill terminal failure.
+- comparable batch minimum = 0;
+- comparable batch maximum = 100;
+- equal values share their average rank;
+- a single comparable candidate receives neutral 50;
+- candidates with fewer than 15 closed trades or missing conservative expectancy
+  also receive neutral 50 as required by F-005 evidence sufficiency.
 
-Until that end-to-end path is tested, affected ETH playbooks may be evaluated for
-WATCH but may not create executable tickets.
+This normalization affects sequencing only. It cannot change eligibility, quantity,
+Risk limits, cash reservation, or Governor state. If current source authority later
+binds a different percentile convention, this implementation must be versioned rather
+than silently changed.
 
-**AETH-VN-011 status:** CONTAINED.
+**AETH-VN-012 status:** CONTAINED / NON-BLOCKING.
