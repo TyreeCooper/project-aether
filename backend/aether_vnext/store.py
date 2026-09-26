@@ -16,6 +16,7 @@ from typing import Any, Mapping
 import sqlalchemy as sa
 from sqlalchemy.engine import Connection
 
+from aether_vnext.domain import MarketObservation
 from aether_vnext.schema import build_metadata
 
 
@@ -83,6 +84,35 @@ class VNextStore:
             ],
         )
         return True
+
+    def record_market_observation(
+        self,
+        conn: Connection,
+        observation: MarketObservation,
+    ) -> None:
+        table = self.tables["market_observations"]
+        conn.execute(
+            table.insert().values(
+                observation_id=observation.observation_id,
+                asset_id=observation.asset_id,
+                venue=observation.venue,
+                bid=observation.bid,
+                ask=observation.ask,
+                last=observation.last,
+                mark=observation.mark,
+                source=observation.source,
+                exchange_ts=observation.exchange_ts,
+                received_ts=observation.received_ts,
+                age_ms=observation.age_ms,
+                spread_abs=observation.spread_abs,
+                spread_bps=observation.spread_bps,
+                session_state=observation.session_state.value,
+                quality_state=observation.quality_state.value,
+                fallback_reason=observation.fallback_reason,
+                calendar_state=observation.calendar_state.value,
+                data_version=observation.data_version,
+            )
+        )
 
     def append_event(
         self,
