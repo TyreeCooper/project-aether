@@ -1,6 +1,6 @@
 # AETHER vNext — Build Status
 
-**AETHER TRACE:** 2026-09-25 23:55 EDT  
+**AETHER TRACE:** 2026-09-26 01:18 EDT  
 **Branch:** `aether-vnext-swapout`  
 **Draft PR:** #12  
 **Legacy baseline:** `879736630edf5f41ede90258a4596bf3fff8c053`
@@ -122,19 +122,63 @@ Phase 3 completion evidence:
 - the five failures are the same unchanged legacy `test_sleeve_portfolio.py`
   failures tracked as AETH-VN-001; no new vNext failure appeared.
 
+### Phase 4 — Trading Clock + market-data pipeline: COMPLETE
+
+Implemented:
+- provider-neutral quote adapter boundary plus separate MarketPrint adapter contract;
+- concrete Kraken public ticker parser for BTC/ETH only, with unsupported symbols ignored;
+- canonical MarketObservation normalization;
+- source-aware primary/fallback selection that filters by asset before provider precedence;
+- future market timestamps rejected rather than clamped into false freshness;
+- freshness, crossed-book and invalid-book refusal;
+- calendar/session eligibility included in the non-bypassable market-validity gate;
+- closed-session observations are still preserved for truth/audit, but cannot become executable;
+- MarketObservation persistence by durable observation_id;
+- exchange-timestamp bar bucketing in venue timezone;
+- completed-bar construction with no synthetic missing bars;
+- authoritative session/early-close final-bar timestamps;
+- out-of-order print rejection;
+- shared bar-builder semantics for replay and paper;
+- completed-bar Trading Clock keyed by explicit playbook trigger interval rather than
+  an invented universal horizon cadence;
+- one evaluation per consumed completed trigger bar;
+- unsupported/inactive/session-closed/forming/wrong-interval routes are not due;
+- unknown non-Kraken market-data bindings and stale thresholds remain explicitly
+  unbound under AETH-VN-002 rather than guessed.
+
+Phase 4 completion evidence:
+- AETHER vNext CI run #122: SUCCESS.
+- **87 isolated vNext tests passed.**
+- repository-wide CI run #527: SUCCESS.
+- **382 repository tests passed, 1 warning.**
+- PR remains DRAFT; PAPER ONLY / LIVE HARD BLOCKED remained intact.
+
+### Phase 5 — Execution Engine: IN PROGRESS
+
+Scope:
+- two-phase READY → RESERVED → SUBMITTED → FILLED/REJECTED/CANCELLED lifecycle;
+- broker-local cash/margin reservation without holding SQL open during adapter wait;
+- 250 ms paper acknowledgement/fill latency;
+- 15 s paper stale-submit timeout;
+- all-or-none seed-twelve paper fills by default; PARTIAL remains first-class but disabled
+  unless Policy explicitly enables it;
+- conservative bid/ask entry and exit fills with 5 bps adverse slippage;
+- market-changed/stale rejection and spread-doubling guard at fill time;
+- signal consumption only on successful OPEN;
+- terminal-state idempotency and crash/restart reconciliation;
+- flatten path with conservative through-price stop handling;
+- no live orders.
+
 ## CI state
 
 ### vNext CI
 
 GREEN on the current replacement code path.
 
-### Repository-wide legacy CI
+### Repository-wide CI
 
-Known baseline defect AETH-VN-001 remains visible:
-5 legacy sleeve/portfolio tests fail while 312 pass. The failing source and tests
-are byte-identical between main and the replacement branch, proving the failure was
-not introduced by vNext. This defect is CONTAINED and BLOCKS final merge, but does
-not control vNext design.
+GREEN on the current replacement branch. AETH-VN-001 is CLOSED. Superseded workflow
+pileups are cancelled automatically and both workflows have a 10-minute timeout.
 
 ## Current safety
 
@@ -148,14 +192,9 @@ not control vNext design.
 
 ## Next build target
 
-Phase 4 — Trading Clock + market-data pipeline:
-- canonical MarketObservation normalization pipeline;
-- freshness calculation and crossed-book rejection;
-- exchange timestamp bucket assignment;
-- closed-bar construction with no synthetic missing bars;
-- calendar/maintenance/holiday integration;
-- vNext data-adapter boundary and source failover;
-- historical replay and paper paths using the same bar-close semantics;
-- explicit external bindings from AETH-VN-002 where provider contracts are known.
+Continue Phase 5 Execution Engine. Implement only the execution physics that are
+unambiguous in the frozen sources; any conflicting execution rule is logged and held
+out rather than guessed.
 
-Strategy conversion remains intentionally later.
+Strategy conversion remains later in the locked roadmap:
+Phase 6 Risk + Governor → Phase 7 Playbook Runtime → Phase 8 Scout/Sniper/Clerk.
