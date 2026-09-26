@@ -5,6 +5,12 @@ from datetime import datetime, timezone
 import pytest
 import sqlalchemy as sa
 
+from aether_vnext.domain import (
+    CalendarState,
+    MarketObservation,
+    QualityState,
+    SessionState,
+)
 from aether_vnext.store import VNextStore
 
 
@@ -18,6 +24,29 @@ def _store():
     with engine.begin() as conn:
         store.create_all_for_test(conn)
         store.provision_seed_ledgers_once(conn)
+        store.record_market_observation(
+            conn,
+            MarketObservation(
+                observation_id="obs-hitch",
+                asset_id="eth",
+                venue="Kraken",
+                bid=3999.0,
+                ask=4001.0,
+                last=4000.0,
+                mark=4000.0,
+                source="test",
+                exchange_ts=T0,
+                received_ts=T0,
+                age_ms=0,
+                spread_abs=2.0,
+                spread_bps=5.0,
+                session_state=SessionState.ACTIVE,
+                quality_state=QualityState.HEALTHY,
+                fallback_reason=None,
+                calendar_state=CalendarState.ALWAYS_OPEN,
+                data_version="test-v1",
+            ),
+        )
         conn.execute(
             store.tables["policy_snapshots"].insert().values(
                 configuration_hash="cfg-hitch",
@@ -48,7 +77,7 @@ def _lineage(conn, store: VNextStore, *, event_id: str = "firm-eth") -> None:
             asset_risk_hitches={"btc": 0.50},
             policy_version="policy-hitch",
             configuration_hash="cfg-hitch",
-            market_observation_id=None,
+            market_observation_id="obs-hitch",
             first_killed_by=None,
             first_kill_reason=None,
             created_at_utc=T0,
@@ -77,7 +106,7 @@ def _pending(conn, store: VNextStore) -> None:
             reject_code=None,
             policy_version="policy-hitch",
             configuration_hash="cfg-hitch",
-            market_observation_id=None,
+            market_observation_id="obs-hitch",
             first_killed_by=None,
             first_kill_reason=None,
             created_at_utc=T0,
@@ -124,7 +153,7 @@ def _pending(conn, store: VNextStore) -> None:
             idempotency_key="idem-eth",
             policy_version="policy-hitch",
             configuration_hash="cfg-hitch",
-            observation_id_at_reserve=None,
+            observation_id_at_reserve="obs-hitch",
             first_killed_by=None,
             first_kill_reason=None,
             created_at_utc=T0,
@@ -207,7 +236,7 @@ def test_open_trade_reconstructs_hitch_from_durable_lineage_after_restart() -> N
                 management_telemetry={},
                 policy_version="policy-hitch",
                 configuration_hash="cfg-hitch",
-                market_observation_id=None,
+                market_observation_id="obs-hitch",
                 opened_at_utc=T0,
             )
         )
