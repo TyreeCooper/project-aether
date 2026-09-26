@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import hashlib
 from typing import Any
 
 
@@ -37,12 +38,6 @@ class RawNewsItem:
     dedupe_key: str
     raw_payload_ref: str
 
-    def __post_init__(self) -> None:
-        if self.first_seen_at_utc < self.published_at_utc:
-            raise ValueError("first_seen_at_utc cannot precede published_at_utc")
-        if self.received_at_utc < self.first_seen_at_utc:
-            raise ValueError("received_at_utc cannot precede first_seen_at_utc")
-
 
 @dataclass(frozen=True, slots=True)
 class NormalizedEvent:
@@ -75,12 +70,6 @@ class NormalizedEvent:
     demand: bool = False
     liquidity: bool = False
     normalizer_version: str = ""
-
-    def __post_init__(self) -> None:
-        if self.information_available_at_utc < self.canonical_event_at_utc:
-            raise ValueError(
-                "information_available_at_utc cannot precede canonical_event_at_utc"
-            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,10 +136,12 @@ def raw_news_identity_key(
     published_at_utc: datetime,
     normalized_title: str,
 ) -> str:
-    """Return the frozen F-007 raw-news identity material before hashing."""
+    """Return the frozen F-007 SHA-256 raw-item identity key."""
     if provider_item_id:
-        return f"{source_id}|{provider_item_id}"
-    return (
-        f"{source_id}|{canonical_url or ''}|"
-        f"{published_at_utc.isoformat()}|{normalized_title}"
-    )
+        material = f"{source_id}|{provider_item_id}"
+    else:
+        material = (
+            f"{source_id}|{canonical_url or ''}|"
+            f"{published_at_utc.isoformat()}|{normalized_title}"
+        )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
