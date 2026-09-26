@@ -129,12 +129,12 @@ class OrderIntent:
     lineage: Lineage
     broker: str
     venue: str
-    symbol: str
+    symbol_executed: str
     side: str
-    qty: float
+    requested_qty: float
     order_type: str
     reference_price: float | None
-    expected_fill: float | None
+    expected_fill_price: float | None
     state: OrderIntentState
     submitted_at: datetime | None
     acknowledged_at: datetime | None
@@ -142,8 +142,8 @@ class OrderIntent:
     filled_qty: float
     avg_fill_price: float | None
     reject_code: str | None
-    slippage_usd: float | None
-    slippage_bps: float | None
+    slip_usd: float | None
+    slip_bps: float | None
     idempotency_key: str
     broker_account_id: str | None = None
     intent_kind: str = "OPEN"
@@ -155,9 +155,9 @@ class OrderIntent:
     ready_spread_bps: float | None = None
     hard_stop_price: float | None = None
     submit_timeout_at: datetime | None = None
-    fill_market_observation_id: str | None = None
+    observation_id_at_fill: str | None = None
     trade_id: str | None = None
-    row_version: int = 1
+    version: int = 1
 
 
 @dataclass(frozen=True, slots=True)
