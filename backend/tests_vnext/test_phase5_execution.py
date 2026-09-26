@@ -27,6 +27,10 @@ from aether_vnext.execution import (
     stop_triggered,
     submit_paper_intent,
 )
+from aether_vnext.reconciler import (
+    RECONCILER_INTERVAL_SECONDS,
+    reconcile_stale_intents,
+)
 from aether_vnext.registry import SEED_REGISTRY
 from aether_vnext.store import VNextStore
 
@@ -776,3 +780,64 @@ def test_phase_a_rejects_occupied_position_key_without_reserving_cash() -> None:
         }["kraken_paper"]
         assert ledger["cash_available_usd"] == pytest.approx(4000.0)
         assert ledger["cash_reserved_usd"] == 0.0
+
+
+def test_reconciler_runs_on_two_second_contract_and_releases_stale_reserve() -> None:
+    assert RECONCILER_INTERVAL_SECONDS == 2
+    engine, store = _store_fixture()
+    with engine.begin() as conn:
+        _reserve_btc(conn, store)
+
+    with engine.begin() as conn:
+        results = reconcile_stale_intents(
+            conn,
+            store=store,
+            at_utc=T0 + timedelta(seconds=16),
+        )
+        assert len(results) == 1
+        assert results[0]["state"] == "CANCELLED_STALE"
+
+        intent = conn.execute(
+            sa.select(store.tables["order_intents"]).where(
+                store.tables["order_intents"].c.order_intent_id
+                == "intent-reserve-1"
+            )
+        ).mappings().one()
+        assert intent["state"] == "CANCELLED_STALE"
+        assert intent["reject_code"] == "submit_timeout"
+
+        ledger = {
+            row["broker_account_id"]: row
+            for row in store.ledger_rows(conn)
+        }["kraken_paper"]
+        assert ledger["cash_available_usd"] == pytest.approx(4000.0)
+        assert ledger["cash_reserved_usd"] == 0.0
+        assert conn.execute(
+            sa.select(sa.func.count()).select_from(store.tables["signal_consumptions"])
+        ).scalar_one() == 0
+
+
+def test_late_fill_after_stale_cancel_is_ignored_at_persistence_boundary() -> None:
+    engine, store = _store_fixture()
+    with engine.begin() as conn:
+        _submit_reserved_btc(conn, store)
+
+    with engine.begin() as conn:
+        reconcile_stale_intents(
+            conn,
+            store=store,
+            at_utc=T0 + timedelta(seconds=16),
+        )
+
+    with engine.begin() as conn:
+        late = _finalize_btc(conn, store)
+        assert late["ok"] is False
+        assert late["duplicate"] is True
+        assert late["error"] == "terminal_state_wins"
+        assert late["state"] == "CANCELLED_STALE"
+        assert conn.execute(
+            sa.select(sa.func.count()).select_from(store.tables["open_trades"])
+        ).scalar_one() == 0
+        assert conn.execute(
+            sa.select(sa.func.count()).select_from(store.tables["signal_consumptions"])
+        ).scalar_one() == 0
