@@ -120,6 +120,7 @@ class Ticket:
     quantity: float | None
     modeled_round_trip_cost_pct: float | None
     reject_code: str | None = None
+    exit_plan_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
