@@ -1040,8 +1040,9 @@ def test_durable_order_intent_round_trips_into_domain_contract() -> None:
         assert intent.broker_account_id == "kraken_paper"
         assert intent.position_key == "btc:daily_swing"
         assert intent.signal_key == "signal-1"
-        assert intent.reserved_cash_usd == pytest.approx(100.0)
-        assert intent.reserved_margin_usd == 0.0
+        req = _btc_reservation()
+        assert intent.reserved_cash_usd == pytest.approx(req.reserve_cash_usd)
+        assert intent.reserved_margin_usd == pytest.approx(req.margin_need_usd)
         assert intent.submit_timeout_at is not None
         assert intent.row_version == 1
 
