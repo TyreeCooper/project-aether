@@ -317,6 +317,10 @@ class VNextStore:
             raise ValueError("qty must be positive")
         if reserve_cash_usd < 0 or reserve_margin_usd < 0:
             raise ValueError("reservation amounts cannot be negative")
+        if reserve_cash_usd + 1e-9 < reserve_margin_usd:
+            raise ValueError(
+                "reserve_cash_usd must include at least the locked margin"
+            )
 
         if submit_timeout_at is None:
             submit_timeout_at = created_at_utc + timedelta(milliseconds=15_000)
