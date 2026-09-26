@@ -45,6 +45,11 @@ class ReasonCode(StrEnum):
     COST_HURDLE_EXCEEDS_EXPECTED_MOVE = "cost_hurdle_exceeds_expected_move"
     PRODUCT_COST_MODEL_ERROR = "product_cost_model_error"
 
+    # Portfolio Phase-A contract
+    TICKET_NOT_READY = "ticket_not_ready"
+    CONFIGURATION_MISMATCH = "configuration_mismatch"
+    TICKET_CONTRACT_MISMATCH = "ticket_contract_mismatch"
+
     # Portfolio / execution
     SIGNAL_CONSUMED = "signal_consumed"
     BROKER_REJECT = "broker_reject"
