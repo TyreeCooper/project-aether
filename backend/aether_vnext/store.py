@@ -24,6 +24,7 @@ from aether_vnext.domain import (
 )
 from aether_vnext.registry import ProductType, registry_row
 from aether_vnext.schema import build_metadata
+from aether_vnext.seed_truth import ASSET_BROKER_ACCOUNT
 
 
 SEED_LEDGER_CASH_USD: Mapping[str, float] = {
@@ -32,6 +33,29 @@ SEED_LEDGER_CASH_USD: Mapping[str, float] = {
     "ninja_paper": 2000.0,
     "ibkr_paper": 2000.0,
 }
+
+
+def open_intent_idempotency_key(
+    *,
+    ticket_id: str,
+    side: str,
+    quantity: float,
+    asset_id: str,
+    horizon: str,
+    signal_key: str,
+) -> str:
+    """Binding v3.1/Part III OPEN-intent idempotency formula."""
+    raw = "|".join(
+        (
+            str(ticket_id),
+            str(side),
+            str(quantity),
+            str(asset_id),
+            str(horizon),
+            str(signal_key),
+        )
+    )
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def canonical_payload_hash(payload: Mapping[str, Any]) -> str:
@@ -522,6 +546,47 @@ class VNextStore:
                 actor=actor,
                 market_observation_id=market_observation_id,
             )
+        canonical_broker_account_id = ASSET_BROKER_ACCOUNT.get(asset_id)
+        if canonical_broker_account_id is None:
+            return self.reject_ticket_pre_reserve(
+                conn,
+                ticket_id=ticket_id,
+                reason_code="unsupported_product",
+                at_utc=created_at_utc,
+                event_id=event_id,
+                actor=actor,
+                market_observation_id=market_observation_id,
+            )
+        if broker_account_id != canonical_broker_account_id:
+            return self.reject_ticket_pre_reserve(
+                conn,
+                ticket_id=ticket_id,
+                reason_code="broker_sleeve_mismatch",
+                at_utc=created_at_utc,
+                event_id=event_id,
+                actor=actor,
+                market_observation_id=market_observation_id,
+            )
+
+        expected_idempotency_key = open_intent_idempotency_key(
+            ticket_id=ticket_id,
+            side=side,
+            quantity=float(ticket["quantity"]),
+            asset_id=asset_id,
+            horizon=str(ticket["horizon"]),
+            signal_key=signal_key,
+        )
+        if idempotency_key != expected_idempotency_key:
+            return self.reject_ticket_pre_reserve(
+                conn,
+                ticket_id=ticket_id,
+                reason_code="idempotency_key_mismatch",
+                at_utc=created_at_utc,
+                event_id=event_id,
+                actor=actor,
+                market_observation_id=market_observation_id,
+            )
+
         if (
             ticket["asset_id"] != asset_id
             or ticket["route_id"] != route_id
