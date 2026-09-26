@@ -51,6 +51,11 @@ class ReasonCode(StrEnum):
     TICKET_CONTRACT_MISMATCH = "ticket_contract_mismatch"
     IDEMPOTENCY_KEY_MISMATCH = "idempotency_key_mismatch"
     BROKER_SLEEVE_MISMATCH = "broker_sleeve_mismatch"
+    MARKET_OBSERVATION_MISSING = "market_observation_missing"
+    MARKET_OBSERVATION_MISMATCH = "market_observation_mismatch"
+    MARKET_INVALID = "market_invalid"
+    COST_MODEL_MISSING = "cost_model_missing"
+    RESERVATION_MISMATCH = "reservation_mismatch"
 
     # Portfolio / execution
     SIGNAL_CONSUMED = "signal_consumed"
