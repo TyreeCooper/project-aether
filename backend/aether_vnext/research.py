@@ -25,6 +25,26 @@ class HypothesisCard:
     status: ResearchState
     annotations: tuple[str, ...] = ()
 
+    def __post_init__(self) -> None:
+        required = {
+            "hypothesis_id": self.hypothesis_id,
+            "hypothesis_text": self.hypothesis_text,
+            "economic_rationale": self.economic_rationale,
+            "mechanism_class": self.mechanism_class,
+            "horizon": self.horizon,
+        }
+        for name, value in required.items():
+            if not str(value).strip():
+                raise ValueError(f"{name} is required")
+        if self.created_at_utc.tzinfo is None:
+            raise ValueError("created_at_utc must be timezone-aware")
+        if not self.eligible_assets:
+            raise ValueError("eligible_assets cannot be empty")
+        if not self.allowed_sides:
+            raise ValueError("allowed_sides cannot be empty")
+        if not self.benchmark_ids:
+            raise ValueError("benchmark_ids cannot be empty")
+
 
 @dataclass(frozen=True, slots=True)
 class ResearchExperiment:
@@ -41,6 +61,26 @@ class ResearchExperiment:
     configuration_hash: str
     owner: str
     supersedes_experiment_id: str | None
+
+    def __post_init__(self) -> None:
+        for name in (
+            "experiment_id",
+            "hypothesis_id",
+            "parameter_space_hash",
+            "dataset_snapshot_id",
+            "code_commit_sha",
+            "configuration_hash",
+            "owner",
+        ):
+            if not str(getattr(self, name)).strip():
+                raise ValueError(f"{name} is required")
+        if self.created_at_utc.tzinfo is None:
+            raise ValueError("created_at_utc must be timezone-aware")
+        if self.frozen_at_utc is not None:
+            if self.frozen_at_utc.tzinfo is None:
+                raise ValueError("frozen_at_utc must be timezone-aware")
+            if self.frozen_at_utc < self.created_at_utc:
+                raise ValueError("frozen_at_utc cannot precede created_at_utc")
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +102,20 @@ class ResearchDatasetSnapshot:
     def __post_init__(self) -> None:
         if self.pit is not True:
             raise ValueError("ResearchDatasetSnapshot requires PIT=true")
+        for name in (
+            "created_at_utc",
+            "as_of_utc",
+            "start_at_utc",
+            "end_at_utc",
+        ):
+            if getattr(self, name).tzinfo is None:
+                raise ValueError(f"{name} must be timezone-aware")
+        if self.start_at_utc > self.end_at_utc:
+            raise ValueError("dataset start_at_utc cannot follow end_at_utc")
+        if self.end_at_utc > self.as_of_utc:
+            raise ValueError("dataset cannot contain information after as_of_utc")
+        if not self.asset_ids:
+            raise ValueError("asset_ids cannot be empty")
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +136,30 @@ class BacktestRun:
     status: str
     integrity_flags: tuple[str, ...] = ()
     metrics_json: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        for name in (
+            "backtest_run_id",
+            "experiment_id",
+            "run_type",
+            "dataset_snapshot_id",
+            "playbook_id",
+            "playbook_version",
+            "code_commit_sha",
+            "configuration_hash",
+            "cost_model_version",
+            "execution_model_version",
+            "status",
+        ):
+            if not str(getattr(self, name)).strip():
+                raise ValueError(f"{name} is required")
+        if self.started_at_utc.tzinfo is None:
+            raise ValueError("started_at_utc must be timezone-aware")
+        if self.finished_at_utc is not None:
+            if self.finished_at_utc.tzinfo is None:
+                raise ValueError("finished_at_utc must be timezone-aware")
+            if self.finished_at_utc < self.started_at_utc:
+                raise ValueError("finished_at_utc cannot precede started_at_utc")
 
 
 @dataclass(frozen=True, slots=True)

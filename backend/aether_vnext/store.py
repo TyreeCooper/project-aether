@@ -62,6 +62,13 @@ from aether_vnext.risk import (
 )
 from aether_vnext.reason_codes import ReasonCode
 from aether_vnext.regime import RegimeTags
+from aether_vnext.research import (
+    BacktestRun,
+    FoldResult,
+    HypothesisCard,
+    ResearchDatasetSnapshot,
+    ResearchExperiment,
+)
 from aether_vnext.review import (
     ReviewGateInput,
     assess_review_gates,
@@ -1111,6 +1118,161 @@ class VNextStore:
                 result.asset_risk_hitches_usd
             ),
         }
+
+    def record_research_hypothesis(
+        self,
+        conn: Connection,
+        card: HypothesisCard,
+    ) -> None:
+        table = self.tables["research_hypotheses"]
+        conn.execute(
+            table.insert().values(
+                hypothesis_id=card.hypothesis_id,
+                created_at_utc=card.created_at_utc,
+                hypothesis_text=card.hypothesis_text,
+                economic_rationale=card.economic_rationale,
+                mechanism_class=card.mechanism_class,
+                eligible_assets=list(card.eligible_assets),
+                horizon=card.horizon,
+                allowed_sides=list(card.allowed_sides),
+                expected_regimes=list(card.expected_regimes),
+                falsification_conditions=list(card.falsification_conditions),
+                required_data=list(card.required_data),
+                benchmark_ids=list(card.benchmark_ids),
+                status=card.status.value,
+            )
+        )
+        for index, annotation in enumerate(card.annotations, start=1):
+            self.append_research_hypothesis_annotation(
+                conn,
+                annotation_id=f"{card.hypothesis_id}:annotation:{index}",
+                hypothesis_id=card.hypothesis_id,
+                annotation=annotation,
+                created_at_utc=card.created_at_utc,
+            )
+
+    def append_research_hypothesis_annotation(
+        self,
+        conn: Connection,
+        *,
+        annotation_id: str,
+        hypothesis_id: str,
+        annotation: str,
+        created_at_utc: datetime,
+    ) -> None:
+        if not str(annotation_id).strip():
+            raise ValueError("annotation_id is required")
+        if not str(annotation).strip():
+            raise ValueError("annotation is required")
+        if created_at_utc.tzinfo is None:
+            raise ValueError("created_at_utc must be timezone-aware")
+        conn.execute(
+            self.tables["research_hypothesis_annotations"].insert().values(
+                annotation_id=annotation_id,
+                hypothesis_id=hypothesis_id,
+                annotation=annotation,
+                created_at_utc=created_at_utc,
+            )
+        )
+
+    def record_research_dataset_snapshot(
+        self,
+        conn: Connection,
+        snapshot: ResearchDatasetSnapshot,
+    ) -> None:
+        conn.execute(
+            self.tables["research_dataset_snapshots"].insert().values(
+                dataset_snapshot_id=snapshot.dataset_snapshot_id,
+                created_at_utc=snapshot.created_at_utc,
+                as_of_utc=snapshot.as_of_utc,
+                start_at_utc=snapshot.start_at_utc,
+                end_at_utc=snapshot.end_at_utc,
+                asset_ids=list(snapshot.asset_ids),
+                data_version=snapshot.data_version,
+                source_registry_version=snapshot.source_registry_version,
+                product_registry_version=snapshot.product_registry_version,
+                calendar_version=snapshot.calendar_version,
+                pit=snapshot.pit,
+                missing_data_policy=snapshot.missing_data_policy,
+                content_hash=snapshot.content_hash,
+            )
+        )
+
+    def record_research_experiment(
+        self,
+        conn: Connection,
+        experiment: ResearchExperiment,
+    ) -> None:
+        conn.execute(
+            self.tables["research_experiments"].insert().values(
+                experiment_id=experiment.experiment_id,
+                hypothesis_id=experiment.hypothesis_id,
+                parent_experiment_id=experiment.parent_experiment_id,
+                created_at_utc=experiment.created_at_utc,
+                frozen_at_utc=experiment.frozen_at_utc,
+                research_state=experiment.research_state.value,
+                parameter_spec=dict(experiment.parameter_spec),
+                parameter_space_hash=experiment.parameter_space_hash,
+                dataset_snapshot_id=experiment.dataset_snapshot_id,
+                code_commit_sha=experiment.code_commit_sha,
+                configuration_hash=experiment.configuration_hash,
+                owner=experiment.owner,
+                supersedes_experiment_id=experiment.supersedes_experiment_id,
+            )
+        )
+
+    def record_backtest_run(
+        self,
+        conn: Connection,
+        run: BacktestRun,
+    ) -> None:
+        conn.execute(
+            self.tables["backtest_runs"].insert().values(
+                backtest_run_id=run.backtest_run_id,
+                experiment_id=run.experiment_id,
+                run_type=run.run_type,
+                dataset_snapshot_id=run.dataset_snapshot_id,
+                playbook_id=run.playbook_id,
+                playbook_version=run.playbook_version,
+                code_commit_sha=run.code_commit_sha,
+                configuration_hash=run.configuration_hash,
+                cost_model_version=run.cost_model_version,
+                execution_model_version=run.execution_model_version,
+                random_seed=run.random_seed,
+                started_at_utc=run.started_at_utc,
+                finished_at_utc=run.finished_at_utc,
+                status=run.status,
+                integrity_flags=list(run.integrity_flags),
+                metrics_json=dict(run.metrics_json),
+            )
+        )
+
+    def record_fold_result(
+        self,
+        conn: Connection,
+        fold: FoldResult,
+    ) -> None:
+        conn.execute(
+            self.tables["fold_results"].insert().values(
+                fold_result_id=fold.fold_result_id,
+                backtest_run_id=fold.backtest_run_id,
+                fold_index=fold.fold_index,
+                train_start_utc=fold.train_start_utc,
+                train_end_utc=fold.train_end_utc,
+                test_start_utc=fold.test_start_utc,
+                test_end_utc=fold.test_end_utc,
+                n=fold.n,
+                net_pnl=fold.net_pnl,
+                expectancy_r=fold.expectancy_r,
+                profit_factor=fold.profit_factor,
+                stop_rate=fold.stop_rate,
+                max_drawdown=fold.max_drawdown,
+                cost_drag=fold.cost_drag,
+                benchmark_result=dict(fold.benchmark_result),
+                passed=fold.passed,
+                failure_reasons=list(fold.failure_reasons),
+            )
+        )
 
     def record_evidence_window(
         self,
