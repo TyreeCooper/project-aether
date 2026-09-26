@@ -4,14 +4,18 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
+import sqlalchemy as sa
+from sqlalchemy.exc import IntegrityError
 
 from aether_vnext.adapters import KrakenPublicTickerV2
 from aether_vnext.bars import ClosedBarBuilder, MarketPrint
 from aether_vnext.calendars import CalendarDecision
 from aether_vnext.domain import CalendarState, QualityState, SessionState
 from aether_vnext.market_data import RawQuote, normalize_quote, select_source
+from aether_vnext.market_pipeline import MarketDataPipeline
 from aether_vnext.market_truth import observation_is_valid
 from aether_vnext.registry import SEED_REGISTRY, bind_market_data
+from aether_vnext.store import VNextStore
 from aether_vnext.trading_clock import RouteClockSpec, TradingClock
 
 
@@ -377,3 +381,127 @@ def test_trading_clock_route_gates_are_before_strategy_evaluation() -> None:
     )
     assert decision.due is False
     assert decision.reason == "route_unsupported"
+
+
+def test_market_pipeline_refuses_unbound_registry_row() -> None:
+    pipeline = MarketDataPipeline(registry=SEED_REGISTRY)
+    result = pipeline.evaluate(
+        asset_id="eurusd",
+        quotes=(),
+        calendar=_calendar(),
+        as_of_utc=T0,
+    )
+    assert result.executable is False
+    assert result.reason == "market_data_unbound"
+
+
+def test_market_pipeline_returns_only_valid_executable_observation() -> None:
+    row = bind_market_data(
+        SEED_REGISTRY["btc"],
+        primary_source_id="primary",
+        stale_threshold_ms=1_000,
+    )
+    pipeline = MarketDataPipeline(registry={"btc": row})
+    result = pipeline.evaluate(
+        asset_id="btc",
+        quotes=(_quote(source_id="primary"),),
+        calendar=_calendar(),
+        as_of_utc=T0,
+    )
+    assert result.executable is True
+    assert result.reason == "market_valid"
+    assert result.observation is not None
+    assert result.observation.asset_id == "btc"
+
+
+def test_market_observation_persists_once_by_durable_id() -> None:
+    row = bind_market_data(
+        SEED_REGISTRY["btc"],
+        primary_source_id="primary",
+        stale_threshold_ms=1_000,
+    )
+    observation = MarketDataPipeline(registry={"btc": row}).evaluate(
+        asset_id="btc",
+        quotes=(_quote(source_id="primary"),),
+        calendar=_calendar(),
+        as_of_utc=T0,
+    ).observation
+    assert observation is not None
+
+    engine = sa.create_engine("sqlite+pysqlite:///:memory:", future=True)
+    store = VNextStore(schema=None)
+    with engine.begin() as conn:
+        store.create_all_for_test(conn)
+        store.record_market_observation(conn, observation)
+
+    with pytest.raises(IntegrityError):
+        with engine.begin() as conn:
+            store.record_market_observation(conn, observation)
+
+
+def test_early_close_rewrites_final_bar_close_to_authoritative_session_end() -> None:
+    builder = ClosedBarBuilder(
+        asset_id="nvda",
+        interval=timedelta(hours=1),
+        venue_timezone="America/New_York",
+    )
+    first_print = datetime(2026, 11, 27, 17, 35, tzinfo=UTC)  # 12:35 ET
+    builder.push(
+        MarketPrint(
+            asset_id="nvda",
+            price=100.0,
+            volume=1.0,
+            exchange_ts=first_print,
+            received_ts=first_print,
+            source_id="ibkr_test",
+        )
+    )
+    session_close = datetime(2026, 11, 27, 18, 0, tzinfo=UTC)  # 13:00 ET
+    closed = builder.close_at_session_end(
+        session_close_utc=session_close,
+        received_ts=session_close,
+    )
+    assert len(closed) == 1
+    assert closed[0].bucket_close_utc == session_close
+
+
+def test_replay_and_paper_share_identical_bar_builder_semantics() -> None:
+    prints = (
+        MarketPrint(
+            asset_id="btc",
+            price=100.0,
+            volume=1.0,
+            exchange_ts=T0 + timedelta(seconds=10),
+            received_ts=T0 + timedelta(seconds=10),
+            source_id="kraken_public",
+        ),
+        MarketPrint(
+            asset_id="btc",
+            price=101.0,
+            volume=1.0,
+            exchange_ts=T0 + timedelta(seconds=40),
+            received_ts=T0 + timedelta(seconds=40),
+            source_id="kraken_public",
+        ),
+        MarketPrint(
+            asset_id="btc",
+            price=102.0,
+            volume=1.0,
+            exchange_ts=T0 + timedelta(minutes=1),
+            received_ts=T0 + timedelta(minutes=1),
+            source_id="kraken_public",
+        ),
+    )
+
+    def run_path() -> tuple:
+        builder = ClosedBarBuilder(
+            asset_id="btc",
+            interval=timedelta(minutes=1),
+            venue_timezone="UTC",
+        )
+        out = []
+        for print_ in prints:
+            out.extend(builder.push(print_))
+        return tuple(out)
+
+    assert run_path() == run_path()
