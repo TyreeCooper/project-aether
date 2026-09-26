@@ -16,7 +16,12 @@ from typing import Any, Mapping
 import sqlalchemy as sa
 from sqlalchemy.engine import Connection
 
-from aether_vnext.domain import MarketObservation
+from aether_vnext.domain import (
+    Lineage,
+    MarketObservation,
+    OrderIntent,
+    OrderIntentState,
+)
 from aether_vnext.schema import build_metadata
 
 
@@ -119,6 +124,68 @@ class VNextStore:
                 calendar_state=observation.calendar_state.value,
                 data_version=observation.data_version,
             )
+        )
+
+    def load_order_intent(
+        self,
+        conn: Connection,
+        *,
+        order_intent_id: str,
+    ) -> OrderIntent | None:
+        table = self.tables["order_intents"]
+        row = conn.execute(
+            sa.select(table).where(
+                table.c.order_intent_id == order_intent_id
+            )
+        ).mappings().first()
+        if row is None:
+            return None
+        return OrderIntent(
+            order_intent_id=row["order_intent_id"],
+            lineage=Lineage(
+                asset_id=row["asset_id"],
+                route_id=row["route_id"],
+                policy_version=row["policy_version"],
+                configuration_hash=row["configuration_hash"],
+                market_observation_id=row["market_observation_id"],
+                created_at_utc=row["created_at_utc"],
+                firm_event_id=row["firm_event_id"],
+                ticket_id=row["ticket_id"],
+                order_intent_id=row["order_intent_id"],
+                trade_id=row["trade_id"],
+                first_killed_by=row["first_killed_by"],
+                first_kill_reason=row["first_kill_reason"],
+            ),
+            broker=row["broker"],
+            venue=row["venue"],
+            symbol=row["symbol"],
+            side=row["side"],
+            qty=float(row["qty"]),
+            order_type=row["order_type"],
+            reference_price=row["reference_price"],
+            expected_fill=row["expected_fill"],
+            state=OrderIntentState(row["state"]),
+            submitted_at=row["submitted_at"],
+            acknowledged_at=row["acknowledged_at"],
+            filled_at=row["filled_at"],
+            filled_qty=float(row["filled_qty"]),
+            avg_fill_price=row["avg_fill_price"],
+            reject_code=row["reject_code"],
+            slippage_usd=row["slippage_usd"],
+            slippage_bps=row["slippage_bps"],
+            idempotency_key=row["idempotency_key"],
+            broker_account_id=row["broker_account_id"],
+            intent_kind=row["intent_kind"],
+            position_key=row["position_key"],
+            signal_key=row["signal_key"],
+            reserved_cash_usd=float(row["reserved_cash_usd"]),
+            reserved_margin_usd=float(row["reserved_margin_usd"]),
+            ready_spread_bps=row["ready_spread_bps"],
+            hard_stop_price=row["hard_stop_price"],
+            submit_timeout_at=row["submit_timeout_at"],
+            fill_market_observation_id=row["fill_market_observation_id"],
+            trade_id=row["trade_id"],
+            row_version=int(row["row_version"]),
         )
 
     def reserve_order_intent(
