@@ -115,3 +115,42 @@ Verification:
 
 Historical failed/cancelled/stale rows may remain visible in the GitHub Actions history;
 they are not the status of the current PR head.
+
+
+## AETH-VN-004 — Entry bad_fill_through_stop wording conflicts with protective-stop geometry
+
+**Class:** binding-spec ambiguity  
+**Discovered:** Phase 5 Execution Engine conversion  
+**Status:** OPEN + BLOCKS only this specific entry rejection rule  
+**Blocks Phase 5 foundation work:** NO  
+**Blocks final execution closeout:** YES until resolved
+
+### Conflict
+
+The binding execution addendum says a fill-time entry must reject
+`bad_fill_through_stop` when a **long fill >= stop**.
+
+The same AETHER playbooks define protective long stops below entry
+(for example `entry - ATR multiple`), and the execution law separately says a long
+stop is triggered when the conservative bid is **<= hard_stop_price**.
+
+Those statements do not define one coherent long-entry comparison. Encoding one side
+would require guessing whether the inequality or the noun "stop" is the typo.
+
+### Current control
+
+vNext does **not** silently repair the document.
+
+Implemented now:
+- stop-already-through on the conservative quote rejects `market_changed`;
+- stale/invalid market rejects `market_stale`;
+- spread > 2x READY spread rejects `market_changed`;
+- unambiguous ask/bid + 5 bps entry fill law;
+- unambiguous through-price protective-stop EXIT law.
+
+Held out:
+- the separate entry `bad_fill_through_stop` comparison.
+
+This issue must be reconciled against the intended protective-stop geometry before
+Phase 5 is declared COMPLETE. No legacy implementation is allowed to decide the
+answer by default.
