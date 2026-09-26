@@ -332,17 +332,47 @@ def test_phase5_execution_reservation_columns_are_in_current_schema() -> None:
     } <= columns
 
 
-def test_runtime_schema_facade_is_pinned_to_revision_0005() -> None:
+def test_runtime_schema_facade_is_pinned_to_revision_0006() -> None:
     backend = Path(__file__).resolve().parents[1]
     facade = (backend / "aether_vnext" / "schema.py").read_text(encoding="utf-8")
-    assert "schema_v0005" in facade
+    assert "schema_v0006" in facade
     migration = (
         backend
         / "alembic"
         / "versions"
-        / "0005_aether_vnext_ticket_exit_plan.py"
+        / "0006_aether_vnext_closed_trade_identity.py"
     ).read_text(encoding="utf-8")
-    assert 'revision: str = "0005"' in migration
-    assert 'down_revision: Union[str, None] = "0004"' in migration
-    assert "exit_plan_id" in migration
-    assert "fk_tickets_exit_plan" in migration
+    assert 'revision: str = "0006"' in migration
+    assert 'down_revision: Union[str, None] = "0005"' in migration
+    assert "exit_price" in migration
+    assert "fees_usd" in migration
+    assert "position_key" in migration
+    assert "revision 0006 requires explicit exit_price and fees_usd" in migration
+
+
+def test_closed_trade_is_self_contained_execution_evidence() -> None:
+    _, store = _engine_and_store()
+    columns = set(store.tables["closed_trades"].c.keys())
+    assert {
+        "trade_id",
+        "route_id",
+        "asset_id",
+        "position_key",
+        "side",
+        "quantity",
+        "avg_entry_price",
+        "exit_price",
+        "closed_at_utc",
+        "gross_pnl_usd",
+        "net_pnl_usd",
+        "total_cost_usd",
+        "fees_usd",
+        "mfe_usd",
+        "mae_usd",
+        "capture_efficiency",
+        "duration_s",
+        "exit_reason",
+        "policy_version",
+        "configuration_hash",
+        "market_observation_id",
+    } <= columns
