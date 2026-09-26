@@ -144,7 +144,7 @@ def test_missing_declared_route_baseline_fails_before_campaign_persist() -> None
     engine, store = _store()
     with engine.begin() as conn:
         store.record_evidence_window(conn, _window("eurusd-heldout"))
-        with pytest.raises(RuntimeError, match="no current held-out baseline"):
+        with pytest.raises(RuntimeError, match="missing_current_held_out_baseline"):
             start_forward_paper_campaign_from_book(
                 conn,
                 store,
@@ -192,7 +192,7 @@ def test_other_configuration_evidence_cannot_satisfy_current_baseline() -> None:
                 policy_version="other-policy",
             ),
         )
-        with pytest.raises(RuntimeError, match="no current held-out baseline"):
+        with pytest.raises(RuntimeError, match="missing_current_held_out_baseline"):
             start_forward_paper_campaign_from_book(
                 conn,
                 store,
@@ -211,7 +211,7 @@ def test_other_configuration_evidence_cannot_satisfy_current_baseline() -> None:
 def test_benched_playbook_is_not_burnin_eligible() -> None:
     engine, store = _store()
     with engine.begin() as conn:
-        with pytest.raises(ValueError, match="not burn-in eligible"):
+        with pytest.raises(RuntimeError, match="playbook_not_burnin_eligible"):
             start_forward_paper_campaign_from_book(
                 conn,
                 store,
@@ -235,7 +235,7 @@ def test_duplicate_route_playbook_request_fails_before_persist() -> None:
     )
     with engine.begin() as conn:
         store.record_evidence_window(conn, _window("heldout-1"))
-        with pytest.raises(ValueError, match="duplicate"):
+        with pytest.raises(RuntimeError, match="duplicate_route_playbook_request"):
             start_forward_paper_campaign_from_book(
                 conn,
                 store,
