@@ -14,6 +14,8 @@ from aether_vnext.domain import (
     OrderIntentState,
     QualityState,
     SessionState,
+    Ticket,
+    TicketState,
 )
 from aether_vnext.execution import (
     PAPER_ACK_MS,
@@ -24,6 +26,7 @@ from aether_vnext.execution import (
     exit_fill_price,
     fill_submitted_paper_intent,
     paper_fill_due_at,
+    phase_a_admission,
     stop_exit_fill_price,
     stop_triggered,
     submit_paper_intent,
@@ -873,3 +876,101 @@ def test_durable_order_intent_round_trips_into_domain_contract() -> None:
         assert intent.reserved_margin_usd == 0.0
         assert intent.submit_timeout_at is not None
         assert intent.row_version == 1
+
+
+def _ready_ticket(*, side: str = "long", config: str = "cfg") -> Ticket:
+    return Ticket(
+        ticket_id="ticket-ready",
+        lineage=Lineage(
+            asset_id="btc",
+            route_id="btc:daily_swing:long",
+            policy_version="policy-v1",
+            configuration_hash=config,
+            market_observation_id="obs-ready",
+            created_at_utc=T0,
+        ),
+        state=TicketState.READY,
+        signal_key="signal-ready",
+        side=side,
+        horizon="daily_swing",
+        stop_price=95_000.0,
+        quantity=0.01,
+        modeled_round_trip_cost_pct=0.1,
+    )
+
+
+def test_phase_a_admission_accepts_only_ready_healthy_enabled_risk_valid_route() -> None:
+    allowed = phase_a_admission(
+        ticket=_ready_ticket(),
+        observation=_obs(),
+        registry_row=SEED_REGISTRY["btc"],
+        active_configuration_hash="cfg",
+        max_age_ms=1_000,
+        route_evidence_state="CANDIDATE",
+        route_operational_state="ENABLED",
+        governor_halted=False,
+        firm_envelope_ok=True,
+    )
+    assert allowed.allowed is True
+    assert allowed.reason == "phase_a_ready"
+
+
+@pytest.mark.parametrize(
+    ("change", "expected"),
+    (
+        ({"active_configuration_hash": "other"}, "configuration_mismatch"),
+        ({"route_evidence_state": "BENCH"}, "route_benched"),
+        ({"route_operational_state": "DISABLED"}, "route_halted"),
+        ({"governor_halted": True}, "route_halted"),
+        ({"firm_envelope_ok": False}, "portfolio_risk_full"),
+    ),
+)
+def test_phase_a_admission_blocks_nonnegotiable_pre_reserve_gates(
+    change,
+    expected,
+) -> None:
+    args = dict(
+        ticket=_ready_ticket(),
+        observation=_obs(),
+        registry_row=SEED_REGISTRY["btc"],
+        active_configuration_hash="cfg",
+        max_age_ms=1_000,
+        route_evidence_state="CANDIDATE",
+        route_operational_state="ENABLED",
+        governor_halted=False,
+        firm_envelope_ok=True,
+    )
+    args.update(change)
+    decision = phase_a_admission(**args)
+    assert decision.allowed is False
+    assert decision.reason == expected
+
+
+def test_phase_a_admission_blocks_degraded_fallback_and_crypto_short() -> None:
+    degraded = phase_a_admission(
+        ticket=_ready_ticket(),
+        observation=_obs(quality=QualityState.DEGRADED),
+        registry_row=SEED_REGISTRY["btc"],
+        active_configuration_hash="cfg",
+        max_age_ms=1_000,
+        route_evidence_state="CANDIDATE",
+        route_operational_state="ENABLED",
+        governor_halted=False,
+        firm_envelope_ok=True,
+    )
+    assert degraded.allowed is False
+    assert degraded.reason == "market_stale"
+
+    short = phase_a_admission(
+        ticket=_ready_ticket(side="short"),
+        observation=_obs(),
+        registry_row=SEED_REGISTRY["btc"],
+        active_configuration_hash="cfg",
+        max_age_ms=1_000,
+        route_evidence_state="CANDIDATE",
+        route_operational_state="ENABLED",
+        governor_halted=False,
+        firm_envelope_ok=True,
+    )
+    assert short.allowed is False
+    assert short.reason == "product_side_unsupported"
