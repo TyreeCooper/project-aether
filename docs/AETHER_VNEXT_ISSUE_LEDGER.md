@@ -184,3 +184,74 @@ Revision 0003 now uses an explicit `$aether$ ... $aether$` function delimiter.
 A regression test asserts both delimiters in the migration text.
 
 This was corrected before vNext deployment/cutover. No production schema was changed.
+
+
+## AETH-VN-006 — Sleeve inventory cardinality is ambiguous on multi-asset broker rows
+
+**Class:** schema normalization / anti-invention control  
+**Discovered:** Phase 5 closeout audit  
+**Status:** CLOSED  
+**Evidence reset:** NONE
+
+### Conflict
+
+v4.2.1 names `inventory_qty / inventory_avg` on the broker sleeve while each
+broker sleeve is explicitly allowed to hold multiple instruments:
+
+- Kraken: BTC + ETH;
+- IBKR: NVDA + TSLA + PLTR.
+
+A single scalar quantity and average price on one broker row would mix incompatible
+units and prices.
+
+### Resolution
+
+vNext preserves the exact inventory concepts but normalizes them into
+`sleeve_inventory`, keyed by:
+
+`(broker_account_id, asset_id)`
+
+Each row owns `inventory_qty`, `inventory_avg`, `updated_at_utc`, and optimistic
+`row_version`. The broker ledger retains broker-level cash, reserve, margin, P&L,
+fees, carry, settlement, and reconciliation fields.
+
+Revision 0009 refuses to infer an asset if a development database somehow contains
+non-zero scalar inventory, rather than silently assigning it to the wrong instrument.
+
+This is relational normalization only. It changes no setup, entry, exit, sizing,
+risk fraction, playbook state, or evidence sample.
+
+
+## AETH-VN-007 — Spot/equity sleeve-equity wording can double-count reserved purchase notional
+
+**Class:** binding accounting ambiguity  
+**Discovered:** Phase 5 closeout audit  
+**Status:** CONTAINED — must be implemented before Phase 6 Risk uses consolidated equity  
+**Blocks Phase 5 two-phase execution:** NO  
+**Blocks Phase 6 consolidated-equity/risk denominator:** YES
+
+### Conflict
+
+v4.2.1 simultaneously states:
+
+1. `cash_reserved_usd` includes OpenTrade reserved notional/margin;
+2. spot `inventory_mtm = inventory_qty × bid`;
+3. `sleeve_equity = cash_available + cash_reserved + inventory_mtm + unrealized - fees_accrued`;
+4. counting reserved purchase notional as extra equity is forbidden.
+
+For a filled spot/equity long, adding both the purchase notional still represented in
+`cash_reserved` and the full marked inventory value would count the same capital twice.
+
+### Controlled normalization
+
+Until Phase 6 implements the consolidated-equity projection, vNext will not expose a
+risk denominator from that literal double-counting formula.
+
+The Phase 6 projection must exclude the portion of `cash_reserved_usd` that backs
+spot/equity-long inventory before adding that inventory's conservative marked value.
+Equivalently: reserved purchase cost is capital transformed into inventory, not extra
+equity.
+
+The existing Phase 5 OPEN/FLAT cash-reservation lifecycle remains unchanged and is
+already tested for conservation. No profitability/evidence calculation may use a
+double-counted equity figure.
