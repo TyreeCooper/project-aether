@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from aether_vnext.domain import MarketObservation, QualityState
+from aether_vnext.domain import MarketObservation, QualityState, SessionState
 
 
 def observation_is_valid(
@@ -25,6 +25,12 @@ def observation_is_valid(
     if observation.quality_state in {QualityState.STALE, QualityState.INVALID}:
         return False
     if observation.age_ms > max_age_ms:
+        return False
+    if observation.session_state in {
+        SessionState.CLOSED,
+        SessionState.MAINTENANCE,
+        SessionState.HALT,
+    }:
         return False
     if observation.bid is not None and observation.ask is not None:
         if observation.bid > observation.ask:
