@@ -105,7 +105,7 @@ def test_execution_validation_never_increments_strategy_n() -> None:
 @pytest.mark.parametrize(
     "field,mutated",
     (
-        ("sample_domain", SampleDomain.HELD_OUT),
+        ("sample_domain", SampleDomain.IN_SAMPLE),
         ("playbook_version", "9.9"),
         ("configuration_hash", "different-config"),
         ("policy_version", "different-policy"),
