@@ -155,6 +155,7 @@ class OrderIntent:
     ready_spread_bps: float | None = None
     hard_stop_price: float | None = None
     submit_timeout_at: datetime | None = None
+    observation_id_at_reserve: str | None = None
     observation_id_at_fill: str | None = None
     trade_id: str | None = None
     version: int = 1
