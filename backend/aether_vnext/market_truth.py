@@ -17,8 +17,9 @@ def observation_is_valid(
 ) -> bool:
     """Hard market-validity gate shared by FIRE/READY/OPEN.
 
-    Healthy or degraded observations may be usable if still fresh and not
-    crossed. stale/invalid quality states are never valid.
+    Executable market truth requires HEALTHY quality, freshness, an eligible
+    session, a non-crossed book, and a positive mark. DEGRADED observations may
+    be retained for audit/display but cannot authorize FIRE/READY/OPEN.
     """
     if max_age_ms < 0:
         raise ValueError("max_age_ms must be non-negative")
