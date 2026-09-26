@@ -17,11 +17,13 @@ import sqlalchemy as sa
 from sqlalchemy.engine import Connection
 
 from aether_vnext.domain import (
+    CalendarState,
     Lineage,
     MarketObservation,
     OrderIntent,
     OrderIntentState,
     QualityState,
+    SessionState,
     Setup,
     SetupState,
     Ticket,
@@ -36,6 +38,7 @@ from aether_vnext.equity import (
     inventory_market_value_usd,
     sleeve_equity_projection,
 )
+from aether_vnext.execution import entry_fill_price
 from aether_vnext.registry import ProductType, registry_row
 from aether_vnext.reservations import reservation_requirement
 from aether_vnext.risk import (
@@ -44,12 +47,14 @@ from aether_vnext.risk import (
     RiskExposure,
     aggregate_book_risk,
     risk_limits_usd,
+    size_candidate_to_risk,
     stop_risk_usd,
 )
 from aether_vnext.reason_codes import ReasonCode
 from aether_vnext.schema import build_metadata
 from aether_vnext.playbook_exits import exit_rule
 from aether_vnext.playbooks import (
+    SEED_ASSET_CLUSTERS,
     asset_risk_hitches,
     cluster_for_asset,
     playbook,
@@ -779,6 +784,311 @@ class VNextStore:
             reject_code=row["reject_code"],
             exit_plan_id=row["exit_plan_id"],
         )
+
+    def size_fire_ticket(
+        self,
+        conn: Connection,
+        *,
+        ticket_id: str,
+        market_observation_id: str,
+        current_observations: Mapping[str, MarketObservation],
+        estimated_round_trip_cost_per_unit_usd: float,
+        created_at_utc: datetime,
+        event_id: str,
+        actor: str = "Risk",
+        broker_margin_cap_qty: float | None = None,
+        firm_capital_cap_qty: float | None = None,
+    ) -> dict[str, Any]:
+        """Apply Risk authority to exactly one FIRE Ticket.
+
+        Risk writes quantity only. Clerk economics remain unset until SIZE -> READY.
+        Portfolio later rechecks the same hard envelope atomically before reservation.
+        """
+        if created_at_utc.tzinfo is None:
+            raise ValueError("created_at_utc must be timezone-aware")
+        if float(estimated_round_trip_cost_per_unit_usd) < 0:
+            raise ValueError(
+                "estimated_round_trip_cost_per_unit_usd cannot be negative"
+            )
+
+        tickets = self.tables["tickets"]
+        lineage_table = self.tables["decision_lineage"]
+        observations = self.tables["market_observations"]
+
+        ticket = conn.execute(
+            sa.select(tickets)
+            .where(tickets.c.ticket_id == ticket_id)
+            .with_for_update()
+        ).mappings().first()
+        if ticket is None:
+            raise KeyError(f"unknown ticket: {ticket_id}")
+        if str(ticket["state"]) != TicketState.FIRE.value:
+            raise ValueError("Risk sizing requires FIRE ticket")
+        if ticket["stop_price"] is None:
+            raise ValueError("FIRE ticket requires stop_price")
+
+        lineage = conn.execute(
+            sa.select(lineage_table)
+            .where(lineage_table.c.firm_event_id == ticket["firm_event_id"])
+            .with_for_update()
+        ).mappings().first()
+        if lineage is None:
+            raise RuntimeError("FIRE ticket missing decision lineage")
+        if lineage["playbook_id"] is None:
+            raise RuntimeError("FIRE ticket missing durable playbook identity")
+
+        asset_id = str(ticket["asset_id"])
+        canonical_cluster = cluster_for_asset(asset_id)
+        if str(lineage["risk_cluster_id"]) != canonical_cluster:
+            raise RuntimeError("FIRE ticket canonical cluster drift")
+
+        hitches = {
+            str(target): float(fraction)
+            for target, fraction in dict(
+                lineage["asset_risk_hitches"] or {}
+            ).items()
+        }
+        expected_hitches = {
+            str(target): float(fraction)
+            for target, fraction in asset_risk_hitches(
+                str(lineage["playbook_id"])
+            ).items()
+        }
+        if hitches != expected_hitches:
+            raise RuntimeError("FIRE ticket canonical Risk hitch drift")
+
+        observation_row = conn.execute(
+            sa.select(observations).where(
+                observations.c.observation_id == market_observation_id
+            )
+        ).mappings().first()
+        if observation_row is None:
+            raise KeyError(
+                f"unknown market observation: {market_observation_id}"
+            )
+        if str(observation_row["asset_id"]) != asset_id:
+            raise ValueError("Risk market observation asset mismatch")
+
+        observation = MarketObservation(
+            observation_id=str(observation_row["observation_id"]),
+            asset_id=asset_id,
+            venue=str(observation_row["venue"]),
+            bid=observation_row["bid"],
+            ask=observation_row["ask"],
+            last=observation_row["last"],
+            mark=observation_row["mark"],
+            source=str(observation_row["source"]),
+            exchange_ts=(
+                _stored_utc(observation_row["exchange_ts"])
+                if observation_row["exchange_ts"] is not None
+                else None
+            ),
+            received_ts=_stored_utc(observation_row["received_ts"]),
+            age_ms=int(observation_row["age_ms"]),
+            spread_abs=observation_row["spread_abs"],
+            spread_bps=observation_row["spread_bps"],
+            session_state=SessionState(str(observation_row["session_state"])),
+            quality_state=QualityState(str(observation_row["quality_state"])),
+            fallback_reason=observation_row["fallback_reason"],
+            calendar_state=CalendarState(str(observation_row["calendar_state"])),
+            data_version=str(observation_row["data_version"]),
+        )
+
+        if (
+            observation.quality_state is not QualityState.HEALTHY
+            or observation.bid is None
+            or observation.ask is None
+        ):
+            reject_code = ReasonCode.MARKET_STALE.value
+            result = None
+        else:
+            entry_price = entry_fill_price(
+                observation,
+                position_side=str(ticket["side"]),
+            )
+            firm_equity = self.project_firm_equity(
+                conn,
+                observations=current_observations,
+            )
+            if firm_equity.consolidated_equity_usd <= 0:
+                raise RuntimeError("Firm equity must be positive for Risk sizing")
+
+            open_snapshot = self.project_open_risk(
+                conn,
+                cluster_by_asset=SEED_ASSET_CLUSTERS,
+            )
+            open_exposure = open_snapshot.exposure_for(
+                asset_id=asset_id,
+                cluster_id=canonical_cluster,
+            )
+            pending_exposure = self._pending_open_risk_exposure(
+                conn,
+                asset_id=asset_id,
+                cluster_id=canonical_cluster,
+            )
+            exposure = RiskExposure(
+                asset_open_risk_usd=(
+                    open_exposure.asset_open_risk_usd
+                    + pending_exposure.asset_open_risk_usd
+                ),
+                cluster_open_risk_usd=(
+                    open_exposure.cluster_open_risk_usd
+                    + pending_exposure.cluster_open_risk_usd
+                ),
+                portfolio_open_risk_usd=(
+                    open_exposure.portfolio_open_risk_usd
+                    + pending_exposure.portfolio_open_risk_usd
+                ),
+            )
+
+            limits = risk_limits_usd(
+                firm_equity.consolidated_equity_usd
+            )
+            cross_remaining: dict[str, float] = {}
+            for target_asset in hitches:
+                target_cluster = cluster_for_asset(target_asset)
+                target_open = open_snapshot.exposure_for(
+                    asset_id=target_asset,
+                    cluster_id=target_cluster,
+                )
+                target_pending = self._pending_open_risk_exposure(
+                    conn,
+                    asset_id=target_asset,
+                    cluster_id=target_cluster,
+                )
+                occupied = (
+                    target_open.asset_open_risk_usd
+                    + target_pending.asset_open_risk_usd
+                )
+                cross_remaining[target_asset] = max(
+                    limits.asset_usd - occupied,
+                    0.0,
+                )
+
+            result = size_candidate_to_risk(
+                registry_row(asset_id),
+                side=str(ticket["side"]),
+                entry_price=entry_price,
+                stop_price=float(ticket["stop_price"]),
+                equity_usd=firm_equity.consolidated_equity_usd,
+                exposure=exposure,
+                broker_margin_cap_qty=broker_margin_cap_qty,
+                firm_capital_cap_qty=firm_capital_cap_qty,
+                estimated_round_trip_cost_per_unit_usd=(
+                    estimated_round_trip_cost_per_unit_usd
+                ),
+                asset_risk_hitches=hitches,
+                cross_asset_remaining_risk_usd=cross_remaining,
+            )
+            reject_code = result.reject_code
+
+        if result is None or not result.ok:
+            reject = str(reject_code)
+            conn.execute(
+                tickets.update()
+                .where(tickets.c.ticket_id == ticket_id)
+                .values(
+                    state=TicketState.REJECTED.value,
+                    quantity=None,
+                    reject_code=reject,
+                    market_observation_id=market_observation_id,
+                    first_killed_by="Risk",
+                    first_kill_reason=reject,
+                )
+            )
+            conn.execute(
+                lineage_table.update()
+                .where(
+                    lineage_table.c.firm_event_id == ticket["firm_event_id"]
+                )
+                .values(
+                    market_observation_id=market_observation_id,
+                    first_killed_by="Risk",
+                    first_kill_reason=reject,
+                    row_version=lineage_table.c.row_version + 1,
+                )
+            )
+            self.append_event(
+                conn,
+                event_id=event_id,
+                aggregate_type="ticket",
+                aggregate_id=ticket_id,
+                prior_state=TicketState.FIRE.value,
+                new_state=TicketState.REJECTED.value,
+                seat="Risk",
+                reason_code=reject,
+                policy_version=str(ticket["policy_version"]),
+                configuration_hash=str(ticket["configuration_hash"]),
+                market_observation_id=market_observation_id,
+                actor=actor,
+                created_at_utc=created_at_utc,
+                payload={},
+            )
+            return {
+                "ok": False,
+                "state": TicketState.REJECTED.value,
+                "reject_code": reject,
+            }
+
+        conn.execute(
+            tickets.update()
+            .where(tickets.c.ticket_id == ticket_id)
+            .values(
+                state=TicketState.SIZE.value,
+                quantity=result.quantity,
+                modeled_round_trip_cost_pct=None,
+                reject_code=None,
+                market_observation_id=market_observation_id,
+            )
+        )
+        conn.execute(
+            lineage_table.update()
+            .where(lineage_table.c.firm_event_id == ticket["firm_event_id"])
+            .values(
+                market_observation_id=market_observation_id,
+                row_version=lineage_table.c.row_version + 1,
+            )
+        )
+        self.append_event(
+            conn,
+            event_id=event_id,
+            aggregate_type="ticket",
+            aggregate_id=ticket_id,
+            prior_state=TicketState.FIRE.value,
+            new_state=TicketState.SIZE.value,
+            seat="Risk",
+            reason_code=None,
+            policy_version=str(ticket["policy_version"]),
+            configuration_hash=str(ticket["configuration_hash"]),
+            market_observation_id=market_observation_id,
+            actor=actor,
+            created_at_utc=created_at_utc,
+            payload={
+                "quantity": result.quantity,
+                "stop_risk_usd": result.stop_risk_usd,
+                "estimated_round_trip_cost_usd": (
+                    result.estimated_round_trip_cost_usd
+                ),
+                "modeled_loss_at_stop_usd": result.modeled_loss_at_stop_usd,
+                "risk_cluster_id": canonical_cluster,
+                "asset_risk_hitches_usd": dict(
+                    result.asset_risk_hitches_usd
+                ),
+            },
+        )
+        return {
+            "ok": True,
+            "state": TicketState.SIZE.value,
+            "quantity": result.quantity,
+            "stop_risk_usd": result.stop_risk_usd,
+            "estimated_round_trip_cost_usd": (
+                result.estimated_round_trip_cost_usd
+            ),
+            "modeled_loss_at_stop_usd": result.modeled_loss_at_stop_usd,
+            "asset_risk_hitches_usd": dict(
+                result.asset_risk_hitches_usd
+            ),
+        }
 
     def load_order_intent(
         self,
