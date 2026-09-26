@@ -322,6 +322,18 @@ def _store_fixture():
     with engine.begin() as conn:
         store.create_all_for_test(conn)
         assert store.provision_seed_ledgers_once(conn) is True
+        _insert_exit_plan_row(
+            conn,
+            store,
+            exit_plan_id="exit-plan-btc",
+            hard_stop_price=95_000.0,
+        )
+        _insert_exit_plan_row(
+            conn,
+            store,
+            exit_plan_id="exit-plan-mes",
+            hard_stop_price=5900.0,
+        )
         _insert_ready_ticket_row(
             conn,
             store,
@@ -333,6 +345,7 @@ def _store_fixture():
             horizon="daily_swing",
             quantity=0.01,
             market_observation_id="obs-ready",
+            exit_plan_id="exit-plan-btc",
         )
         _insert_ready_ticket_row(
             conn,
@@ -346,6 +359,7 @@ def _store_fixture():
             quantity=1.0,
             stop_price=5900.0,
             market_observation_id="obs-ready-mes",
+            exit_plan_id="exit-plan-mes",
         )
     return engine, store
 
@@ -382,7 +396,7 @@ def _reserve_btc(
         reserve_margin_usd=reserve_margin_usd,
         ready_spread_bps=2.0,
         hard_stop_price=95_000.0,
-        exit_plan_id=None,
+        exit_plan_id="exit-plan-btc",
         submit_timeout_at=None,
         policy_version="policy-v1",
         configuration_hash="cfg",
@@ -548,7 +562,7 @@ def test_margin_reservation_and_release_use_same_broker_ledger() -> None:
             reserve_margin_usd=1200.0,
             ready_spread_bps=1.0,
             hard_stop_price=5900.0,
-            exit_plan_id=None,
+            exit_plan_id="exit-plan-mes",
             submit_timeout_at=None,
             policy_version="policy-v1",
             configuration_hash="cfg",
@@ -612,8 +626,6 @@ def _finalize_btc(conn, store: VNextStore, *, trade_id: str = "trade-1", qty: fl
         slippage_usd=0.5,
         slippage_bps=5.0,
         initial_stop_risk_usd=50.0,
-        exit_plan_version="v1",
-        exit_plan_payload={"hard_stop_price": 95_000.0},
         management_telemetry={},
         event_id=f"evt-fill-{trade_id}",
         actor="paper-adapter",
@@ -921,6 +933,7 @@ def _ready_ticket(*, side: str = "long", config: str = "cfg") -> Ticket:
         stop_price=95_000.0,
         quantity=0.01,
         modeled_round_trip_cost_pct=0.1,
+        exit_plan_id="exit-plan-btc",
     )
 
 
@@ -1001,6 +1014,41 @@ def test_phase_a_admission_blocks_degraded_fallback_and_crypto_short() -> None:
     assert short.reason == "product_side_unsupported"
 
 
+def _insert_exit_plan_row(
+    conn,
+    store: VNextStore,
+    *,
+    exit_plan_id: str,
+    hard_stop_price: float,
+) -> None:
+    table = store.tables["exit_plans"]
+    conn.execute(
+        table.insert().values(
+            exit_plan_id=exit_plan_id,
+            version="v1",
+            hard_stop_price=hard_stop_price,
+            structure_rule_id=None,
+            time_stop_deadline_utc=None,
+            trailing_policy={
+                "enabled": False,
+                "start_condition": None,
+                "ratchet_rule": None,
+                "never_loosen": True,
+            },
+            profit_take_policy={
+                "enabled": False,
+                "rule_id": None,
+            },
+            session_close_policy="hold",
+            stale_mark_policy="hold",
+            governor_halt_behavior="hold",
+            created_from_playbook_version="1.3",
+            payload_hash=f"hash-{exit_plan_id}",
+            created_at_utc=T0,
+        )
+    )
+
+
 def _insert_ready_ticket_row(
     conn,
     store: VNextStore,
@@ -1014,11 +1062,13 @@ def _insert_ready_ticket_row(
     quantity: float = 0.01,
     stop_price: float = 95_000.0,
     market_observation_id: str = "obs-ready",
+    exit_plan_id: str = "exit-plan-btc",
 ) -> None:
     tickets = store.tables["tickets"]
     conn.execute(
         tickets.insert().values(
             ticket_id=ticket_id,
+            exit_plan_id=exit_plan_id,
             setup_id=f"setup-{ticket_id}",
             firm_event_id=None,
             asset_id=asset_id,
@@ -1128,7 +1178,7 @@ def test_ready_to_reserved_to_submitted_to_filled_to_open_end_to_end() -> None:
             order_intent_id="intent-reserve-1",
             trade_id="trade-e2e",
             setup_id="setup-ticket-1",
-            exit_plan_id="exit-plan-e2e",
+            exit_plan_id="exit-plan-btc",
             fill_market_observation_id="obs-fill",
             filled_at_utc=venue_fill.intent.filled_at,
             filled_qty=venue_fill.intent.filled_qty,
@@ -1136,8 +1186,6 @@ def test_ready_to_reserved_to_submitted_to_filled_to_open_end_to_end() -> None:
             slippage_usd=venue_fill.intent.slippage_usd or 0.0,
             slippage_bps=venue_fill.intent.slippage_bps or 0.0,
             initial_stop_risk_usd=50.0,
-            exit_plan_version="v1",
-            exit_plan_payload={"hard_stop_price": 95_000.0},
             management_telemetry={},
             event_id="evt-e2e-open",
             actor="portfolio",
