@@ -76,6 +76,18 @@ def test_order_intent_contains_live_shaped_execution_fields() -> None:
         "slippage_usd",
         "slippage_bps",
         "idempotency_key",
+        "broker_account_id",
+        "intent_kind",
+        "position_key",
+        "signal_key",
+        "reserved_cash_usd",
+        "reserved_margin_usd",
+        "ready_spread_bps",
+        "hard_stop_price",
+        "submit_timeout_at",
+        "fill_market_observation_id",
+        "trade_id",
+        "row_version",
     } <= names
 
 
