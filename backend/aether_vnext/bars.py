@@ -71,12 +71,21 @@ class _WorkingBar:
         self.last_exchange_ts = print_.exchange_ts
         self.print_count += 1
 
-    def freeze(self) -> Bar:
+    def freeze(
+        self,
+        *,
+        bucket_close_override_utc: datetime | None = None,
+    ) -> Bar:
+        close_utc = bucket_close_override_utc or self.bucket_close_utc
+        if close_utc.tzinfo is None:
+            raise ValueError("bar close timestamp must be timezone-aware")
+        if close_utc < self.bucket_open_utc:
+            raise ValueError("bar close cannot precede bar open")
         return Bar(
             asset_id=self.asset_id,
             interval=self.interval,
             bucket_open_utc=self.bucket_open_utc,
-            bucket_close_utc=self.bucket_close_utc,
+            bucket_close_utc=close_utc,
             open=self.open,
             high=self.high,
             low=self.low,
@@ -186,6 +195,8 @@ class ClosedBarBuilder:
             return ()
         if session_close_utc.tzinfo is None or received_ts.tzinfo is None:
             raise ValueError("session timestamps must be timezone-aware")
+        if session_close_utc < current.bucket_open_utc:
+            raise ValueError("session close cannot precede forming bar")
         if not bar_is_closed(
             bar_open_utc=current.bucket_open_utc,
             interval=current.interval,
@@ -194,7 +205,9 @@ class ClosedBarBuilder:
             session_close_utc=session_close_utc,
         ):
             return ()
-        closed = current.freeze()
+        closed = current.freeze(
+            bucket_close_override_utc=session_close_utc,
+        )
         self._working = None
         return (closed,)
 
