@@ -316,7 +316,31 @@ def test_phase5_execution_reservation_columns_are_in_current_schema() -> None:
     _, store = _engine_and_store()
     columns = set(store.tables["order_intents"].c.keys())
     assert {
+        "order_intent_id",
+        "ticket_id",
+        "trade_id",
         "broker_account_id",
+        "venue",
+        "symbol_executed",
+        "side",
+        "requested_qty",
+        "filled_qty",
+        "order_type",
+        "reference_price",
+        "expected_fill_price",
+        "avg_fill_price",
+        "state",
+        "reject_code",
+        "slip_usd",
+        "slip_bps",
+        "submitted_at",
+        "acknowledged_at",
+        "filled_at",
+        "submit_timeout_at",
+        "idempotency_key",
+        "observation_id_at_reserve",
+        "observation_id_at_fill",
+        "version",
         "exit_plan_id",
         "intent_kind",
         "position_key",
@@ -325,29 +349,33 @@ def test_phase5_execution_reservation_columns_are_in_current_schema() -> None:
         "reserved_margin_usd",
         "ready_spread_bps",
         "hard_stop_price",
-        "submit_timeout_at",
-        "fill_market_observation_id",
-        "trade_id",
-        "row_version",
     } <= columns
+    assert "symbol" not in columns
+    assert "qty" not in columns
+    assert "expected_fill" not in columns
+    assert "slippage_usd" not in columns
+    assert "slippage_bps" not in columns
+    assert "fill_market_observation_id" not in columns
 
 
-def test_runtime_schema_facade_is_pinned_to_revision_0009() -> None:
+def test_runtime_schema_facade_is_pinned_to_revision_0010() -> None:
     backend = Path(__file__).resolve().parents[1]
     facade = (backend / "aether_vnext" / "schema.py").read_text(encoding="utf-8")
-    assert "schema_v0009" in facade
+    assert "schema_v0010" in facade
     migration = (
         backend
         / "alembic"
         / "versions"
-        / "0009_aether_vnext_normalized_sleeve_inventory.py"
+        / "0010_aether_vnext_order_intent_vocabulary.py"
     ).read_text(encoding="utf-8")
-    assert 'revision: str = "0009"' in migration
-    assert 'down_revision: Union[str, None] = "0008"' in migration
-    assert "sleeve_inventory" in migration
-    assert "broker_account_id" in migration
-    assert "asset_id" in migration
-    assert "revision 0009 cannot infer asset_id" in migration
+    assert 'revision: str = "0010"' in migration
+    assert 'down_revision: Union[str, None] = "0009"' in migration
+    assert "symbol_executed" in migration
+    assert "requested_qty" in migration
+    assert "expected_fill_price" in migration
+    assert "observation_id_at_reserve" in migration
+    assert "observation_id_at_fill" in migration
+    assert "MARKET_PAPER" in migration
 
 
 def test_closed_trade_is_self_contained_execution_evidence() -> None:
