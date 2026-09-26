@@ -34,6 +34,7 @@ def test_book_of_record_has_required_tables() -> None:
         "policy_snapshots",
         "governor_state",
         "broker_account_ledgers",
+        "decision_lineage",
         "setups",
         "tickets",
         "exit_plans",
@@ -42,6 +43,7 @@ def test_book_of_record_has_required_tables() -> None:
         "active_positions",
         "closed_trades",
         "review_cards",
+        "route_review_state",
         "signal_consumptions",
         "mutation_idempotency",
         "ledger_transfers",
@@ -146,11 +148,18 @@ def test_lineage_foreign_key_chain_is_present() -> None:
             for fk in constraint.elements
         }
 
+    assert "decision_lineage.firm_event_id" in targets("setups")
     assert "setups.setup_id" in targets("tickets")
+    assert "decision_lineage.firm_event_id" in targets("tickets")
     assert "tickets.ticket_id" in targets("order_intents")
+    assert "decision_lineage.firm_event_id" in targets("order_intents")
     assert "order_intents.order_intent_id" in targets("open_trades")
+    assert "decision_lineage.firm_event_id" in targets("open_trades")
     assert "open_trades.trade_id" in targets("closed_trades")
+    assert "decision_lineage.firm_event_id" in targets("closed_trades")
     assert "closed_trades.trade_id" in targets("review_cards")
+    assert "decision_lineage.firm_event_id" in targets("review_cards")
+    assert "review_cards.review_card_id" in targets("route_review_state")
 
 
 def test_one_active_position_per_position_key_is_database_enforced() -> None:
@@ -269,3 +278,33 @@ def test_signal_consumption_is_database_unique() -> None:
                 trade_id="trade-2",
                 consumed_at_utc=NOW,
             )
+
+
+def test_decision_lineage_contains_universal_forensic_fields() -> None:
+    _, store = _engine_and_store()
+    lineage = store.tables["decision_lineage"]
+    assert {
+        "firm_event_id",
+        "setup_id",
+        "ticket_id",
+        "order_intent_id",
+        "trade_id",
+        "asset_id",
+        "route_id",
+        "policy_version",
+        "configuration_hash",
+        "market_observation_id",
+        "first_killed_by",
+        "first_kill_reason",
+        "created_at_utc",
+        "row_version",
+    } <= set(lineage.c.keys())
+
+
+def test_route_review_projection_preserves_bench_or_keep_across_restart() -> None:
+    _, store = _engine_and_store()
+    route_state = store.tables["route_review_state"]
+    assert tuple(route_state.primary_key.columns.keys()) == ("route_id",)
+    assert {"evidence_state", "operational_state", "review_card_id", "row_version"} <= set(
+        route_state.c.keys()
+    )
