@@ -39,6 +39,13 @@ def canonical_payload_hash(payload: Mapping[str, Any]) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def _horizon_from_position_key(value: str) -> str:
+    parts = str(value).split(":")
+    if len(parts) != 2 or not parts[1]:
+        raise ValueError("position_key must be asset:horizon")
+    return parts[1]
+
+
 class VNextStore:
     def __init__(self, *, schema: str | None = "aether_vnext") -> None:
         self.schema = schema
@@ -344,6 +351,240 @@ class VNextStore:
             payload={"submit_timeout_at": submit_timeout_at.isoformat()},
         )
         return {"ok": True, "duplicate": False, "state": "SUBMITTED"}
+
+    def finalize_filled_open(
+        self,
+        conn: Connection,
+        *,
+        order_intent_id: str,
+        trade_id: str,
+        setup_id: str,
+        exit_plan_id: str,
+        fill_market_observation_id: str,
+        filled_at_utc: datetime,
+        filled_qty: float,
+        avg_fill_price: float,
+        slippage_usd: float,
+        slippage_bps: float,
+        initial_stop_risk_usd: float,
+        exit_plan_version: str,
+        exit_plan_payload: Mapping[str, Any],
+        management_telemetry: Mapping[str, Any],
+        event_id: str,
+        actor: str,
+    ) -> dict[str, Any]:
+        """Atomically convert a SUBMITTED all-or-none intent into one OPEN trade.
+
+        The broker reservation remains locked while the trade is OPEN. Signal
+        consumption, active-position occupancy, OpenTrade creation, intent fill
+        state, lineage, and EventLedger are committed together.
+        """
+        if filled_qty <= 0 or avg_fill_price <= 0:
+            raise ValueError("filled quantity and price must be positive")
+        if initial_stop_risk_usd < 0:
+            raise ValueError("initial_stop_risk_usd cannot be negative")
+
+        intents = self.tables["order_intents"]
+        trades = self.tables["open_trades"]
+        positions = self.tables["active_positions"]
+        signals = self.tables["signal_consumptions"]
+        lineage = self.tables["decision_lineage"]
+
+        intent = conn.execute(
+            sa.select(intents)
+            .where(intents.c.order_intent_id == order_intent_id)
+            .with_for_update()
+        ).mappings().first()
+        if intent is None:
+            raise KeyError(f"unknown order intent: {order_intent_id}")
+
+        if intent["state"] == "FILLED":
+            return {
+                "ok": True,
+                "duplicate": True,
+                "state": "FILLED",
+                "trade_id": intent["trade_id"],
+            }
+        if intent["state"] in {"REJECTED", "CANCELLED", "CANCELLED_STALE"}:
+            return {
+                "ok": False,
+                "duplicate": True,
+                "error": "terminal_state_wins",
+                "state": intent["state"],
+            }
+        if intent["state"] != "SUBMITTED":
+            return {
+                "ok": False,
+                "error": "illegal_state",
+                "state": intent["state"],
+            }
+        if abs(float(filled_qty) - float(intent["qty"])) > 1e-12:
+            return {
+                "ok": False,
+                "error": "partial_fill_disabled",
+                "state": intent["state"],
+            }
+
+        position_key_value = str(intent["position_key"] or "")
+        signal_key_value = str(intent["signal_key"] or "")
+        if not position_key_value:
+            raise ValueError("position_key required before OPEN")
+        if not signal_key_value:
+            raise ValueError("signal_key required before OPEN")
+
+        existing_position = conn.execute(
+            sa.select(positions.c.trade_id).where(
+                positions.c.position_key == position_key_value
+            )
+        ).first()
+        if existing_position is not None:
+            return {
+                "ok": False,
+                "error": "duplicate_position_key",
+                "state": intent["state"],
+            }
+
+        existing_signal = conn.execute(
+            sa.select(signals.c.trade_id).where(
+                signals.c.signal_key == signal_key_value
+            )
+        ).first()
+        if existing_signal is not None:
+            return {
+                "ok": False,
+                "error": "signal_consumed",
+                "state": intent["state"],
+            }
+
+        conn.execute(
+            trades.insert().values(
+                trade_id=trade_id,
+                order_intent_id=order_intent_id,
+                ticket_id=intent["ticket_id"],
+                setup_id=setup_id,
+                exit_plan_id=exit_plan_id,
+                firm_event_id=intent["firm_event_id"],
+                asset_id=intent["asset_id"],
+                route_id=intent["route_id"],
+                position_key=position_key_value,
+                side=intent["side"],
+                quantity=filled_qty,
+                avg_entry_price=avg_fill_price,
+                initial_stop_risk_usd=initial_stop_risk_usd,
+                exit_plan_version=exit_plan_version,
+                exit_plan_payload=dict(exit_plan_payload),
+                management_telemetry=dict(management_telemetry),
+                policy_version=intent["policy_version"],
+                configuration_hash=intent["configuration_hash"],
+                market_observation_id=fill_market_observation_id,
+                opened_at_utc=filled_at_utc,
+            )
+        )
+        conn.execute(
+            positions.insert().values(
+                position_key=position_key_value,
+                trade_id=trade_id,
+                asset_id=intent["asset_id"],
+                horizon=_horizon_from_position_key(position_key_value),
+                side=intent["side"],
+                quantity=filled_qty,
+                row_version=1,
+                updated_at_utc=filled_at_utc,
+            )
+        )
+        conn.execute(
+            signals.insert().values(
+                signal_key=signal_key_value,
+                order_intent_id=order_intent_id,
+                trade_id=trade_id,
+                consumed_at_utc=filled_at_utc,
+            )
+        )
+        conn.execute(
+            intents.update()
+            .where(intents.c.order_intent_id == order_intent_id)
+            .values(
+                state="FILLED",
+                filled_at=filled_at_utc,
+                filled_qty=filled_qty,
+                avg_fill_price=avg_fill_price,
+                reject_code=None,
+                slippage_usd=slippage_usd,
+                slippage_bps=slippage_bps,
+                fill_market_observation_id=fill_market_observation_id,
+                trade_id=trade_id,
+                exit_plan_id=exit_plan_id,
+                row_version=int(intent["row_version"]) + 1,
+            )
+        )
+
+        firm_event_id = intent["firm_event_id"]
+        if firm_event_id:
+            conn.execute(
+                lineage.update()
+                .where(lineage.c.firm_event_id == firm_event_id)
+                .values(
+                    setup_id=setup_id,
+                    ticket_id=intent["ticket_id"],
+                    order_intent_id=order_intent_id,
+                    trade_id=trade_id,
+                    market_observation_id=fill_market_observation_id,
+                    row_version=lineage.c.row_version + 1,
+                )
+            )
+
+        self.append_event(
+            conn,
+            event_id=event_id,
+            aggregate_type="trade",
+            aggregate_id=trade_id,
+            prior_state="SUBMITTED",
+            new_state="OPEN",
+            seat="Portfolio",
+            reason_code="execution.filled",
+            policy_version=intent["policy_version"],
+            configuration_hash=intent["configuration_hash"],
+            market_observation_id=fill_market_observation_id,
+            actor=actor,
+            created_at_utc=filled_at_utc,
+            payload={
+                "order_intent_id": order_intent_id,
+                "position_key": position_key_value,
+                "signal_key": signal_key_value,
+                "filled_qty": filled_qty,
+                "avg_fill_price": avg_fill_price,
+                "reserved_cash_usd": float(intent["reserved_cash_usd"]),
+                "reserved_margin_usd": float(intent["reserved_margin_usd"]),
+                "reservation_retained_while_open": True,
+            },
+        )
+        return {
+            "ok": True,
+            "duplicate": False,
+            "state": "FILLED",
+            "trade_id": trade_id,
+            "position_key": position_key_value,
+            "signal_key": signal_key_value,
+        }
+
+    def stale_order_intent_ids(
+        self,
+        conn: Connection,
+        *,
+        at_utc: datetime,
+    ) -> tuple[str, ...]:
+        """Return RESERVED/SUBMITTED intents whose durable timeout has elapsed."""
+        intents = self.tables["order_intents"]
+        rows = conn.execute(
+            sa.select(intents.c.order_intent_id).where(
+                sa.and_(
+                    intents.c.state.in_(("RESERVED", "SUBMITTED")),
+                    intents.c.submit_timeout_at.is_not(None),
+                    intents.c.submit_timeout_at < at_utc,
+                )
+            )
+        )
+        return tuple(str(row[0]) for row in rows)
 
     def release_order_reservation(
         self,
