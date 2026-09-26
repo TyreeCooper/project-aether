@@ -37,7 +37,9 @@ from aether_vnext.reservations import reservation_requirement
 from aether_vnext.risk import (
     BookRiskPosition,
     BookRiskSnapshot,
+    RiskExposure,
     aggregate_book_risk,
+    risk_limits_usd,
     stop_risk_usd,
 )
 from aether_vnext.schema import build_metadata
@@ -281,6 +283,14 @@ class VNextStore:
                 for ledger_id, cash in SEED_LEDGER_CASH_USD.items()
             ],
         )
+        guard = self.tables["risk_admission_guard"]
+        conn.execute(
+            guard.insert().values(
+                scope_key="firm",
+                row_version=1,
+                updated_at_utc=datetime.now(timezone.utc),
+            )
+        )
         return True
 
     def record_market_observation(
@@ -451,6 +461,407 @@ class VNextStore:
             "error": reason_code,
             "state": "REJECTED",
             "reject_code": reason_code,
+        }
+
+    def _pending_open_risk_exposure(
+        self,
+        conn: Connection,
+        *,
+        asset_id: str,
+        cluster_id: str,
+    ) -> RiskExposure:
+        intents = self.tables["order_intents"]
+        reservations = self.tables["risk_admission_reservations"]
+
+        rows = conn.execute(
+            sa.select(
+                intents.c.order_intent_id,
+                reservations.c.asset_id,
+                reservations.c.cluster_id,
+                reservations.c.stop_risk_usd,
+            )
+            .select_from(
+                intents.outerjoin(
+                    reservations,
+                    reservations.c.order_intent_id
+                    == intents.c.order_intent_id,
+                )
+            )
+            .where(
+                sa.and_(
+                    intents.c.intent_kind == "OPEN",
+                    intents.c.state.in_(("RESERVED", "SUBMITTED")),
+                )
+            )
+            .order_by(intents.c.order_intent_id)
+        ).mappings().all()
+
+        asset_risk = 0.0
+        cluster_risk = 0.0
+        portfolio_risk = 0.0
+        for row in rows:
+            if row["stop_risk_usd"] is None:
+                raise RuntimeError(
+                    "pending OPEN intent missing atomic risk reservation: "
+                    f"{row['order_intent_id']}"
+                )
+            risk = float(row["stop_risk_usd"])
+            if risk <= 0:
+                raise RuntimeError(
+                    f"invalid pending stop-risk: {row['order_intent_id']}"
+                )
+            portfolio_risk += risk
+            if str(row["asset_id"]) == asset_id:
+                asset_risk += risk
+            if str(row["cluster_id"]) == cluster_id:
+                cluster_risk += risk
+
+        return RiskExposure(
+            asset_open_risk_usd=asset_risk,
+            cluster_open_risk_usd=cluster_risk,
+            portfolio_open_risk_usd=portfolio_risk,
+        )
+
+    def reserve_risk_checked_open_intent(
+        self,
+        conn: Connection,
+        *,
+        order_intent_id: str,
+        ticket_id: str,
+        firm_event_id: str | None,
+        asset_id: str,
+        route_id: str,
+        broker_account_id: str,
+        broker: str,
+        venue: str,
+        symbol: str,
+        side: str,
+        qty: float,
+        order_type: str,
+        reference_price: float | None,
+        expected_fill: float | None,
+        idempotency_key: str,
+        signal_key: str,
+        position_key: str,
+        reserve_cash_usd: float | None,
+        reserve_margin_usd: float | None,
+        ready_spread_bps: float | None,
+        hard_stop_price: float | None,
+        exit_plan_id: str | None,
+        submit_timeout_at: datetime | None,
+        policy_version: str,
+        configuration_hash: str,
+        market_observation_id: str,
+        created_at_utc: datetime,
+        event_id: str,
+        actor: str,
+        risk_cluster_id: str,
+        cluster_by_asset: Mapping[str, str],
+        current_observations: Mapping[str, MarketObservation],
+    ) -> dict[str, Any]:
+        """Atomically verify Firm risk and reserve an OPEN OrderIntent.
+
+        A single durable Firm guard row is locked first. While that row is held,
+        the method combines active-book stop-risk with every RESERVED/SUBMITTED
+        OPEN risk reservation, checks the candidate against the frozen trade,
+        asset, cluster and portfolio ceilings, and only then creates RESERVED.
+
+        This prevents concurrent Phase-A admissions from spending the same risk
+        capacity. Cluster identity remains explicit input until a canonical vNext
+        twelve-asset cluster map is frozen.
+        """
+        cluster_id = str(risk_cluster_id).strip()
+        if not cluster_id:
+            raise ValueError("risk_cluster_id cannot be blank")
+
+        intents = self.tables["order_intents"]
+        risk_reservations = self.tables["risk_admission_reservations"]
+        existing = conn.execute(
+            sa.select(intents).where(
+                intents.c.idempotency_key == idempotency_key
+            )
+        ).mappings().first()
+        if existing is not None:
+            if (
+                existing["intent_kind"] == "OPEN"
+                and existing["state"] in {"RESERVED", "SUBMITTED"}
+            ):
+                tracked = conn.execute(
+                    sa.select(risk_reservations.c.order_intent_id).where(
+                        risk_reservations.c.order_intent_id
+                        == existing["order_intent_id"]
+                    )
+                ).first()
+                if tracked is None:
+                    raise RuntimeError(
+                        "pending OPEN idempotent retry lacks risk reservation"
+                    )
+            return {
+                "ok": True,
+                "duplicate": True,
+                "order_intent_id": existing["order_intent_id"],
+                "state": existing["state"],
+            }
+
+        guard_table = self.tables["risk_admission_guard"]
+        guard = conn.execute(
+            sa.select(guard_table)
+            .where(guard_table.c.scope_key == "firm")
+            .with_for_update()
+        ).mappings().first()
+        if guard is None:
+            raise RuntimeError(
+                "Firm risk admission guard is not provisioned"
+            )
+
+        tickets = self.tables["tickets"]
+        observations = self.tables["market_observations"]
+        ticket = conn.execute(
+            sa.select(tickets).where(tickets.c.ticket_id == ticket_id)
+        ).mappings().first()
+
+        # Let the existing Phase-A contract own canonical rejection behavior
+        # when the ticket cannot be risk-evaluated as a valid READY candidate.
+        preflight_valid = (
+            ticket is not None
+            and ticket["state"] == "READY"
+            and ticket["asset_id"] == asset_id
+            and ticket["route_id"] == route_id
+            and ticket["signal_key"] == signal_key
+            and ticket["side"] == side
+            and ticket["exit_plan_id"] == exit_plan_id
+            and ticket["stop_price"] is not None
+            and ticket["quantity"] is not None
+            and abs(float(ticket["quantity"]) - float(qty)) <= 1e-12
+            and ticket["modeled_round_trip_cost_pct"] is not None
+            and ticket["policy_version"] == policy_version
+            and ticket["configuration_hash"] == configuration_hash
+        )
+        observation = conn.execute(
+            sa.select(observations).where(
+                observations.c.observation_id == market_observation_id
+            )
+        ).mappings().first()
+        preflight_valid = bool(
+            preflight_valid
+            and observation is not None
+            and observation["asset_id"] == asset_id
+            and observation["quality_state"] == "healthy"
+            and observation["bid"] is not None
+            and observation["ask"] is not None
+        )
+
+        if not preflight_valid:
+            return self.reserve_order_intent(
+                conn,
+                order_intent_id=order_intent_id,
+                ticket_id=ticket_id,
+                firm_event_id=firm_event_id,
+                asset_id=asset_id,
+                route_id=route_id,
+                broker_account_id=broker_account_id,
+                broker=broker,
+                venue=venue,
+                symbol=symbol,
+                side=side,
+                qty=qty,
+                order_type=order_type,
+                reference_price=reference_price,
+                expected_fill=expected_fill,
+                idempotency_key=idempotency_key,
+                signal_key=signal_key,
+                position_key=position_key,
+                reserve_cash_usd=reserve_cash_usd,
+                reserve_margin_usd=reserve_margin_usd,
+                ready_spread_bps=ready_spread_bps,
+                hard_stop_price=hard_stop_price,
+                exit_plan_id=exit_plan_id,
+                submit_timeout_at=submit_timeout_at,
+                policy_version=policy_version,
+                configuration_hash=configuration_hash,
+                market_observation_id=market_observation_id,
+                created_at_utc=created_at_utc,
+                event_id=event_id,
+                actor=actor,
+                intent_kind="OPEN",
+            )
+
+        ticket_stop = float(ticket["stop_price"])
+        if (
+            hard_stop_price is None
+            or abs(float(hard_stop_price) - ticket_stop) > 1e-12
+        ):
+            return self.reject_ticket_pre_reserve(
+                conn,
+                ticket_id=ticket_id,
+                reason_code="ticket_contract_mismatch",
+                at_utc=created_at_utc,
+                event_id=event_id,
+                actor=actor,
+                market_observation_id=market_observation_id,
+            )
+
+        requirement = reservation_requirement(
+            registry_row(asset_id),
+            side=side,
+            qty=float(qty),
+            bid=float(observation["bid"]),
+            ask=float(observation["ask"]),
+            modeled_round_trip_cost_pct=float(
+                ticket["modeled_round_trip_cost_pct"]
+            ),
+        )
+        try:
+            candidate_risk = stop_risk_usd(
+                registry_row(asset_id),
+                side=side,
+                quantity=float(qty),
+                entry_price=requirement.computed_entry_price,
+                stop_price=ticket_stop,
+            )
+        except ValueError as exc:
+            if str(exc) != "bad_stop":
+                raise
+            return self.reject_ticket_pre_reserve(
+                conn,
+                ticket_id=ticket_id,
+                reason_code="bad_stop",
+                at_utc=created_at_utc,
+                event_id=event_id,
+                actor=actor,
+                market_observation_id=market_observation_id,
+            )
+
+        firm_equity = self.project_firm_equity(
+            conn,
+            observations=current_observations,
+        )
+        if firm_equity.consolidated_equity_usd <= 0:
+            raise RuntimeError("Firm equity must be positive for risk admission")
+        limits = risk_limits_usd(firm_equity.consolidated_equity_usd)
+
+        open_snapshot = self.project_open_risk(
+            conn,
+            cluster_by_asset=cluster_by_asset,
+        )
+        open_exposure = open_snapshot.exposure_for(
+            asset_id=asset_id,
+            cluster_id=cluster_id,
+        )
+        pending_exposure = self._pending_open_risk_exposure(
+            conn,
+            asset_id=asset_id,
+            cluster_id=cluster_id,
+        )
+        exposure = RiskExposure(
+            asset_open_risk_usd=(
+                open_exposure.asset_open_risk_usd
+                + pending_exposure.asset_open_risk_usd
+            ),
+            cluster_open_risk_usd=(
+                open_exposure.cluster_open_risk_usd
+                + pending_exposure.cluster_open_risk_usd
+            ),
+            portfolio_open_risk_usd=(
+                open_exposure.portfolio_open_risk_usd
+                + pending_exposure.portfolio_open_risk_usd
+            ),
+        )
+
+        epsilon = 1e-6
+        if candidate_risk > limits.trade_usd + epsilon:
+            # A READY ticket above the constitutional per-trade ceiling is an
+            # invalid upstream ticket contract; no new non-canonical reason code
+            # is invented here.
+            reason_code = "ticket_contract_mismatch"
+        elif (
+            exposure.asset_open_risk_usd + candidate_risk
+            > limits.asset_usd + epsilon
+        ):
+            reason_code = "asset_risk_full"
+        elif (
+            exposure.cluster_open_risk_usd + candidate_risk
+            > limits.cluster_usd + epsilon
+        ):
+            reason_code = "cluster_risk_full"
+        elif (
+            exposure.portfolio_open_risk_usd + candidate_risk
+            > limits.portfolio_usd + epsilon
+        ):
+            reason_code = "portfolio_risk_full"
+        else:
+            reason_code = None
+
+        if reason_code is not None:
+            return self.reject_ticket_pre_reserve(
+                conn,
+                ticket_id=ticket_id,
+                reason_code=reason_code,
+                at_utc=created_at_utc,
+                event_id=event_id,
+                actor=actor,
+                market_observation_id=market_observation_id,
+            )
+
+        result = self.reserve_order_intent(
+            conn,
+            order_intent_id=order_intent_id,
+            ticket_id=ticket_id,
+            firm_event_id=firm_event_id,
+            asset_id=asset_id,
+            route_id=route_id,
+            broker_account_id=broker_account_id,
+            broker=broker,
+            venue=venue,
+            symbol=symbol,
+            side=side,
+            qty=qty,
+            order_type=order_type,
+            reference_price=reference_price,
+            expected_fill=expected_fill,
+            idempotency_key=idempotency_key,
+            signal_key=signal_key,
+            position_key=position_key,
+            reserve_cash_usd=reserve_cash_usd,
+            reserve_margin_usd=reserve_margin_usd,
+            ready_spread_bps=ready_spread_bps,
+            hard_stop_price=hard_stop_price,
+            exit_plan_id=exit_plan_id,
+            submit_timeout_at=submit_timeout_at,
+            policy_version=policy_version,
+            configuration_hash=configuration_hash,
+            market_observation_id=market_observation_id,
+            created_at_utc=created_at_utc,
+            event_id=event_id,
+            actor=actor,
+            intent_kind="OPEN",
+        )
+        if not result.get("ok") or result.get("duplicate"):
+            return result
+
+        conn.execute(
+            risk_reservations.insert().values(
+                order_intent_id=order_intent_id,
+                asset_id=asset_id,
+                cluster_id=cluster_id,
+                stop_risk_usd=candidate_risk,
+                policy_version=policy_version,
+                configuration_hash=configuration_hash,
+                created_at_utc=created_at_utc,
+            )
+        )
+        conn.execute(
+            guard_table.update()
+            .where(guard_table.c.scope_key == "firm")
+            .values(
+                row_version=int(guard["row_version"]) + 1,
+                updated_at_utc=created_at_utc,
+            )
+        )
+        return result | {
+            "reserved_stop_risk_usd": candidate_risk,
+            "risk_cluster_id": cluster_id,
+            "firm_equity_usd": firm_equity.consolidated_equity_usd,
         }
 
     def reserve_order_intent(

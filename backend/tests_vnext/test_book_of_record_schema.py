@@ -33,12 +33,14 @@ def test_book_of_record_has_required_tables() -> None:
         "market_observations",
         "policy_snapshots",
         "governor_state",
+        "risk_admission_guard",
         "broker_account_ledgers",
         "decision_lineage",
         "setups",
         "tickets",
         "exit_plans",
         "order_intents",
+        "risk_admission_reservations",
         "open_trades",
         "active_positions",
         "closed_trades",
@@ -358,24 +360,38 @@ def test_phase5_execution_reservation_columns_are_in_current_schema() -> None:
     assert "fill_market_observation_id" not in columns
 
 
-def test_runtime_schema_facade_is_pinned_to_revision_0010() -> None:
+def test_runtime_schema_facade_is_pinned_to_revision_0011() -> None:
     backend = Path(__file__).resolve().parents[1]
     facade = (backend / "aether_vnext" / "schema.py").read_text(encoding="utf-8")
-    assert "schema_v0010" in facade
+    assert "schema_v0011" in facade
     migration = (
         backend
         / "alembic"
         / "versions"
-        / "0010_aether_vnext_order_intent_vocabulary.py"
+        / "0011_aether_vnext_atomic_risk_admission.py"
     ).read_text(encoding="utf-8")
-    assert 'revision: str = "0010"' in migration
-    assert 'down_revision: Union[str, None] = "0009"' in migration
-    assert "symbol_executed" in migration
-    assert "requested_qty" in migration
-    assert "expected_fill_price" in migration
-    assert "observation_id_at_reserve" in migration
-    assert "observation_id_at_fill" in migration
-    assert "MARKET_PAPER" in migration
+    assert 'revision: str = "0011"' in migration
+    assert 'down_revision: Union[str, None] = "0010"' in migration
+    assert "risk_admission_guard" in migration
+    assert "risk_admission_reservations" in migration
+    assert "ON CONFLICT (scope_key) DO NOTHING" in migration
+
+
+def test_phase6_atomic_risk_admission_schema_is_explicit() -> None:
+    _, store = _engine_and_store()
+    guard = store.tables["risk_admission_guard"]
+    reservations = store.tables["risk_admission_reservations"]
+    assert tuple(guard.primary_key.columns.keys()) == ("scope_key",)
+    assert "row_version" in guard.c
+    assert tuple(reservations.primary_key.columns.keys()) == ("order_intent_id",)
+    assert {
+        "asset_id",
+        "cluster_id",
+        "stop_risk_usd",
+        "policy_version",
+        "configuration_hash",
+        "created_at_utc",
+    } <= set(reservations.c.keys())
 
 
 def test_closed_trade_is_self_contained_execution_evidence() -> None:
