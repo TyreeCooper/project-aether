@@ -34,6 +34,12 @@ from aether_vnext.equity import (
 )
 from aether_vnext.registry import ProductType, registry_row
 from aether_vnext.reservations import reservation_requirement
+from aether_vnext.risk import (
+    BookRiskPosition,
+    BookRiskSnapshot,
+    aggregate_book_risk,
+    stop_risk_usd,
+)
 from aether_vnext.schema import build_metadata
 from aether_vnext.seed_truth import ASSET_BROKER_ACCOUNT
 
@@ -2170,6 +2176,111 @@ class VNextStore:
             )
 
         return firm_equity_projection(projections)
+
+    def project_open_risk(
+        self,
+        conn: Connection,
+        *,
+        cluster_by_asset: Mapping[str, str],
+    ) -> BookRiskSnapshot:
+        """Project conservative open stop-risk from the durable active book.
+
+        Cluster identity is supplied explicitly because vNext does not yet have a
+        frozen twelve-asset cluster assignment. Historical legacy cluster labels
+        are not imported as design authority.
+
+        Until a later management phase persists ratcheted protective-stop state,
+        the frozen opening hard stop is the durable stop-risk reference. Because
+        the exit contract forbids loosening a trailing stop, this is conservative:
+        it may overstate later reduced risk but must not understate opening risk.
+        """
+        active_positions = self.tables["active_positions"]
+        trades = self.tables["open_trades"]
+
+        rows: list[BookRiskPosition] = []
+        active_rows = conn.execute(
+            sa.select(active_positions).order_by(active_positions.c.position_key)
+        ).mappings().all()
+
+        for active in active_rows:
+            trade = conn.execute(
+                sa.select(trades).where(
+                    trades.c.trade_id == active["trade_id"]
+                )
+            ).mappings().first()
+            if trade is None:
+                raise RuntimeError(
+                    f"active position missing OpenTrade: {active['position_key']}"
+                )
+
+            position_key = str(active["position_key"])
+            asset_id = str(active["asset_id"])
+            if str(trade["position_key"]) != position_key:
+                raise RuntimeError(
+                    f"active/OpenTrade position_key drift: {position_key}"
+                )
+            if str(trade["asset_id"]) != asset_id:
+                raise RuntimeError(
+                    f"active/OpenTrade asset drift: {position_key}"
+                )
+            if str(trade["side"]) != str(active["side"]):
+                raise RuntimeError(
+                    f"active/OpenTrade side drift: {position_key}"
+                )
+            if abs(float(trade["quantity"]) - float(active["quantity"])) > 1e-12:
+                raise RuntimeError(
+                    f"active/OpenTrade quantity drift: {position_key}"
+                )
+
+            cluster_value = cluster_by_asset.get(asset_id)
+            cluster_id = (
+                str(cluster_value).strip()
+                if cluster_value is not None
+                else ""
+            )
+            if not cluster_id:
+                raise ValueError(
+                    f"missing canonical cluster assignment for active asset: {asset_id}"
+                )
+
+            exit_payload = dict(trade["exit_plan_payload"] or {})
+            hard_stop = exit_payload.get("hard_stop_price")
+            if hard_stop is None:
+                raise RuntimeError(
+                    f"active trade missing frozen hard stop: {trade['trade_id']}"
+                )
+
+            try:
+                computed_risk = stop_risk_usd(
+                    registry_row(asset_id),
+                    side=str(trade["side"]),
+                    quantity=float(trade["quantity"]),
+                    entry_price=float(trade["avg_entry_price"]),
+                    stop_price=float(hard_stop),
+                )
+            except ValueError as exc:
+                raise RuntimeError(
+                    f"invalid active stop-risk geometry: {trade['trade_id']}"
+                ) from exc
+
+            stored_risk = float(trade["initial_stop_risk_usd"])
+            tolerance = max(1e-6, computed_risk * 1e-9)
+            if abs(stored_risk - computed_risk) > tolerance:
+                raise RuntimeError(
+                    f"initial stop-risk drift for trade: {trade['trade_id']}"
+                )
+
+            rows.append(
+                BookRiskPosition(
+                    trade_id=str(trade["trade_id"]),
+                    position_key=position_key,
+                    asset_id=asset_id,
+                    cluster_id=cluster_id,
+                    stop_risk_usd=computed_risk,
+                )
+            )
+
+        return aggregate_book_risk(rows)
 
     def event_rows(self, conn: Connection) -> list[dict[str, Any]]:
         table = self.tables["event_ledger"]

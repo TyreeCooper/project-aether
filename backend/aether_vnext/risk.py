@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_FLOOR
+from typing import Iterable
 
 from aether_vnext.execution import gross_pnl_usd
 from aether_vnext.freeze import (
@@ -79,6 +80,89 @@ class RiskSizeResult:
     allowed_risk_usd: float
     reject_code: str | None
     limits: RiskLimitsUsd
+
+
+@dataclass(frozen=True, slots=True)
+class BookRiskPosition:
+    trade_id: str
+    position_key: str
+    asset_id: str
+    cluster_id: str
+    stop_risk_usd: float
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("trade_id", self.trade_id),
+            ("position_key", self.position_key),
+            ("asset_id", self.asset_id),
+            ("cluster_id", self.cluster_id),
+        ):
+            if not str(value).strip():
+                raise ValueError(f"{name} cannot be blank")
+        if float(self.stop_risk_usd) < 0:
+            raise ValueError("stop_risk_usd cannot be negative")
+
+
+@dataclass(frozen=True, slots=True)
+class RiskBucketUsd:
+    key: str
+    stop_risk_usd: float
+
+
+@dataclass(frozen=True, slots=True)
+class BookRiskSnapshot:
+    positions: tuple[BookRiskPosition, ...]
+    by_asset: tuple[RiskBucketUsd, ...]
+    by_cluster: tuple[RiskBucketUsd, ...]
+    portfolio_open_risk_usd: float
+
+    def exposure_for(self, *, asset_id: str, cluster_id: str) -> RiskExposure:
+        asset = str(asset_id).strip()
+        cluster = str(cluster_id).strip()
+        if not asset or not cluster:
+            raise ValueError("asset_id and cluster_id cannot be blank")
+        by_asset = {row.key: row.stop_risk_usd for row in self.by_asset}
+        by_cluster = {row.key: row.stop_risk_usd for row in self.by_cluster}
+        return RiskExposure(
+            asset_open_risk_usd=float(by_asset.get(asset, 0.0)),
+            cluster_open_risk_usd=float(by_cluster.get(cluster, 0.0)),
+            portfolio_open_risk_usd=float(self.portfolio_open_risk_usd),
+        )
+
+
+def aggregate_book_risk(
+    positions: Iterable[BookRiskPosition],
+) -> BookRiskSnapshot:
+    """Aggregate already-validated active-position stop-risk deterministically."""
+    rows = tuple(sorted(positions, key=lambda row: row.position_key))
+    position_keys = [row.position_key for row in rows]
+    trade_ids = [row.trade_id for row in rows]
+    if len(position_keys) != len(set(position_keys)):
+        raise ValueError("duplicate position_key in book risk projection")
+    if len(trade_ids) != len(set(trade_ids)):
+        raise ValueError("duplicate trade_id in book risk projection")
+
+    by_asset: dict[str, float] = {}
+    by_cluster: dict[str, float] = {}
+    portfolio = 0.0
+    for row in rows:
+        risk = float(row.stop_risk_usd)
+        portfolio += risk
+        by_asset[row.asset_id] = by_asset.get(row.asset_id, 0.0) + risk
+        by_cluster[row.cluster_id] = by_cluster.get(row.cluster_id, 0.0) + risk
+
+    return BookRiskSnapshot(
+        positions=rows,
+        by_asset=tuple(
+            RiskBucketUsd(key=key, stop_risk_usd=value)
+            for key, value in sorted(by_asset.items())
+        ),
+        by_cluster=tuple(
+            RiskBucketUsd(key=key, stop_risk_usd=value)
+            for key, value in sorted(by_cluster.items())
+        ),
+        portfolio_open_risk_usd=portfolio,
+    )
 
 
 def risk_limits_usd(
