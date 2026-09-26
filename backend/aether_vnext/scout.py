@@ -11,6 +11,7 @@ from typing import Any, Mapping
 
 from aether_vnext.domain import Lineage, Setup, SetupState
 from aether_vnext.playbook_engine import RuntimeWatchCandidate
+from aether_vnext.regime import RegimeTags
 from aether_vnext.playbooks import (
     asset_risk_hitches,
     cluster_for_asset,
@@ -36,6 +37,7 @@ def build_watch_setup(
     created_at_utc: datetime,
     invalidation: float | None,
     quality: float | None,
+    regime_tags: RegimeTags,
     intel_pack: Mapping[str, Any] | None = None,
 ) -> Setup:
     """Stamp one immutable Scout WATCH claim from a runtime candidate."""
@@ -49,6 +51,9 @@ def build_watch_setup(
         raise ValueError("trigger_bar_close_exchange_ts must be timezone-aware")
     if created_at_utc.tzinfo is None:
         raise ValueError("created_at_utc must be timezone-aware")
+    regime_tags.assert_point_in_time(
+        no_later_than_utc=trigger_bar_close_exchange_ts
+    )
 
     spec = playbook(candidate.playbook_id)
     if not spec.scout_definition_enabled:
@@ -109,4 +114,5 @@ def build_watch_setup(
         trigger_bar_close_exchange_ts=trigger_bar_close_exchange_ts,
         exit_contract_complete=bool(candidate.exit_contract_complete),
         exit_contract_gap=candidate.exit_contract_gap,
+        regime_tags=regime_tags.to_payload(),
     )

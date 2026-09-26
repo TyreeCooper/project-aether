@@ -16,6 +16,7 @@ from aether_vnext.family_a import FamilyAContext, evaluate_family_a_structure
 from aether_vnext.playbook_engine import resolve_closed_bar_runtime
 from aether_vnext.playbook_exits import build_exit_geometry
 from aether_vnext.playbooks import playbook
+from aether_vnext.regime import RegimeTags
 from aether_vnext.scout import build_watch_setup
 from aether_vnext.sniper import evaluate_sniper_fire, signal_key_for_setup
 from aether_vnext.store import VNextStore
@@ -24,6 +25,18 @@ from aether_vnext.store import VNextStore
 UTC = timezone.utc
 BAR_CLOSE = datetime(2026, 9, 26, 20, 30, tzinfo=UTC)
 NOW = datetime(2026, 9, 26, 20, 45, tzinfo=UTC)
+
+
+def _regime_tags() -> RegimeTags:
+    return RegimeTags(
+        trend_range="trend",
+        realized_volatility_band="mid",
+        session="ny",
+        spread_cost_band="normal",
+        event_risk_state="normal",
+        data_quality_state="healthy",
+        as_of_utc=BAR_CLOSE,
+    )
 
 
 def _bar() -> Bar:
@@ -96,6 +109,7 @@ def _watch_setup():
         created_at_utc=NOW,
         invalidation=1.1000,
         quality=0.9,
+        regime_tags=_regime_tags(),
     )
 
 

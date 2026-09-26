@@ -363,23 +363,22 @@ def test_phase5_execution_reservation_columns_are_in_current_schema() -> None:
     assert "fill_market_observation_id" not in columns
 
 
-def test_runtime_schema_facade_is_pinned_to_revision_0014() -> None:
+def test_runtime_schema_facade_is_pinned_to_revision_0015() -> None:
     backend = Path(__file__).resolve().parents[1]
     facade = (backend / "aether_vnext" / "schema.py").read_text(encoding="utf-8")
-    assert "schema_v0014" in facade
+    assert "schema_v0015" in facade
     migration = (
         backend
         / "alembic"
         / "versions"
-        / "0014_aether_vnext_evidence_windows.py"
+        / "0015_aether_vnext_regime_tags.py"
     ).read_text(encoding="utf-8")
-    assert 'revision: str = "0014"' in migration
-    assert 'down_revision: Union[str, None] = "0013"' in migration
-    assert "evidence_windows" in migration
-    assert "sample_domain" in migration
-    assert "immutable_trade_ids" in migration
-    assert "trg_evidence_windows_immutable" in migration
-    assert "reject_immutable_mutation" in migration
+    assert 'revision: str = "0015"' in migration
+    assert 'down_revision: Union[str, None] = "0014"' in migration
+    assert "regime_tags" in migration
+    assert "setups" in migration
+    assert "closed_trades" in migration
+    assert "trg_setup_regime_tags_immutable" in migration
 
 
 def test_phase6_atomic_risk_admission_schema_is_explicit() -> None:
@@ -424,6 +423,7 @@ def test_closed_trade_is_self_contained_execution_evidence() -> None:
         "policy_version",
         "configuration_hash",
         "market_observation_id",
+        "regime_tags",
     } <= columns
 
 

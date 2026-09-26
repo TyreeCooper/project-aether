@@ -113,6 +113,7 @@ class Setup:
     trigger_bar_close_exchange_ts: datetime | None = None
     exit_contract_complete: bool | None = None
     exit_contract_gap: str | None = None
+    regime_tags: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,6 +205,7 @@ class ClosedTrade:
     capture_efficiency: float | None
     duration_s: float
     exit_reason: str
+    regime_tags: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

@@ -60,6 +60,7 @@ from aether_vnext.risk import (
     stop_risk_usd,
 )
 from aether_vnext.reason_codes import ReasonCode
+from aether_vnext.regime import RegimeTags
 from aether_vnext.review import (
     ReviewGateInput,
     assess_review_gates,
@@ -380,6 +381,10 @@ class VNextStore:
             raise ValueError("trigger_bar_close_exchange_ts is required")
         if setup.trigger_bar_close_exchange_ts.tzinfo is None:
             raise ValueError("trigger_bar_close_exchange_ts must be timezone-aware")
+        regime_tags = RegimeTags.from_payload(setup.regime_tags)
+        regime_tags.assert_point_in_time(
+            no_later_than_utc=setup.trigger_bar_close_exchange_ts
+        )
 
         lineage = setup.lineage
         if not lineage.firm_event_id:
@@ -492,6 +497,7 @@ class VNextStore:
                 invalidation=setup.invalidation,
                 quality=setup.quality,
                 intel_pack=dict(setup.intel_pack),
+                regime_tags=regime_tags.to_payload(),
                 policy_version=lineage.policy_version,
                 configuration_hash=lineage.configuration_hash,
                 market_observation_id=lineage.market_observation_id,
@@ -554,6 +560,7 @@ class VNextStore:
                 row["exit_contract_complete"]
             ),
             exit_contract_gap=row["exit_contract_gap"],
+            regime_tags=dict(row["regime_tags"] or {}),
         )
 
     def record_sniper_ticket(
@@ -3666,6 +3673,18 @@ class VNextStore:
                 updated_at_utc=filled_at_utc,
             )
 
+        entry_regime_tags: dict[str, Any] | None = None
+        setup_row = conn.execute(
+            sa.select(self.tables["setups"].c.regime_tags).where(
+                self.tables["setups"].c.setup_id == trade["setup_id"]
+            )
+        ).mappings().first()
+        if setup_row is not None and setup_row["regime_tags"] is not None:
+            parsed_regime_tags = RegimeTags.from_payload(
+                dict(setup_row["regime_tags"])
+            )
+            entry_regime_tags = parsed_regime_tags.to_payload()
+
         conn.execute(
             closed.insert().values(
                 trade_id=trade_id,
@@ -3687,6 +3706,7 @@ class VNextStore:
                 capture_efficiency=capture_efficiency,
                 duration_s=duration_s,
                 exit_reason=exit_reason,
+                regime_tags=entry_regime_tags,
                 policy_version=trade["policy_version"],
                 configuration_hash=trade["configuration_hash"],
                 market_observation_id=fill_market_observation_id,

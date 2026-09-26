@@ -39,6 +39,7 @@ from aether_vnext.reconciler import (
     RECONCILER_INTERVAL_SECONDS,
     reconcile_stale_intents,
 )
+from aether_vnext.regime import RegimeTags
 from aether_vnext.registry import SEED_REGISTRY
 from aether_vnext.reservations import reservation_requirement
 from aether_vnext.store import VNextStore, open_intent_idempotency_key
@@ -2368,3 +2369,129 @@ def test_phase_a_rejects_missing_persisted_market_observation() -> None:
         assert conn.execute(
             sa.select(sa.func.count()).select_from(store.tables["order_intents"])
         ).scalar_one() == 0
+
+
+def test_closed_trade_inherits_setup_entry_regime_snapshot() -> None:
+    engine, store = _store_fixture()
+    tags = RegimeTags(
+        trend_range="trend",
+        realized_volatility_band="high",
+        session="24x7",
+        spread_cost_band="normal",
+        event_risk_state="normal",
+        data_quality_state="healthy",
+        as_of_utc=T0,
+    )
+    with engine.begin() as conn:
+        conn.execute(
+            store.tables["setups"].insert().values(
+                setup_id="setup-1",
+                firm_event_id=None,
+                asset_id="btc",
+                route_id="btc:daily_swing:long",
+                state="FIRE",
+                side="long",
+                horizon="daily_swing",
+                playbook_id="pb_crypto_daily_breakout_v1_2",
+                playbook_version="1.2",
+                risk_cluster_id="crypto",
+                asset_risk_hitches={},
+                trigger_bar_close_exchange_ts=T0,
+                exit_contract_complete=True,
+                exit_contract_gap=None,
+                invalidation=95_000.0,
+                quality=0.9,
+                intel_pack={},
+                regime_tags=tags.to_payload(),
+                policy_version="policy-v1",
+                configuration_hash="cfg",
+                market_observation_id="obs-ready",
+                first_killed_by=None,
+                first_kill_reason=None,
+                created_at_utc=T0,
+            )
+        )
+        _open_btc_for_flatten(conn, store)
+        store.request_flatten(
+            conn,
+            trade_id="trade-1",
+            exit_reason="structure",
+            market_observation_id="obs-exit-request",
+            at_utc=T0 + timedelta(seconds=1),
+            event_id="evt-regime-flat-request",
+        )
+        store.reserve_flatten_intent(
+            conn,
+            order_intent_id="close-intent-regime",
+            trade_id="trade-1",
+            idempotency_key="close-idem-regime",
+            exit_reason="structure",
+            market_observation_id="obs-exit-request",
+            reference_price=101_000.0,
+            ready_spread_bps=2.0,
+            created_at_utc=T0 + timedelta(seconds=1),
+            event_id="evt-regime-flat-reserve",
+        )
+
+    with engine.begin() as conn:
+        store.mark_order_intent_submitted(
+            conn,
+            order_intent_id="close-intent-regime",
+            submitted_at_utc=T0 + timedelta(seconds=1),
+            acknowledged_at_utc=T0 + timedelta(seconds=1),
+            submit_timeout_at=None,
+            event_id="evt-regime-flat-submit",
+            actor="paper-adapter",
+        )
+        durable = store.load_order_intent(
+            conn,
+            order_intent_id="close-intent-regime",
+        )
+        assert durable is not None
+
+    venue_fill = fill_submitted_paper_flatten_intent(
+        durable,
+        observation=_obs(
+            bid=101_000.0,
+            ask=101_020.0,
+            spread_bps=2.0,
+        ),
+        registry_row=SEED_REGISTRY["btc"],
+        max_age_ms=1_000,
+        at_utc=T0 + timedelta(seconds=1, milliseconds=250),
+    )
+    exit_price = float(venue_fill.intent.avg_fill_price)
+    gross = gross_pnl_usd(
+        SEED_REGISTRY["btc"],
+        position_side="long",
+        qty=0.01,
+        entry_price=100_060.005,
+        exit_price=exit_price,
+    )
+    fees = 2.0
+    with engine.begin() as conn:
+        result = store.finalize_filled_flat(
+            conn,
+            close_order_intent_id="close-intent-regime",
+            fill_market_observation_id="obs-exit-fill",
+            filled_at_utc=venue_fill.intent.filled_at,
+            filled_qty=venue_fill.intent.filled_qty,
+            exit_price=exit_price,
+            gross_pnl_usd=gross,
+            net_pnl_usd=gross - fees,
+            total_cost_usd=fees + float(venue_fill.intent.slip_usd or 0.0),
+            fees_usd=fees,
+            slippage_usd=float(venue_fill.intent.slip_usd or 0.0),
+            slippage_bps=float(venue_fill.intent.slip_bps or 0.0),
+            mfe_usd=12.0,
+            mae_usd=-3.0,
+            capture_efficiency=0.75,
+            event_id="evt-regime-flat-final",
+        )
+        assert result["state"] == "FLAT"
+        closed = conn.execute(
+            sa.select(store.tables["closed_trades"]).where(
+                store.tables["closed_trades"].c.trade_id == "trade-1"
+            )
+        ).mappings().one()
+    assert closed["regime_tags"] == tags.to_payload()
