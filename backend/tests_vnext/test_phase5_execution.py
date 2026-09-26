@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import hashlib
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -39,7 +40,7 @@ from aether_vnext.reconciler import (
     reconcile_stale_intents,
 )
 from aether_vnext.registry import SEED_REGISTRY
-from aether_vnext.store import VNextStore
+from aether_vnext.store import VNextStore, open_intent_idempotency_key
 
 
 UTC = timezone.utc
@@ -319,6 +320,25 @@ def test_entry_fill_never_uses_mid_or_last() -> None:
     )
 
 
+def _open_idem(
+    *,
+    ticket_id: str,
+    side: str,
+    quantity: float,
+    asset_id: str,
+    horizon: str,
+    signal_key: str,
+) -> str:
+    return open_intent_idempotency_key(
+        ticket_id=ticket_id,
+        side=side,
+        quantity=quantity,
+        asset_id=asset_id,
+        horizon=horizon,
+        signal_key=signal_key,
+    )
+
+
 def _store_fixture():
     engine = sa.create_engine("sqlite+pysqlite:///:memory:", future=True)
     store = VNextStore(schema=None)
@@ -372,7 +392,7 @@ def _reserve_btc(
     store: VNextStore,
     *,
     order_intent_id: str = "intent-reserve-1",
-    idempotency_key: str = "idem-reserve-1",
+    idempotency_key: str | None = None,
     reserve_cash_usd: float = 100.0,
     reserve_margin_usd: float = 0.0,
 ):
@@ -392,7 +412,17 @@ def _reserve_btc(
         order_type="market",
         reference_price=100_000.0,
         expected_fill=100_060.0,
-        idempotency_key=idempotency_key,
+        idempotency_key=(
+            idempotency_key
+            or _open_idem(
+                ticket_id="ticket-1",
+                side="long",
+                quantity=0.01,
+                asset_id="btc",
+                horizon="daily_swing",
+                signal_key="signal-1",
+            )
+        ),
         signal_key="signal-1",
         position_key="btc:daily_swing",
         reserve_cash_usd=reserve_cash_usd,
@@ -441,7 +471,6 @@ def test_phase_a_duplicate_idempotency_does_not_double_reserve() -> None:
             conn,
             store,
             order_intent_id="intent-different",
-            idempotency_key="idem-reserve-1",
         )
         assert first["duplicate"] is False
         assert second["duplicate"] is True
@@ -460,7 +489,6 @@ def test_phase_a_insufficient_broker_cash_rolls_back_reservation_shape() -> None
             conn,
             store,
             order_intent_id="intent-too-big",
-            idempotency_key="idem-too-big",
             reserve_cash_usd=5000.0,
         )
         assert out["ok"] is False
@@ -558,7 +586,14 @@ def test_margin_reservation_and_release_use_same_broker_ledger() -> None:
             order_type="market",
             reference_price=6000.0,
             expected_fill=6003.0,
-            idempotency_key="idem-mes-1",
+            idempotency_key=_open_idem(
+                ticket_id="ticket-mes",
+                side="long",
+                quantity=1.0,
+                asset_id="mes",
+                horizon="intraday",
+                signal_key="signal-mes-1",
+            ),
             signal_key="signal-mes-1",
             position_key="mes:intraday",
             reserve_cash_usd=1201.0,
@@ -1675,7 +1710,14 @@ def test_margin_reservation_cannot_exist_without_matching_cash_reserve() -> None
                 order_type="market",
                 reference_price=6000.0,
                 expected_fill=6003.0,
-                idempotency_key="idem-mes-invalid",
+                idempotency_key=_open_idem(
+                    ticket_id="ticket-mes",
+                    side="long",
+                    quantity=1.0,
+                    asset_id="mes",
+                    horizon="intraday",
+                    signal_key="signal-mes-1",
+                ),
                 signal_key="signal-mes-1",
                 position_key="mes:intraday",
                 reserve_cash_usd=100.0,
@@ -1713,7 +1755,14 @@ def test_futures_open_to_flat_releases_cash_and_margin_and_books_net() -> None:
             order_type="market",
             reference_price=6000.0,
             expected_fill=6003.0,
-            idempotency_key="idem-mes-open",
+            idempotency_key=_open_idem(
+                ticket_id="ticket-mes",
+                side="long",
+                quantity=1.0,
+                asset_id="mes",
+                horizon="intraday",
+                signal_key="signal-mes-1",
+            ),
             signal_key="signal-mes-1",
             position_key="mes:intraday",
             reserve_cash_usd=1201.0,
@@ -1980,7 +2029,14 @@ def test_kraken_btc_and_eth_inventory_rows_never_mix_units_or_average_price() ->
             order_type="market",
             reference_price=4000.0,
             expected_fill=4002.0,
-            idempotency_key="idem-eth-open",
+            idempotency_key=_open_idem(
+                ticket_id="ticket-eth",
+                side="long",
+                quantity=0.02,
+                asset_id="eth",
+                horizon="daily_swing",
+                signal_key="signal-eth-1",
+            ),
             signal_key="signal-eth-1",
             position_key="eth:daily_swing",
             reserve_cash_usd=80.0,
@@ -2040,3 +2096,93 @@ def test_kraken_btc_and_eth_inventory_rows_never_mix_units_or_average_price() ->
         assert by_asset["btc"]["inventory_avg"] == pytest.approx(100_060.005)
         assert by_asset["eth"]["inventory_qty"] == pytest.approx(0.02)
         assert by_asset["eth"]["inventory_avg"] == pytest.approx(4002.0)
+
+
+def test_open_idempotency_key_matches_binding_formula_exactly() -> None:
+    expected = hashlib.sha256(
+        b"ticket-1|long|0.01|btc|daily_swing|signal-1"
+    ).hexdigest()
+    assert _open_idem(
+        ticket_id="ticket-1",
+        side="long",
+        quantity=0.01,
+        asset_id="btc",
+        horizon="daily_swing",
+        signal_key="signal-1",
+    ) == expected
+
+
+def test_phase_a_rejects_noncanonical_idempotency_key_without_reserving() -> None:
+    engine, store = _store_fixture()
+    with engine.begin() as conn:
+        result = _reserve_btc(
+            conn,
+            store,
+            idempotency_key="caller-invented-key",
+        )
+        assert result["ok"] is False
+        assert result["error"] == "idempotency_key_mismatch"
+        assert conn.execute(
+            sa.select(sa.func.count()).select_from(store.tables["order_intents"])
+        ).scalar_one() == 0
+        ledger = {
+            row["broker_account_id"]: row
+            for row in store.ledger_rows(conn)
+        }["kraken_paper"]
+        assert ledger["cash_available_usd"] == pytest.approx(4000.0)
+        assert ledger["cash_reserved_usd"] == 0.0
+
+
+def test_phase_a_rejects_wrong_broker_sleeve_without_reserving() -> None:
+    engine, store = _store_fixture()
+    with engine.begin() as conn:
+        result = store.reserve_order_intent(
+            conn,
+            order_intent_id="intent-wrong-sleeve",
+            ticket_id="ticket-1",
+            firm_event_id=None,
+            asset_id="btc",
+            route_id="btc:daily_swing:long",
+            broker_account_id="ibkr_paper",
+            broker="Kraken",
+            venue="Kraken",
+            symbol="XBTUSD",
+            side="long",
+            qty=0.01,
+            order_type="market",
+            reference_price=100_000.0,
+            expected_fill=100_060.0,
+            idempotency_key=_open_idem(
+                ticket_id="ticket-1",
+                side="long",
+                quantity=0.01,
+                asset_id="btc",
+                horizon="daily_swing",
+                signal_key="signal-1",
+            ),
+            signal_key="signal-1",
+            position_key="btc:daily_swing",
+            reserve_cash_usd=100.0,
+            reserve_margin_usd=0.0,
+            ready_spread_bps=2.0,
+            hard_stop_price=95_000.0,
+            exit_plan_id="exit-plan-btc",
+            submit_timeout_at=None,
+            policy_version="policy-v1",
+            configuration_hash="cfg",
+            market_observation_id="obs-ready",
+            created_at_utc=T0,
+            event_id="evt-wrong-sleeve",
+            actor="test",
+        )
+        assert result["ok"] is False
+        assert result["error"] == "broker_sleeve_mismatch"
+        assert conn.execute(
+            sa.select(sa.func.count()).select_from(store.tables["order_intents"])
+        ).scalar_one() == 0
+        ledgers = {
+            row["broker_account_id"]: row
+            for row in store.ledger_rows(conn)
+        }
+        assert ledgers["kraken_paper"]["cash_available_usd"] == pytest.approx(4000.0)
+        assert ledgers["ibkr_paper"]["cash_available_usd"] == pytest.approx(2000.0)
