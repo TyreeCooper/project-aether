@@ -10,7 +10,7 @@ on:
     paths:
       - 'backend/aether_vnext/**'
       - 'backend/tests_vnext/**'
-      - 'backend/alembic/versions/0002_aether_vnext_namespace.py'
+      - 'backend/alembic/versions/**'
       - 'docs/AETHER_VNEXT_PHASE0_CONTROL.md'
       - '.github/workflows/aether-vnext-ci.yml'
   workflow_dispatch:
