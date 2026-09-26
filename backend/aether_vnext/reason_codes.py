@@ -28,6 +28,7 @@ class ReasonCode(StrEnum):
     NO_COMPLETED_BREAKOUT = "no_completed_breakout"
     STALE_SETUP = "stale_setup"
     SIGNAL_KEY_DUPLICATE = "signal_key_duplicate"
+    ILLEGAL_STOP_SIDE = "illegal_stop_side"
 
     # Risk
     BAD_STOP = "bad_stop"

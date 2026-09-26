@@ -24,6 +24,8 @@ from aether_vnext.domain import (
     QualityState,
     Setup,
     SetupState,
+    Ticket,
+    TicketState,
 )
 from aether_vnext.equity import (
     FirmEquityProjection,
@@ -53,6 +55,7 @@ from aether_vnext.playbooks import (
     playbook,
 )
 from aether_vnext.seed_truth import ASSET_BROKER_ACCOUNT
+from aether_vnext.sniper import SniperDecision, signal_key_for_setup
 
 
 SEED_LEDGER_CASH_USD: Mapping[str, float] = {
@@ -532,6 +535,249 @@ class VNextStore:
                 row["exit_contract_complete"]
             ),
             exit_contract_gap=row["exit_contract_gap"],
+        )
+
+    def record_sniper_ticket(
+        self,
+        conn: Connection,
+        *,
+        setup_id: str,
+        ticket_id: str,
+        decision: SniperDecision,
+        market_observation_id: str,
+        created_at_utc: datetime,
+        desk_scope_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Persist Sniper FIRE or canonical rejection without sizing the ticket."""
+        if created_at_utc.tzinfo is None:
+            raise ValueError("created_at_utc must be timezone-aware")
+
+        setups = self.tables["setups"]
+        tickets = self.tables["tickets"]
+        lineage_table = self.tables["decision_lineage"]
+        observations = self.tables["market_observations"]
+        review_state = self.tables["route_review_state"]
+
+        setup_row = conn.execute(
+            sa.select(setups)
+            .where(setups.c.setup_id == setup_id)
+            .with_for_update()
+        ).mappings().first()
+        if setup_row is None:
+            raise KeyError(f"unknown setup: {setup_id}")
+
+        lineage_row = conn.execute(
+            sa.select(lineage_table)
+            .where(
+                lineage_table.c.firm_event_id
+                == setup_row["firm_event_id"]
+            )
+            .with_for_update()
+        ).mappings().one()
+
+        if setup_row["exit_contract_complete"] is not True:
+            raise ValueError(
+                "incomplete playbook ExitPlan contract cannot create Ticket"
+            )
+
+        observation = conn.execute(
+            sa.select(observations).where(
+                observations.c.observation_id
+                == market_observation_id
+            )
+        ).mappings().first()
+        if observation is None:
+            raise KeyError(
+                f"unknown market observation: {market_observation_id}"
+            )
+        if observation["asset_id"] != setup_row["asset_id"]:
+            raise ValueError("market observation asset mismatch")
+
+        expected_signal = signal_key_for_setup(self.load_setup(
+            conn, setup_id=setup_id
+        ))
+        if decision.signal_key != expected_signal:
+            raise ValueError("Sniper signal_key mismatch")
+
+        duplicate = conn.execute(
+            sa.select(tickets.c.ticket_id).where(
+                tickets.c.signal_key == decision.signal_key
+            )
+        ).first()
+        if duplicate is not None:
+            conn.execute(
+                setups.update()
+                .where(setups.c.setup_id == setup_id)
+                .values(
+                    first_killed_by="Sniper",
+                    first_kill_reason=ReasonCode.SIGNAL_KEY_DUPLICATE.value,
+                )
+            )
+            conn.execute(
+                lineage_table.update()
+                .where(
+                    lineage_table.c.firm_event_id
+                    == setup_row["firm_event_id"]
+                )
+                .values(
+                    first_killed_by="Sniper",
+                    first_kill_reason=ReasonCode.SIGNAL_KEY_DUPLICATE.value,
+                    market_observation_id=market_observation_id,
+                    row_version=lineage_table.c.row_version + 1,
+                )
+            )
+            return {
+                "ok": False,
+                "state": "REJECTED",
+                "reject_code": ReasonCode.SIGNAL_KEY_DUPLICATE.value,
+                "ticket_created": False,
+            }
+
+        reject_code = decision.reject_code
+
+        route_state = conn.execute(
+            sa.select(review_state).where(
+                review_state.c.route_id == setup_row["route_id"]
+            )
+        ).mappings().first()
+        if route_state is not None and (
+            str(route_state["evidence_state"]).upper() == "BENCH"
+            or str(route_state["operational_state"]).upper()
+            in {"DISABLED", "HALT"}
+        ):
+            reject_code = ReasonCode.ROUTE_BENCHED.value
+
+        governor_block = self.governor_block_for_admission(
+            conn,
+            route_id=str(setup_row["route_id"]),
+            venue=str(observation["venue"]),
+            product_id=str(setup_row["asset_id"]),
+            desk_scope_id=desk_scope_id,
+        )
+        if governor_block is not None:
+            reject_code = str(governor_block["reason_code"])
+
+        if str(setup_row["state"]) != SetupState.WATCH.value:
+            reject_code = ReasonCode.STALE_SETUP.value
+
+        state = (
+            TicketState.FIRE.value
+            if decision.fire and reject_code is None
+            else TicketState.REJECTED.value
+        )
+        first_killed_by = None if state == TicketState.FIRE.value else "Sniper"
+        first_kill_reason = None if state == TicketState.FIRE.value else reject_code
+
+        conn.execute(
+            tickets.insert().values(
+                ticket_id=ticket_id,
+                exit_plan_id=None,
+                setup_id=setup_id,
+                firm_event_id=setup_row["firm_event_id"],
+                asset_id=setup_row["asset_id"],
+                route_id=setup_row["route_id"],
+                state=state,
+                signal_key=decision.signal_key,
+                side=setup_row["side"],
+                horizon=setup_row["horizon"],
+                stop_price=decision.stop_price,
+                quantity=None,
+                modeled_round_trip_cost_pct=None,
+                reject_code=reject_code,
+                policy_version=setup_row["policy_version"],
+                configuration_hash=setup_row["configuration_hash"],
+                market_observation_id=market_observation_id,
+                first_killed_by=first_killed_by,
+                first_kill_reason=first_kill_reason,
+                created_at_utc=created_at_utc,
+            )
+        )
+
+        setup_values: dict[str, Any] = {
+            "first_killed_by": first_killed_by,
+            "first_kill_reason": first_kill_reason,
+        }
+        if state == TicketState.FIRE.value:
+            setup_values["state"] = SetupState.FIRE.value
+        conn.execute(
+            setups.update()
+            .where(setups.c.setup_id == setup_id)
+            .values(**setup_values)
+        )
+        conn.execute(
+            lineage_table.update()
+            .where(
+                lineage_table.c.firm_event_id
+                == setup_row["firm_event_id"]
+            )
+            .values(
+                ticket_id=ticket_id,
+                market_observation_id=market_observation_id,
+                first_killed_by=first_killed_by,
+                first_kill_reason=first_kill_reason,
+                row_version=lineage_table.c.row_version + 1,
+            )
+        )
+        return {
+            "ok": state == TicketState.FIRE.value,
+            "state": state,
+            "reject_code": reject_code,
+            "ticket_created": True,
+            "ticket_id": ticket_id,
+            "signal_key": decision.signal_key,
+        }
+
+    def load_ticket(
+        self,
+        conn: Connection,
+        *,
+        ticket_id: str,
+    ) -> Ticket | None:
+        tickets = self.tables["tickets"]
+        lineage_table = self.tables["decision_lineage"]
+        row = conn.execute(
+            sa.select(tickets).where(tickets.c.ticket_id == ticket_id)
+        ).mappings().first()
+        if row is None:
+            return None
+        lineage_row = conn.execute(
+            sa.select(lineage_table).where(
+                lineage_table.c.firm_event_id == row["firm_event_id"]
+            )
+        ).mappings().one()
+        return Ticket(
+            ticket_id=str(row["ticket_id"]),
+            lineage=Lineage(
+                asset_id=str(row["asset_id"]),
+                route_id=str(row["route_id"]),
+                policy_version=str(row["policy_version"]),
+                configuration_hash=str(row["configuration_hash"]),
+                market_observation_id=str(row["market_observation_id"]),
+                created_at_utc=_stored_utc(row["created_at_utc"]),
+                firm_event_id=str(row["firm_event_id"]),
+                setup_id=str(row["setup_id"]),
+                ticket_id=str(row["ticket_id"]),
+                first_killed_by=row["first_killed_by"],
+                first_kill_reason=row["first_kill_reason"],
+                playbook_id=lineage_row["playbook_id"],
+                playbook_version=lineage_row["playbook_version"],
+                risk_cluster_id=lineage_row["risk_cluster_id"],
+                asset_risk_hitches={
+                    str(k): float(v)
+                    for k, v in dict(
+                        lineage_row["asset_risk_hitches"] or {}
+                    ).items()
+                },
+            ),
+            state=TicketState(str(row["state"])),
+            signal_key=str(row["signal_key"]),
+            side=str(row["side"]),
+            horizon=str(row["horizon"]),
+            stop_price=row["stop_price"],
+            quantity=row["quantity"],
+            modeled_round_trip_cost_pct=row["modeled_round_trip_cost_pct"],
+            reject_code=row["reject_code"],
+            exit_plan_id=row["exit_plan_id"],
         )
 
     def load_order_intent(
