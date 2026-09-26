@@ -317,7 +317,7 @@ class VNextStore:
                 route_id=row["route_id"],
                 policy_version=row["policy_version"],
                 configuration_hash=row["configuration_hash"],
-                market_observation_id=row["market_observation_id"],
+                market_observation_id=row["observation_id_at_reserve"],
                 created_at_utc=_stored_utc(row["created_at_utc"]),
                 firm_event_id=row["firm_event_id"],
                 ticket_id=row["ticket_id"],
@@ -328,12 +328,12 @@ class VNextStore:
             ),
             broker=row["broker"],
             venue=row["venue"],
-            symbol=row["symbol"],
+            symbol_executed=row["symbol_executed"],
             side=row["side"],
-            qty=float(row["qty"]),
+            requested_qty=float(row["requested_qty"]),
             order_type=row["order_type"],
             reference_price=row["reference_price"],
-            expected_fill=row["expected_fill"],
+            expected_fill_price=row["expected_fill_price"],
             state=OrderIntentState(row["state"]),
             submitted_at=_stored_utc(row["submitted_at"]),
             acknowledged_at=_stored_utc(row["acknowledged_at"]),
@@ -341,8 +341,8 @@ class VNextStore:
             filled_qty=float(row["filled_qty"]),
             avg_fill_price=row["avg_fill_price"],
             reject_code=row["reject_code"],
-            slippage_usd=row["slippage_usd"],
-            slippage_bps=row["slippage_bps"],
+            slip_usd=row["slip_usd"],
+            slip_bps=row["slip_bps"],
             idempotency_key=row["idempotency_key"],
             broker_account_id=row["broker_account_id"],
             intent_kind=row["intent_kind"],
@@ -354,9 +354,9 @@ class VNextStore:
             ready_spread_bps=row["ready_spread_bps"],
             hard_stop_price=row["hard_stop_price"],
             submit_timeout_at=_stored_utc(row["submit_timeout_at"]),
-            fill_market_observation_id=row["fill_market_observation_id"],
+            observation_id_at_fill=row["observation_id_at_fill"],
             trade_id=row["trade_id"],
-            row_version=int(row["row_version"]),
+            version=int(row["version"]),
         )
 
     def reject_ticket_pre_reserve(
@@ -530,7 +530,7 @@ class VNextStore:
                 at_utc=created_at_utc,
                 event_id=event_id,
                 actor=actor,
-                market_observation_id=market_observation_id,
+                observation_id_at_reserve=market_observation_id,
             )
         if ticket["exit_plan_id"] is None:
             return self.reject_ticket_pre_reserve(
@@ -540,7 +540,7 @@ class VNextStore:
                 at_utc=created_at_utc,
                 event_id=event_id,
                 actor=actor,
-                market_observation_id=market_observation_id,
+                observation_id_at_reserve=market_observation_id,
             )
         canonical_broker_account_id = ASSET_BROKER_ACCOUNT.get(asset_id)
         if canonical_broker_account_id is None:
@@ -551,7 +551,7 @@ class VNextStore:
                 at_utc=created_at_utc,
                 event_id=event_id,
                 actor=actor,
-                market_observation_id=market_observation_id,
+                observation_id_at_reserve=market_observation_id,
             )
         if broker_account_id != canonical_broker_account_id:
             return self.reject_ticket_pre_reserve(
@@ -561,7 +561,7 @@ class VNextStore:
                 at_utc=created_at_utc,
                 event_id=event_id,
                 actor=actor,
-                market_observation_id=market_observation_id,
+                observation_id_at_reserve=market_observation_id,
             )
 
         expected_idempotency_key = open_intent_idempotency_key(
@@ -580,7 +580,7 @@ class VNextStore:
                 at_utc=created_at_utc,
                 event_id=event_id,
                 actor=actor,
-                market_observation_id=market_observation_id,
+                observation_id_at_reserve=market_observation_id,
             )
 
         if (
@@ -598,7 +598,7 @@ class VNextStore:
                 at_utc=created_at_utc,
                 event_id=event_id,
                 actor=actor,
-                market_observation_id=market_observation_id,
+                observation_id_at_reserve=market_observation_id,
             )
 
         observation = conn.execute(
@@ -614,7 +614,7 @@ class VNextStore:
                 at_utc=created_at_utc,
                 event_id=event_id,
                 actor=actor,
-                market_observation_id=market_observation_id,
+                observation_id_at_reserve=market_observation_id,
             )
         if observation["asset_id"] != asset_id:
             return self.reject_ticket_pre_reserve(
@@ -624,7 +624,7 @@ class VNextStore:
                 at_utc=created_at_utc,
                 event_id=event_id,
                 actor=actor,
-                market_observation_id=market_observation_id,
+                observation_id_at_reserve=market_observation_id,
             )
         if (
             observation["quality_state"] != "healthy"
@@ -638,7 +638,7 @@ class VNextStore:
                 at_utc=created_at_utc,
                 event_id=event_id,
                 actor=actor,
-                market_observation_id=market_observation_id,
+                observation_id_at_reserve=market_observation_id,
             )
         modeled_cost_pct = ticket["modeled_round_trip_cost_pct"]
         if modeled_cost_pct is None:
@@ -649,7 +649,7 @@ class VNextStore:
                 at_utc=created_at_utc,
                 event_id=event_id,
                 actor=actor,
-                market_observation_id=market_observation_id,
+                observation_id_at_reserve=market_observation_id,
             )
 
         requirement = reservation_requirement(
@@ -677,7 +677,7 @@ class VNextStore:
                 at_utc=created_at_utc,
                 event_id=event_id,
                 actor=actor,
-                market_observation_id=market_observation_id,
+                observation_id_at_reserve=market_observation_id,
             )
 
         reserve_cash_usd = requirement.reserve_cash_usd
@@ -706,7 +706,7 @@ class VNextStore:
                 at_utc=created_at_utc,
                 event_id=event_id,
                 actor=actor,
-                market_observation_id=market_observation_id,
+                observation_id_at_reserve=market_observation_id,
             )
 
         active = conn.execute(
@@ -722,7 +722,7 @@ class VNextStore:
                 at_utc=created_at_utc,
                 event_id=event_id,
                 actor=actor,
-                market_observation_id=market_observation_id,
+                observation_id_at_reserve=market_observation_id,
             )
 
         cash_available = float(ledger["cash_available_usd"])
@@ -740,7 +740,7 @@ class VNextStore:
                 at_utc=created_at_utc,
                 event_id=event_id,
                 actor=actor,
-                market_observation_id=market_observation_id,
+                observation_id_at_reserve=market_observation_id,
             )
 
         conn.execute(
@@ -753,12 +753,12 @@ class VNextStore:
                 broker_account_id=broker_account_id,
                 broker=broker,
                 venue=venue,
-                symbol=symbol,
+                symbol_executed=symbol,
                 side=side,
-                qty=qty,
-                order_type=order_type,
+                requested_qty=qty,
+                order_type="MARKET_PAPER",
                 reference_price=reference_price,
-                expected_fill=expected_fill,
+                expected_fill_price=expected_fill,
                 state="RESERVED",
                 submitted_at=None,
                 acknowledged_at=None,
@@ -766,8 +766,8 @@ class VNextStore:
                 filled_qty=0.0,
                 avg_fill_price=None,
                 reject_code=None,
-                slippage_usd=None,
-                slippage_bps=None,
+                slip_usd=None,
+                slip_bps=None,
                 idempotency_key=idempotency_key,
                 exit_plan_id=exit_plan_id,
                 intent_kind=intent_kind,
@@ -778,12 +778,12 @@ class VNextStore:
                 ready_spread_bps=ready_spread_bps,
                 hard_stop_price=hard_stop_price,
                 submit_timeout_at=submit_timeout_at,
-                fill_market_observation_id=None,
+                observation_id_at_fill=None,
                 trade_id=None,
-                row_version=1,
+                version=1,
                 policy_version=policy_version,
                 configuration_hash=configuration_hash,
-                market_observation_id=market_observation_id,
+                observation_id_at_reserve=market_observation_id,
                 first_killed_by=None,
                 first_kill_reason=None,
                 created_at_utc=created_at_utc,
@@ -811,7 +811,7 @@ class VNextStore:
             reason_code="portfolio.reserve",
             policy_version=policy_version,
             configuration_hash=configuration_hash,
-            market_observation_id=market_observation_id,
+            observation_id_at_reserve=market_observation_id,
             actor=actor,
             created_at_utc=created_at_utc,
             payload={
@@ -878,7 +878,7 @@ class VNextStore:
                 submitted_at=submitted_at_utc,
                 acknowledged_at=acknowledged_at_utc,
                 submit_timeout_at=durable_timeout,
-                row_version=int(row["row_version"]) + 1,
+                version=int(row["version"]) + 1,
             )
         )
         self.append_event(
@@ -892,7 +892,7 @@ class VNextStore:
             reason_code="execution.submitted",
             policy_version=row["policy_version"],
             configuration_hash=row["configuration_hash"],
-            market_observation_id=row["market_observation_id"],
+            market_observation_id=row["observation_id_at_reserve"],
             actor=actor,
             created_at_utc=submitted_at_utc,
             payload={"submit_timeout_at": durable_timeout.isoformat()},
@@ -965,7 +965,7 @@ class VNextStore:
                 "error": "illegal_state",
                 "state": intent["state"],
             }
-        if abs(float(filled_qty) - float(intent["qty"])) > 1e-12:
+        if abs(float(filled_qty) - float(intent["requested_qty"])) > 1e-12:
             return {
                 "ok": False,
                 "error": "partial_fill_disabled",
@@ -1106,12 +1106,12 @@ class VNextStore:
                 filled_qty=filled_qty,
                 avg_fill_price=avg_fill_price,
                 reject_code=None,
-                slippage_usd=slippage_usd,
-                slippage_bps=slippage_bps,
-                fill_market_observation_id=fill_market_observation_id,
+                slip_usd=slippage_usd,
+                slip_bps=slippage_bps,
+                observation_id_at_fill=fill_market_observation_id,
                 trade_id=trade_id,
                 exit_plan_id=exit_plan_id,
-                row_version=int(intent["row_version"]) + 1,
+                version=int(intent["version"]) + 1,
             )
         )
 
@@ -1315,21 +1315,21 @@ class VNextStore:
                 ready_spread_bps=ready_spread_bps,
                 hard_stop_price=hard_stop_price,
                 submit_timeout_at=timeout_at,
-                fill_market_observation_id=None,
+                observation_id_at_fill=None,
                 trade_id=trade_id,
-                row_version=1,
+                version=1,
                 ticket_id=trade["ticket_id"],
                 firm_event_id=trade["firm_event_id"],
                 asset_id=trade["asset_id"],
                 route_id=trade["route_id"],
                 broker=opening_intent["broker"],
                 venue=opening_intent["venue"],
-                symbol=opening_intent["symbol"],
+                symbol_executed=opening_intent["symbol_executed"],
                 side=trade["side"],
-                qty=trade["quantity"],
-                order_type="market",
+                requested_qty=trade["quantity"],
+                order_type="MARKET_PAPER",
                 reference_price=reference_price,
-                expected_fill=None,
+                expected_fill_price=None,
                 state="RESERVED",
                 submitted_at=None,
                 acknowledged_at=None,
@@ -1337,12 +1337,12 @@ class VNextStore:
                 filled_qty=0.0,
                 avg_fill_price=None,
                 reject_code=None,
-                slippage_usd=None,
-                slippage_bps=None,
+                slip_usd=None,
+                slip_bps=None,
                 idempotency_key=idempotency_key,
                 policy_version=trade["policy_version"],
                 configuration_hash=trade["configuration_hash"],
-                market_observation_id=market_observation_id,
+                observation_id_at_reserve=market_observation_id,
                 first_killed_by=None,
                 first_kill_reason=None,
                 created_at_utc=created_at_utc,
@@ -1359,7 +1359,7 @@ class VNextStore:
             reason_code="portfolio.flatten_reserve",
             policy_version=trade["policy_version"],
             configuration_hash=trade["configuration_hash"],
-            market_observation_id=market_observation_id,
+            observation_id_at_reserve=market_observation_id,
             actor=actor,
             created_at_utc=created_at_utc,
             payload={
@@ -1606,10 +1606,10 @@ class VNextStore:
                 filled_qty=filled_qty,
                 avg_fill_price=exit_price,
                 reject_code=None,
-                slippage_usd=slippage_usd,
-                slippage_bps=slippage_bps,
-                fill_market_observation_id=fill_market_observation_id,
-                row_version=int(close_intent["row_version"]) + 1,
+                slip_usd=slippage_usd,
+                slip_bps=slippage_bps,
+                observation_id_at_fill=fill_market_observation_id,
+                version=int(close_intent["version"]) + 1,
             )
         )
 
@@ -1755,8 +1755,8 @@ class VNextStore:
         intent_values: dict[str, Any] = {
             "state": terminal_state,
             "reject_code": reject_code,
-            "fill_market_observation_id": fill_market_observation_id,
-            "row_version": int(intent["row_version"]) + 1,
+            "observation_id_at_fill": fill_market_observation_id,
+            "version": int(intent["version"]) + 1,
         }
         if is_failed_open:
             intent_values["first_killed_by"] = (
@@ -1836,7 +1836,7 @@ class VNextStore:
             policy_version=intent["policy_version"],
             configuration_hash=intent["configuration_hash"],
             market_observation_id=(
-                fill_market_observation_id or intent["market_observation_id"]
+                fill_market_observation_id or intent["observation_id_at_reserve"]
             ),
             actor=actor,
             created_at_utc=at_utc,
