@@ -505,3 +505,21 @@ def test_replay_and_paper_share_identical_bar_builder_semantics() -> None:
         return tuple(out)
 
     assert run_path() == run_path()
+
+
+def test_market_pipeline_preserves_closed_session_observation_but_blocks_execution() -> None:
+    row = bind_market_data(
+        SEED_REGISTRY["btc"],
+        primary_source_id="primary",
+        stale_threshold_ms=1_000,
+    )
+    result = MarketDataPipeline(registry={"btc": row}).evaluate(
+        asset_id="btc",
+        quotes=(_quote(source_id="primary"),),
+        calendar=_calendar(eligible=False),
+        as_of_utc=T0,
+    )
+    assert result.observation is not None
+    assert result.observation.session_state is SessionState.CLOSED
+    assert result.executable is False
+    assert result.reason == "session_closed"
