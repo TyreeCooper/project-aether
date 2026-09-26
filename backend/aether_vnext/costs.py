@@ -212,12 +212,17 @@ def modeled_round_trip_cost(
         price=exit_reference_price,
         slip_bps=slip_bps,
     )
-    borrow = default_short_borrow_usd(
-        row,
-        qty=qty,
-        price=entry_price,
-        holding_days=holding_days,
-        venue_borrow_rate_annual=venue_borrow_rate_annual,
+    is_short_trade = str(entry_side).strip().lower() in {"sell", "short"}
+    borrow = (
+        default_short_borrow_usd(
+            row,
+            qty=qty,
+            price=entry_price,
+            holding_days=holding_days,
+            venue_borrow_rate_annual=venue_borrow_rate_annual,
+        )
+        if is_short_trade
+        else 0.0
     )
     total = entry_fee + exit_fee + entry_slip + exit_slip + spread + borrow
     denominator = notional_usd(row, qty=qty, price=entry_price)
