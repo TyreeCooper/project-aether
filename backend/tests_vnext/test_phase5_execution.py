@@ -72,12 +72,12 @@ def _intent(
         lineage=_lineage(),
         broker="Kraken",
         venue="Kraken",
-        symbol="XBTUSD",
+        symbol_executed="XBTUSD",
         side=side,
-        qty=0.01,
-        order_type="market",
+        requested_qty=0.01,
+        order_type="MARKET_PAPER",
         reference_price=100_000.0,
-        expected_fill=None,
+        expected_fill_price=None,
         state=state,
         submitted_at=submitted_at,
         acknowledged_at=acknowledged_at,
@@ -85,8 +85,8 @@ def _intent(
         filled_qty=0.0,
         avg_fill_price=None,
         reject_code=None,
-        slippage_usd=None,
-        slippage_bps=None,
+        slip_usd=None,
+        slip_bps=None,
         idempotency_key="idem-1",
     )
 
@@ -163,13 +163,13 @@ def test_long_entry_fills_from_ask_plus_5bps_and_all_or_none() -> None:
     )
     assert transition.applied is True
     assert transition.intent.state is OrderIntentState.FILLED
-    assert transition.intent.filled_qty == submitted.qty
+    assert transition.intent.filled_qty == submitted.requested_qty
     assert transition.intent.avg_fill_price == pytest.approx(
         obs.ask * 1.0005
     )
-    assert transition.intent.slippage_bps == 5.0
-    assert transition.intent.slippage_usd is not None
-    assert transition.intent.slippage_usd > 0
+    assert transition.intent.slip_bps == 5.0
+    assert transition.intent.slip_usd is not None
+    assert transition.intent.slip_usd > 0
 
 
 def test_short_entry_fills_from_bid_minus_5bps() -> None:
@@ -787,7 +787,7 @@ def test_successful_fill_atomically_opens_consumes_signal_and_retains_reserve() 
         assert intent["state"] == "FILLED"
         assert intent["trade_id"] == "trade-1"
         assert intent["filled_qty"] == pytest.approx(0.01)
-        assert intent["fill_market_observation_id"] == "obs-fill"
+        assert intent["observation_id_at_fill"] == "obs-fill"
 
         open_trades = conn.execute(
             sa.select(store.tables["open_trades"])
@@ -1064,7 +1064,7 @@ def test_durable_order_intent_round_trips_into_domain_contract() -> None:
         assert intent.reserved_cash_usd == pytest.approx(req.reserve_cash_usd)
         assert intent.reserved_margin_usd == pytest.approx(req.margin_need_usd)
         assert intent.submit_timeout_at is not None
-        assert intent.row_version == 1
+        assert intent.version == 1
 
 
 def _ready_ticket(*, side: str = "long", config: str = "cfg") -> Ticket:
@@ -1335,8 +1335,8 @@ def test_ready_to_reserved_to_submitted_to_filled_to_open_end_to_end() -> None:
             filled_at_utc=venue_fill.intent.filled_at,
             filled_qty=venue_fill.intent.filled_qty,
             avg_fill_price=venue_fill.intent.avg_fill_price,
-            slippage_usd=venue_fill.intent.slippage_usd or 0.0,
-            slippage_bps=venue_fill.intent.slippage_bps or 0.0,
+            slippage_usd=venue_fill.intent.slip_usd or 0.0,
+            slippage_bps=venue_fill.intent.slip_bps or 0.0,
             initial_stop_risk_usd=50.0,
             management_telemetry={},
             event_id="evt-e2e-open",
@@ -1394,7 +1394,7 @@ def test_flatten_fill_uses_conservative_exit_side_and_ignores_wide_spread_gate()
     assert transition.intent.avg_fill_price == pytest.approx(
         99_000.0 * 0.9995
     )
-    assert transition.intent.filled_qty == intent.qty
+    assert transition.intent.filled_qty == intent.requested_qty
 
 
 def test_hard_stop_flatten_fills_through_gap_not_at_perfect_stop() -> None:
@@ -1643,10 +1643,10 @@ def test_full_flatten_lifecycle_books_closed_trade_and_releases_reserve_once() -
             exit_price=exit_price,
             gross_pnl_usd=gross,
             net_pnl_usd=net,
-            total_cost_usd=fees + float(venue_fill.intent.slippage_usd or 0.0),
+            total_cost_usd=fees + float(venue_fill.intent.slip_usd or 0.0),
             fees_usd=fees,
-            slippage_usd=float(venue_fill.intent.slippage_usd or 0.0),
-            slippage_bps=float(venue_fill.intent.slippage_bps or 0.0),
+            slippage_usd=float(venue_fill.intent.slip_usd or 0.0),
+            slippage_bps=float(venue_fill.intent.slip_bps or 0.0),
             mfe_usd=12.0,
             mae_usd=-3.0,
             capture_efficiency=0.75,
@@ -1705,10 +1705,10 @@ def test_full_flatten_lifecycle_books_closed_trade_and_releases_reserve_once() -
             exit_price=exit_price,
             gross_pnl_usd=gross,
             net_pnl_usd=net,
-            total_cost_usd=fees + float(venue_fill.intent.slippage_usd or 0.0),
+            total_cost_usd=fees + float(venue_fill.intent.slip_usd or 0.0),
             fees_usd=fees,
-            slippage_usd=float(venue_fill.intent.slippage_usd or 0.0),
-            slippage_bps=float(venue_fill.intent.slippage_bps or 0.0),
+            slippage_usd=float(venue_fill.intent.slip_usd or 0.0),
+            slippage_bps=float(venue_fill.intent.slip_bps or 0.0),
             mfe_usd=12.0,
             mae_usd=-3.0,
             capture_efficiency=0.75,
@@ -2027,10 +2027,10 @@ def test_futures_open_to_flat_releases_cash_and_margin_and_books_net() -> None:
             exit_price=exit_price,
             gross_pnl_usd=gross,
             net_pnl_usd=net,
-            total_cost_usd=fees + float(venue_fill.intent.slippage_usd or 0.0),
+            total_cost_usd=fees + float(venue_fill.intent.slip_usd or 0.0),
             fees_usd=fees,
-            slippage_usd=float(venue_fill.intent.slippage_usd or 0.0),
-            slippage_bps=float(venue_fill.intent.slippage_bps or 0.0),
+            slippage_usd=float(venue_fill.intent.slip_usd or 0.0),
+            slippage_bps=float(venue_fill.intent.slip_bps or 0.0),
             mfe_usd=30.0,
             mae_usd=-10.0,
             capture_efficiency=0.50,
