@@ -64,6 +64,7 @@ def reconcile_stale_intents(
                 submit_timeout_at=timeout_at,
             ),
             actor=actor,
+            first_killed_by="Portfolio",
         )
         out.append(result)
 
