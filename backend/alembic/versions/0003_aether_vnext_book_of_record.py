@@ -59,56 +59,73 @@ def upgrade() -> None:
         )
     )
 
-    # EventLedger is append-only Firm evidence. Projection rebuilds may read it;
-    # no application path may UPDATE or DELETE historical decisions.
+    # Immutable Firm evidence/history. EventLedger is append-only; policy
+    # snapshots and ExitPlans are versioned rather than edited; consumed signals
+    # and ClosedTrades must never be rewritten to make later evidence look better.
     op.execute(
         sa.text(
             f"""
-            CREATE OR REPLACE FUNCTION {SCHEMA}.reject_event_ledger_mutation()
+            CREATE OR REPLACE FUNCTION {SCHEMA}.reject_immutable_mutation()
             RETURNS trigger
             LANGUAGE plpgsql
-            AS $$
+            AS $
             BEGIN
-                RAISE EXCEPTION 'aether_vnext.event_ledger is append-only';
+                RAISE EXCEPTION 'AETHER vNext immutable record cannot be updated or deleted';
             END;
-            $$;
+            $;
             """
         )
     )
-    op.execute(
-        sa.text(
-            f"""
-            DROP TRIGGER IF EXISTS trg_event_ledger_append_only
-            ON {SCHEMA}.event_ledger
-            """
-        )
+    immutable_tables = (
+        ("event_ledger", "trg_event_ledger_append_only"),
+        ("policy_snapshots", "trg_policy_snapshots_immutable"),
+        ("exit_plans", "trg_exit_plans_immutable"),
+        ("closed_trades", "trg_closed_trades_immutable"),
+        ("signal_consumptions", "trg_signal_consumptions_immutable"),
     )
-    op.execute(
-        sa.text(
-            f"""
-            CREATE TRIGGER trg_event_ledger_append_only
-            BEFORE UPDATE OR DELETE ON {SCHEMA}.event_ledger
-            FOR EACH ROW
-            EXECUTE FUNCTION {SCHEMA}.reject_event_ledger_mutation()
-            """
+    for table_name, trigger_name in immutable_tables:
+        op.execute(
+            sa.text(
+                f"""
+                DROP TRIGGER IF EXISTS {trigger_name}
+                ON {SCHEMA}.{table_name}
+                """
+            )
         )
-    )
+        op.execute(
+            sa.text(
+                f"""
+                CREATE TRIGGER {trigger_name}
+                BEFORE UPDATE OR DELETE ON {SCHEMA}.{table_name}
+                FOR EACH ROW
+                EXECUTE FUNCTION {SCHEMA}.reject_immutable_mutation()
+                """
+            )
+        )
 
 
 def downgrade() -> None:
     bind = op.get_bind()
-    op.execute(
-        sa.text(
-            f"""
-            DROP TRIGGER IF EXISTS trg_event_ledger_append_only
-            ON {SCHEMA}.event_ledger
-            """
-        )
+    immutable_tables = (
+        ("event_ledger", "trg_event_ledger_append_only"),
+        ("policy_snapshots", "trg_policy_snapshots_immutable"),
+        ("exit_plans", "trg_exit_plans_immutable"),
+        ("closed_trades", "trg_closed_trades_immutable"),
+        ("signal_consumptions", "trg_signal_consumptions_immutable"),
     )
+    for table_name, trigger_name in immutable_tables:
+        op.execute(
+            sa.text(
+                f"""
+                DROP TRIGGER IF EXISTS {trigger_name}
+                ON {SCHEMA}.{table_name}
+                """
+            )
+        )
     op.execute(
         sa.text(
             f"""
-            DROP FUNCTION IF EXISTS {SCHEMA}.reject_event_ledger_mutation()
+            DROP FUNCTION IF EXISTS {SCHEMA}.reject_immutable_mutation()
             """
         )
     )
