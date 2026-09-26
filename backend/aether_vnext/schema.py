@@ -5,6 +5,6 @@ Runtime code may import this facade, which can evolve only through a new migrati
 """
 from __future__ import annotations
 
-from aether_vnext.schema_v0009 import METADATA, build_metadata
+from aether_vnext.schema_v0010 import METADATA, build_metadata
 
 __all__ = ["METADATA", "build_metadata"]
