@@ -23,6 +23,7 @@ from aether_vnext.domain import (
     OrderIntent,
     OrderIntentState,
     QualityState,
+    ReviewCard,
     SessionState,
     Setup,
     SetupState,
@@ -39,6 +40,8 @@ from aether_vnext.equity import (
     sleeve_equity_projection,
 )
 from aether_vnext.execution import entry_fill_price
+from aether_vnext.evidence import CostSensitivity, ProfitabilityEvidence
+from aether_vnext.freeze import EvidenceState
 from aether_vnext.registry import ProductType, registry_row
 from aether_vnext.reservations import reservation_requirement
 from aether_vnext.risk import (
@@ -1089,6 +1092,241 @@ class VNextStore:
                 result.asset_risk_hitches_usd
             ),
         }
+
+    def record_profitability_review(
+        self,
+        conn: Connection,
+        *,
+        evidence: ProfitabilityEvidence,
+        review_card: ReviewCard,
+    ) -> ReviewCard:
+        """Persist immutable evidence plus Review's forward evidence-state decision.
+
+        Review owns evidence/review state only. This transaction does not mutate
+        cash, margin, positions, orders, tickets, or execution state.
+        """
+        if review_card.as_of_utc.tzinfo is None:
+            raise ValueError("ReviewCard as_of_utc must be timezone-aware")
+        if review_card.evidence_id != evidence.evidence_id:
+            raise ValueError("ReviewCard evidence_id mismatch")
+        if review_card.route_id != evidence.route_id:
+            raise ValueError("ReviewCard route_id mismatch")
+        if review_card.playbook_id != evidence.playbook_id:
+            raise ValueError("ReviewCard playbook_id mismatch")
+        if review_card.playbook_version != evidence.playbook_version:
+            raise ValueError("ReviewCard playbook_version mismatch")
+        if review_card.configuration_hash != evidence.configuration_hash:
+            raise ValueError("ReviewCard configuration_hash mismatch")
+        if review_card.reviewer != evidence.reviewer:
+            raise ValueError("ReviewCard reviewer mismatch")
+
+        try:
+            target_state = EvidenceState(str(review_card.evidence_state))
+        except ValueError as exc:
+            raise ValueError("unknown Review evidence_state") from exc
+        if str(evidence.verdict) != target_state.value:
+            raise ValueError("evidence verdict must equal Review evidence_state")
+
+        spec = playbook(evidence.playbook_id)
+        if spec.version != evidence.playbook_version:
+            raise ValueError("playbook_version mismatch")
+
+        policies = self.tables["policy_snapshots"]
+        policy = conn.execute(
+            sa.select(policies).where(
+                policies.c.configuration_hash
+                == evidence.configuration_hash
+            )
+        ).mappings().first()
+        if policy is None:
+            raise KeyError(
+                f"unknown configuration_hash: {evidence.configuration_hash}"
+            )
+        if str(policy["policy_version"]) != evidence.policy_version:
+            raise ValueError("policy_version/configuration_hash mismatch")
+
+        evidence_table = self.tables["profitability_evidence"]
+        review_table = self.tables["review_cards"]
+        route_state = self.tables["route_review_state"]
+
+        conn.execute(
+            evidence_table.insert().values(
+                evidence_id=evidence.evidence_id,
+                route_id=evidence.route_id,
+                playbook_id=evidence.playbook_id,
+                playbook_version=evidence.playbook_version,
+                policy_version=evidence.policy_version,
+                configuration_hash=evidence.configuration_hash,
+                data_version=evidence.data_version,
+                fill_model_version=evidence.fill_model_version,
+                fee_schedule_version=evidence.fee_schedule_version,
+                in_sample_window=evidence.in_sample_window,
+                oos_windows=list(evidence.oos_windows),
+                n_trades=evidence.n_trades,
+                net_expectancy_usd=evidence.net_expectancy_usd,
+                profit_factor=evidence.profit_factor,
+                win_rate=evidence.win_rate,
+                avg_win_usd=evidence.avg_win_usd,
+                avg_loss_usd=evidence.avg_loss_usd,
+                stop_rate=evidence.stop_rate,
+                max_drawdown_usd=evidence.max_drawdown_usd,
+                max_drawdown_pct=evidence.max_drawdown_pct,
+                median_duration_s=evidence.median_duration_s,
+                capture_efficiency=evidence.capture_efficiency,
+                cost_sensitivity={
+                    "base": dict(evidence.cost_sensitivity.base),
+                    "plus25": dict(evidence.cost_sensitivity.plus25),
+                    "plus50": dict(evidence.cost_sensitivity.plus50),
+                },
+                regime_matrix=dict(evidence.regime_matrix),
+                benchmark_result=dict(evidence.benchmark_result),
+                capacity_result=dict(evidence.capacity_result),
+                portfolio_contribution=dict(
+                    evidence.portfolio_contribution
+                ),
+                model_risks=list(evidence.model_risks),
+                verdict=evidence.verdict,
+                reviewer=evidence.reviewer,
+                as_of_utc=evidence.as_of_utc,
+            )
+        )
+        conn.execute(
+            review_table.insert().values(
+                review_card_id=review_card.review_card_id,
+                firm_event_id=None,
+                trade_id=None,
+                route_id=review_card.route_id,
+                playbook_id=review_card.playbook_id,
+                playbook_version=review_card.playbook_version,
+                as_of_utc=review_card.as_of_utc,
+                evidence_state=target_state.value,
+                evidence_id=evidence.evidence_id,
+                decision_reason=review_card.decision_reason,
+                reviewer=review_card.reviewer,
+                configuration_hash=review_card.configuration_hash,
+            )
+        )
+
+        current = conn.execute(
+            sa.select(route_state)
+            .where(route_state.c.route_id == review_card.route_id)
+            .with_for_update()
+        ).mappings().first()
+        if current is None:
+            conn.execute(
+                route_state.insert().values(
+                    route_id=review_card.route_id,
+                    evidence_state=target_state.value,
+                    operational_state=spec.operational_state.value,
+                    review_card_id=review_card.review_card_id,
+                    updated_at_utc=review_card.as_of_utc,
+                    row_version=1,
+                )
+            )
+        else:
+            conn.execute(
+                route_state.update()
+                .where(
+                    route_state.c.route_id == review_card.route_id,
+                    route_state.c.row_version == current["row_version"],
+                )
+                .values(
+                    evidence_state=target_state.value,
+                    review_card_id=review_card.review_card_id,
+                    updated_at_utc=review_card.as_of_utc,
+                    row_version=route_state.c.row_version + 1,
+                )
+            )
+
+        return review_card
+
+    def load_profitability_evidence(
+        self,
+        conn: Connection,
+        *,
+        evidence_id: str,
+    ) -> ProfitabilityEvidence | None:
+        table = self.tables["profitability_evidence"]
+        row = conn.execute(
+            sa.select(table).where(table.c.evidence_id == evidence_id)
+        ).mappings().first()
+        if row is None:
+            return None
+        costs = dict(row["cost_sensitivity"] or {})
+        return ProfitabilityEvidence(
+            evidence_id=str(row["evidence_id"]),
+            route_id=str(row["route_id"]),
+            playbook_id=str(row["playbook_id"]),
+            playbook_version=str(row["playbook_version"]),
+            policy_version=str(row["policy_version"]),
+            configuration_hash=str(row["configuration_hash"]),
+            data_version=str(row["data_version"]),
+            fill_model_version=str(row["fill_model_version"]),
+            fee_schedule_version=str(row["fee_schedule_version"]),
+            in_sample_window=(
+                dict(row["in_sample_window"])
+                if row["in_sample_window"] is not None
+                else None
+            ),
+            oos_windows=tuple(
+                dict(item) for item in (row["oos_windows"] or [])
+            ),
+            n_trades=int(row["n_trades"]),
+            net_expectancy_usd=float(row["net_expectancy_usd"]),
+            profit_factor=float(row["profit_factor"]),
+            win_rate=float(row["win_rate"]),
+            avg_win_usd=float(row["avg_win_usd"]),
+            avg_loss_usd=float(row["avg_loss_usd"]),
+            stop_rate=float(row["stop_rate"]),
+            max_drawdown_usd=float(row["max_drawdown_usd"]),
+            max_drawdown_pct=float(row["max_drawdown_pct"]),
+            median_duration_s=float(row["median_duration_s"]),
+            capture_efficiency=float(row["capture_efficiency"]),
+            cost_sensitivity=CostSensitivity(
+                base=dict(costs.get("base") or {}),
+                plus25=dict(costs.get("plus25") or {}),
+                plus50=dict(costs.get("plus50") or {}),
+            ),
+            regime_matrix=dict(row["regime_matrix"] or {}),
+            benchmark_result=dict(row["benchmark_result"] or {}),
+            capacity_result=dict(row["capacity_result"] or {}),
+            portfolio_contribution=dict(
+                row["portfolio_contribution"] or {}
+            ),
+            model_risks=tuple(
+                str(item) for item in (row["model_risks"] or [])
+            ),
+            verdict=str(row["verdict"]),
+            reviewer=str(row["reviewer"]),
+            as_of_utc=_stored_utc(row["as_of_utc"]),
+        )
+
+    def load_review_card(
+        self,
+        conn: Connection,
+        *,
+        review_card_id: str,
+    ) -> ReviewCard | None:
+        table = self.tables["review_cards"]
+        row = conn.execute(
+            sa.select(table).where(
+                table.c.review_card_id == review_card_id
+            )
+        ).mappings().first()
+        if row is None:
+            return None
+        return ReviewCard(
+            review_card_id=str(row["review_card_id"]),
+            route_id=str(row["route_id"]),
+            playbook_id=str(row["playbook_id"]),
+            playbook_version=str(row["playbook_version"]),
+            as_of_utc=_stored_utc(row["as_of_utc"]),
+            evidence_state=str(row["evidence_state"]),
+            evidence_id=row["evidence_id"],
+            decision_reason=str(row["decision_reason"]),
+            reviewer=str(row["reviewer"]),
+            configuration_hash=str(row["configuration_hash"]),
+        )
 
     def load_order_intent(
         self,

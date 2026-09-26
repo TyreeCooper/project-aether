@@ -44,6 +44,7 @@ def test_book_of_record_has_required_tables() -> None:
         "open_trades",
         "active_positions",
         "closed_trades",
+        "profitability_evidence",
         "review_cards",
         "route_review_state",
         "signal_consumptions",
@@ -161,6 +162,7 @@ def test_lineage_foreign_key_chain_is_present() -> None:
     assert "decision_lineage.firm_event_id" in targets("closed_trades")
     assert "closed_trades.trade_id" in targets("review_cards")
     assert "decision_lineage.firm_event_id" in targets("review_cards")
+    assert "profitability_evidence.evidence_id" in targets("review_cards")
     assert "review_cards.review_card_id" in targets("route_review_state")
 
 
@@ -360,22 +362,22 @@ def test_phase5_execution_reservation_columns_are_in_current_schema() -> None:
     assert "fill_market_observation_id" not in columns
 
 
-def test_runtime_schema_facade_is_pinned_to_revision_0012() -> None:
+def test_runtime_schema_facade_is_pinned_to_revision_0013() -> None:
     backend = Path(__file__).resolve().parents[1]
     facade = (backend / "aether_vnext" / "schema.py").read_text(encoding="utf-8")
-    assert "schema_v0012" in facade
+    assert "schema_v0013" in facade
     migration = (
         backend
         / "alembic"
         / "versions"
-        / "0012_aether_vnext_setup_playbook_lineage.py"
+        / "0013_aether_vnext_profitability_evidence.py"
     ).read_text(encoding="utf-8")
-    assert 'revision: str = "0012"' in migration
-    assert 'down_revision: Union[str, None] = "0011"' in migration
-    assert "playbook_id" in migration
-    assert "trigger_bar_close_exchange_ts" in migration
-    assert "uq_setup_playbook_closed_bar_once" in migration
-    assert "trg_setup_playbook_identity_immutable" in migration
+    assert 'revision: str = "0013"' in migration
+    assert 'down_revision: Union[str, None] = "0012"' in migration
+    assert "profitability_evidence" in migration
+    assert "fk_review_cards_profitability_evidence" in migration
+    assert "trg_profitability_evidence_immutable" in migration
+    assert "reject_immutable_mutation" in migration
 
 
 def test_phase6_atomic_risk_admission_schema_is_explicit() -> None:

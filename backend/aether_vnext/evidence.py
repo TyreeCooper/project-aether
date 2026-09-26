@@ -46,3 +46,31 @@ class ProfitabilityEvidence:
     verdict: str
     reviewer: str
     as_of_utc: datetime
+
+    def __post_init__(self) -> None:
+        required_text = {
+            "evidence_id": self.evidence_id,
+            "route_id": self.route_id,
+            "playbook_id": self.playbook_id,
+            "playbook_version": self.playbook_version,
+            "policy_version": self.policy_version,
+            "configuration_hash": self.configuration_hash,
+            "data_version": self.data_version,
+            "fill_model_version": self.fill_model_version,
+            "fee_schedule_version": self.fee_schedule_version,
+            "verdict": self.verdict,
+            "reviewer": self.reviewer,
+        }
+        for name, value in required_text.items():
+            if not str(value).strip():
+                raise ValueError(f"{name} is required")
+        if self.as_of_utc.tzinfo is None:
+            raise ValueError("as_of_utc must be timezone-aware")
+        if int(self.n_trades) < 0:
+            raise ValueError("n_trades cannot be negative")
+        if not 0.0 <= float(self.win_rate) <= 1.0:
+            raise ValueError("win_rate must be in [0,1]")
+        if not 0.0 <= float(self.stop_rate) <= 1.0:
+            raise ValueError("stop_rate must be in [0,1]")
+        if float(self.median_duration_s) < 0.0:
+            raise ValueError("median_duration_s cannot be negative")
