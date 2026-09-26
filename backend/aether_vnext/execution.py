@@ -29,6 +29,8 @@ from aether_vnext.domain import (
     OrderIntentState,
     QualityState,
     SessionState,
+    Ticket,
+    TicketState,
 )
 from aether_vnext.market_truth import observation_is_valid
 from aether_vnext.registry import ProductRegistryRow
@@ -61,6 +63,62 @@ class PaperExecutionPolicy:
             raise ValueError("submit_timeout_ms must be positive")
         if self.slip_bps < 0:
             raise ValueError("slip_bps cannot be negative")
+
+
+@dataclass(frozen=True, slots=True)
+class PhaseAAdmissionDecision:
+    allowed: bool
+    reason: str
+
+
+def phase_a_admission(
+    *,
+    ticket: Ticket,
+    observation: MarketObservation,
+    registry_row: ProductRegistryRow,
+    active_configuration_hash: str,
+    max_age_ms: int,
+    route_evidence_state: str,
+    route_operational_state: str,
+    governor_halted: bool,
+    firm_envelope_ok: bool,
+    firm_envelope_reason: str = "portfolio_risk_full",
+    locate_ok: bool = False,
+) -> PhaseAAdmissionDecision:
+    """Pure pre-reserve gate; broker capacity and DB uniqueness are store-owned."""
+    if ticket.state is not TicketState.READY:
+        return PhaseAAdmissionDecision(False, "ticket_not_ready")
+    if ticket.lineage.configuration_hash != active_configuration_hash:
+        return PhaseAAdmissionDecision(False, "configuration_mismatch")
+    if ticket.quantity is None or float(ticket.quantity) <= 0:
+        return PhaseAAdmissionDecision(False, "too_small")
+    if ticket.lineage.asset_id != registry_row.asset_id:
+        return PhaseAAdmissionDecision(False, "unsupported_product")
+    if observation.asset_id != registry_row.asset_id:
+        return PhaseAAdmissionDecision(False, "market_changed")
+    if route_evidence_state == "BENCH":
+        return PhaseAAdmissionDecision(False, "route_benched")
+    if route_operational_state != "ENABLED" or governor_halted:
+        return PhaseAAdmissionDecision(False, "route_halted")
+    if not registry_row.product_side_supported(
+        ticket.side,
+        locate_ok=locate_ok,
+    ):
+        return PhaseAAdmissionDecision(False, "product_side_unsupported")
+    if not firm_envelope_ok:
+        return PhaseAAdmissionDecision(False, firm_envelope_reason)
+    if not observation_is_valid(
+        observation,
+        max_age_ms=max_age_ms,
+    ):
+        if observation.session_state in {
+            SessionState.CLOSED,
+            SessionState.MAINTENANCE,
+            SessionState.HALT,
+        }:
+            return PhaseAAdmissionDecision(False, "session_closed")
+        return PhaseAAdmissionDecision(False, "market_stale")
+    return PhaseAAdmissionDecision(True, "phase_a_ready")
 
 
 @dataclass(frozen=True, slots=True)
