@@ -17,6 +17,7 @@ from aether_vnext.store import VNextStore
 @dataclass(frozen=True, slots=True)
 class RestartSnapshot:
     product_registry: tuple[dict[str, Any], ...]
+    decision_lineage: tuple[dict[str, Any], ...]
     policy_snapshots: tuple[dict[str, Any], ...]
     governor_state: tuple[dict[str, Any], ...]
     broker_ledgers: tuple[dict[str, Any], ...]
@@ -27,6 +28,7 @@ class RestartSnapshot:
     open_trade_records: tuple[dict[str, Any], ...]
     exit_plans: tuple[dict[str, Any], ...]
     review_cards: tuple[dict[str, Any], ...]
+    route_review_state: tuple[dict[str, Any], ...]
     consumed_signals: tuple[dict[str, Any], ...]
     mutation_idempotency: tuple[dict[str, Any], ...]
     reconciliation_runs: tuple[dict[str, Any], ...]
@@ -75,6 +77,7 @@ def load_restart_snapshot(
 
     return RestartSnapshot(
         product_registry=_rows(conn, t["product_registry_state"]),
+        decision_lineage=_rows(conn, t["decision_lineage"]),
         policy_snapshots=_rows(conn, t["policy_snapshots"]),
         governor_state=_rows(conn, t["governor_state"]),
         broker_ledgers=_rows(conn, t["broker_account_ledgers"]),
@@ -85,6 +88,7 @@ def load_restart_snapshot(
         open_trade_records=_rows(conn, t["open_trades"]),
         exit_plans=_rows(conn, t["exit_plans"]),
         review_cards=_rows(conn, t["review_cards"]),
+        route_review_state=_rows(conn, t["route_review_state"]),
         consumed_signals=_rows(conn, t["signal_consumptions"]),
         mutation_idempotency=_rows(conn, t["mutation_idempotency"]),
         reconciliation_runs=_rows(conn, t["reconciliation_runs"]),
