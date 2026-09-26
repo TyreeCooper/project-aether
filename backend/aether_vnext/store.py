@@ -8,7 +8,7 @@ provisioning/migration primitive, not a boot hook.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import hashlib
 import json
 from typing import Any, Mapping
@@ -165,6 +165,9 @@ class VNextStore:
         if reserve_cash_usd < 0 or reserve_margin_usd < 0:
             raise ValueError("reservation amounts cannot be negative")
 
+        if submit_timeout_at is None:
+            submit_timeout_at = created_at_utc + timedelta(milliseconds=15_000)
+
         intents = self.tables["order_intents"]
         ledgers = self.tables["broker_account_ledgers"]
 
@@ -300,7 +303,7 @@ class VNextStore:
         order_intent_id: str,
         submitted_at_utc: datetime,
         acknowledged_at_utc: datetime,
-        submit_timeout_at: datetime,
+        submit_timeout_at: datetime | None,
         event_id: str,
         actor: str,
     ) -> dict[str, Any]:
@@ -323,6 +326,13 @@ class VNextStore:
         if row["state"] != "RESERVED":
             return {"ok": False, "error": "illegal_state", "state": row["state"]}
 
+        durable_timeout = row["submit_timeout_at"]
+        if durable_timeout is None:
+            durable_timeout = (
+                submit_timeout_at
+                or submitted_at_utc + timedelta(milliseconds=15_000)
+            )
+
         conn.execute(
             intents.update()
             .where(intents.c.order_intent_id == order_intent_id)
@@ -330,7 +340,7 @@ class VNextStore:
                 state="SUBMITTED",
                 submitted_at=submitted_at_utc,
                 acknowledged_at=acknowledged_at_utc,
-                submit_timeout_at=submit_timeout_at,
+                submit_timeout_at=durable_timeout,
                 row_version=int(row["row_version"]) + 1,
             )
         )
@@ -348,7 +358,7 @@ class VNextStore:
             market_observation_id=row["market_observation_id"],
             actor=actor,
             created_at_utc=submitted_at_utc,
-            payload={"submit_timeout_at": submit_timeout_at.isoformat()},
+            payload={"submit_timeout_at": durable_timeout.isoformat()},
         )
         return {"ok": True, "duplicate": False, "state": "SUBMITTED"}
 
