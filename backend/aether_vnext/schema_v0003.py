@@ -112,10 +112,43 @@ def build_metadata(*, schema: str | None = "aether_vnext") -> sa.MetaData:
     )
 
     sa.Table(
+        "decision_lineage",
+        md,
+        sa.Column("firm_event_id", sa.Text(), primary_key=True),
+        sa.Column("setup_id", sa.Text()),
+        sa.Column("ticket_id", sa.Text()),
+        sa.Column("order_intent_id", sa.Text()),
+        sa.Column("trade_id", sa.Text()),
+        sa.Column("asset_id", sa.Text(), nullable=False, index=True),
+        sa.Column("route_id", sa.Text(), nullable=False, index=True),
+        sa.Column("policy_version", sa.Text(), nullable=False),
+        sa.Column(
+            "configuration_hash",
+            sa.Text(),
+            sa.ForeignKey(_fk(schema, "policy_snapshots.configuration_hash")),
+            nullable=False,
+        ),
+        sa.Column(
+            "market_observation_id",
+            sa.Text(),
+            sa.ForeignKey(_fk(schema, "market_observations.observation_id")),
+        ),
+        sa.Column("first_killed_by", sa.Text()),
+        sa.Column("first_kill_reason", sa.Text()),
+        sa.Column("created_at_utc", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("row_version", sa.BigInteger(), nullable=False, server_default="1"),
+        sa.CheckConstraint("row_version >= 1", name="ck_lineage_row_version_positive"),
+    )
+
+    sa.Table(
         "setups",
         md,
         sa.Column("setup_id", sa.Text(), primary_key=True),
-        sa.Column("firm_event_id", sa.Text()),
+        sa.Column(
+            "firm_event_id",
+            sa.Text(),
+            sa.ForeignKey(_fk(schema, "decision_lineage.firm_event_id")),
+        ),
         sa.Column("asset_id", sa.Text(), nullable=False, index=True),
         sa.Column("route_id", sa.Text(), nullable=False, index=True),
         sa.Column("state", sa.Text(), nullable=False),
@@ -152,7 +185,11 @@ def build_metadata(*, schema: str | None = "aether_vnext") -> sa.MetaData:
             sa.ForeignKey(_fk(schema, "setups.setup_id")),
             nullable=False,
         ),
-        sa.Column("firm_event_id", sa.Text()),
+        sa.Column(
+            "firm_event_id",
+            sa.Text(),
+            sa.ForeignKey(_fk(schema, "decision_lineage.firm_event_id")),
+        ),
         sa.Column("asset_id", sa.Text(), nullable=False, index=True),
         sa.Column("route_id", sa.Text(), nullable=False, index=True),
         sa.Column("state", sa.Text(), nullable=False),
@@ -209,7 +246,11 @@ def build_metadata(*, schema: str | None = "aether_vnext") -> sa.MetaData:
             sa.ForeignKey(_fk(schema, "tickets.ticket_id")),
             nullable=False,
         ),
-        sa.Column("firm_event_id", sa.Text()),
+        sa.Column(
+            "firm_event_id",
+            sa.Text(),
+            sa.ForeignKey(_fk(schema, "decision_lineage.firm_event_id")),
+        ),
         sa.Column("asset_id", sa.Text(), nullable=False, index=True),
         sa.Column("route_id", sa.Text(), nullable=False, index=True),
         sa.Column("broker", sa.Text(), nullable=False),
@@ -279,7 +320,11 @@ def build_metadata(*, schema: str | None = "aether_vnext") -> sa.MetaData:
             sa.ForeignKey(_fk(schema, "exit_plans.exit_plan_id")),
             nullable=False,
         ),
-        sa.Column("firm_event_id", sa.Text()),
+        sa.Column(
+            "firm_event_id",
+            sa.Text(),
+            sa.ForeignKey(_fk(schema, "decision_lineage.firm_event_id")),
+        ),
         sa.Column("asset_id", sa.Text(), nullable=False, index=True),
         sa.Column("route_id", sa.Text(), nullable=False, index=True),
         sa.Column("position_key", sa.Text(), nullable=False, index=True),
@@ -341,6 +386,11 @@ def build_metadata(*, schema: str | None = "aether_vnext") -> sa.MetaData:
             sa.ForeignKey(_fk(schema, "open_trades.trade_id")),
             primary_key=True,
         ),
+        sa.Column(
+            "firm_event_id",
+            sa.Text(),
+            sa.ForeignKey(_fk(schema, "decision_lineage.firm_event_id")),
+        ),
         sa.Column("route_id", sa.Text(), nullable=False, index=True),
         sa.Column("closed_at_utc", sa.DateTime(timezone=True), nullable=False),
         sa.Column("gross_pnl_usd", sa.Float(), nullable=False),
@@ -373,6 +423,11 @@ def build_metadata(*, schema: str | None = "aether_vnext") -> sa.MetaData:
         md,
         sa.Column("review_card_id", sa.Text(), primary_key=True),
         sa.Column(
+            "firm_event_id",
+            sa.Text(),
+            sa.ForeignKey(_fk(schema, "decision_lineage.firm_event_id")),
+        ),
+        sa.Column(
             "trade_id",
             sa.Text(),
             sa.ForeignKey(_fk(schema, "closed_trades.trade_id")),
@@ -391,6 +446,22 @@ def build_metadata(*, schema: str | None = "aether_vnext") -> sa.MetaData:
             sa.ForeignKey(_fk(schema, "policy_snapshots.configuration_hash")),
             nullable=False,
         ),
+    )
+
+    sa.Table(
+        "route_review_state",
+        md,
+        sa.Column("route_id", sa.Text(), primary_key=True),
+        sa.Column("evidence_state", sa.Text(), nullable=False),
+        sa.Column("operational_state", sa.Text(), nullable=False),
+        sa.Column(
+            "review_card_id",
+            sa.Text(),
+            sa.ForeignKey(_fk(schema, "review_cards.review_card_id")),
+        ),
+        sa.Column("updated_at_utc", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("row_version", sa.BigInteger(), nullable=False, server_default="1"),
+        sa.CheckConstraint("row_version >= 1", name="ck_route_review_version_positive"),
     )
 
     sa.Table(
@@ -476,8 +547,18 @@ def build_metadata(*, schema: str | None = "aether_vnext") -> sa.MetaData:
         sa.Column("seat", sa.Text(), nullable=False),
         sa.Column("reason_code", sa.Text(), nullable=False),
         sa.Column("policy_version", sa.Text(), nullable=False),
-        sa.Column("configuration_hash", sa.Text(), nullable=False, index=True),
-        sa.Column("market_observation_id", sa.Text()),
+        sa.Column(
+            "configuration_hash",
+            sa.Text(),
+            sa.ForeignKey(_fk(schema, "policy_snapshots.configuration_hash")),
+            nullable=False,
+            index=True,
+        ),
+        sa.Column(
+            "market_observation_id",
+            sa.Text(),
+            sa.ForeignKey(_fk(schema, "market_observations.observation_id")),
+        ),
         sa.Column("actor", sa.Text(), nullable=False),
         sa.Column("created_at_utc", sa.DateTime(timezone=True), nullable=False, index=True),
         sa.Column("payload_hash", sa.Text(), nullable=False),
