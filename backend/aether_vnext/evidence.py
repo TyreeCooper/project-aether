@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from enum import StrEnum
+from typing import Any, Iterable
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,3 +75,113 @@ class ProfitabilityEvidence:
             raise ValueError("stop_rate must be in [0,1]")
         if float(self.median_duration_s) < 0.0:
             raise ValueError("median_duration_s cannot be negative")
+
+
+class SampleDomain(StrEnum):
+    IN_SAMPLE = "in_sample"
+    HELD_OUT = "held_out"
+    PAPER_FORWARD = "paper_forward"
+    EXECUTION_VALIDATION = "execution_validation"
+    LIVE = "live"
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceWindow:
+    evidence_window_id: str
+    route_id: str
+    playbook_id: str
+    playbook_version: str
+    policy_version: str
+    configuration_hash: str
+    sample_domain: SampleDomain
+    first_timestamp_utc: datetime
+    last_timestamp_utc: datetime
+    n: int
+    immutable_trade_ids: tuple[str, ...]
+    metrics_snapshot_hash: str
+    created_at_utc: datetime
+
+    def __post_init__(self) -> None:
+        required = {
+            "evidence_window_id": self.evidence_window_id,
+            "route_id": self.route_id,
+            "playbook_id": self.playbook_id,
+            "playbook_version": self.playbook_version,
+            "policy_version": self.policy_version,
+            "configuration_hash": self.configuration_hash,
+            "metrics_snapshot_hash": self.metrics_snapshot_hash,
+        }
+        for name, value in required.items():
+            if not str(value).strip():
+                raise ValueError(f"{name} is required")
+        for name, value in (
+            ("first_timestamp_utc", self.first_timestamp_utc),
+            ("last_timestamp_utc", self.last_timestamp_utc),
+            ("created_at_utc", self.created_at_utc),
+        ):
+            if value.tzinfo is None:
+                raise ValueError(f"{name} must be timezone-aware")
+        if self.first_timestamp_utc > self.last_timestamp_utc:
+            raise ValueError("EvidenceWindow timestamps are reversed")
+        ids = tuple(str(value).strip() for value in self.immutable_trade_ids)
+        if not ids or any(not value for value in ids):
+            raise ValueError("immutable_trade_ids must contain nonblank IDs")
+        if len(ids) != len(set(ids)):
+            raise ValueError("duplicate immutable_trade_id in EvidenceWindow")
+        if int(self.n) != len(ids):
+            raise ValueError("EvidenceWindow n must equal immutable_trade_ids length")
+        if int(self.n) <= 0:
+            raise ValueError("EvidenceWindow n must be positive")
+
+
+def _window_family(window: EvidenceWindow) -> tuple[str, ...]:
+    return (
+        window.route_id,
+        window.playbook_id,
+        window.playbook_version,
+        window.policy_version,
+        window.configuration_hash,
+        window.sample_domain.value,
+    )
+
+
+def independent_trade_ids(
+    windows: Iterable[EvidenceWindow],
+) -> tuple[str, ...]:
+    rows = tuple(windows)
+    if not rows:
+        return ()
+    family = _window_family(rows[0])
+    for row in rows[1:]:
+        if _window_family(row) != family:
+            raise ValueError(
+                "EvidenceWindows from different sample/version/config families "
+                "cannot merge"
+            )
+    return tuple(
+        sorted(
+            {
+                trade_id
+                for row in rows
+                for trade_id in row.immutable_trade_ids
+            }
+        )
+    )
+
+
+def independent_n(
+    windows: Iterable[EvidenceWindow],
+) -> int:
+    return len(independent_trade_ids(windows))
+
+
+def strategy_evidence_n(
+    windows: Iterable[EvidenceWindow],
+) -> int:
+    rows = tuple(windows)
+    if not rows:
+        return 0
+    ids = independent_trade_ids(rows)
+    if rows[0].sample_domain is SampleDomain.EXECUTION_VALIDATION:
+        return 0
+    return len(ids)

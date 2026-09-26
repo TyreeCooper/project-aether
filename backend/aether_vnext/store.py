@@ -41,7 +41,12 @@ from aether_vnext.equity import (
     sleeve_equity_projection,
 )
 from aether_vnext.execution import entry_fill_price
-from aether_vnext.evidence import CostSensitivity, ProfitabilityEvidence
+from aether_vnext.evidence import (
+    CostSensitivity,
+    EvidenceWindow,
+    ProfitabilityEvidence,
+    SampleDomain,
+)
 from aether_vnext.freeze import EvidenceState
 from aether_vnext.registry import ProductType, registry_row
 from aether_vnext.reservations import reservation_requirement
@@ -1098,6 +1103,82 @@ class VNextStore:
                 result.asset_risk_hitches_usd
             ),
         }
+
+    def record_evidence_window(
+        self,
+        conn: Connection,
+        window: EvidenceWindow,
+    ) -> None:
+        """Append one immutable, single-domain evidence window."""
+        policies = self.tables["policy_snapshots"]
+        policy = conn.execute(
+            sa.select(policies).where(
+                policies.c.configuration_hash
+                == window.configuration_hash
+            )
+        ).mappings().first()
+        if policy is None:
+            raise KeyError(
+                f"unknown configuration_hash: {window.configuration_hash}"
+            )
+        if str(policy["policy_version"]) != window.policy_version:
+            raise ValueError("policy_version/configuration_hash mismatch")
+
+        spec = playbook(window.playbook_id)
+        if spec.version != window.playbook_version:
+            raise ValueError("playbook_version mismatch")
+
+        table = self.tables["evidence_windows"]
+        conn.execute(
+            table.insert().values(
+                evidence_window_id=window.evidence_window_id,
+                route_id=window.route_id,
+                playbook_id=window.playbook_id,
+                playbook_version=window.playbook_version,
+                policy_version=window.policy_version,
+                configuration_hash=window.configuration_hash,
+                sample_domain=window.sample_domain.value,
+                first_timestamp_utc=window.first_timestamp_utc,
+                last_timestamp_utc=window.last_timestamp_utc,
+                n=window.n,
+                immutable_trade_ids=list(window.immutable_trade_ids),
+                metrics_snapshot_hash=window.metrics_snapshot_hash,
+                created_at_utc=window.created_at_utc,
+            )
+        )
+
+    def load_evidence_window(
+        self,
+        conn: Connection,
+        *,
+        evidence_window_id: str,
+    ) -> EvidenceWindow | None:
+        table = self.tables["evidence_windows"]
+        row = conn.execute(
+            sa.select(table).where(
+                table.c.evidence_window_id == evidence_window_id
+            )
+        ).mappings().first()
+        if row is None:
+            return None
+        return EvidenceWindow(
+            evidence_window_id=str(row["evidence_window_id"]),
+            route_id=str(row["route_id"]),
+            playbook_id=str(row["playbook_id"]),
+            playbook_version=str(row["playbook_version"]),
+            policy_version=str(row["policy_version"]),
+            configuration_hash=str(row["configuration_hash"]),
+            sample_domain=SampleDomain(str(row["sample_domain"])),
+            first_timestamp_utc=_stored_utc(row["first_timestamp_utc"]),
+            last_timestamp_utc=_stored_utc(row["last_timestamp_utc"]),
+            n=int(row["n"]),
+            immutable_trade_ids=tuple(
+                str(value)
+                for value in (row["immutable_trade_ids"] or [])
+            ),
+            metrics_snapshot_hash=str(row["metrics_snapshot_hash"]),
+            created_at_utc=_stored_utc(row["created_at_utc"]),
+        )
 
     def record_profitability_review(
         self,

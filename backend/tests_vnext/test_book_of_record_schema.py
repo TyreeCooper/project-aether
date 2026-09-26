@@ -44,6 +44,7 @@ def test_book_of_record_has_required_tables() -> None:
         "open_trades",
         "active_positions",
         "closed_trades",
+        "evidence_windows",
         "profitability_evidence",
         "review_cards",
         "route_review_state",
@@ -362,21 +363,22 @@ def test_phase5_execution_reservation_columns_are_in_current_schema() -> None:
     assert "fill_market_observation_id" not in columns
 
 
-def test_runtime_schema_facade_is_pinned_to_revision_0013() -> None:
+def test_runtime_schema_facade_is_pinned_to_revision_0014() -> None:
     backend = Path(__file__).resolve().parents[1]
     facade = (backend / "aether_vnext" / "schema.py").read_text(encoding="utf-8")
-    assert "schema_v0013" in facade
+    assert "schema_v0014" in facade
     migration = (
         backend
         / "alembic"
         / "versions"
-        / "0013_aether_vnext_profitability_evidence.py"
+        / "0014_aether_vnext_evidence_windows.py"
     ).read_text(encoding="utf-8")
-    assert 'revision: str = "0013"' in migration
-    assert 'down_revision: Union[str, None] = "0012"' in migration
-    assert "profitability_evidence" in migration
-    assert "fk_review_cards_profitability_evidence" in migration
-    assert "trg_profitability_evidence_immutable" in migration
+    assert 'revision: str = "0014"' in migration
+    assert 'down_revision: Union[str, None] = "0013"' in migration
+    assert "evidence_windows" in migration
+    assert "sample_domain" in migration
+    assert "immutable_trade_ids" in migration
+    assert "trg_evidence_windows_immutable" in migration
     assert "reject_immutable_mutation" in migration
 
 
