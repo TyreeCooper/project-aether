@@ -23,6 +23,7 @@ from aether_vnext.domain import (
     OrderIntentState,
 )
 from aether_vnext.registry import ProductType, registry_row
+from aether_vnext.reservations import reservation_requirement
 from aether_vnext.schema import build_metadata
 from aether_vnext.seed_truth import ASSET_BROKER_ACCOUNT
 
@@ -371,6 +372,7 @@ class VNextStore:
     ) -> dict[str, Any]:
         """Persist a Portfolio Phase-A rejection with no OrderIntent/reserve."""
         tickets = self.tables["tickets"]
+        observations = self.tables["market_observations"]
         row = conn.execute(
             sa.select(tickets)
             .where(tickets.c.ticket_id == ticket_id)
@@ -456,8 +458,8 @@ class VNextStore:
         idempotency_key: str,
         signal_key: str,
         position_key: str,
-        reserve_cash_usd: float,
-        reserve_margin_usd: float,
+        reserve_cash_usd: float | None,
+        reserve_margin_usd: float | None,
         ready_spread_bps: float | None,
         hard_stop_price: float | None,
         exit_plan_id: str | None,
@@ -476,12 +478,6 @@ class VNextStore:
         """
         if qty <= 0:
             raise ValueError("qty must be positive")
-        if reserve_cash_usd < 0 or reserve_margin_usd < 0:
-            raise ValueError("reservation amounts cannot be negative")
-        if reserve_cash_usd + 1e-9 < reserve_margin_usd:
-            raise ValueError(
-                "reserve_cash_usd must include at least the locked margin"
-            )
 
         if submit_timeout_at is None:
             submit_timeout_at = created_at_utc + timedelta(milliseconds=15_000)
@@ -604,6 +600,90 @@ class VNextStore:
                 actor=actor,
                 market_observation_id=market_observation_id,
             )
+
+        observation = conn.execute(
+            sa.select(observations).where(
+                observations.c.observation_id == market_observation_id
+            )
+        ).mappings().first()
+        if observation is None:
+            return self.reject_ticket_pre_reserve(
+                conn,
+                ticket_id=ticket_id,
+                reason_code="market_observation_missing",
+                at_utc=created_at_utc,
+                event_id=event_id,
+                actor=actor,
+                market_observation_id=market_observation_id,
+            )
+        if observation["asset_id"] != asset_id:
+            return self.reject_ticket_pre_reserve(
+                conn,
+                ticket_id=ticket_id,
+                reason_code="market_observation_mismatch",
+                at_utc=created_at_utc,
+                event_id=event_id,
+                actor=actor,
+                market_observation_id=market_observation_id,
+            )
+        if (
+            observation["quality_state"] != "healthy"
+            or observation["bid"] is None
+            or observation["ask"] is None
+        ):
+            return self.reject_ticket_pre_reserve(
+                conn,
+                ticket_id=ticket_id,
+                reason_code="market_invalid",
+                at_utc=created_at_utc,
+                event_id=event_id,
+                actor=actor,
+                market_observation_id=market_observation_id,
+            )
+        modeled_cost_pct = ticket["modeled_round_trip_cost_pct"]
+        if modeled_cost_pct is None:
+            return self.reject_ticket_pre_reserve(
+                conn,
+                ticket_id=ticket_id,
+                reason_code="cost_model_missing",
+                at_utc=created_at_utc,
+                event_id=event_id,
+                actor=actor,
+                market_observation_id=market_observation_id,
+            )
+
+        requirement = reservation_requirement(
+            registry_row(asset_id),
+            side=side,
+            qty=float(ticket["quantity"]),
+            bid=float(observation["bid"]),
+            ask=float(observation["ask"]),
+            modeled_round_trip_cost_pct=float(modeled_cost_pct),
+        )
+
+        # Backward-compatible arguments are assertions only.  Portfolio owns the
+        # actual reservation values and always stores the source-derived result.
+        if (
+            reserve_cash_usd is not None
+            and abs(float(reserve_cash_usd) - requirement.reserve_cash_usd) > 1e-6
+        ) or (
+            reserve_margin_usd is not None
+            and abs(float(reserve_margin_usd) - requirement.margin_need_usd) > 1e-6
+        ):
+            return self.reject_ticket_pre_reserve(
+                conn,
+                ticket_id=ticket_id,
+                reason_code="reservation_mismatch",
+                at_utc=created_at_utc,
+                event_id=event_id,
+                actor=actor,
+                market_observation_id=market_observation_id,
+            )
+
+        reserve_cash_usd = requirement.reserve_cash_usd
+        reserve_margin_usd = requirement.margin_need_usd
+        reference_price = requirement.entry_reference_price
+        expected_fill = requirement.computed_entry_price
 
         ledger = conn.execute(
             sa.select(ledgers)
@@ -738,6 +818,9 @@ class VNextStore:
                 "broker_account_id": broker_account_id,
                 "reserve_cash_usd": reserve_cash_usd,
                 "reserve_margin_usd": reserve_margin_usd,
+                "entry_reference_price": requirement.entry_reference_price,
+                "computed_entry_price": requirement.computed_entry_price,
+                "estimated_cost_buffer_usd": requirement.estimated_cost_buffer_usd,
                 "idempotency_key": idempotency_key,
                 "signal_key": signal_key,
                 "position_key": position_key,
