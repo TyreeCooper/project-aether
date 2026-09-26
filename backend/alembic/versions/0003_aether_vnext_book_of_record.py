@@ -13,7 +13,7 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 
-from aether_vnext.schema import build_metadata
+from aether_vnext.schema_v0003 import build_metadata
 
 
 revision: str = "0003"
