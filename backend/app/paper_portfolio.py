@@ -18,6 +18,7 @@ from app.instruments import (
     quantity_metadata,
     supports_side,
 )
+from app.sleeves import SleeveBook, sleeve_for_asset
 from app.wallet import STARTING_USD
 
 
@@ -55,6 +56,7 @@ class PaperPortfolio:
     def __init__(self, usd: float = STARTING_USD) -> None:
         self.starting_usd = float(usd)
         self.usd = float(usd)
+        self.sleeves = SleeveBook.seed(float(usd))
         self.test_overflow_usd = 0.0
         self.positions: dict[str, dict[str, Any]] = {}
         self.closed_trades: list[dict[str, Any]] = []
@@ -255,6 +257,16 @@ class PaperPortfolio:
 
     def can_buy(self, amount: float) -> bool:
         return float(amount) > 0 and self.usd + 1e-9 >= float(amount)
+
+    def sleeve_cash(self, asset_id: str) -> float:
+        return float(self.sleeves.sleeve_for(asset_id).cash_available_usd)
+
+    def can_buy_asset(self, asset_id: str, amount: float) -> bool:
+        need = float(amount)
+        return (
+            need > 0
+            and self.sleeves.sleeve_for(asset_id).cash_available_usd + 1e-9 >= need
+        )
 
     def _execution_fee(
         self,
@@ -805,6 +817,7 @@ class PaperPortfolio:
         metadata: dict[str, Any] | None = None,
         execution_test: bool = False,
         position_key: str | None = None,
+        sleeve_debit_already_applied: bool = False,
     ) -> dict[str, Any]:
         aid = str(asset_id).lower()
         key = str(position_key or aid).lower()
@@ -836,6 +849,21 @@ class PaperPortfolio:
         normal_margin = self._required_margin(aid, side, qty, price)
         margin = normal_margin
         debit = margin + fee
+        sleeve_id = sleeve_for_asset(aid)
+        sleeve = self.sleeves.sleeve(sleeve_id)
+        if (
+            not sleeve_debit_already_applied
+            and sleeve.cash_available_usd + 1e-9 < debit
+            and not execution_test
+        ):
+            return {
+                "ok": False,
+                "error": "insufficient_capital",
+                "need": debit,
+                "have": sleeve.cash_available_usd,
+                "asset_id": aid,
+                "sleeve_id": sleeve_id,
+            }
         test_overflow = 0.0
         if self.usd + 1e-9 < debit:
             if not execution_test:
@@ -852,11 +880,21 @@ class PaperPortfolio:
             self.test_overflow_usd += test_overflow
             self.usd += test_overflow
         self.usd -= debit
+        if not sleeve_debit_already_applied:
+            if sleeve.cash_available_usd + 1e-9 < debit and execution_test:
+                # Legacy execution-validation may borrow explicit test-only buying
+                # power globally; do not mint broker-local sleeve cash.
+                sleeve_debit = max(sleeve.cash_available_usd, 0.0)
+            else:
+                sleeve_debit = debit
+            sleeve.cash_available_usd -= sleeve_debit
+            sleeve.fees_accrued_usd += fee
         trade_id = uuid.uuid4().hex
         ts = opened_at or _now()
         pos = {
             "trade_id": trade_id,
             "position_key": key,
+            "sleeve_id": sleeve_id,
             "asset_id": aid,
             "product_type": spec["product_type"],
             "side": side,
@@ -928,6 +966,49 @@ class PaperPortfolio:
             "usd": self.usd,
         }
 
+    def apply_filled_intent(
+        self,
+        filled: dict[str, Any],
+        *,
+        price: float,
+    ) -> dict[str, Any]:
+        """Commit a FILLED two-phase intent without debiting its sleeve twice."""
+        if str(filled.get("state") or "") != "FILLED":
+            return {"ok": False, "error": "intent_not_filled"}
+        aid = str(filled.get("asset_id") or "").lower()
+        horizon = str(filled.get("horizon") or "").lower()
+        qty = float(filled.get("filled_qty") or filled.get("quantity") or 0.0)
+        side = str(filled.get("side") or "").lower()
+        reserved_usd = float(filled.get("reserved_usd") or 0.0)
+        if not aid or not horizon or qty <= 0 or side not in {"long", "short"}:
+            return {"ok": False, "error": "bad_filled_intent"}
+
+        opened = self.open_position(
+            aid,
+            side=side,
+            quantity=qty,
+            price=float(price),
+            signal_key=str(filled.get("signal_key") or "") or None,
+            position_key=strategy_position_key(aid, horizon),
+            sleeve_debit_already_applied=True,
+        )
+        if not opened.get("ok"):
+            return opened
+
+        actual_debit = float(opened.get("margin_reserved_usd") or 0.0) + float(
+            opened.get("entry_fee_usd") or 0.0
+        )
+        leftover = max(reserved_usd - actual_debit, 0.0)
+        if leftover > 0:
+            self.sleeves.credit(aid, leftover)
+        self.sleeves.sleeve_for(aid).fees_accrued_usd += float(
+            opened.get("entry_fee_usd") or 0.0
+        )
+        opened["reserved_usd"] = reserved_usd
+        opened["reserve_leftover_usd"] = leftover
+        opened["order_intent_id"] = filled.get("order_intent_id")
+        return opened
+
     def update_stop(
         self,
         asset_id: str,
@@ -984,10 +1065,17 @@ class PaperPortfolio:
 
         if kind in {"crypto_spot", "equity"} and side == "long":
             # Cash long: reserved margin is the purchase notional. Return sale proceeds.
-            self.usd += qty * price - exit_fee
+            close_credit = qty * price - exit_fee
+            self.usd += close_credit
         else:
             # Margin/short products: release margin and realize gross P/L.
-            self.usd += margin + gross - exit_fee
+            close_credit = margin + gross - exit_fee
+            self.usd += close_credit
+
+        sleeve = self.sleeves.sleeve_for(aid)
+        sleeve.cash_available_usd += close_credit
+        sleeve.realized_pnl_usd += net
+        sleeve.fees_accrued_usd += exit_fee
 
         overflow = float(pos.get("test_overflow_usd") or 0.0)
         overflow_repaid = min(max(self.usd, 0.0), overflow)
@@ -1154,6 +1242,7 @@ class PaperPortfolio:
             "test_overflow_usd": self.test_overflow_usd,
             "positions": self.positions,
             "closed_trades": self.closed_trades[-1000:],
+            "sleeves": self.sleeves.payload(),
         }
 
     def restore(self, data: dict[str, Any]) -> None:
@@ -1165,6 +1254,21 @@ class PaperPortfolio:
         capital_upgrade = max(target_starting_usd - saved_starting_usd, 0.0)
         self.starting_usd = max(saved_starting_usd, target_starting_usd)
         self.usd = saved_usd + capital_upgrade
+        sleeve_payload = data.get("sleeves")
+        if isinstance(sleeve_payload, dict):
+            self.sleeves = SleeveBook.restore(
+                sleeve_payload,
+                fallback_starting=self.starting_usd,
+            )
+            if capital_upgrade > 0:
+                upgraded = SleeveBook.seed(capital_upgrade)
+                for sid, ledger in upgraded.ledgers.items():
+                    self.sleeves.sleeve(sid).cash_available_usd += (
+                        ledger.cash_available_usd
+                    )
+                self.sleeves.starting_usd = self.starting_usd
+        else:
+            self.sleeves = SleeveBook.seed(self.starting_usd)
         self.test_overflow_usd = float(data.get("test_overflow_usd", 0.0) or 0.0)
         positions = data.get("positions") or {}
         self.positions = {}
