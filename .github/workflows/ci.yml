@@ -27,7 +27,7 @@ jobs:
             node --check "$file"
           done
       - name: Run backend tests
-        run: python -m pytest -q
+        run: timeout --signal=TERM --kill-after=10s 300s python -m pytest -q -o faulthandler_timeout=60
         env:
           PYTHONPATH: .
           PYTHONUNBUFFERED: "1"
