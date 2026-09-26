@@ -1057,7 +1057,7 @@ class VNextStore:
             prior_state=TicketState.FIRE.value,
             new_state=TicketState.SIZE.value,
             seat="Risk",
-            reason_code=None,
+            reason_code="risk.size",
             policy_version=str(ticket["policy_version"]),
             configuration_hash=str(ticket["configuration_hash"]),
             market_observation_id=market_observation_id,
