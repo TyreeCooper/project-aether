@@ -1073,3 +1073,80 @@ def test_phase_a_failure_rejects_ticket_without_intent_or_reserve() -> None:
         }["kraken_paper"]
         assert ledger["cash_available_usd"] == pytest.approx(4000.0)
         assert ledger["cash_reserved_usd"] == 0.0
+
+
+def test_ready_to_reserved_to_submitted_to_filled_to_open_end_to_end() -> None:
+    engine, store = _store_fixture()
+
+    # Phase A: short local DB transaction.
+    with engine.begin() as conn:
+        reserved = _reserve_btc(conn, store)
+        assert reserved["state"] == "RESERVED"
+
+    # Adapter acknowledgement: separate transaction.
+    with engine.begin() as conn:
+        submitted = store.mark_order_intent_submitted(
+            conn,
+            order_intent_id="intent-reserve-1",
+            submitted_at_utc=T0,
+            acknowledged_at_utc=T0,
+            submit_timeout_at=None,
+            event_id="evt-e2e-submit",
+            actor="paper-adapter",
+        )
+        assert submitted["state"] == "SUBMITTED"
+
+    # Phase B: reload durable intent, wait until the 250 ms event is due, then
+    # calculate venue-shaped fill from a fresh observation.
+    with engine.begin() as conn:
+        durable = store.load_order_intent(
+            conn,
+            order_intent_id="intent-reserve-1",
+        )
+        assert durable is not None
+        assert durable.state is OrderIntentState.SUBMITTED
+        assert durable.submitted_at is not None
+        assert durable.submitted_at.tzinfo is not None
+
+    observation = _obs()
+    venue_fill = fill_submitted_paper_intent(
+        durable,
+        observation=observation,
+        registry_row=SEED_REGISTRY["btc"],
+        ready_spread_bps=2.0,
+        hard_stop_price=95_000.0,
+        max_age_ms=1_000,
+        at_utc=T0 + timedelta(milliseconds=250),
+    )
+    assert venue_fill.intent.state is OrderIntentState.FILLED
+
+    # Portfolio apply: another short transaction. This is the only step that
+    # consumes signal_key and creates OPEN.
+    with engine.begin() as conn:
+        opened = store.finalize_filled_open(
+            conn,
+            order_intent_id="intent-reserve-1",
+            trade_id="trade-e2e",
+            setup_id="setup-ticket-1",
+            exit_plan_id="exit-plan-e2e",
+            fill_market_observation_id="obs-fill",
+            filled_at_utc=venue_fill.intent.filled_at,
+            filled_qty=venue_fill.intent.filled_qty,
+            avg_fill_price=venue_fill.intent.avg_fill_price,
+            slippage_usd=venue_fill.intent.slippage_usd or 0.0,
+            slippage_bps=venue_fill.intent.slippage_bps or 0.0,
+            initial_stop_risk_usd=50.0,
+            exit_plan_version="v1",
+            exit_plan_payload={"hard_stop_price": 95_000.0},
+            management_telemetry={},
+            event_id="evt-e2e-open",
+            actor="portfolio",
+        )
+        assert opened["state"] == "FILLED"
+        assert opened["trade_id"] == "trade-e2e"
+        assert conn.execute(
+            sa.select(sa.func.count()).select_from(store.tables["open_trades"])
+        ).scalar_one() == 1
+        assert conn.execute(
+            sa.select(sa.func.count()).select_from(store.tables["signal_consumptions"])
+        ).scalar_one() == 1
