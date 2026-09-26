@@ -139,7 +139,12 @@ def floor_quantity_to_step(quantity: float, step: float) -> float:
         raise ValueError("quantity cannot be negative")
     if increment <= 0:
         raise ValueError("quantity step must be positive")
-    units = (raw / increment).to_integral_value(rounding=ROUND_FLOOR)
+    # Neutralize sub-ULP float noise before flooring without changing a
+    # materially sub-step quantity. The final stop-risk assertion remains the
+    # authoritative guard against any quantity exceeding its dollar budget.
+    units = (
+        (raw / increment) + Decimal("1e-12")
+    ).to_integral_value(rounding=ROUND_FLOOR)
     return float(units * increment)
 
 
