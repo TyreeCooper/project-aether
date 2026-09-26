@@ -30,6 +30,7 @@ from aether_vnext.equity import (
     conservative_unrealized_pnl_usd,
     firm_equity_projection,
     inventory_market_value_usd,
+    sleeve_equity_projection,
 )
 from aether_vnext.registry import ProductType, registry_row
 from aether_vnext.reservations import reservation_requirement
