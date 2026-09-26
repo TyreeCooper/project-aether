@@ -372,7 +372,6 @@ class VNextStore:
     ) -> dict[str, Any]:
         """Persist a Portfolio Phase-A rejection with no OrderIntent/reserve."""
         tickets = self.tables["tickets"]
-        observations = self.tables["market_observations"]
         row = conn.execute(
             sa.select(tickets)
             .where(tickets.c.ticket_id == ticket_id)
@@ -487,6 +486,7 @@ class VNextStore:
         signals = self.tables["signal_consumptions"]
         positions = self.tables["active_positions"]
         tickets = self.tables["tickets"]
+        observations = self.tables["market_observations"]
 
         # Idempotent retry wins before re-evaluating mutable current state.
         existing = conn.execute(
