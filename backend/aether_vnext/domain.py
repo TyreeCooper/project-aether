@@ -179,10 +179,17 @@ class ClosedTrade:
     trade_id: str
     lineage: Lineage
     route_id: str
+    asset_id: str
+    position_key: str
+    side: str
+    quantity: float
+    avg_entry_price: float
+    exit_price: float
     closed_at_utc: datetime
     gross_pnl_usd: float
     net_pnl_usd: float
     total_cost_usd: float
+    fees_usd: float
     mfe_usd: float | None
     mae_usd: float | None
     capture_efficiency: float | None
