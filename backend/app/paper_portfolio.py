@@ -671,6 +671,16 @@ class PaperPortfolio:
             return notional
         if kind == "equity":
             return notional * float(spec.get("paper_short_margin_rate") or 0.50)
+        if kind == "future":
+            overnight_seed = {
+                "mes": 1200.0,
+                "mnq": 1400.0,
+                "mgc": 1000.0,
+                "mcl": 1000.0,
+                "us10y": 800.0,
+            }.get(str(asset_id).lower())
+            if overnight_seed is not None:
+                return abs(float(quantity)) * overnight_seed
         return notional * float(spec.get("paper_margin_rate") or 0.05)
 
     def size_for_risk(
@@ -818,6 +828,7 @@ class PaperPortfolio:
         execution_test: bool = False,
         position_key: str | None = None,
         sleeve_debit_already_applied: bool = False,
+        test_allow_sleeve_overflow: bool = False,
     ) -> dict[str, Any]:
         aid = str(asset_id).lower()
         key = str(position_key or aid).lower()
@@ -855,6 +866,7 @@ class PaperPortfolio:
             not sleeve_debit_already_applied
             and sleeve.cash_available_usd + 1e-9 < debit
             and not execution_test
+            and not test_allow_sleeve_overflow
         ):
             return {
                 "ok": False,
@@ -881,9 +893,12 @@ class PaperPortfolio:
             self.usd += test_overflow
         self.usd -= debit
         if not sleeve_debit_already_applied:
-            if sleeve.cash_available_usd + 1e-9 < debit and execution_test:
-                # Legacy execution-validation may borrow explicit test-only buying
-                # power globally; do not mint broker-local sleeve cash.
+            if (
+                sleeve.cash_available_usd + 1e-9 < debit
+                and (execution_test or test_allow_sleeve_overflow)
+            ):
+                # Explicit test-only overflow lets focused legacy tests exercise
+                # sizing/risk math without weakening normal broker-local capacity.
                 sleeve_debit = max(sleeve.cash_available_usd, 0.0)
             else:
                 sleeve_debit = debit
@@ -955,6 +970,7 @@ class PaperPortfolio:
             "execution_test_funded": bool(execution_test),
             "normal_required_margin_usd": normal_margin,
             "test_overflow_usd": test_overflow,
+            "test_allow_sleeve_overflow": bool(test_allow_sleeve_overflow),
         }
         self.positions[key] = pos
         return {
