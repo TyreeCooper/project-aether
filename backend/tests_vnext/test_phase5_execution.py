@@ -731,3 +731,48 @@ def test_reconciler_query_finds_only_expired_reserved_or_submitted_intents() -> 
             conn,
             at_utc=T0 + timedelta(seconds=15, milliseconds=1),
         ) == ("intent-reserve-1",)
+
+
+def test_phase_a_rejects_already_consumed_signal_without_reserving_cash() -> None:
+    engine, store = _store_fixture()
+    with engine.begin() as conn:
+        store.consume_signal(
+            conn,
+            signal_key="signal-1",
+            order_intent_id="old-intent",
+            trade_id="old-trade",
+            consumed_at_utc=T0,
+        )
+        out = _reserve_btc(conn, store)
+        assert out["ok"] is False
+        assert out["error"] == "signal_consumed"
+        ledger = {
+            row["broker_account_id"]: row
+            for row in store.ledger_rows(conn)
+        }["kraken_paper"]
+        assert ledger["cash_available_usd"] == pytest.approx(4000.0)
+        assert ledger["cash_reserved_usd"] == 0.0
+
+
+def test_phase_a_rejects_occupied_position_key_without_reserving_cash() -> None:
+    engine, store = _store_fixture()
+    with engine.begin() as conn:
+        store.claim_active_position(
+            conn,
+            position_key="btc:daily_swing",
+            trade_id="old-trade",
+            asset_id="btc",
+            horizon="daily_swing",
+            side="long",
+            quantity=0.01,
+            updated_at_utc=T0,
+        )
+        out = _reserve_btc(conn, store)
+        assert out["ok"] is False
+        assert out["error"] == "duplicate_position_key"
+        ledger = {
+            row["broker_account_id"]: row
+            for row in store.ledger_rows(conn)
+        }["kraken_paper"]
+        assert ledger["cash_available_usd"] == pytest.approx(4000.0)
+        assert ledger["cash_reserved_usd"] == 0.0
