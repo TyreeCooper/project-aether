@@ -55,6 +55,7 @@ def test_book_of_record_has_required_tables() -> None:
         "fold_results",
         "traffic_experiments",
         "traffic_shadow_comparisons",
+        "profitability_readiness_assessments",
         "review_cards",
         "route_review_state",
         "signal_consumptions",
@@ -372,22 +373,23 @@ def test_phase5_execution_reservation_columns_are_in_current_schema() -> None:
     assert "fill_market_observation_id" not in columns
 
 
-def test_runtime_schema_facade_is_pinned_to_revision_0018() -> None:
+def test_runtime_schema_facade_is_pinned_to_revision_0019() -> None:
     backend = Path(__file__).resolve().parents[1]
     facade = (backend / "aether_vnext" / "schema.py").read_text(encoding="utf-8")
-    assert "schema_v0018" in facade
+    assert "schema_v0019" in facade
     migration = (
         backend
         / "alembic"
         / "versions"
-        / "0018_aether_vnext_traffic_experiments.py"
+        / "0019_aether_vnext_profitability_readiness.py"
     ).read_text(encoding="utf-8")
-    assert 'revision: str = "0018"' in migration
-    assert 'down_revision: Union[str, None] = "0017"' in migration
-    assert "traffic_experiments" in migration
-    assert "traffic_shadow_comparisons" in migration
-    assert "ck_shadow_comparison_no_order" in migration
-    assert "reject_immutable_mutation" in migration
+    assert 'revision: str = "0019"' in migration
+    assert 'down_revision: Union[str, None] = "0018"' in migration
+    assert "profitability_readiness_assessments" in migration
+    assert "profitability_ready" in migration
+    assert "live_execution_authorized" in migration
+    assert "ck_profitability_readiness_never_live_authority" in migration
+    assert "trg_profitability_readiness_assessments_immutable" in migration
 
 
 def test_phase6_atomic_risk_admission_schema_is_explicit() -> None:

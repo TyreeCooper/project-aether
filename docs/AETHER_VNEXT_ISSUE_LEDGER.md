@@ -565,3 +565,28 @@ criteria fail closed. Shadow comparisons cannot create orders, and traffic count
 have no target-trade-count field.
 
 **AETH-VN-017 status:** CONTAINED.
+
+
+## AETH-VN-018 — P11 burn-in duration and OOS/trusted-route sufficiency thresholds are not source-bound
+
+**Class:** profitability-readiness policy parameterization / anti-invention control  
+**Discovered:** Phase 9 P11 burn-in conversion  
+**Status:** CONTAINED  
+**Blocks raw burn-in observation:** NO  
+**Blocks profitability_ready=true without versioned sufficiency decisions:** YES
+
+### Facts
+
+Part IV requires sustained operation with no unresolved accounting/model defects
+and sufficient OOS/trusted-route evidence. It does not bind one universal minimum
+burn-in duration, OOS-route count, or trusted-route count.
+
+### Control
+
+vNext records actual burn-in dates and route counts but requires versioned policy
+decisions for sustained-operation sufficiency and OOS/trusted-route sufficiency.
+If either policy is unbound, profitability_ready remains false. Even a true
+profitability_ready assessment has live_execution_authorized=false and cannot
+bypass the existing LIVE HARD BLOCK.
+
+**AETH-VN-018 status:** CONTAINED.

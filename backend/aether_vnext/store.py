@@ -62,6 +62,7 @@ from aether_vnext.risk import (
 )
 from aether_vnext.reason_codes import ReasonCode
 from aether_vnext.regime import RegimeTags
+from aether_vnext.burnin import ProfitabilityReadinessAssessment
 from aether_vnext.research import (
     BacktestRun,
     FoldResult,
@@ -1360,6 +1361,63 @@ class VNextStore:
                 ),
                 order_created=False,
                 evaluated_at_utc=comparison.evaluated_at_utc,
+            )
+        )
+
+    def record_profitability_readiness_assessment(
+        self,
+        conn: Connection,
+        assessment: ProfitabilityReadinessAssessment,
+        *,
+        created_at_utc: datetime,
+    ) -> None:
+        """Append one immutable P11 readiness assessment.
+
+        A READY result remains observational. This method has no execution,
+        Risk, Governor, or route-state authority.
+        """
+        if created_at_utc.tzinfo is None:
+            raise ValueError("created_at_utc must be timezone-aware")
+        if assessment.live_execution_authorized:
+            raise ValueError(
+                "profitability readiness can never authorize live execution"
+            )
+        conn.execute(
+            self.tables["profitability_readiness_assessments"].insert().values(
+                assessment_id=assessment.assessment_id,
+                readiness_policy_version=assessment.readiness_policy_version,
+                firm_snapshot_hash=assessment.firm_snapshot_hash,
+                burn_in_start_at_utc=assessment.burn_in_start_at_utc,
+                burn_in_end_at_utc=assessment.burn_in_end_at_utc,
+                as_of_utc=assessment.as_of_utc,
+                burn_in_duration_s=assessment.burn_in_duration_s,
+                active_route_count=assessment.active_route_count,
+                trusted_route_count=assessment.trusted_route_count,
+                oos_positive_route_count=assessment.oos_positive_route_count,
+                sustained_operation_satisfied=(
+                    assessment.sustained_operation_satisfied
+                ),
+                sustained_operation_policy_version=(
+                    assessment.sustained_operation_policy_version
+                ),
+                oos_trusted_sufficiency_satisfied=(
+                    assessment.oos_trusted_sufficiency_satisfied
+                ),
+                oos_trusted_sufficiency_policy_version=(
+                    assessment.oos_trusted_sufficiency_policy_version
+                ),
+                profitability_ready=assessment.profitability_ready,
+                live_execution_authorized=False,
+                blocking_reasons=list(assessment.blocking_reasons),
+                unresolved_rules=list(assessment.unresolved_rules),
+                unresolved_accounting_defects=list(
+                    assessment.unresolved_accounting_defects
+                ),
+                unresolved_model_defects=list(
+                    assessment.unresolved_model_defects
+                ),
+                evidence_checks=dict(assessment.evidence_checks),
+                created_at_utc=created_at_utc,
             )
         )
 
