@@ -49,6 +49,8 @@ class ReasonCode(StrEnum):
     TICKET_NOT_READY = "ticket_not_ready"
     CONFIGURATION_MISMATCH = "configuration_mismatch"
     TICKET_CONTRACT_MISMATCH = "ticket_contract_mismatch"
+    IDEMPOTENCY_KEY_MISMATCH = "idempotency_key_mismatch"
+    BROKER_SLEEVE_MISMATCH = "broker_sleeve_mismatch"
 
     # Portfolio / execution
     SIGNAL_CONSUMED = "signal_consumed"
