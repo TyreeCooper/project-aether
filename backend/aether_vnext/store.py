@@ -1690,6 +1690,7 @@ class VNextStore:
         at_utc: datetime,
         event_id: str,
         actor: str,
+        first_killed_by: str | None,
         fill_market_observation_id: str | None = None,
     ) -> dict[str, Any]:
         if terminal_state not in {"REJECTED", "CANCELLED", "CANCELLED_STALE"}:
@@ -1697,6 +1698,8 @@ class VNextStore:
 
         intents = self.tables["order_intents"]
         ledgers = self.tables["broker_account_ledgers"]
+        tickets = self.tables["tickets"]
+        lineage = self.tables["decision_lineage"]
 
         intent = conn.execute(
             sa.select(intents)
@@ -1707,6 +1710,17 @@ class VNextStore:
             raise KeyError(f"unknown order intent: {order_intent_id}")
         if intent["state"] in {"FILLED", "REJECTED", "CANCELLED", "CANCELLED_STALE"}:
             return {"ok": True, "duplicate": True, "state": intent["state"]}
+
+        is_failed_open = intent["intent_kind"] == "OPEN"
+        if is_failed_open and first_killed_by not in {
+            "Portfolio",
+            "execution",
+            "Governor",
+        }:
+            raise ValueError(
+                "failed OPEN requires explicit first_killed_by "
+                "(Portfolio, execution, or Governor)"
+            )
 
         ledger = conn.execute(
             sa.select(ledgers)
@@ -1738,16 +1752,78 @@ class VNextStore:
                 row_version=int(ledger["row_version"]) + 1,
             )
         )
+        intent_values: dict[str, Any] = {
+            "state": terminal_state,
+            "reject_code": reject_code,
+            "fill_market_observation_id": fill_market_observation_id,
+            "row_version": int(intent["row_version"]) + 1,
+        }
+        if is_failed_open:
+            intent_values["first_killed_by"] = (
+                intent["first_killed_by"] or first_killed_by
+            )
+            intent_values["first_kill_reason"] = (
+                intent["first_kill_reason"] or reject_code
+            )
         conn.execute(
             intents.update()
             .where(intents.c.order_intent_id == order_intent_id)
-            .values(
-                state=terminal_state,
-                reject_code=reject_code,
-                fill_market_observation_id=fill_market_observation_id,
-                row_version=int(intent["row_version"]) + 1,
-            )
+            .values(**intent_values)
         )
+
+        if is_failed_open:
+            ticket = conn.execute(
+                sa.select(tickets)
+                .where(tickets.c.ticket_id == intent["ticket_id"])
+                .with_for_update()
+            ).mappings().one()
+            conn.execute(
+                tickets.update()
+                .where(tickets.c.ticket_id == intent["ticket_id"])
+                .values(
+                    state="REJECTED",
+                    reject_code=reject_code,
+                    first_killed_by=(
+                        ticket["first_killed_by"] or first_killed_by
+                    ),
+                    first_kill_reason=(
+                        ticket["first_kill_reason"] or reject_code
+                    ),
+                    market_observation_id=(
+                        fill_market_observation_id
+                        or ticket["market_observation_id"]
+                    ),
+                )
+            )
+
+            firm_event_id = intent["firm_event_id"]
+            if firm_event_id:
+                lineage_row = conn.execute(
+                    sa.select(lineage)
+                    .where(lineage.c.firm_event_id == firm_event_id)
+                    .with_for_update()
+                ).mappings().first()
+                if lineage_row is not None:
+                    conn.execute(
+                        lineage.update()
+                        .where(lineage.c.firm_event_id == firm_event_id)
+                        .values(
+                            first_killed_by=(
+                                lineage_row["first_killed_by"]
+                                or first_killed_by
+                            ),
+                            first_kill_reason=(
+                                lineage_row["first_kill_reason"]
+                                or reject_code
+                            ),
+                            market_observation_id=(
+                                fill_market_observation_id
+                                or lineage_row["market_observation_id"]
+                            ),
+                            row_version=int(lineage_row["row_version"]) + 1,
+                        )
+                    )
+
         self.append_event(
             conn,
             event_id=event_id,
@@ -1767,6 +1843,12 @@ class VNextStore:
             payload={
                 "released_cash_usd": reserve_cash,
                 "released_margin_usd": reserve_margin,
+                "first_killed_by": (
+                    first_killed_by if is_failed_open else None
+                ),
+                "first_kill_reason": (
+                    reject_code if is_failed_open else None
+                ),
             },
         )
         return {"ok": True, "duplicate": False, "state": terminal_state}
