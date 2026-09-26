@@ -185,8 +185,14 @@ def test_phase3_migration_seeds_once_and_makes_event_ledger_append_only() -> Non
     assert "('tastyfx_paper', 2000" in migration
     assert "('ninja_paper', 2000" in migration
     assert "('ibkr_paper', 2000" in migration
-    assert "reject_event_ledger_mutation" in migration
+    assert "reject_immutable_mutation" in migration
     assert "BEFORE UPDATE OR DELETE" in migration
+    assert "trg_event_ledger_append_only" in migration
+    assert "trg_policy_snapshots_immutable" in migration
+    assert "trg_exit_plans_immutable" in migration
+    assert "trg_closed_trades_immutable" in migration
+    assert "trg_signal_consumptions_immutable" in migration
+    assert "schema_v0003" in migration
 
 
 def test_vnext_schema_does_not_name_legacy_runtime_state_table() -> None:
