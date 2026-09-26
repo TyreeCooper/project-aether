@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_FLOOR
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from aether_vnext.execution import gross_pnl_usd
 from aether_vnext.freeze import (
@@ -80,6 +80,9 @@ class RiskSizeResult:
     allowed_risk_usd: float
     reject_code: str | None
     limits: RiskLimitsUsd
+    estimated_round_trip_cost_usd: float = 0.0
+    modeled_loss_at_stop_usd: float = 0.0
+    asset_risk_hitches_usd: tuple[tuple[str, float], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +92,7 @@ class BookRiskPosition:
     asset_id: str
     cluster_id: str
     stop_risk_usd: float
+    asset_risk_hitches_usd: tuple[tuple[str, float], ...] = ()
 
     def __post_init__(self) -> None:
         for name, value in (
@@ -101,6 +105,16 @@ class BookRiskPosition:
                 raise ValueError(f"{name} cannot be blank")
         if float(self.stop_risk_usd) < 0:
             raise ValueError("stop_risk_usd cannot be negative")
+        seen: set[str] = set()
+        for target_asset, hitch_usd in self.asset_risk_hitches_usd:
+            target = str(target_asset).strip()
+            if not target:
+                raise ValueError("hitch target asset cannot be blank")
+            if target in seen:
+                raise ValueError("duplicate hitch target asset")
+            seen.add(target)
+            if float(hitch_usd) < 0:
+                raise ValueError("asset-risk hitch cannot be negative")
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,6 +163,10 @@ def aggregate_book_risk(
         risk = float(row.stop_risk_usd)
         portfolio += risk
         by_asset[row.asset_id] = by_asset.get(row.asset_id, 0.0) + risk
+        for target_asset, hitch_usd in row.asset_risk_hitches_usd:
+            by_asset[target_asset] = (
+                by_asset.get(target_asset, 0.0) + float(hitch_usd)
+            )
         by_cluster[row.cluster_id] = by_cluster.get(row.cluster_id, 0.0) + risk
 
     return BookRiskSnapshot(
@@ -258,6 +276,9 @@ def size_candidate_to_risk(
     policy: RiskPolicy = RiskPolicy(),
     broker_margin_cap_qty: float | None = None,
     firm_capital_cap_qty: float | None = None,
+    estimated_round_trip_cost_per_unit_usd: float = 0.0,
+    asset_risk_hitches: Mapping[str, float] | None = None,
+    cross_asset_remaining_risk_usd: Mapping[str, float] | None = None,
 ) -> RiskSizeResult:
     """Return a rounded executable quantity constrained by the four-layer envelope.
 
@@ -332,8 +353,46 @@ def size_candidate_to_risk(
             )
         raise
 
-    raw_qty = allowed / per_unit_risk
+    estimated_cost_per_unit = float(
+        estimated_round_trip_cost_per_unit_usd
+    )
+    if estimated_cost_per_unit < 0:
+        raise ValueError(
+            "estimated_round_trip_cost_per_unit_usd cannot be negative"
+        )
+    per_unit_loss = per_unit_risk + estimated_cost_per_unit
+    if per_unit_loss <= 0:
+        raise ValueError("per_unit_loss must be positive")
+
+    raw_qty = allowed / per_unit_loss
     quantity_caps = [raw_qty]
+
+    hitch_fractions = {
+        str(asset_id).strip(): float(fraction)
+        for asset_id, fraction in dict(asset_risk_hitches or {}).items()
+    }
+    remaining_by_asset = {
+        str(asset_id).strip(): float(remaining)
+        for asset_id, remaining in dict(
+            cross_asset_remaining_risk_usd or {}
+        ).items()
+    }
+    hitch_caps: list[float] = []
+    for target_asset, fraction in sorted(hitch_fractions.items()):
+        if not target_asset:
+            raise ValueError("asset-risk hitch target cannot be blank")
+        if fraction <= 0:
+            raise ValueError("asset-risk hitch fraction must be positive")
+        if target_asset not in remaining_by_asset:
+            raise ValueError(
+                f"missing remaining asset-risk capacity for hitch: {target_asset}"
+            )
+        remaining = remaining_by_asset[target_asset]
+        if remaining < 0:
+            raise ValueError("cross-asset remaining risk cannot be negative")
+        cap = remaining / (fraction * per_unit_risk)
+        hitch_caps.append(cap)
+        quantity_caps.append(cap)
     if row.maximum_quantity is not None:
         quantity_caps.append(float(row.maximum_quantity))
     for cap_name, cap in (
@@ -352,12 +411,20 @@ def size_candidate_to_risk(
         float(row.quantity_step),
     )
     if quantity <= 0 or quantity + 1e-15 < float(row.minimum_quantity):
+        hitch_blocked = bool(
+            hitch_caps
+            and min(hitch_caps) + 1e-15 < float(row.minimum_quantity)
+        )
         return RiskSizeResult(
             ok=False,
             quantity=0.0,
             stop_risk_usd=0.0,
             allowed_risk_usd=allowed,
-            reject_code=ReasonCode.TOO_SMALL.value,
+            reject_code=(
+                ReasonCode.ASSET_RISK_FULL.value
+                if hitch_blocked
+                else ReasonCode.TOO_SMALL.value
+            ),
             limits=limits,
         )
 
@@ -368,8 +435,20 @@ def size_candidate_to_risk(
         entry_price=entry_price,
         stop_price=stop_price,
     )
-    if actual_risk > allowed + 1e-6:
-        raise AssertionError("rounded executable quantity exceeds allowed risk")
+    estimated_cost = quantity * estimated_cost_per_unit
+    modeled_loss = actual_risk + estimated_cost
+    if modeled_loss > allowed + 1e-6:
+        raise AssertionError(
+            "rounded executable quantity exceeds modeled loss budget"
+        )
+
+    hitch_usd = tuple(
+        (target_asset, actual_risk * fraction)
+        for target_asset, fraction in sorted(hitch_fractions.items())
+    )
+    for target_asset, risk_usd in hitch_usd:
+        if risk_usd > remaining_by_asset[target_asset] + 1e-6:
+            raise AssertionError("rounded quantity exceeds cross-asset risk cap")
 
     return RiskSizeResult(
         ok=True,
@@ -378,4 +457,7 @@ def size_candidate_to_risk(
         allowed_risk_usd=allowed,
         reject_code=None,
         limits=limits,
+        estimated_round_trip_cost_usd=estimated_cost,
+        modeled_loss_at_stop_usd=modeled_loss,
+        asset_risk_hitches_usd=hitch_usd,
     )
