@@ -332,20 +332,17 @@ def test_phase5_execution_reservation_columns_are_in_current_schema() -> None:
     } <= columns
 
 
-def test_runtime_schema_facade_is_pinned_to_revision_0004() -> None:
+def test_runtime_schema_facade_is_pinned_to_revision_0005() -> None:
     backend = Path(__file__).resolve().parents[1]
     facade = (backend / "aether_vnext" / "schema.py").read_text(encoding="utf-8")
-    assert "schema_v0004" in facade
+    assert "schema_v0005" in facade
     migration = (
         backend
         / "alembic"
         / "versions"
-        / "0004_aether_vnext_execution_reservations.py"
+        / "0005_aether_vnext_ticket_exit_plan.py"
     ).read_text(encoding="utf-8")
-    assert 'revision: str = "0004"' in migration
-    assert 'down_revision: Union[str, None] = "0003"' in migration
-    assert "reserved_cash_usd" in migration
-    assert "reserved_margin_usd" in migration
-    assert "submit_timeout_at" in migration
-    assert "fill_market_observation_id" in migration
-    assert "fk_order_intents_broker_account" in migration
+    assert 'revision: str = "0005"' in migration
+    assert 'down_revision: Union[str, None] = "0004"' in migration
+    assert "exit_plan_id" in migration
+    assert "fk_tickets_exit_plan" in migration
