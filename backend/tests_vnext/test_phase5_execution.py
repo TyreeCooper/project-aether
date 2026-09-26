@@ -608,9 +608,27 @@ def test_submit_and_reject_release_are_separate_transactions_and_idempotent() ->
             at_utc=T0 + timedelta(milliseconds=250),
             event_id="evt-reject-1",
             actor="paper-adapter",
+            first_killed_by="execution",
             fill_market_observation_id=None,
         )
         assert released["state"] == "REJECTED"
+
+        intent = conn.execute(
+            sa.select(store.tables["order_intents"]).where(
+                store.tables["order_intents"].c.order_intent_id
+                == "intent-reserve-1"
+            )
+        ).mappings().one()
+        ticket = conn.execute(
+            sa.select(store.tables["tickets"]).where(
+                store.tables["tickets"].c.ticket_id == "ticket-1"
+            )
+        ).mappings().one()
+        assert intent["first_killed_by"] == "execution"
+        assert intent["first_kill_reason"] == "market_stale"
+        assert ticket["state"] == "REJECTED"
+        assert ticket["first_killed_by"] == "execution"
+        assert ticket["first_kill_reason"] == "market_stale"
 
     with engine.begin() as conn:
         duplicate_release = store.release_order_reservation(
@@ -621,6 +639,7 @@ def test_submit_and_reject_release_are_separate_transactions_and_idempotent() ->
             at_utc=T0 + timedelta(milliseconds=251),
             event_id="evt-reject-duplicate",
             actor="paper-adapter",
+            first_killed_by="execution",
             fill_market_observation_id=None,
         )
         assert duplicate_release["duplicate"] is True
@@ -702,6 +721,7 @@ def test_margin_reservation_and_release_use_same_broker_ledger() -> None:
             at_utc=T0 + timedelta(seconds=16),
             event_id="evt-mes-release",
             actor="reconciler",
+            first_killed_by="Portfolio",
         )
         ledger = {
             row["broker_account_id"]: row
@@ -1744,6 +1764,7 @@ def test_rejected_close_releases_no_open_reserve_and_keeps_position_open() -> No
             at_utc=T0 + timedelta(seconds=2),
             event_id="evt-flat-reject-3",
             actor="paper-adapter",
+            first_killed_by=None,
         )
 
         ledger = {
@@ -1772,6 +1793,14 @@ def test_rejected_close_releases_no_open_reserve_and_keeps_position_open() -> No
                 store.tables["signal_consumptions"]
             )
         ).scalar_one() == 1
+        ticket = conn.execute(
+            sa.select(store.tables["tickets"]).where(
+                store.tables["tickets"].c.ticket_id == "ticket-1"
+            )
+        ).mappings().one()
+        assert ticket["state"] == "READY"
+        assert ticket["first_killed_by"] is None
+        assert ticket["first_kill_reason"] is None
 
 
 def test_caller_cannot_override_source_owned_reservation_amounts() -> None:
