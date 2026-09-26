@@ -472,3 +472,26 @@ baseline_not_worse remains an explicit evidence fact that must come from a
 source-bound route/benchmark comparator before KEEP_TRUSTED may pass.
 
 **AETH-VN-013 status:** CONTAINED.
+
+
+## AETH-VN-014 — Path-resampling policy and concentration normalizations are not fully source-bound
+
+**Class:** profitability diagnostic parameterization / anti-invention control  
+**Discovered:** Phase 9 portfolio/path diagnostics  
+**Status:** CONTAINED / NON-BLOCKING FOR DIRECT DIAGNOSTICS  
+
+### Facts
+
+Current authority requires resampled/bootstrapped path stress where sample size permits,
+but does not bind the minimum sample size, iteration count, random-seed policy, or
+confidence statistics. It also names concentration fields without defining one universal
+categorical concentration statistic across assets, sides, and regimes.
+
+### Control
+
+vNext computes direct observed path diagnostics deterministically and reports resampled
+path stress as UNBOUND_POLICY until those parameters are approved. For categorical
+concentration it emits an explicitly labeled descriptive max_trade_count_share rather
+than pretending that normalization is a source-bound promotion gate.
+
+**AETH-VN-014 status:** CONTAINED.
