@@ -198,3 +198,74 @@ def test_phase3_migration_seeds_once_and_makes_event_ledger_append_only() -> Non
 def test_vnext_schema_does_not_name_legacy_runtime_state_table() -> None:
     _, store = _engine_and_store()
     assert "aether_runtime_state" not in store.tables
+
+
+def test_mutation_idempotency_key_cannot_be_recorded_twice() -> None:
+    engine, store = _engine_and_store()
+    with engine.begin() as conn:
+        store.record_mutation_idempotency(
+            conn,
+            idempotency_key="idem-1",
+            mutation_type="reserve",
+            aggregate_type="order_intent",
+            aggregate_id="oi-1",
+            created_at_utc=NOW,
+        )
+    with pytest.raises(IntegrityError):
+        with engine.begin() as conn:
+            store.record_mutation_idempotency(
+                conn,
+                idempotency_key="idem-1",
+                mutation_type="reserve",
+                aggregate_type="order_intent",
+                aggregate_id="oi-1",
+                created_at_utc=NOW,
+            )
+
+
+def test_active_position_key_cannot_be_claimed_twice() -> None:
+    engine, store = _engine_and_store()
+    with engine.begin() as conn:
+        store.claim_active_position(
+            conn,
+            position_key="btc:daily_swing",
+            trade_id="trade-1",
+            asset_id="btc",
+            horizon="daily_swing",
+            side="long",
+            quantity=0.01,
+            updated_at_utc=NOW,
+        )
+    with pytest.raises(IntegrityError):
+        with engine.begin() as conn:
+            store.claim_active_position(
+                conn,
+                position_key="btc:daily_swing",
+                trade_id="trade-2",
+                asset_id="btc",
+                horizon="daily_swing",
+                side="long",
+                quantity=0.02,
+                updated_at_utc=NOW,
+            )
+
+
+def test_signal_consumption_is_database_unique() -> None:
+    engine, store = _engine_and_store()
+    with engine.begin() as conn:
+        store.consume_signal(
+            conn,
+            signal_key="signal-1",
+            order_intent_id="oi-1",
+            trade_id="trade-1",
+            consumed_at_utc=NOW,
+        )
+    with pytest.raises(IntegrityError):
+        with engine.begin() as conn:
+            store.consume_signal(
+                conn,
+                signal_key="signal-1",
+                order_intent_id="oi-2",
+                trade_id="trade-2",
+                consumed_at_utc=NOW,
+            )
