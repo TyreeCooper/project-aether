@@ -332,22 +332,19 @@ def test_phase5_execution_reservation_columns_are_in_current_schema() -> None:
     } <= columns
 
 
-def test_runtime_schema_facade_is_pinned_to_revision_0006() -> None:
+def test_runtime_schema_facade_is_pinned_to_revision_0007() -> None:
     backend = Path(__file__).resolve().parents[1]
     facade = (backend / "aether_vnext" / "schema.py").read_text(encoding="utf-8")
-    assert "schema_v0006" in facade
+    assert "schema_v0007" in facade
     migration = (
         backend
         / "alembic"
         / "versions"
-        / "0006_aether_vnext_closed_trade_identity.py"
+        / "0007_aether_vnext_close_intent_reason.py"
     ).read_text(encoding="utf-8")
-    assert 'revision: str = "0006"' in migration
-    assert 'down_revision: Union[str, None] = "0005"' in migration
-    assert "exit_price" in migration
-    assert "fees_usd" in migration
-    assert "position_key" in migration
-    assert "revision 0006 requires explicit exit_price and fees_usd" in migration
+    assert 'revision: str = "0007"' in migration
+    assert 'down_revision: Union[str, None] = "0006"' in migration
+    assert "exit_reason" in migration
 
 
 def test_closed_trade_is_self_contained_execution_evidence() -> None:
@@ -376,3 +373,8 @@ def test_closed_trade_is_self_contained_execution_evidence() -> None:
         "configuration_hash",
         "market_observation_id",
     } <= columns
+
+
+def test_close_order_intent_persists_exit_reason() -> None:
+    _, store = _engine_and_store()
+    assert "exit_reason" in store.tables["order_intents"].c
