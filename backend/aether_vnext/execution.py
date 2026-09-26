@@ -22,7 +22,11 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 
-from aether_vnext.costs import DEFAULT_SLIP_BPS, slip_cost_usd
+from aether_vnext.costs import (
+    DEFAULT_SLIP_BPS,
+    FX_STANDARD_LOT_BASE_UNITS,
+    slip_cost_usd,
+)
 from aether_vnext.domain import (
     MarketObservation,
     OrderIntent,
@@ -281,6 +285,144 @@ def stop_exit_fill_price(
         raise ValueError("valid ask required for short stop exit")
     reference = max(stop, float(observation.ask))
     return reference * (1.0 + slip_bps / 10_000.0)
+
+
+def gross_pnl_usd(
+    registry_row: ProductRegistryRow,
+    *,
+    position_side: str,
+    qty: float,
+    entry_price: float,
+    exit_price: float,
+) -> float:
+    """Product-correct gross P&L from actual fill prices, before explicit fees/carry."""
+    side = _position_side(position_side)
+    q = abs(float(qty))
+    entry = float(entry_price)
+    exit_ = float(exit_price)
+    if q <= 0 or entry <= 0 or exit_ <= 0:
+        raise ValueError("qty and prices must be positive")
+
+    direction = 1.0 if side == "long" else -1.0
+    delta = direction * (exit_ - entry)
+
+    if registry_row.asset_id == "usdjpy":
+        quote_pnl_jpy = delta * q * FX_STANDARD_LOT_BASE_UNITS
+        return quote_pnl_jpy / exit_
+
+    if registry_row.product_type.value == "fx":
+        return delta * q * FX_STANDARD_LOT_BASE_UNITS
+
+    if registry_row.point_value is not None:
+        return delta * q * float(registry_row.point_value)
+
+    return delta * q
+
+
+def fill_submitted_paper_flatten_intent(
+    intent: OrderIntent,
+    *,
+    observation: MarketObservation,
+    registry_row: ProductRegistryRow,
+    max_age_ms: int,
+    at_utc: datetime,
+    policy: PaperExecutionPolicy = PaperExecutionPolicy(),
+) -> ExecutionTransition:
+    """Fill a crash-safe CLOSE intent; risk reduction is never blocked by spread width."""
+    _require_aware(at_utc, "at_utc")
+    if intent.state in _TERMINAL_STATES:
+        return ExecutionTransition(intent, False, "terminal_state_wins")
+    if intent.state is not OrderIntentState.SUBMITTED:
+        return ExecutionTransition(intent, False, "illegal_state")
+    if intent.intent_kind != "CLOSE":
+        return ExecutionTransition(intent, False, "illegal_intent_kind")
+    if at_utc < paper_fill_due_at(intent, policy=policy):
+        return ExecutionTransition(intent, False, "paper_latency_wait")
+    if policy.partials_enabled:
+        return ExecutionTransition(intent, False, "partial_policy_not_implemented")
+
+    if observation.quality_state is not QualityState.HEALTHY:
+        updated = replace(
+            intent,
+            state=OrderIntentState.REJECTED,
+            reject_code="market_stale",
+        )
+        return ExecutionTransition(updated, True, "market_stale")
+    if observation.age_ms > max_age_ms:
+        updated = replace(
+            intent,
+            state=OrderIntentState.REJECTED,
+            reject_code="market_stale",
+        )
+        return ExecutionTransition(updated, True, "market_stale")
+    if observation.session_state in {
+        SessionState.CLOSED,
+        SessionState.MAINTENANCE,
+        SessionState.HALT,
+    }:
+        updated = replace(
+            intent,
+            state=OrderIntentState.REJECTED,
+            reject_code="market_changed",
+        )
+        return ExecutionTransition(updated, True, "market_changed")
+    if not observation_is_valid(observation, max_age_ms=max_age_ms):
+        updated = replace(
+            intent,
+            state=OrderIntentState.REJECTED,
+            reject_code="market_stale",
+        )
+        return ExecutionTransition(updated, True, "market_stale")
+
+    exit_reason = str(intent.exit_reason or "")
+    stop = intent.hard_stop_price
+    if (
+        exit_reason == "hard_stop"
+        and stop is not None
+        and stop_triggered(
+            observation,
+            position_side=intent.side,
+            hard_stop_price=float(stop),
+        )
+    ):
+        fill_price = stop_exit_fill_price(
+            observation,
+            position_side=intent.side,
+            hard_stop_price=float(stop),
+            slip_bps=policy.slip_bps,
+        )
+    else:
+        fill_price = exit_fill_price(
+            observation,
+            position_side=intent.side,
+            slip_bps=policy.slip_bps,
+        )
+
+    reference_price = (
+        observation.bid
+        if intent.side.lower() == "long"
+        else observation.ask
+    )
+    if reference_price is None:
+        raise ValueError("exit quote side missing")
+
+    slip_usd = slip_cost_usd(
+        registry_row,
+        qty=intent.qty,
+        price=float(reference_price),
+        slip_bps=policy.slip_bps,
+    )
+    updated = replace(
+        intent,
+        state=OrderIntentState.FILLED,
+        filled_at=at_utc,
+        filled_qty=intent.qty,
+        avg_fill_price=fill_price,
+        reject_code=None,
+        slippage_usd=slip_usd,
+        slippage_bps=policy.slip_bps,
+    )
+    return ExecutionTransition(updated, True, "filled")
 
 
 def fill_submitted_paper_intent(
