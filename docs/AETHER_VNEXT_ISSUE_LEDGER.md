@@ -119,41 +119,51 @@ they are not the status of the current PR head.
 
 ## AETH-VN-004 — Entry bad_fill_through_stop wording conflicts with protective-stop geometry
 
-**Class:** binding-spec ambiguity  
+**Class:** binding-spec ambiguity / explicit implementation erratum  
 **Discovered:** Phase 5 Execution Engine conversion  
-**Status:** OPEN + BLOCKS only this specific entry rejection rule  
-**Blocks Phase 5 foundation work:** NO  
-**Blocks final execution closeout:** YES until resolved
+**Status:** CLOSED  
+**Blocks Phase 5:** NO
 
 ### Conflict
 
-The binding execution addendum says a fill-time entry must reject
-`bad_fill_through_stop` when a **long fill >= stop**.
+The binding v4.2.1 execution addendum literally states:
 
-The same AETHER playbooks define protective long stops below entry
-(for example `entry - ATR multiple`), and the execution law separately says a long
-stop is triggered when the conservative bid is **<= hard_stop_price**.
+- `Computed entry is through the stop (long fill >= stop) REJECT bad_fill_through_stop`.
 
-Those statements do not define one coherent long-entry comparison. Encoding one side
-would require guessing whether the inequality or the noun "stop" is the typo.
+The executable Playbook Pack independently and repeatedly defines protective stops as:
 
-### Current control
+- LONG: `entry - ATR multiple`;
+- SHORT: `entry + ATR multiple`.
 
-vNext does **not** silently repair the document.
+The same execution addendum also defines the conservative stop-through condition:
+a long protective stop is already through when the long-side conservative market is
+at/below the stop.
 
-Implemented now:
-- stop-already-through on the conservative quote rejects `market_changed`;
-- stale/invalid market rejects `market_stale`;
-- spread > 2x READY spread rejects `market_changed`;
-- unambiguous ask/bid + 5 bps entry fill law;
-- unambiguous through-price protective-stop EXIT law.
+Taken literally, `long fill >= stop` would reject an ordinary valid long entry
+because a valid long protective stop is below entry. The literal inequality is
+therefore incompatible with the executable protective-stop geometry.
 
-Held out:
-- the separate entry `bad_fill_through_stop` comparison.
+### Explicit erratum
 
-This issue must be reconciled against the intended protective-stop geometry before
-Phase 5 is declared COMPLETE. No legacy implementation is allowed to decide the
-answer by default.
+For vNext implementation, `bad_fill_through_stop` means the **computed entry fill is
+on or beyond the protective stop in the loss direction**:
+
+- LONG: `computed_fill <= hard_stop_price`;
+- SHORT: `computed_fill >= hard_stop_price`.
+
+This correction is explicit and auditable. The source text is not overwritten.
+
+### Precedence and effect
+
+The fill-time conservative-side `stop already through` test remains first and rejects
+`market_changed`. The corrected `bad_fill_through_stop` comparison is therefore a
+defensive second check on the computed entry price. Under a healthy, non-crossed book
+and the default adverse 5 bps paper slippage, it should normally be unreachable after
+the conservative-side stop-through gate.
+
+This erratum changes no playbook setup, trigger, stop placement, sizing, route state,
+or evidence rule. No route evidence reset is required. vNext forward evidence has not
+started, so no sample is being reclassified.
 
 
 ## AETH-VN-005 — PostgreSQL immutable-trigger function had malformed dollar quoting
