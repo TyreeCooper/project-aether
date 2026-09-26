@@ -78,6 +78,7 @@ def test_order_intent_contains_live_shaped_execution_fields() -> None:
         "idempotency_key",
         "broker_account_id",
         "intent_kind",
+        "exit_reason",
         "position_key",
         "signal_key",
         "reserved_cash_usd",
