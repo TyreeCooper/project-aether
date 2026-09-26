@@ -310,3 +310,42 @@ def test_route_review_projection_preserves_bench_or_keep_across_restart() -> Non
     assert {"evidence_state", "operational_state", "review_card_id", "row_version"} <= set(
         route_state.c.keys()
     )
+
+
+def test_phase5_execution_reservation_columns_are_in_current_schema() -> None:
+    _, store = _engine_and_store()
+    columns = set(store.tables["order_intents"].c.keys())
+    assert {
+        "broker_account_id",
+        "exit_plan_id",
+        "intent_kind",
+        "position_key",
+        "signal_key",
+        "reserved_cash_usd",
+        "reserved_margin_usd",
+        "ready_spread_bps",
+        "hard_stop_price",
+        "submit_timeout_at",
+        "fill_market_observation_id",
+        "trade_id",
+        "row_version",
+    } <= columns
+
+
+def test_runtime_schema_facade_is_pinned_to_revision_0004() -> None:
+    backend = Path(__file__).resolve().parents[1]
+    facade = (backend / "aether_vnext" / "schema.py").read_text(encoding="utf-8")
+    assert "schema_v0004" in facade
+    migration = (
+        backend
+        / "alembic"
+        / "versions"
+        / "0004_aether_vnext_execution_reservations.py"
+    ).read_text(encoding="utf-8")
+    assert 'revision: str = "0004"' in migration
+    assert 'down_revision: Union[str, None] = "0003"' in migration
+    assert "reserved_cash_usd" in migration
+    assert "reserved_margin_usd" in migration
+    assert "submit_timeout_at" in migration
+    assert "fill_market_observation_id" in migration
+    assert "fk_order_intents_broker_account" in migration
