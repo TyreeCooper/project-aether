@@ -863,6 +863,491 @@ class VNextStore:
             "signal_key": signal_key_value,
         }
 
+    def request_flatten(
+        self,
+        conn: Connection,
+        *,
+        trade_id: str,
+        exit_reason: str,
+        market_observation_id: str,
+        at_utc: datetime,
+        event_id: str,
+        actor: str = "Exit",
+    ) -> dict[str, Any]:
+        """Record Exit's FLATTEN_REQUEST without touching cash or position state."""
+        if not str(exit_reason).strip():
+            raise ValueError("exit_reason is required")
+        trades = self.tables["open_trades"]
+        closed = self.tables["closed_trades"]
+        positions = self.tables["active_positions"]
+
+        if conn.execute(
+            sa.select(closed.c.trade_id).where(closed.c.trade_id == trade_id)
+        ).first() is not None:
+            return {"ok": True, "duplicate": True, "state": "FLAT"}
+
+        trade = conn.execute(
+            sa.select(trades).where(trades.c.trade_id == trade_id)
+        ).mappings().first()
+        if trade is None:
+            return {"ok": False, "error": "trade_not_open"}
+
+        active = conn.execute(
+            sa.select(positions.c.trade_id).where(
+                positions.c.position_key == trade["position_key"]
+            )
+        ).first()
+        if active is None or str(active[0]) != trade_id:
+            return {"ok": False, "error": "trade_not_open"}
+
+        self.append_event(
+            conn,
+            event_id=event_id,
+            aggregate_type="trade",
+            aggregate_id=trade_id,
+            prior_state="OPEN",
+            new_state="FLATTEN_REQUEST",
+            seat="Exit",
+            reason_code=str(exit_reason),
+            policy_version=trade["policy_version"],
+            configuration_hash=trade["configuration_hash"],
+            market_observation_id=market_observation_id,
+            actor=actor,
+            created_at_utc=at_utc,
+            payload={
+                "trade_id": trade_id,
+                "position_key": trade["position_key"],
+                "exit_reason": str(exit_reason),
+                "cash_touched": False,
+            },
+        )
+        return {
+            "ok": True,
+            "duplicate": False,
+            "state": "FLATTEN_REQUEST",
+        }
+
+    def reserve_flatten_intent(
+        self,
+        conn: Connection,
+        *,
+        order_intent_id: str,
+        trade_id: str,
+        idempotency_key: str,
+        exit_reason: str,
+        market_observation_id: str,
+        reference_price: float | None,
+        ready_spread_bps: float | None,
+        created_at_utc: datetime,
+        event_id: str,
+        actor: str = "Portfolio",
+    ) -> dict[str, Any]:
+        """Phase A for CLOSE: create RESERVED intent but reserve no extra capital."""
+        if not str(exit_reason).strip():
+            raise ValueError("exit_reason is required")
+
+        intents = self.tables["order_intents"]
+        trades = self.tables["open_trades"]
+        closed = self.tables["closed_trades"]
+        positions = self.tables["active_positions"]
+
+        existing = conn.execute(
+            sa.select(intents).where(
+                intents.c.idempotency_key == idempotency_key
+            )
+        ).mappings().first()
+        if existing is not None:
+            return {
+                "ok": True,
+                "duplicate": True,
+                "order_intent_id": existing["order_intent_id"],
+                "state": existing["state"],
+            }
+
+        if conn.execute(
+            sa.select(closed.c.trade_id).where(closed.c.trade_id == trade_id)
+        ).first() is not None:
+            return {
+                "ok": True,
+                "duplicate": True,
+                "trade_id": trade_id,
+                "state": "FLAT",
+            }
+
+        trade = conn.execute(
+            sa.select(trades)
+            .where(trades.c.trade_id == trade_id)
+            .with_for_update()
+        ).mappings().first()
+        if trade is None:
+            return {"ok": False, "error": "trade_not_open"}
+
+        active = conn.execute(
+            sa.select(positions)
+            .where(positions.c.position_key == trade["position_key"])
+            .with_for_update()
+        ).mappings().first()
+        if active is None or active["trade_id"] != trade_id:
+            return {"ok": False, "error": "trade_not_open"}
+
+        opening_intent = conn.execute(
+            sa.select(intents).where(
+                intents.c.order_intent_id == trade["order_intent_id"]
+            )
+        ).mappings().one()
+
+        exit_plan_payload = dict(trade["exit_plan_payload"] or {})
+        hard_stop_price = exit_plan_payload.get("hard_stop_price")
+        timeout_at = created_at_utc + timedelta(milliseconds=15_000)
+
+        conn.execute(
+            intents.insert().values(
+                order_intent_id=order_intent_id,
+                broker_account_id=opening_intent["broker_account_id"],
+                exit_plan_id=trade["exit_plan_id"],
+                intent_kind="CLOSE",
+                exit_reason=str(exit_reason),
+                position_key=trade["position_key"],
+                signal_key=opening_intent["signal_key"],
+                reserved_cash_usd=0.0,
+                reserved_margin_usd=0.0,
+                ready_spread_bps=ready_spread_bps,
+                hard_stop_price=hard_stop_price,
+                submit_timeout_at=timeout_at,
+                fill_market_observation_id=None,
+                trade_id=trade_id,
+                row_version=1,
+                ticket_id=trade["ticket_id"],
+                firm_event_id=trade["firm_event_id"],
+                asset_id=trade["asset_id"],
+                route_id=trade["route_id"],
+                broker=opening_intent["broker"],
+                venue=opening_intent["venue"],
+                symbol=opening_intent["symbol"],
+                side=trade["side"],
+                qty=trade["quantity"],
+                order_type="market",
+                reference_price=reference_price,
+                expected_fill=None,
+                state="RESERVED",
+                submitted_at=None,
+                acknowledged_at=None,
+                filled_at=None,
+                filled_qty=0.0,
+                avg_fill_price=None,
+                reject_code=None,
+                slippage_usd=None,
+                slippage_bps=None,
+                idempotency_key=idempotency_key,
+                policy_version=trade["policy_version"],
+                configuration_hash=trade["configuration_hash"],
+                market_observation_id=market_observation_id,
+                first_killed_by=None,
+                first_kill_reason=None,
+                created_at_utc=created_at_utc,
+            )
+        )
+        self.append_event(
+            conn,
+            event_id=event_id,
+            aggregate_type="order_intent",
+            aggregate_id=order_intent_id,
+            prior_state="FLATTEN_REQUEST",
+            new_state="RESERVED",
+            seat="Portfolio",
+            reason_code="portfolio.flatten_reserve",
+            policy_version=trade["policy_version"],
+            configuration_hash=trade["configuration_hash"],
+            market_observation_id=market_observation_id,
+            actor=actor,
+            created_at_utc=created_at_utc,
+            payload={
+                "trade_id": trade_id,
+                "position_key": trade["position_key"],
+                "exit_reason": str(exit_reason),
+                "reserved_cash_usd": 0.0,
+                "reserved_margin_usd": 0.0,
+                "opening_reservation_retained": True,
+            },
+        )
+        return {
+            "ok": True,
+            "duplicate": False,
+            "order_intent_id": order_intent_id,
+            "state": "RESERVED",
+        }
+
+    def finalize_filled_flat(
+        self,
+        conn: Connection,
+        *,
+        close_order_intent_id: str,
+        fill_market_observation_id: str,
+        filled_at_utc: datetime,
+        filled_qty: float,
+        exit_price: float,
+        gross_pnl_usd: float,
+        net_pnl_usd: float,
+        total_cost_usd: float,
+        fees_usd: float,
+        slippage_usd: float,
+        slippage_bps: float,
+        mfe_usd: float | None,
+        mae_usd: float | None,
+        capture_efficiency: float | None,
+        event_id: str,
+        actor: str = "Portfolio",
+    ) -> dict[str, Any]:
+        """Atomically commit CLOSE FILLED -> FLAT and release the OPEN reservation."""
+        if filled_qty <= 0 or exit_price <= 0:
+            raise ValueError("filled quantity and exit price must be positive")
+        if total_cost_usd < 0 or fees_usd < 0:
+            raise ValueError("costs and fees cannot be negative")
+        if fees_usd > total_cost_usd + 1e-9:
+            raise ValueError("fees_usd cannot exceed total_cost_usd")
+
+        intents = self.tables["order_intents"]
+        trades = self.tables["open_trades"]
+        closed = self.tables["closed_trades"]
+        positions = self.tables["active_positions"]
+        ledgers = self.tables["broker_account_ledgers"]
+        lineage = self.tables["decision_lineage"]
+
+        close_intent = conn.execute(
+            sa.select(intents)
+            .where(intents.c.order_intent_id == close_order_intent_id)
+            .with_for_update()
+        ).mappings().first()
+        if close_intent is None:
+            raise KeyError(f"unknown close intent: {close_order_intent_id}")
+
+        trade_id = str(close_intent["trade_id"] or "")
+        if not trade_id:
+            raise ValueError("CLOSE intent must reference trade_id")
+
+        existing_closed = conn.execute(
+            sa.select(closed).where(closed.c.trade_id == trade_id)
+        ).mappings().first()
+        if existing_closed is not None:
+            return {
+                "ok": True,
+                "duplicate": True,
+                "state": "FLAT",
+                "trade_id": trade_id,
+            }
+
+        if close_intent["state"] in {
+            "REJECTED",
+            "CANCELLED",
+            "CANCELLED_STALE",
+        }:
+            return {
+                "ok": False,
+                "duplicate": True,
+                "error": "terminal_state_wins",
+                "state": close_intent["state"],
+            }
+        if close_intent["state"] != "SUBMITTED":
+            return {
+                "ok": False,
+                "error": "illegal_state",
+                "state": close_intent["state"],
+            }
+        if close_intent["intent_kind"] != "CLOSE":
+            return {
+                "ok": False,
+                "error": "illegal_intent_kind",
+                "state": close_intent["state"],
+            }
+
+        trade = conn.execute(
+            sa.select(trades)
+            .where(trades.c.trade_id == trade_id)
+            .with_for_update()
+        ).mappings().one()
+        if abs(float(filled_qty) - float(trade["quantity"])) > 1e-12:
+            return {
+                "ok": False,
+                "error": "partial_fill_disabled",
+                "state": close_intent["state"],
+            }
+
+        active = conn.execute(
+            sa.select(positions)
+            .where(positions.c.position_key == trade["position_key"])
+            .with_for_update()
+        ).mappings().first()
+        if active is None or active["trade_id"] != trade_id:
+            return {
+                "ok": False,
+                "error": "trade_not_open",
+                "state": close_intent["state"],
+            }
+
+        opening_intent = conn.execute(
+            sa.select(intents).where(
+                intents.c.order_intent_id == trade["order_intent_id"]
+            )
+        ).mappings().one()
+        ledger = conn.execute(
+            sa.select(ledgers)
+            .where(
+                ledgers.c.broker_account_id
+                == opening_intent["broker_account_id"]
+            )
+            .with_for_update()
+        ).mappings().one()
+
+        reserve_cash = float(opening_intent["reserved_cash_usd"])
+        reserve_margin = float(opening_intent["reserved_margin_usd"])
+        cash_reserved = float(ledger["cash_reserved_usd"])
+        margin_used = float(ledger["margin_used_usd"])
+        if cash_reserved + 1e-9 < reserve_cash:
+            raise RuntimeError("cash reservation drift")
+        if margin_used + 1e-9 < reserve_margin:
+            raise RuntimeError("margin reservation drift")
+
+        post_cash = (
+            float(ledger["cash_available_usd"])
+            + reserve_cash
+            + float(net_pnl_usd)
+        )
+        if post_cash < -1e-9:
+            raise RuntimeError("flat would violate nonnegative sleeve cash law")
+        post_cash = max(0.0, post_cash)
+
+        opened_at = _stored_utc(trade["opened_at_utc"])
+        closed_at = _stored_utc(filled_at_utc)
+        assert opened_at is not None and closed_at is not None
+        duration_s = (closed_at - opened_at).total_seconds()
+        if duration_s < 0:
+            raise ValueError("close cannot precede open")
+
+        exit_reason = str(close_intent["exit_reason"] or "")
+        if not exit_reason:
+            raise ValueError("CLOSE intent missing exit_reason")
+
+        conn.execute(
+            closed.insert().values(
+                trade_id=trade_id,
+                firm_event_id=trade["firm_event_id"],
+                route_id=trade["route_id"],
+                asset_id=trade["asset_id"],
+                position_key=trade["position_key"],
+                side=trade["side"],
+                quantity=trade["quantity"],
+                avg_entry_price=trade["avg_entry_price"],
+                exit_price=exit_price,
+                closed_at_utc=filled_at_utc,
+                gross_pnl_usd=gross_pnl_usd,
+                net_pnl_usd=net_pnl_usd,
+                total_cost_usd=total_cost_usd,
+                fees_usd=fees_usd,
+                mfe_usd=mfe_usd,
+                mae_usd=mae_usd,
+                capture_efficiency=capture_efficiency,
+                duration_s=duration_s,
+                exit_reason=exit_reason,
+                policy_version=trade["policy_version"],
+                configuration_hash=trade["configuration_hash"],
+                market_observation_id=fill_market_observation_id,
+            )
+        )
+        conn.execute(
+            positions.delete().where(
+                sa.and_(
+                    positions.c.position_key == trade["position_key"],
+                    positions.c.trade_id == trade_id,
+                )
+            )
+        )
+        conn.execute(
+            ledgers.update()
+            .where(
+                ledgers.c.broker_account_id
+                == opening_intent["broker_account_id"]
+            )
+            .values(
+                cash_available_usd=post_cash,
+                cash_reserved_usd=cash_reserved - reserve_cash,
+                margin_used_usd=margin_used - reserve_margin,
+                margin_available_usd=(
+                    float(ledger["margin_available_usd"]) + reserve_margin
+                ),
+                realized_pnl_usd=(
+                    float(ledger["realized_pnl_usd"]) + float(net_pnl_usd)
+                ),
+                fees_accrued_usd=(
+                    float(ledger["fees_accrued_usd"]) + float(fees_usd)
+                ),
+                settled_cash_usd=post_cash,
+                row_version=int(ledger["row_version"]) + 1,
+            )
+        )
+        conn.execute(
+            intents.update()
+            .where(intents.c.order_intent_id == close_order_intent_id)
+            .values(
+                state="FILLED",
+                filled_at=filled_at_utc,
+                filled_qty=filled_qty,
+                avg_fill_price=exit_price,
+                reject_code=None,
+                slippage_usd=slippage_usd,
+                slippage_bps=slippage_bps,
+                fill_market_observation_id=fill_market_observation_id,
+                row_version=int(close_intent["row_version"]) + 1,
+            )
+        )
+
+        firm_event_id = trade["firm_event_id"]
+        if firm_event_id:
+            conn.execute(
+                lineage.update()
+                .where(lineage.c.firm_event_id == firm_event_id)
+                .values(
+                    market_observation_id=fill_market_observation_id,
+                    row_version=lineage.c.row_version + 1,
+                )
+            )
+
+        self.append_event(
+            conn,
+            event_id=event_id,
+            aggregate_type="trade",
+            aggregate_id=trade_id,
+            prior_state="OPEN",
+            new_state="FLAT",
+            seat="Portfolio",
+            reason_code=exit_reason,
+            policy_version=trade["policy_version"],
+            configuration_hash=trade["configuration_hash"],
+            market_observation_id=fill_market_observation_id,
+            actor=actor,
+            created_at_utc=filled_at_utc,
+            payload={
+                "close_order_intent_id": close_order_intent_id,
+                "position_key": trade["position_key"],
+                "exit_reason": exit_reason,
+                "exit_price": exit_price,
+                "gross_pnl_usd": gross_pnl_usd,
+                "net_pnl_usd": net_pnl_usd,
+                "total_cost_usd": total_cost_usd,
+                "fees_usd": fees_usd,
+                "released_cash_usd": reserve_cash,
+                "released_margin_usd": reserve_margin,
+                "signal_remains_consumed": True,
+            },
+        )
+        return {
+            "ok": True,
+            "duplicate": False,
+            "state": "FLAT",
+            "trade_id": trade_id,
+            "position_key": trade["position_key"],
+            "net_pnl_usd": float(net_pnl_usd),
+        }
+
     def stale_order_intent_ids(
         self,
         conn: Connection,
