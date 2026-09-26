@@ -22,6 +22,7 @@ from aether_vnext.execution import (
     PAPER_SUBMIT_TIMEOUT_MS,
     PaperExecutionPolicy,
     cancel_stale_paper_intent,
+    computed_entry_through_protective_stop,
     entry_fill_price,
     exit_fill_price,
     fill_submitted_paper_flatten_intent,
@@ -1860,3 +1861,57 @@ def test_futures_open_to_flat_releases_cash_and_margin_and_books_net() -> None:
                 store.tables["signal_consumptions"]
             )
         ).scalar_one() == 1
+
+
+def test_bad_fill_through_stop_erratum_uses_protective_loss_direction() -> None:
+    assert computed_entry_through_protective_stop(
+        position_side="long",
+        computed_fill_price=94_999.0,
+        hard_stop_price=95_000.0,
+    ) is True
+    assert computed_entry_through_protective_stop(
+        position_side="long",
+        computed_fill_price=95_001.0,
+        hard_stop_price=95_000.0,
+    ) is False
+
+    assert computed_entry_through_protective_stop(
+        position_side="short",
+        computed_fill_price=105_001.0,
+        hard_stop_price=105_000.0,
+    ) is True
+    assert computed_entry_through_protective_stop(
+        position_side="short",
+        computed_fill_price=104_999.0,
+        hard_stop_price=105_000.0,
+    ) is False
+
+
+def test_normal_long_entry_above_protective_stop_is_not_bad_fill() -> None:
+    submitted = submit_paper_intent(_intent(), at_utc=T0).intent
+    transition = fill_submitted_paper_intent(
+        submitted,
+        observation=_obs(),
+        registry_row=SEED_REGISTRY["btc"],
+        ready_spread_bps=2.0,
+        hard_stop_price=95_000.0,
+        max_age_ms=1_000,
+        at_utc=T0 + timedelta(milliseconds=250),
+    )
+    assert transition.intent.state is OrderIntentState.FILLED
+    assert transition.intent.reject_code is None
+
+
+def test_conservative_stop_through_keeps_market_changed_precedence() -> None:
+    submitted = submit_paper_intent(_intent(), at_utc=T0).intent
+    transition = fill_submitted_paper_intent(
+        submitted,
+        observation=_obs(bid=94_900.0, ask=94_920.0),
+        registry_row=SEED_REGISTRY["btc"],
+        ready_spread_bps=3.0,
+        hard_stop_price=95_000.0,
+        max_age_ms=1_000,
+        at_utc=T0 + timedelta(milliseconds=250),
+    )
+    assert transition.intent.state is OrderIntentState.REJECTED
+    assert transition.intent.reject_code == "market_changed"
