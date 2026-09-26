@@ -21,6 +21,7 @@ from aether_vnext.execution import (
     PaperExecutionPolicy,
     cancel_stale_paper_intent,
     entry_fill_price,
+    exit_fill_price,
     fill_submitted_paper_intent,
     paper_fill_due_at,
     stop_exit_fill_price,
@@ -841,3 +842,15 @@ def test_late_fill_after_stale_cancel_is_ignored_at_persistence_boundary() -> No
         assert conn.execute(
             sa.select(sa.func.count()).select_from(store.tables["signal_consumptions"])
         ).scalar_one() == 0
+
+
+def test_non_stop_flatten_uses_conservative_exit_side_plus_adverse_slip() -> None:
+    obs = _obs(bid=99.0, ask=101.0)
+    assert exit_fill_price(
+        obs,
+        position_side="long",
+    ) == pytest.approx(99.0 * 0.9995)
+    assert exit_fill_price(
+        obs,
+        position_side="short",
+    ) == pytest.approx(101.0 * 1.0005)
