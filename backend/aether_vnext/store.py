@@ -42,6 +42,7 @@ from aether_vnext.risk import (
     risk_limits_usd,
     stop_risk_usd,
 )
+from aether_vnext.reason_codes import ReasonCode
 from aether_vnext.schema import build_metadata
 from aether_vnext.seed_truth import ASSET_BROKER_ACCOUNT
 
@@ -51,6 +52,17 @@ SEED_LEDGER_CASH_USD: Mapping[str, float] = {
     "tastyfx_paper": 2000.0,
     "ninja_paper": 2000.0,
     "ibkr_paper": 2000.0,
+}
+
+
+GOVERNOR_SCOPE_TYPES = frozenset({"route", "venue", "product", "desk"})
+GOVERNOR_HALT_REASON_BY_SCOPE: Mapping[str, str] = {
+    "route": ReasonCode.ROUTE_HALTED.value,
+    "venue": ReasonCode.VENUE_HALTED.value,
+    # The Master reason dictionary defines lifecycle_ineligible as including
+    # a halted instrument; no separate product_halted code is invented.
+    "product": ReasonCode.LIFECYCLE_INELIGIBLE.value,
+    "desk": ReasonCode.DESK_HALTED.value,
 }
 
 
@@ -558,6 +570,7 @@ class VNextStore:
         risk_cluster_id: str,
         cluster_by_asset: Mapping[str, str],
         current_observations: Mapping[str, MarketObservation],
+        desk_scope_id: str | None = None,
     ) -> dict[str, Any]:
         """Atomically verify Firm risk and reserve an OPEN OrderIntent.
 
@@ -684,6 +697,25 @@ class VNextStore:
                 event_id=event_id,
                 actor=actor,
                 intent_kind="OPEN",
+            )
+
+        governor_block = self.governor_block_for_admission(
+            conn,
+            route_id=route_id,
+            venue=venue,
+            product_id=asset_id,
+            desk_scope_id=desk_scope_id,
+        )
+        if governor_block is not None:
+            return self.reject_ticket_governor_pre_reserve(
+                conn,
+                ticket_id=ticket_id,
+                reason_code=str(governor_block["reason_code"]),
+                at_utc=created_at_utc,
+                event_id=event_id,
+                actor=actor,
+                market_observation_id=market_observation_id,
+                governor_scope_key=str(governor_block["scope_key"]),
             )
 
         ticket_stop = float(ticket["stop_price"])
@@ -862,6 +894,307 @@ class VNextStore:
             "reserved_stop_risk_usd": candidate_risk,
             "risk_cluster_id": cluster_id,
             "firm_equity_usd": firm_equity.consolidated_equity_usd,
+        }
+
+    def set_governor_state(
+        self,
+        conn: Connection,
+        *,
+        scope_key: str,
+        scope_type: str,
+        scope_id: str | None,
+        state: str,
+        governor_state_version: str,
+        policy_version: str,
+        configuration_hash: str,
+        effective_at_utc: datetime,
+        reason: str,
+        actor: str,
+        authenticated: bool,
+        expected_row_version: int | None = None,
+        event_id: str,
+    ) -> dict[str, Any]:
+        """Persist an authenticated Governor state transition with audit history.
+
+        NORMAL/HALT is independent of Review KEEP/BENCH. Restart never invokes
+        this mutation; the durable row remains authoritative until another
+        authenticated transition explicitly changes it.
+        """
+        normalized_scope = str(scope_type).strip().lower()
+        normalized_state = str(state).strip().upper()
+        normalized_key = str(scope_key).strip()
+        normalized_actor = str(actor).strip()
+        normalized_reason = str(reason).strip()
+        version = str(governor_state_version).strip()
+
+        if normalized_scope not in GOVERNOR_SCOPE_TYPES:
+            raise ValueError("unsupported Governor scope_type")
+        if normalized_state not in {"NORMAL", "HALT"}:
+            raise ValueError("Governor state must be NORMAL or HALT")
+        if not normalized_key:
+            raise ValueError("scope_key cannot be blank")
+        if normalized_scope != "desk" and not str(scope_id or "").strip():
+            raise ValueError(f"{normalized_scope} scope requires scope_id")
+        if not version:
+            raise ValueError("governor_state_version cannot be blank")
+        if not normalized_reason:
+            raise ValueError("Governor transition reason cannot be blank")
+        if not normalized_actor:
+            raise ValueError("Governor transition actor cannot be blank")
+        if not authenticated:
+            raise PermissionError("Governor transition requires authenticated actor")
+
+        table = self.tables["governor_state"]
+        existing = conn.execute(
+            sa.select(table)
+            .where(table.c.scope_key == normalized_key)
+            .with_for_update()
+        ).mappings().first()
+
+        prior_state: str | None = None
+        if existing is None:
+            if expected_row_version not in {None, 0}:
+                raise RuntimeError("Governor optimistic version mismatch")
+            conn.execute(
+                table.insert().values(
+                    scope_key=normalized_key,
+                    scope_type=normalized_scope,
+                    scope_id=(
+                        str(scope_id).strip()
+                        if scope_id is not None
+                        else None
+                    ),
+                    governor_state_version=version,
+                    state=normalized_state,
+                    configuration_hash=configuration_hash,
+                    effective_at_utc=effective_at_utc,
+                    reason=normalized_reason,
+                    row_version=1,
+                )
+            )
+            row_version = 1
+        else:
+            prior_state = str(existing["state"])
+            if (
+                expected_row_version is not None
+                and int(existing["row_version"]) != int(expected_row_version)
+            ):
+                raise RuntimeError("Governor optimistic version mismatch")
+            if str(existing["scope_type"]) != normalized_scope:
+                raise RuntimeError("Governor scope_type cannot change in place")
+            existing_scope_id = (
+                str(existing["scope_id"]).strip()
+                if existing["scope_id"] is not None
+                else None
+            )
+            requested_scope_id = (
+                str(scope_id).strip()
+                if scope_id is not None
+                else None
+            )
+            if existing_scope_id != requested_scope_id:
+                raise RuntimeError("Governor scope_id cannot change in place")
+            row_version = int(existing["row_version"]) + 1
+            conn.execute(
+                table.update()
+                .where(table.c.scope_key == normalized_key)
+                .values(
+                    governor_state_version=version,
+                    state=normalized_state,
+                    configuration_hash=configuration_hash,
+                    effective_at_utc=effective_at_utc,
+                    reason=normalized_reason,
+                    row_version=row_version,
+                )
+            )
+
+        halt_reason = GOVERNOR_HALT_REASON_BY_SCOPE[normalized_scope]
+        audit_code = (
+            halt_reason
+            if normalized_state == "HALT"
+            else "governor_reset"
+        )
+        self.append_event(
+            conn,
+            event_id=event_id,
+            aggregate_type="governor_state",
+            aggregate_id=normalized_key,
+            prior_state=prior_state,
+            new_state=normalized_state,
+            seat="Governor",
+            reason_code=audit_code,
+            policy_version=policy_version,
+            configuration_hash=configuration_hash,
+            market_observation_id=None,
+            actor=normalized_actor,
+            created_at_utc=effective_at_utc,
+            payload={
+                "scope_type": normalized_scope,
+                "scope_id": (
+                    str(scope_id).strip()
+                    if scope_id is not None
+                    else None
+                ),
+                "reason": normalized_reason,
+                "authenticated": True,
+                "governor_state_version": version,
+                "row_version": row_version,
+            },
+        )
+        return {
+            "scope_key": normalized_key,
+            "scope_type": normalized_scope,
+            "scope_id": (
+                str(scope_id).strip()
+                if scope_id is not None
+                else None
+            ),
+            "state": normalized_state,
+            "row_version": row_version,
+            "reason": normalized_reason,
+        }
+
+    def governor_block_for_admission(
+        self,
+        conn: Connection,
+        *,
+        route_id: str,
+        venue: str,
+        product_id: str,
+        desk_scope_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Return the earliest-effective matching durable HALT, if any."""
+        table = self.tables["governor_state"]
+        rows = conn.execute(
+            sa.select(table)
+            .where(table.c.state == "HALT")
+            .order_by(
+                table.c.effective_at_utc,
+                table.c.scope_key,
+            )
+        ).mappings().all()
+
+        route_value = str(route_id).strip()
+        venue_value = str(venue).strip()
+        product_value = str(product_id).strip()
+        desk_value = (
+            str(desk_scope_id).strip()
+            if desk_scope_id is not None
+            else None
+        )
+
+        for row in rows:
+            scope_type = str(row["scope_type"]).strip().lower()
+            if scope_type not in GOVERNOR_SCOPE_TYPES:
+                raise RuntimeError(
+                    f"unsupported durable Governor scope: {scope_type}"
+                )
+            scope_id = (
+                str(row["scope_id"]).strip()
+                if row["scope_id"] is not None
+                else None
+            )
+            matches = (
+                (scope_type == "route" and scope_id == route_value)
+                or (scope_type == "venue" and scope_id == venue_value)
+                or (scope_type == "product" and scope_id == product_value)
+                or (
+                    scope_type == "desk"
+                    and (
+                        scope_id is None
+                        or (
+                            desk_value is not None
+                            and scope_id == desk_value
+                        )
+                    )
+                )
+            )
+            if matches:
+                return {
+                    "scope_key": row["scope_key"],
+                    "scope_type": scope_type,
+                    "scope_id": scope_id,
+                    "reason_code": GOVERNOR_HALT_REASON_BY_SCOPE[scope_type],
+                    "reason": row["reason"],
+                    "effective_at_utc": row["effective_at_utc"],
+                }
+        return None
+
+    def reject_ticket_governor_pre_reserve(
+        self,
+        conn: Connection,
+        *,
+        ticket_id: str,
+        reason_code: str,
+        at_utc: datetime,
+        event_id: str,
+        actor: str,
+        market_observation_id: str | None = None,
+        governor_scope_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Persist a Governor veto before any OrderIntent or capital reservation."""
+        tickets = self.tables["tickets"]
+        row = conn.execute(
+            sa.select(tickets)
+            .where(tickets.c.ticket_id == ticket_id)
+            .with_for_update()
+        ).mappings().first()
+        if row is None:
+            raise KeyError(f"unknown ticket: {ticket_id}")
+        if row["state"] == "REJECTED":
+            return {
+                "ok": True,
+                "duplicate": True,
+                "state": "REJECTED",
+                "reject_code": row["reject_code"],
+            }
+        if row["state"] != "READY":
+            return {
+                "ok": False,
+                "error": "ticket_not_ready",
+                "state": row["state"],
+            }
+
+        observation_id = market_observation_id or row["market_observation_id"]
+        conn.execute(
+            tickets.update()
+            .where(tickets.c.ticket_id == ticket_id)
+            .values(
+                state="REJECTED",
+                reject_code=reason_code,
+                first_killed_by="Governor",
+                first_kill_reason=reason_code,
+                market_observation_id=observation_id,
+            )
+        )
+        self.append_event(
+            conn,
+            event_id=event_id,
+            aggregate_type="ticket",
+            aggregate_id=ticket_id,
+            prior_state="READY",
+            new_state="REJECTED",
+            seat="Governor",
+            reason_code=reason_code,
+            policy_version=row["policy_version"],
+            configuration_hash=row["configuration_hash"],
+            market_observation_id=observation_id,
+            actor=actor,
+            created_at_utc=at_utc,
+            payload={
+                "first_killed_by": "Governor",
+                "first_kill_reason": reason_code,
+                "governor_scope_key": governor_scope_key,
+                "order_intent_created": False,
+                "reservation_created": False,
+            },
+        )
+        return {
+            "ok": False,
+            "duplicate": False,
+            "error": reason_code,
+            "state": "REJECTED",
+            "reject_code": reason_code,
         }
 
     def reserve_order_intent(
