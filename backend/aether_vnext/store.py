@@ -341,7 +341,7 @@ class VNextStore:
             market_observation_id=row["market_observation_id"],
             actor=actor,
             created_at_utc=submitted_at_utc,
-            payload={"submit_timeout_at": submit_timeout_at},
+            payload={"submit_timeout_at": submit_timeout_at.isoformat()},
         )
         return {"ok": True, "duplicate": False, "state": "SUBMITTED"}
 
