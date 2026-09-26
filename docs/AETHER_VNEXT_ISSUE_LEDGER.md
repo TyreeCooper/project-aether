@@ -1,6 +1,6 @@
 # AETHER vNext — Issue Ledger
 
-**AETHER TRACE:** 2026-09-26 15:50 EDT  
+**AETHER TRACE:** 2026-09-26 16:40 EDT  
 **Branch:** `aether-vnext-swapout`  
 **Rule:** no hidden debt. Every discovered issue is fixed, explicitly deferred with a dependency, or proven irrelevant.
 
@@ -284,27 +284,31 @@ Verification:
 
 **Class:** binding policy gap / anti-invention control  
 **Discovered:** Phase 6 Risk integration  
-**Status:** CONTAINED  
+**Status:** CLOSED  
 **Blocks generic Risk engine:** NO  
-**Blocks route admission without approved cluster identity:** YES
+**Blocks route admission without approved cluster identity:** NO — canonical map recovered
 
-### Facts
+### Resolution
 
-- The Master requires a 2.25% cluster/factor stop-risk ceiling.
-- The Master gives factor examples such as crypto, FX USD concentration, US beta,
-  metals, energy and rates.
-- The frozen vNext source does not provide one binding twelve-asset assignment table.
-- Historical legacy code used a plausible mapping, but legacy behavior has no design
-  authority over vNext.
+Phase 7 recovered the canonical mapping from the bound Playbook Pack plus the source
+cluster-netting law rather than importing legacy runtime labels:
 
-### Control
+- BTC, ETH -> crypto
+- EURUSD, USDJPY -> fx
+- MES, MNQ, NVDA, TSLA, PLTR -> us_beta
+- MGC -> metal
+- MCL -> energy
+- US10Y / ZN -> rates
 
-vNext does not import the legacy cluster table. Book-risk projection and atomic
-admission require an explicit nonblank cluster identity. Missing active-asset cluster
-identity fails closed.
+The mapping is frozen in `aether_vnext.playbooks.SEED_ASSET_CLUSTERS`.
+Every bound playbook is tested to remain inside exactly one canonical Risk cluster.
+Unknown asset cluster lookup fails closed.
 
-Phase 7/route integration must bind a canonical cluster map from approved source
-authority before those routes can reach Risk admission.
+Verification:
+- AETHER vNext CI #363: **330 passed**.
+- repository-wide CI #672: **625 passed, 1 warning**.
+
+**AETH-VN-008 status:** CLOSED.
 
 
 ## AETH-VN-009 — Daily-loss Governor threshold has no binding numeric value
@@ -320,7 +324,12 @@ authority before those routes can reach Risk admission.
 - The Master requires a versioned daily-loss threshold.
 - At the threshold, new risk must HALT while existing exposure remains managed unless
   an explicit flatten policy says otherwise.
-- No binding numeric daily-loss threshold was found in the frozen source.
+- An older v3.1 addendum contains a 2.00% SOD-equity policy default and 3.00% hard cap.
+- The later v5 / Pre-Code Freeze authority expresses daily-loss HALT as a versioned
+  policy but does not promote a numeric daily-loss constant into the frozen vNext
+  configuration contract.
+- vNext therefore does not silently revive the older number without an explicit
+  current-authority binding.
 
 ### Control
 
@@ -330,3 +339,78 @@ history are implemented independently.
 
 Automatic daily-loss triggering remains disabled/unbound until an approved versioned
 Policy Book supplies the numeric threshold.
+
+
+## AETH-VN-010 — Three Playbook exit contracts are source-incomplete
+
+**Class:** binding playbook ambiguity / anti-invention control  
+**Discovered:** Phase 7 exit-geometry conversion  
+**Status:** CONTAINED  
+**Blocks Phase 7 deterministic WATCH evaluation:** NO  
+**Blocks affected route Ticket / READY materialization:** YES
+
+### Facts
+
+The bound source provides enough information to evaluate WATCH structure for all
+three definitions, but not enough to materialize a unique complete ExitPlan:
+
+1. `pb_eth_rider_v1_2`
+   - explicitly inherits the crypto-swing stop construction;
+   - does not explicitly bind its own time-stop, first-target, or structure-invalidation
+     fields.
+
+2. `pb_fx_range_v1_3`
+3. `pb_eq_range_v1_3`
+   - both bind stop distance = 1.0 x ATR, target = 12-bar midpoint, time = 90m;
+   - neither binds the stop anchor from which the 1.0 x ATR distance is measured.
+
+### Control
+
+vNext preserves the exact known geometry and marks these definitions
+`source_complete=False`. It does not assume entry +/- ATR for Family C and does not
+silently clone missing ETH-rider ExitPlan fields.
+
+Phase 8 must refuse ticket materialization for any WATCH candidate whose exit contract
+is incomplete.
+
+**AETH-VN-010 status:** CONTAINED.
+
+
+## AETH-VN-011 — ETH rider cross-asset Risk hitch is not yet durable through the trade pipeline
+
+**Class:** cross-asset Risk attribution / persistence dependency  
+**Discovered:** Phase 7 closeout audit  
+**Status:** CONTAINED  
+**Blocks generic Phase 6 Risk engine:** NO  
+**Blocks affected ETH playbook Ticket creation:** YES
+
+### Facts
+
+The source requires:
+
+- `pb_eth_rider_v1_2`: 50% of ETH initial stop-risk also consumes BTC asset-risk
+  capacity.
+- `pb_eth_failed_break_v1_3`: the same 50% BTC asset-cap hitch if that currently
+  disabled short playbook is ever operationally enabled.
+
+The Phase 6 generic Risk book correctly aggregates ordinary asset/cluster/portfolio
+risk but does not yet carry playbook identity or cross-asset hitch attribution through
+pending reservation, OPEN, restart, and reconciliation.
+
+### Control
+
+Phase 7 binds the exact metadata in
+`aether_vnext.playbooks.PLAYBOOK_ASSET_RISK_HITCHES`.
+
+Phase 8 must:
+- durably stamp playbook_id / playbook_version on Setup lineage;
+- include candidate hitch occupancy before Risk admission;
+- persist pending hitch occupancy while RESERVED/SUBMITTED;
+- retain the hitch while OPEN;
+- restore and reconcile it after restart;
+- release it exactly once at FLAT or zero-fill terminal failure.
+
+Until that end-to-end path is tested, affected ETH playbooks may be evaluated for
+WATCH but may not create executable tickets.
+
+**AETH-VN-011 status:** CONTAINED.

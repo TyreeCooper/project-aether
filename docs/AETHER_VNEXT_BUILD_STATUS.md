@@ -1,6 +1,6 @@
 # AETHER vNext — Build Status
 
-**AETHER TRACE:** 2026-09-26 15:50 EDT  
+**AETHER TRACE:** 2026-09-26 16:40 EDT  
 **Branch:** `aether-vnext-swapout`  
 **Draft PR:** #12  
 **Legacy baseline:** `879736630edf5f41ede90258a4596bf3fff8c053`
@@ -253,6 +253,56 @@ Contained source-policy dependencies carried forward:
   daily-loss triggering remains unbound until an approved Policy Book value exists.
 
 
+### Phase 7 — Playbook Runtime: COMPLETE
+
+Implemented:
+- exact bound 27-playbook registry: 26 CANDIDATE definitions + 1 BENCH;
+- Family counts frozen at A=16, B=9, C=2;
+- exact trigger interval per playbook rather than deriving cadence from horizon;
+- operational disablement remains separate from evidence state;
+- BTC/ETH failed-break short definitions remain preserved but DISABLED under current
+  long-only Kraken spot product truth;
+- shared closed-bar / PIT runtime law and traceable disposition vocabulary;
+- volatility bands frozen at Family A/B [40,85] inclusive and Family C <40;
+- same-bar Family A -> B -> C precedence;
+- deterministic Family-A breakout/session/prior-day structure evaluation;
+- deterministic ETH rider dependency gating without merging its evidence with standalone
+  ETH behavior;
+- deterministic Family-B failed-break state machine with exact fail windows;
+- Family-B existing-position silence and equity-short locate requirement;
+- deterministic Family-C EURUSD/NVDA range-harvest structure;
+- source-bound playbook stop/target/time-stop metadata, including valid ZN 1/64 stop
+  tick alignment;
+- explicit fail-closed exposure of source-incomplete exit fields rather than invented
+  parameters;
+- integrated closed-bar Playbook Runtime that may identify WATCH-eligible candidates
+  but cannot create Setup/Ticket records or impersonate Clerk, Risk, Governor, or
+  Execution;
+- canonical seed-12 Risk cluster binding:
+  BTC/ETH=crypto, EURUSD/USDJPY=fx, MES/MNQ/NVDA/TSLA/PLTR=us_beta,
+  MGC=metal, MCL=energy, US10Y=rates;
+- source-bound ETH cross-asset Risk hitch metadata:
+  pb_eth_rider_v1_2 and pb_eth_failed_break_v1_3 attribute 50% of ETH initial stop-risk
+  to the BTC asset cap;
+- no legacy app.* strategy imports.
+
+Phase 7 completion evidence:
+- implementation head before documentation closeout:
+  `706ce779928d8000e9ed003e443cb5d895333512`;
+- AETHER vNext CI run #363: SUCCESS — **330 isolated vNext tests passed**;
+- repository-wide CI run #672: SUCCESS — **625 tests passed, 1 warning**;
+- PAPER ONLY / LIVE HARD BLOCKED remains non-bypassable.
+
+Issue transitions at Phase 7 closeout:
+- AETH-VN-008: CLOSED — canonical cluster mapping is now source-bound.
+- AETH-VN-010: CONTAINED — ETH rider exit fields and Family-C stop anchor are
+  source-incomplete; affected routes may WATCH but may not advance to a ticket requiring
+  a complete ExitPlan until resolved.
+- AETH-VN-011: CONTAINED — ETH 50% BTC asset-cap hitch is source-bound in metadata but
+  must be durably carried through Setup -> Risk admission -> restart before those
+  playbooks can create tickets.
+
+
 ## CI state
 
 ### vNext CI
@@ -270,21 +320,26 @@ pileups are cancelled automatically and both workflows have a 10-minute timeout.
 - no vNext production deployment;
 - no live orders;
 - no forced strategy entries;
-- no vNext strategy implementation yet;
+- Phase 7 playbook runtime exists, but no Phase 8 Scout/Sniper/Clerk ticket pipeline is active;
 - no legacy evidence imported into vNext;
 - PR #12 remains DRAFT.
 
 ## Next build target
 
-Phase 7 — Playbook Runtime.
+Phase 8 — Scout / Sniper / Clerk.
 
-Phase 7 may convert the frozen Playbook Pack into deterministic vNext playbook/runtime
-objects without importing legacy strategy behavior. Before any real route can reach
-Risk admission, its cluster identity must come from an approved canonical binding
-(AETH-VN-008), not from the historical legacy cluster map.
+First Phase-8 gate:
+- stamp immutable playbook_id / playbook_version identity on durable Setup lineage;
+- carry canonical cluster_id and any playbook asset-risk hitches into Risk admission;
+- persist the ETH -> BTC 50% hitch across pending reservation, OPEN, restart, and
+  reconciliation before enabling either affected ETH playbook for ticket creation;
+- refuse ticket materialization when Playbook Runtime reports an incomplete exit
+  contract under AETH-VN-010;
+- preserve A -> B -> C precedence and one OPEN per asset:horizon;
+- keep Clerk cost-edge, product, locate, and venue checks separate from Scout/Sniper.
 
-The automatic daily-loss Governor trigger remains separately unbound under AETH-VN-009
-until a versioned Policy Book supplies a numeric threshold.
+AETH-VN-009 remains separately contained: automatic daily-loss HALT remains unbound
+until the current frozen authority explicitly binds the numeric policy value.
 
-Locked roadmap after Phase 7:
-Phase 8 Scout/Sniper/Clerk.
+Locked roadmap after Phase 8:
+Phase 9 Evidence / Review integration and later cutover gates.
