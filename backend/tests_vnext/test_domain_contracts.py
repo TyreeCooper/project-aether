@@ -89,6 +89,7 @@ def test_order_intent_contains_live_shaped_execution_fields() -> None:
         "ready_spread_bps",
         "hard_stop_price",
         "submit_timeout_at",
+        "observation_id_at_reserve",
         "observation_id_at_fill",
         "trade_id",
         "version",
