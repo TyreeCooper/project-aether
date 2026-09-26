@@ -475,6 +475,102 @@ class VNextStore:
             "reject_code": reason_code,
         }
 
+    def _lock_firm_risk_admission_guard(
+        self,
+        conn: Connection,
+    ) -> Mapping[str, Any]:
+        guard_table = self.tables["risk_admission_guard"]
+        guard = conn.execute(
+            sa.select(guard_table)
+            .where(guard_table.c.scope_key == "firm")
+            .with_for_update()
+        ).mappings().first()
+        if guard is None:
+            raise RuntimeError("Firm risk admission guard is not provisioned")
+        return guard
+
+    def risk_admission_reconciliation_issues(
+        self,
+        conn: Connection,
+    ) -> tuple[str, ...]:
+        """Return deterministic, read-only findings for Phase-6 risk state."""
+        guard_table = self.tables["risk_admission_guard"]
+        intents = self.tables["order_intents"]
+        reservations = self.tables["risk_admission_reservations"]
+
+        issues: list[str] = []
+        guards = conn.execute(
+            sa.select(guard_table).order_by(guard_table.c.scope_key)
+        ).mappings().all()
+        firm_guards = [
+            row for row in guards if str(row["scope_key"]) == "firm"
+        ]
+        if len(firm_guards) != 1:
+            issues.append(
+                f"firm_risk_guard_count:{len(firm_guards)}"
+            )
+
+        intent_rows = {
+            str(row["order_intent_id"]): row
+            for row in conn.execute(sa.select(intents)).mappings()
+        }
+        reservation_rows = {
+            str(row["order_intent_id"]): row
+            for row in conn.execute(sa.select(reservations)).mappings()
+        }
+
+        for intent_id, intent in sorted(intent_rows.items()):
+            is_pending_open = (
+                str(intent["intent_kind"]) == "OPEN"
+                and str(intent["state"]) in {"RESERVED", "SUBMITTED"}
+            )
+            reservation = reservation_rows.get(intent_id)
+            if is_pending_open and reservation is None:
+                issues.append(
+                    f"missing_pending_risk_reservation:{intent_id}"
+                )
+            if (
+                not is_pending_open
+                and reservation is not None
+            ):
+                issues.append(
+                    f"risk_reservation_on_nonpending_intent:{intent_id}"
+                )
+
+        for intent_id, reservation in sorted(reservation_rows.items()):
+            intent = intent_rows.get(intent_id)
+            if intent is None:
+                issues.append(f"orphan_risk_reservation:{intent_id}")
+                continue
+            if str(reservation["asset_id"]) != str(intent["asset_id"]):
+                issues.append(
+                    f"risk_reservation_asset_mismatch:{intent_id}"
+                )
+            if (
+                str(reservation["policy_version"])
+                != str(intent["policy_version"])
+            ):
+                issues.append(
+                    f"risk_reservation_policy_mismatch:{intent_id}"
+                )
+            if (
+                str(reservation["configuration_hash"])
+                != str(intent["configuration_hash"])
+            ):
+                issues.append(
+                    f"risk_reservation_configuration_mismatch:{intent_id}"
+                )
+            if not str(reservation["cluster_id"]).strip():
+                issues.append(
+                    f"risk_reservation_cluster_blank:{intent_id}"
+                )
+            if float(reservation["stop_risk_usd"]) <= 0:
+                issues.append(
+                    f"risk_reservation_nonpositive:{intent_id}"
+                )
+
+        return tuple(sorted(set(issues)))
+
     def _pending_open_risk_exposure(
         self,
         conn: Connection,
@@ -617,15 +713,7 @@ class VNextStore:
             }
 
         guard_table = self.tables["risk_admission_guard"]
-        guard = conn.execute(
-            sa.select(guard_table)
-            .where(guard_table.c.scope_key == "firm")
-            .with_for_update()
-        ).mappings().first()
-        if guard is None:
-            raise RuntimeError(
-                "Firm risk admission guard is not provisioned"
-            )
+        guard = self._lock_firm_risk_admission_guard(conn)
 
         tickets = self.tables["tickets"]
         observations = self.tables["market_observations"]
@@ -1697,6 +1785,12 @@ class VNextStore:
         lineage = self.tables["decision_lineage"]
         exit_plans = self.tables["exit_plans"]
         inventory = self.tables["sleeve_inventory"]
+        risk_reservations = self.tables["risk_admission_reservations"]
+
+        # Serialize the pending-risk -> OpenTrade source transition against
+        # every new Phase-A admission. This closes the READ COMMITTED gap where
+        # an admission could otherwise observe neither source during a fill.
+        self._lock_firm_risk_admission_guard(conn)
 
         intent = conn.execute(
             sa.select(intents)
@@ -1732,6 +1826,28 @@ class VNextStore:
                 "error": "partial_fill_disabled",
                 "state": intent["state"],
             }
+
+        if intent["intent_kind"] != "OPEN":
+            return {
+                "ok": False,
+                "error": "illegal_intent_kind",
+                "state": intent["state"],
+            }
+
+        risk_reservation = conn.execute(
+            sa.select(risk_reservations)
+            .where(
+                risk_reservations.c.order_intent_id == order_intent_id
+            )
+            .with_for_update()
+        ).mappings().first()
+        if (
+            risk_reservation is not None
+            and str(risk_reservation["asset_id"]) != str(intent["asset_id"])
+        ):
+            raise RuntimeError(
+                f"risk reservation asset drift: {order_intent_id}"
+            )
 
         position_key_value = str(intent["position_key"] or "")
         signal_key_value = str(intent["signal_key"] or "")
@@ -1876,6 +1992,19 @@ class VNextStore:
             )
         )
 
+        pending_stop_risk_usd = (
+            float(risk_reservation["stop_risk_usd"])
+            if risk_reservation is not None
+            else None
+        )
+        if risk_reservation is not None:
+            conn.execute(
+                risk_reservations.delete().where(
+                    risk_reservations.c.order_intent_id
+                    == order_intent_id
+                )
+            )
+
         firm_event_id = intent["firm_event_id"]
         if firm_event_id:
             conn.execute(
@@ -1914,6 +2043,8 @@ class VNextStore:
                 "reserved_cash_usd": float(intent["reserved_cash_usd"]),
                 "reserved_margin_usd": float(intent["reserved_margin_usd"]),
                 "reservation_retained_while_open": True,
+                "pending_stop_risk_released_usd": pending_stop_risk_usd,
+                "risk_source_after_fill": "open_trade",
             },
         )
         return {
@@ -2461,6 +2592,20 @@ class VNextStore:
         ledgers = self.tables["broker_account_ledgers"]
         tickets = self.tables["tickets"]
         lineage = self.tables["decision_lineage"]
+        risk_reservations = self.tables["risk_admission_reservations"]
+
+        # Read kind first without a row lock. OPEN terminal transitions then
+        # acquire the Firm guard before locking the intent, matching Phase-A
+        # lock ordering. CLOSE/risk-reducing paths never depend on this guard.
+        intent_preview = conn.execute(
+            sa.select(intents).where(
+                intents.c.order_intent_id == order_intent_id
+            )
+        ).mappings().first()
+        if intent_preview is None:
+            raise KeyError(f"unknown order intent: {order_intent_id}")
+        if str(intent_preview["intent_kind"]) == "OPEN":
+            self._lock_firm_risk_admission_guard(conn)
 
         intent = conn.execute(
             sa.select(intents)
@@ -2585,6 +2730,27 @@ class VNextStore:
                         )
                     )
 
+        released_stop_risk_usd: float | None = None
+        if is_failed_open:
+            risk_row = conn.execute(
+                sa.select(risk_reservations)
+                .where(
+                    risk_reservations.c.order_intent_id
+                    == order_intent_id
+                )
+                .with_for_update()
+            ).mappings().first()
+            if risk_row is not None:
+                released_stop_risk_usd = float(
+                    risk_row["stop_risk_usd"]
+                )
+                conn.execute(
+                    risk_reservations.delete().where(
+                        risk_reservations.c.order_intent_id
+                        == order_intent_id
+                    )
+                )
+
         self.append_event(
             conn,
             event_id=event_id,
@@ -2604,6 +2770,7 @@ class VNextStore:
             payload={
                 "released_cash_usd": reserve_cash,
                 "released_margin_usd": reserve_margin,
+                "released_stop_risk_usd": released_stop_risk_usd,
                 "first_killed_by": (
                     first_killed_by if is_failed_open else None
                 ),

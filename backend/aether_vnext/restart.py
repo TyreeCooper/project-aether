@@ -20,6 +20,9 @@ class RestartSnapshot:
     decision_lineage: tuple[dict[str, Any], ...]
     policy_snapshots: tuple[dict[str, Any], ...]
     governor_state: tuple[dict[str, Any], ...]
+    risk_admission_guard: tuple[dict[str, Any], ...]
+    risk_admission_reservations: tuple[dict[str, Any], ...]
+    risk_admission_issues: tuple[str, ...]
     broker_ledgers: tuple[dict[str, Any], ...]
     in_flight_setups: tuple[dict[str, Any], ...]
     in_flight_tickets: tuple[dict[str, Any], ...]
@@ -80,6 +83,14 @@ def load_restart_snapshot(
         decision_lineage=_rows(conn, t["decision_lineage"]),
         policy_snapshots=_rows(conn, t["policy_snapshots"]),
         governor_state=_rows(conn, t["governor_state"]),
+        risk_admission_guard=_rows(conn, t["risk_admission_guard"]),
+        risk_admission_reservations=_rows(
+            conn,
+            t["risk_admission_reservations"],
+        ),
+        risk_admission_issues=store.risk_admission_reconciliation_issues(
+            conn
+        ),
         broker_ledgers=_rows(conn, t["broker_account_ledgers"]),
         in_flight_setups=setups,
         in_flight_tickets=tickets,
