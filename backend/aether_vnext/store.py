@@ -93,8 +93,6 @@ class VNextStore:
                     "cash_reserved_usd": 0.0,
                     "margin_used_usd": 0.0,
                     "margin_available_usd": cash,
-                    "inventory_qty": 0.0,
-                    "inventory_avg": None,
                     "realized_pnl_usd": 0.0,
                     "unrealized_pnl_usd": 0.0,
                     "fees_accrued_usd": 0.0,
