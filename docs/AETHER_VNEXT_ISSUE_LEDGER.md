@@ -443,3 +443,32 @@ binds a different percentile convention, this implementation must be versioned r
 than silently changed.
 
 **AETH-VN-012 status:** CONTAINED / NON-BLOCKING.
+
+
+## AETH-VN-013 — Universal benchmark “not worse” scalar comparator is not source-bound
+
+**Class:** profitability-evidence comparison ambiguity / anti-invention control  
+**Discovered:** Phase 9 benchmark engine conversion  
+**Status:** CONTAINED / NON-BLOCKING FOR METRIC GENERATION  
+**Blocks trusted KEEP unless separately resolved:** YES
+
+### Facts
+
+Current authority requires:
+- every route to carry explicit benchmark identity;
+- candidate and baseline to use the same data/fill/cost engine;
+- benchmark evidence to remain queryable;
+- trusted KEEP to be “not worse than baseline.”
+
+The source does not bind one universal scalar formula that converts multi-metric
+candidate/baseline evidence into that final boolean across crypto, FX, futures,
+rates, and equities.
+
+### Control
+
+Phase 9 computes candidate and benchmark results on an identical EconomicPath and
+stores base/+25%/+50% metrics side-by-side. It does not infer a universal winner.
+baseline_not_worse remains an explicit evidence fact that must come from a
+source-bound route/benchmark comparator before KEEP_TRUSTED may pass.
+
+**AETH-VN-013 status:** CONTAINED.
