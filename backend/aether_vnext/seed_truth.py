@@ -200,6 +200,23 @@ SEED_PRODUCT_MATH: Final = MappingProxyType(
 )
 
 
+BROKER_ACCOUNT_BY_BROKER: Final = MappingProxyType(
+    {
+        "Kraken": "kraken_paper",
+        "tastyfx": "tastyfx_paper",
+        "NinjaTrader": "ninja_paper",
+        "IBKR": "ibkr_paper",
+    }
+)
+
+ASSET_BROKER_ACCOUNT: Final = MappingProxyType(
+    {
+        asset_id: BROKER_ACCOUNT_BY_BROKER[spec.broker]
+        for asset_id, spec in SEED_PRODUCT_MATH.items()
+    }
+)
+
+
 @dataclass(frozen=True, slots=True)
 class FeeSchedule:
     fee_schedule_id: str
