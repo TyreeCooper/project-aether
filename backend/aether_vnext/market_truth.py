@@ -22,7 +22,10 @@ def observation_is_valid(
     """
     if max_age_ms < 0:
         raise ValueError("max_age_ms must be non-negative")
-    if observation.quality_state in {QualityState.STALE, QualityState.INVALID}:
+    # v4.2.1 Phase A is stricter than the generic v3 taxonomy: execution
+    # requires HEALTHY. DEGRADED observations remain durable/displayable truth
+    # but cannot authorize FIRE/READY/OPEN.
+    if observation.quality_state is not QualityState.HEALTHY:
         return False
     if observation.age_ms > max_age_ms:
         return False
