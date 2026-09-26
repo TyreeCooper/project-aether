@@ -18,8 +18,13 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: vnext-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   vnext-contract:
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     defaults:
       run:
