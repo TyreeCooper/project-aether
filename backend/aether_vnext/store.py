@@ -1550,6 +1550,17 @@ class VNextStore:
             evidence.oos_windows
         ):
             raise ValueError("Review gate fold count mismatch")
+        evidence_capacity_ready = bool(
+            dict(evidence.capacity_result or {}).get(
+                "trusted_keep_ready",
+                False,
+            )
+        )
+        if (
+            bool(gate_input.capacity_trusted_keep_ready)
+            != evidence_capacity_ready
+        ):
+            raise ValueError("Review gate capacity readiness mismatch")
 
         assessment = assess_review_gates(gate_input)
         validate_review_verdict(assessment, target_state)

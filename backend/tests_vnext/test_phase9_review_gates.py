@@ -29,6 +29,7 @@ def _gate(**overrides) -> ReviewGateInput:
         false_discovery_extra_fold_completed=False,
         multi_day_fx=False,
         carry_model_present=True,
+        capacity_trusted_keep_ready=True,
         last10_stop_grind_confirmed=False,
     )
     values.update(overrides)
@@ -256,3 +257,17 @@ def test_nonchronological_or_integrity_defect_blocks_keep() -> None:
     )
     assert bad_integrity.probation_keep_eligible is False
     assert bad_integrity.trusted_keep_eligible is False
+
+
+def test_trusted_keep_is_blocked_when_intended_size_capacity_is_not_ready() -> None:
+    out = assess_review_gates(
+        _gate(
+            n_closed=30,
+            fold_expectancy_after_plus25_cost=(1, 1, 1, 1),
+            capacity_trusted_keep_ready=False,
+        )
+    )
+    assert out.trusted_keep_eligible is False
+    assert "capacity_not_ready_for_trusted_keep" in out.reasons
+    with pytest.raises(ValueError, match="KEEP_TRUSTED"):
+        validate_review_verdict(out, EvidenceState.KEEP_TRUSTED)

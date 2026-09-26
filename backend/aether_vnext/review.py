@@ -40,6 +40,7 @@ class ReviewGateInput:
     false_discovery_extra_fold_completed: bool = False
     multi_day_fx: bool = False
     carry_model_present: bool = True
+    capacity_trusted_keep_ready: bool = False
     last10_stop_grind_confirmed: bool | None = None
 
     def __post_init__(self) -> None:
@@ -146,6 +147,7 @@ def assess_review_gates(
         and gate.baseline_not_worse
         and gate.folds_chronological
         and gate.integrity_clear
+        and gate.capacity_trusted_keep_ready
         and false_discovery_ok
     )
 
@@ -174,6 +176,8 @@ def assess_review_gates(
         reasons.append("folds_not_chronological")
     if not gate.integrity_clear:
         reasons.append("integrity_not_clear")
+    if not gate.capacity_trusted_keep_ready:
+        reasons.append("capacity_not_ready_for_trusted_keep")
 
     return ReviewGateAssessment(
         evidence_id=gate.evidence_id,

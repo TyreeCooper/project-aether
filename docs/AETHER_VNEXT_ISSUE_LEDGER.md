@@ -520,3 +520,26 @@ queues Review as MATERIALITY_UNBOUND rather than inventing a threshold. The deca
 monitor cannot mutate route Review state, Risk fractions, playbook rules, or side.
 
 **AETH-VN-015 status:** CONTAINED.
+
+
+## AETH-VN-016 — Capacity readiness thresholds are route/product policy inputs, not universal constants
+
+**Class:** capacity-evidence parameterization / anti-invention control  
+**Discovered:** Phase 9 P5 capacity conversion  
+**Status:** CONTAINED  
+
+### Facts
+
+Part IV requires spread-distribution comparison, marginal slippage at size, depth/
+participation or conservative product caps, locate/borrow, carry/financing, and
+gap/tail cost. It does not bind one universal spread-percentile cutoff, liquidity
+participation fraction, or carry-materiality threshold across all product classes.
+
+### Control
+
+vNext requires those decisions as explicit versioned evidence inputs. Missing or
+unbound inputs make capacity trusted_keep_ready=false. The engine may not invent a
+cross-product threshold, and KEEP_TRUSTED now requires the persisted capacity result
+to be ready.
+
+**AETH-VN-016 status:** CONTAINED.

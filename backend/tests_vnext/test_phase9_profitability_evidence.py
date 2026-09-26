@@ -56,7 +56,10 @@ def _evidence(
         ),
         regime_matrix={"trend": {"n": 7}, "range": {"n": 5}},
         benchmark_result={"not_worse_than_baseline": True},
-        capacity_result={"status": "unvalidated"},
+        capacity_result={
+            "status": "unvalidated",
+            "trusted_keep_ready": False,
+        },
         portfolio_contribution={"status": "unvalidated"},
         model_risks=("capacity_pending",),
         verdict=verdict,
