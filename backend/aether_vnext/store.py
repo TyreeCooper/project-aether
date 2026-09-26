@@ -354,6 +354,7 @@ class VNextStore:
             ready_spread_bps=row["ready_spread_bps"],
             hard_stop_price=row["hard_stop_price"],
             submit_timeout_at=_stored_utc(row["submit_timeout_at"]),
+            observation_id_at_reserve=row["observation_id_at_reserve"],
             observation_id_at_fill=row["observation_id_at_fill"],
             trade_id=row["trade_id"],
             version=int(row["version"]),
