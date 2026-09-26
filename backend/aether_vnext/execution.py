@@ -164,6 +164,25 @@ def entry_fill_price(
     return float(observation.bid) * (1.0 - slip_bps / 10_000.0)
 
 
+def exit_fill_price(
+    observation: MarketObservation,
+    *,
+    position_side: str,
+    slip_bps: float = DEFAULT_SLIP_BPS,
+) -> float:
+    """Conservative non-stop flatten price: long sells bid, short buys ask."""
+    side = _position_side(position_side)
+    if slip_bps < 0:
+        raise ValueError("slip_bps cannot be negative")
+    if side == "long":
+        if observation.bid is None or observation.bid <= 0:
+            raise ValueError("valid bid required for long exit")
+        return float(observation.bid) * (1.0 - slip_bps / 10_000.0)
+    if observation.ask is None or observation.ask <= 0:
+        raise ValueError("valid ask required for short exit")
+    return float(observation.ask) * (1.0 + slip_bps / 10_000.0)
+
+
 def stop_triggered(
     observation: MarketObservation,
     *,
