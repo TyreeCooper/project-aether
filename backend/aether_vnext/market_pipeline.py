@@ -59,14 +59,6 @@ class MarketDataPipeline:
                 executable=False,
                 reason="market_data_unbound",
             )
-        if not calendar.eligible:
-            return MarketPipelineResult(
-                asset_id=aid,
-                observation=None,
-                executable=False,
-                reason="session_closed",
-            )
-
         assert row.stale_threshold_ms is not None
         selection: SourceSelection = select_source(
             quotes,
@@ -95,7 +87,11 @@ class MarketDataPipeline:
                 asset_id=aid,
                 observation=observation,
                 executable=False,
-                reason="market_invalid",
+                reason=(
+                    "session_closed"
+                    if not calendar.eligible
+                    else "market_invalid"
+                ),
                 attempted_sources=selection.attempted_sources,
                 rejection_reasons=selection.rejection_reasons,
             )
