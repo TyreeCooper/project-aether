@@ -22,6 +22,7 @@ from aether_vnext.domain import (
     OrderIntent,
     OrderIntentState,
 )
+from aether_vnext.registry import ProductType, registry_row
 from aether_vnext.schema import build_metadata
 
 
@@ -50,6 +51,141 @@ def _stored_utc(value: datetime | None) -> datetime | None:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
+
+
+def _uses_cash_inventory(asset_id: str, side: str) -> bool:
+    row = registry_row(asset_id)
+    return (
+        str(side).strip().lower() == "long"
+        and row.product_type in {
+            ProductType.SPOT_CRYPTO,
+            ProductType.EQUITY,
+        }
+    )
+
+
+def _upsert_cash_inventory(
+    conn: Connection,
+    *,
+    table: sa.Table,
+    broker_account_id: str,
+    asset_id: str,
+    quantity: float,
+    avg_fill_price: float,
+    updated_at_utc: datetime,
+) -> None:
+    existing = conn.execute(
+        sa.select(table)
+        .where(
+            sa.and_(
+                table.c.broker_account_id == broker_account_id,
+                table.c.asset_id == asset_id,
+            )
+        )
+        .with_for_update()
+    ).mappings().first()
+
+    if existing is None:
+        conn.execute(
+            table.insert().values(
+                broker_account_id=broker_account_id,
+                asset_id=asset_id,
+                inventory_qty=quantity,
+                inventory_avg=avg_fill_price,
+                updated_at_utc=updated_at_utc,
+                row_version=1,
+            )
+        )
+        return
+
+    old_qty = float(existing["inventory_qty"])
+    old_avg = float(existing["inventory_avg"])
+    new_qty = old_qty + float(quantity)
+    if new_qty <= 0:
+        raise RuntimeError("inventory quantity must remain positive on OPEN")
+    new_avg = (
+        old_qty * old_avg + float(quantity) * float(avg_fill_price)
+    ) / new_qty
+    conn.execute(
+        table.update()
+        .where(
+            sa.and_(
+                table.c.broker_account_id == broker_account_id,
+                table.c.asset_id == asset_id,
+            )
+        )
+        .values(
+            inventory_qty=new_qty,
+            inventory_avg=new_avg,
+            updated_at_utc=updated_at_utc,
+            row_version=int(existing["row_version"]) + 1,
+        )
+    )
+
+
+def _reduce_cash_inventory(
+    conn: Connection,
+    *,
+    table: sa.Table,
+    broker_account_id: str,
+    asset_id: str,
+    quantity: float,
+    trade_entry_price: float,
+    updated_at_utc: datetime,
+) -> None:
+    existing = conn.execute(
+        sa.select(table)
+        .where(
+            sa.and_(
+                table.c.broker_account_id == broker_account_id,
+                table.c.asset_id == asset_id,
+            )
+        )
+        .with_for_update()
+    ).mappings().first()
+    if existing is None:
+        raise RuntimeError("cash inventory missing for OPEN trade")
+
+    old_qty = float(existing["inventory_qty"])
+    old_avg = float(existing["inventory_avg"])
+    remove_qty = float(quantity)
+    if old_qty + 1e-9 < remove_qty:
+        raise RuntimeError("cash inventory quantity drift")
+
+    new_qty = old_qty - remove_qty
+    if new_qty <= 1e-12:
+        conn.execute(
+            table.delete().where(
+                sa.and_(
+                    table.c.broker_account_id == broker_account_id,
+                    table.c.asset_id == asset_id,
+                )
+            )
+        )
+        return
+
+    remaining_cost = (
+        old_qty * old_avg
+        - remove_qty * float(trade_entry_price)
+    )
+    if remaining_cost <= 0:
+        raise RuntimeError("cash inventory average-cost drift")
+    new_avg = remaining_cost / new_qty
+    conn.execute(
+        table.update()
+        .where(
+            sa.and_(
+                table.c.broker_account_id == broker_account_id,
+                table.c.asset_id == asset_id,
+            )
+        )
+        .values(
+            inventory_qty=new_qty,
+            inventory_avg=new_avg,
+            updated_at_utc=updated_at_utc,
+            row_version=int(existing["row_version"]) + 1,
+        )
+    )
 
 
 def _horizon_from_position_key(value: str) -> str:
@@ -651,6 +787,7 @@ class VNextStore:
         signals = self.tables["signal_consumptions"]
         lineage = self.tables["decision_lineage"]
         exit_plans = self.tables["exit_plans"]
+        inventory = self.tables["sleeve_inventory"]
 
         intent = conn.execute(
             sa.select(intents)
@@ -801,6 +938,17 @@ class VNextStore:
                 consumed_at_utc=filled_at_utc,
             )
         )
+        if _uses_cash_inventory(intent["asset_id"], intent["side"]):
+            _upsert_cash_inventory(
+                conn,
+                table=inventory,
+                broker_account_id=intent["broker_account_id"],
+                asset_id=intent["asset_id"],
+                quantity=filled_qty,
+                avg_fill_price=avg_fill_price,
+                updated_at_utc=filled_at_utc,
+            )
+
         conn.execute(
             intents.update()
             .where(intents.c.order_intent_id == order_intent_id)
@@ -1117,6 +1265,7 @@ class VNextStore:
         positions = self.tables["active_positions"]
         ledgers = self.tables["broker_account_ledgers"]
         lineage = self.tables["decision_lineage"]
+        inventory = self.tables["sleeve_inventory"]
 
         close_intent = conn.execute(
             sa.select(intents)
@@ -1231,6 +1380,17 @@ class VNextStore:
         exit_reason = str(close_intent["exit_reason"] or "")
         if not exit_reason:
             raise ValueError("CLOSE intent missing exit_reason")
+
+        if _uses_cash_inventory(trade["asset_id"], trade["side"]):
+            _reduce_cash_inventory(
+                conn,
+                table=inventory,
+                broker_account_id=opening_intent["broker_account_id"],
+                asset_id=trade["asset_id"],
+                quantity=filled_qty,
+                trade_entry_price=float(trade["avg_entry_price"]),
+                updated_at_utc=filled_at_utc,
+            )
 
         conn.execute(
             closed.insert().values(
