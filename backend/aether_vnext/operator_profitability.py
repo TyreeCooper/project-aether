@@ -67,7 +67,11 @@ class ExecutionPanelInput:
 
 
 def _cost_shock_status(evidence: ProfitabilityEvidence) -> dict[str, object]:
-    sensitivity = evidence.cost_sensitivity.as_dict()
+    sensitivity = {
+        "base": dict(evidence.cost_sensitivity.base),
+        "plus25": dict(evidence.cost_sensitivity.plus25),
+        "plus50": dict(evidence.cost_sensitivity.plus50),
+    }
     out: dict[str, object] = {}
     for label in ("base", "plus25", "plus50"):
         bucket = dict(sensitivity.get(label) or {})
@@ -122,7 +126,11 @@ def _review_row(
         "oos_windows": list(evidence.oos_windows),
         "regime_matrix": dict(evidence.regime_matrix),
         "benchmark_result": dict(evidence.benchmark_result),
-        "cost_sensitivity": evidence.cost_sensitivity.as_dict(),
+        "cost_sensitivity": {
+            "base": dict(evidence.cost_sensitivity.base),
+            "plus25": dict(evidence.cost_sensitivity.plus25),
+            "plus50": dict(evidence.cost_sensitivity.plus50),
+        },
         "drawdown": {
             "usd": evidence.max_drawdown_usd,
             "pct": evidence.max_drawdown_pct,
