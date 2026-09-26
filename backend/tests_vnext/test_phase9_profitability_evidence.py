@@ -8,6 +8,8 @@ from sqlalchemy.exc import IntegrityError
 
 from aether_vnext.domain import ReviewCard
 from aether_vnext.evidence import CostSensitivity, ProfitabilityEvidence
+from aether_vnext.freeze import EvidenceState
+from aether_vnext.review import ReviewGateInput
 from aether_vnext.store import VNextStore
 
 
@@ -63,6 +65,32 @@ def _evidence(
     )
 
 
+def _gate_input(
+    *,
+    evidence_id: str = "evidence-1",
+    n_closed: int = 12,
+    net_expectancy: float = 3.5,
+    stop_rate: float = 0.40,
+    profit_factor: float = 1.1,
+) -> ReviewGateInput:
+    return ReviewGateInput(
+        evidence_id=evidence_id,
+        n_closed=n_closed,
+        fold_expectancy_after_plus25_cost=(1.0, 1.0),
+        expectancy_ci_lower=None,
+        net_expectancy_after_costs=net_expectancy,
+        profit_factor=profit_factor,
+        stop_rate=stop_rate,
+        baseline_not_worse=True,
+        folds_chronological=True,
+        integrity_clear=True,
+        current_route_risk_fraction=0.0075,
+        radar_eligible_routes=12,
+        prior_evidence_state=EvidenceState.CANDIDATE,
+        last10_stop_grind_confirmed=False,
+    )
+
+
 def _card(
     *,
     review_card_id: str = "review-1",
@@ -111,6 +139,7 @@ def test_profitability_evidence_round_trips_and_review_points_to_it() -> None:
             conn,
             evidence=evidence,
             review_card=card,
+            gate_input=_gate_input(),
         )
         assert returned == card
 
@@ -143,22 +172,27 @@ def test_second_review_updates_projection_but_preserves_prior_evidence_and_card(
             conn,
             evidence=_evidence(),
             review_card=_card(),
+            gate_input=_gate_input(),
         )
     second_evidence = _evidence(
         evidence_id="evidence-2",
-        verdict="CUT_SIZE",
+        verdict="EVIDENCE_ACCUMULATING",
         n_trades=20,
     )
     second_card = _card(
         review_card_id="review-2",
         evidence_id="evidence-2",
-        state="CUT_SIZE",
+        state="EVIDENCE_ACCUMULATING",
     )
     with engine.begin() as conn:
         store.record_profitability_review(
             conn,
             evidence=second_evidence,
             review_card=second_card,
+            gate_input=_gate_input(
+                evidence_id="evidence-2",
+                n_closed=20,
+            ),
         )
 
     with engine.begin() as conn:
@@ -181,7 +215,7 @@ def test_second_review_updates_projection_but_preserves_prior_evidence_and_card(
 
     assert evidence_count == 2
     assert card_count == 2
-    assert route["evidence_state"] == "CUT_SIZE"
+    assert route["evidence_state"] == "EVIDENCE_ACCUMULATING"
     assert route["review_card_id"] == "review-2"
     assert route["row_version"] == 2
 
@@ -193,6 +227,7 @@ def test_duplicate_evidence_id_is_database_rejected() -> None:
             conn,
             evidence=_evidence(),
             review_card=_card(),
+            gate_input=_gate_input(),
         )
     with pytest.raises(IntegrityError):
         with engine.begin() as conn:
@@ -202,6 +237,7 @@ def test_duplicate_evidence_id_is_database_rejected() -> None:
                 review_card=_card(
                     review_card_id="review-duplicate",
                 ),
+                gate_input=_gate_input(),
             )
 
 
@@ -214,6 +250,7 @@ def test_review_and_evidence_identity_mismatches_fail_before_write() -> None:
                 conn,
                 evidence=_evidence(),
                 review_card=bad_card,
+                gate_input=_gate_input(),
             )
     with engine.begin() as conn:
         assert conn.execute(
@@ -248,6 +285,7 @@ def test_review_persistence_does_not_mutate_broker_money_state() -> None:
             conn,
             evidence=_evidence(),
             review_card=_card(),
+            gate_input=_gate_input(),
         )
         after = tuple(
             sorted(

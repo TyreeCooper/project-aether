@@ -11,6 +11,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import math
 from typing import Any, Mapping
 
 import sqlalchemy as sa
@@ -54,6 +55,11 @@ from aether_vnext.risk import (
     stop_risk_usd,
 )
 from aether_vnext.reason_codes import ReasonCode
+from aether_vnext.review import (
+    ReviewGateInput,
+    assess_review_gates,
+    validate_review_verdict,
+)
 from aether_vnext.schema import build_metadata
 from aether_vnext.playbook_exits import exit_rule
 from aether_vnext.playbooks import (
@@ -1099,6 +1105,7 @@ class VNextStore:
         *,
         evidence: ProfitabilityEvidence,
         review_card: ReviewCard,
+        gate_input: ReviewGateInput,
     ) -> ReviewCard:
         """Persist immutable evidence plus Review's forward evidence-state decision.
 
@@ -1126,6 +1133,39 @@ class VNextStore:
             raise ValueError("unknown Review evidence_state") from exc
         if str(evidence.verdict) != target_state.value:
             raise ValueError("evidence verdict must equal Review evidence_state")
+
+        if gate_input.evidence_id != evidence.evidence_id:
+            raise ValueError("Review gate evidence_id mismatch")
+        if int(gate_input.n_closed) != int(evidence.n_trades):
+            raise ValueError("Review gate n_closed mismatch")
+        if not math.isclose(
+            float(gate_input.net_expectancy_after_costs),
+            float(evidence.net_expectancy_usd),
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        ):
+            raise ValueError("Review gate expectancy mismatch")
+        if not math.isclose(
+            float(gate_input.profit_factor),
+            float(evidence.profit_factor),
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        ):
+            raise ValueError("Review gate profit_factor mismatch")
+        if not math.isclose(
+            float(gate_input.stop_rate),
+            float(evidence.stop_rate),
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        ):
+            raise ValueError("Review gate stop_rate mismatch")
+        if len(gate_input.fold_expectancy_after_plus25_cost) != len(
+            evidence.oos_windows
+        ):
+            raise ValueError("Review gate fold count mismatch")
+
+        assessment = assess_review_gates(gate_input)
+        validate_review_verdict(assessment, target_state)
 
         spec = playbook(evidence.playbook_id)
         if spec.version != evidence.playbook_version:
