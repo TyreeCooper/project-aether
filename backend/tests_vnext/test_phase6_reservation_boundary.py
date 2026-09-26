@@ -28,7 +28,7 @@ def test_checked_admission_is_the_only_public_open_reservation_entrypoint() -> N
         name
         for name in dir(VNextStore)
         if "reserve" in name.lower()
-        and "order_intent" in name.lower()
+        and "intent" in name.lower()
         and not name.startswith("_")
     ]
     assert public == ["reserve_risk_checked_open_intent"]
