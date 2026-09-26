@@ -360,21 +360,22 @@ def test_phase5_execution_reservation_columns_are_in_current_schema() -> None:
     assert "fill_market_observation_id" not in columns
 
 
-def test_runtime_schema_facade_is_pinned_to_revision_0011() -> None:
+def test_runtime_schema_facade_is_pinned_to_revision_0012() -> None:
     backend = Path(__file__).resolve().parents[1]
     facade = (backend / "aether_vnext" / "schema.py").read_text(encoding="utf-8")
-    assert "schema_v0011" in facade
+    assert "schema_v0012" in facade
     migration = (
         backend
         / "alembic"
         / "versions"
-        / "0011_aether_vnext_atomic_risk_admission.py"
+        / "0012_aether_vnext_setup_playbook_lineage.py"
     ).read_text(encoding="utf-8")
-    assert 'revision: str = "0011"' in migration
-    assert 'down_revision: Union[str, None] = "0010"' in migration
-    assert "risk_admission_guard" in migration
-    assert "risk_admission_reservations" in migration
-    assert "ON CONFLICT (scope_key) DO NOTHING" in migration
+    assert 'revision: str = "0012"' in migration
+    assert 'down_revision: Union[str, None] = "0011"' in migration
+    assert "playbook_id" in migration
+    assert "trigger_bar_close_exchange_ts" in migration
+    assert "uq_setup_playbook_closed_bar_once" in migration
+    assert "trg_setup_playbook_identity_immutable" in migration
 
 
 def test_phase6_atomic_risk_admission_schema_is_explicit() -> None:

@@ -22,6 +22,8 @@ from aether_vnext.domain import (
     OrderIntent,
     OrderIntentState,
     QualityState,
+    Setup,
+    SetupState,
 )
 from aether_vnext.equity import (
     FirmEquityProjection,
@@ -44,6 +46,12 @@ from aether_vnext.risk import (
 )
 from aether_vnext.reason_codes import ReasonCode
 from aether_vnext.schema import build_metadata
+from aether_vnext.playbook_exits import exit_rule
+from aether_vnext.playbooks import (
+    asset_risk_hitches,
+    cluster_for_asset,
+    playbook,
+)
 from aether_vnext.seed_truth import ASSET_BROKER_ACCOUNT
 
 
@@ -332,6 +340,198 @@ class VNextStore:
                 calendar_state=observation.calendar_state.value,
                 data_version=observation.data_version,
             )
+        )
+
+    def record_watch_setup(
+        self,
+        conn: Connection,
+        setup: Setup,
+    ) -> None:
+        """Persist one source-bound Scout WATCH claim and its forensic lineage.
+
+        This is insert-only. The database unique key enforces one evaluation for
+        one playbook/asset/horizon/side on one completed trigger bar.
+        """
+        if setup.state is not SetupState.WATCH:
+            raise ValueError("Scout persistence accepts WATCH setups only")
+        if setup.trigger_bar_close_exchange_ts is None:
+            raise ValueError("trigger_bar_close_exchange_ts is required")
+        if setup.trigger_bar_close_exchange_ts.tzinfo is None:
+            raise ValueError("trigger_bar_close_exchange_ts must be timezone-aware")
+
+        lineage = setup.lineage
+        if not lineage.firm_event_id:
+            raise ValueError("firm_event_id is required")
+        if lineage.setup_id != setup.setup_id:
+            raise ValueError("lineage setup_id mismatch")
+        if not lineage.playbook_id or not lineage.playbook_version:
+            raise ValueError("playbook identity is required")
+        if not lineage.risk_cluster_id:
+            raise ValueError("risk_cluster_id is required")
+
+        spec = playbook(lineage.playbook_id)
+        if not spec.scout_definition_enabled:
+            raise ValueError("playbook is not operationally Scout-enabled")
+        if spec.version != lineage.playbook_version:
+            raise ValueError("playbook_version mismatch")
+        if lineage.asset_id not in spec.allowed_assets:
+            raise ValueError("asset violates playbook contract")
+        if setup.side not in spec.allowed_sides:
+            raise ValueError("side violates playbook contract")
+        if setup.horizon != spec.horizon:
+            raise ValueError("horizon violates playbook contract")
+
+        expected_route = f"{lineage.asset_id}:{setup.horizon}:{setup.side}"
+        if lineage.route_id != expected_route:
+            raise ValueError("canonical route_id mismatch")
+
+        expected_cluster = cluster_for_asset(lineage.asset_id)
+        if lineage.risk_cluster_id != expected_cluster:
+            raise ValueError("canonical risk_cluster_id mismatch")
+
+        expected_hitches = {
+            str(asset_id): float(fraction)
+            for asset_id, fraction in asset_risk_hitches(
+                lineage.playbook_id
+            ).items()
+        }
+        actual_hitches = {
+            str(asset_id): float(fraction)
+            for asset_id, fraction in lineage.asset_risk_hitches.items()
+        }
+        if actual_hitches != expected_hitches:
+            raise ValueError("canonical asset_risk_hitches mismatch")
+
+        bound_exit = exit_rule(lineage.playbook_id)
+        if setup.exit_contract_complete is None:
+            raise ValueError("exit_contract_complete is required")
+        if bool(setup.exit_contract_complete) != bound_exit.source_complete:
+            raise ValueError("exit-contract completeness mismatch")
+        if setup.exit_contract_gap != bound_exit.unresolved_reason:
+            raise ValueError("exit-contract gap mismatch")
+
+        observations = self.tables["market_observations"]
+        observation = conn.execute(
+            sa.select(observations).where(
+                observations.c.observation_id
+                == lineage.market_observation_id
+            )
+        ).mappings().first()
+        if observation is None:
+            raise KeyError(
+                f"unknown market observation: {lineage.market_observation_id}"
+            )
+        if str(observation["asset_id"]) != lineage.asset_id:
+            raise ValueError("market observation asset mismatch")
+
+        lineage_table = self.tables["decision_lineage"]
+        setup_table = self.tables["setups"]
+
+        conn.execute(
+            lineage_table.insert().values(
+                firm_event_id=lineage.firm_event_id,
+                setup_id=setup.setup_id,
+                ticket_id=None,
+                order_intent_id=None,
+                trade_id=None,
+                asset_id=lineage.asset_id,
+                route_id=lineage.route_id,
+                playbook_id=lineage.playbook_id,
+                playbook_version=lineage.playbook_version,
+                risk_cluster_id=lineage.risk_cluster_id,
+                asset_risk_hitches=actual_hitches,
+                policy_version=lineage.policy_version,
+                configuration_hash=lineage.configuration_hash,
+                market_observation_id=lineage.market_observation_id,
+                first_killed_by=None,
+                first_kill_reason=None,
+                created_at_utc=lineage.created_at_utc,
+                row_version=1,
+            )
+        )
+        conn.execute(
+            setup_table.insert().values(
+                setup_id=setup.setup_id,
+                firm_event_id=lineage.firm_event_id,
+                asset_id=lineage.asset_id,
+                route_id=lineage.route_id,
+                state=setup.state.value,
+                side=setup.side,
+                horizon=setup.horizon,
+                playbook_id=lineage.playbook_id,
+                playbook_version=lineage.playbook_version,
+                risk_cluster_id=lineage.risk_cluster_id,
+                asset_risk_hitches=actual_hitches,
+                trigger_bar_close_exchange_ts=(
+                    setup.trigger_bar_close_exchange_ts
+                ),
+                exit_contract_complete=setup.exit_contract_complete,
+                exit_contract_gap=setup.exit_contract_gap,
+                invalidation=setup.invalidation,
+                quality=setup.quality,
+                intel_pack=dict(setup.intel_pack),
+                policy_version=lineage.policy_version,
+                configuration_hash=lineage.configuration_hash,
+                market_observation_id=lineage.market_observation_id,
+                first_killed_by=None,
+                first_kill_reason=None,
+                created_at_utc=lineage.created_at_utc,
+            )
+        )
+
+    def load_setup(
+        self,
+        conn: Connection,
+        *,
+        setup_id: str,
+    ) -> Setup | None:
+        setups = self.tables["setups"]
+        lineage_table = self.tables["decision_lineage"]
+        row = conn.execute(
+            sa.select(setups, lineage_table)
+            .join(
+                lineage_table,
+                lineage_table.c.firm_event_id
+                == setups.c.firm_event_id,
+            )
+            .where(setups.c.setup_id == setup_id)
+        ).mappings().first()
+        if row is None:
+            return None
+        return Setup(
+            setup_id=str(row["setup_id"]),
+            lineage=Lineage(
+                asset_id=str(row["asset_id"]),
+                route_id=str(row["route_id"]),
+                policy_version=str(row["policy_version"]),
+                configuration_hash=str(row["configuration_hash"]),
+                market_observation_id=str(row["market_observation_id"]),
+                created_at_utc=_stored_utc(row["created_at_utc"]),
+                firm_event_id=str(row["firm_event_id"]),
+                setup_id=str(row["setup_id"]),
+                playbook_id=str(row["playbook_id"]),
+                playbook_version=str(row["playbook_version"]),
+                risk_cluster_id=str(row["risk_cluster_id"]),
+                asset_risk_hitches={
+                    str(k): float(v)
+                    for k, v in dict(
+                        row["asset_risk_hitches"] or {}
+                    ).items()
+                },
+            ),
+            state=SetupState(str(row["state"])),
+            side=str(row["side"]),
+            horizon=str(row["horizon"]),
+            invalidation=row["invalidation"],
+            quality=row["quality"],
+            intel_pack=dict(row["intel_pack"] or {}),
+            trigger_bar_close_exchange_ts=_stored_utc(
+                row["trigger_bar_close_exchange_ts"]
+            ),
+            exit_contract_complete=bool(
+                row["exit_contract_complete"]
+            ),
+            exit_contract_gap=row["exit_contract_gap"],
         )
 
     def load_order_intent(

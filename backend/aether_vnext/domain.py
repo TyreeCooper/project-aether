@@ -72,6 +72,10 @@ class Lineage:
     trade_id: str | None = None
     first_killed_by: str | None = None
     first_kill_reason: str | None = None
+    playbook_id: str | None = None
+    playbook_version: str | None = None
+    risk_cluster_id: str | None = None
+    asset_risk_hitches: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +110,9 @@ class Setup:
     invalidation: float | None
     quality: float | None
     intel_pack: dict[str, Any] = field(default_factory=dict)
+    trigger_bar_close_exchange_ts: datetime | None = None
+    exit_contract_complete: bool | None = None
+    exit_contract_gap: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
