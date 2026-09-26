@@ -1677,3 +1677,186 @@ def test_margin_reservation_cannot_exist_without_matching_cash_reserve() -> None
                 event_id="evt-mes-invalid",
                 actor="test",
             )
+
+
+def test_futures_open_to_flat_releases_cash_and_margin_and_books_net() -> None:
+    engine, store = _store_fixture()
+
+    with engine.begin() as conn:
+        reserved = store.reserve_order_intent(
+            conn,
+            order_intent_id="intent-mes-open",
+            ticket_id="ticket-mes",
+            firm_event_id=None,
+            asset_id="mes",
+            route_id="mes:intraday:long",
+            broker_account_id="ninja_paper",
+            broker="NinjaTrader",
+            venue="NinjaTrader",
+            symbol="MESZ26",
+            side="long",
+            qty=1.0,
+            order_type="market",
+            reference_price=6000.0,
+            expected_fill=6003.0,
+            idempotency_key="idem-mes-open",
+            signal_key="signal-mes-1",
+            position_key="mes:intraday",
+            reserve_cash_usd=1201.0,
+            reserve_margin_usd=1200.0,
+            ready_spread_bps=1.0,
+            hard_stop_price=5900.0,
+            exit_plan_id="exit-plan-mes",
+            submit_timeout_at=None,
+            policy_version="policy-v1",
+            configuration_hash="cfg",
+            market_observation_id="obs-ready-mes",
+            created_at_utc=T0,
+            event_id="evt-mes-open-reserve",
+            actor="test",
+        )
+        assert reserved["state"] == "RESERVED"
+        store.mark_order_intent_submitted(
+            conn,
+            order_intent_id="intent-mes-open",
+            submitted_at_utc=T0,
+            acknowledged_at_utc=T0,
+            submit_timeout_at=None,
+            event_id="evt-mes-open-submit",
+            actor="paper-adapter",
+        )
+        opened = store.finalize_filled_open(
+            conn,
+            order_intent_id="intent-mes-open",
+            trade_id="trade-mes",
+            setup_id="setup-ticket-mes",
+            exit_plan_id="exit-plan-mes",
+            fill_market_observation_id="obs-fill-mes",
+            filled_at_utc=T0 + timedelta(milliseconds=250),
+            filled_qty=1.0,
+            avg_fill_price=6003.0,
+            slippage_usd=1.0,
+            slippage_bps=5.0,
+            initial_stop_risk_usd=100.0,
+            management_telemetry={},
+            event_id="evt-mes-open-final",
+            actor="paper-adapter",
+        )
+        assert opened["state"] == "FILLED"
+
+        ledger = {
+            row["broker_account_id"]: row
+            for row in store.ledger_rows(conn)
+        }["ninja_paper"]
+        assert ledger["cash_available_usd"] == pytest.approx(799.0)
+        assert ledger["cash_reserved_usd"] == pytest.approx(1201.0)
+        assert ledger["margin_used_usd"] == pytest.approx(1200.0)
+        assert ledger["margin_available_usd"] == pytest.approx(800.0)
+
+        store.request_flatten(
+            conn,
+            trade_id="trade-mes",
+            exit_reason="structure",
+            market_observation_id="obs-mes-exit-request",
+            at_utc=T0 + timedelta(seconds=1),
+            event_id="evt-mes-flat-request",
+        )
+        store.reserve_flatten_intent(
+            conn,
+            order_intent_id="intent-mes-close",
+            trade_id="trade-mes",
+            idempotency_key="idem-mes-close",
+            exit_reason="structure",
+            market_observation_id="obs-mes-exit-request",
+            reference_price=6008.0,
+            ready_spread_bps=1.0,
+            created_at_utc=T0 + timedelta(seconds=1),
+            event_id="evt-mes-flat-reserve",
+        )
+        store.mark_order_intent_submitted(
+            conn,
+            order_intent_id="intent-mes-close",
+            submitted_at_utc=T0 + timedelta(seconds=1),
+            acknowledged_at_utc=T0 + timedelta(seconds=1),
+            submit_timeout_at=None,
+            event_id="evt-mes-flat-submit",
+            actor="paper-adapter",
+        )
+        close_intent = store.load_order_intent(
+            conn,
+            order_intent_id="intent-mes-close",
+        )
+        assert close_intent is not None
+
+    mes_obs = replace(
+        _obs(
+            bid=6008.0,
+            ask=6008.25,
+            spread_bps=0.42,
+        ),
+        observation_id="obs-mes-exit-fill",
+        asset_id="mes",
+        venue="NinjaTrader",
+        source="ninja-paper",
+        mark=6008.125,
+    )
+    venue_fill = fill_submitted_paper_flatten_intent(
+        close_intent,
+        observation=mes_obs,
+        registry_row=SEED_REGISTRY["mes"],
+        max_age_ms=1_000,
+        at_utc=T0 + timedelta(seconds=1, milliseconds=250),
+    )
+    assert venue_fill.intent.state is OrderIntentState.FILLED
+
+    exit_price = float(venue_fill.intent.avg_fill_price)
+    gross = gross_pnl_usd(
+        SEED_REGISTRY["mes"],
+        position_side="long",
+        qty=1.0,
+        entry_price=6003.0,
+        exit_price=exit_price,
+    )
+    fees = 1.0
+    net = gross - fees
+
+    with engine.begin() as conn:
+        flat = store.finalize_filled_flat(
+            conn,
+            close_order_intent_id="intent-mes-close",
+            fill_market_observation_id="obs-mes-exit-fill",
+            filled_at_utc=venue_fill.intent.filled_at,
+            filled_qty=venue_fill.intent.filled_qty,
+            exit_price=exit_price,
+            gross_pnl_usd=gross,
+            net_pnl_usd=net,
+            total_cost_usd=fees + float(venue_fill.intent.slippage_usd or 0.0),
+            fees_usd=fees,
+            slippage_usd=float(venue_fill.intent.slippage_usd or 0.0),
+            slippage_bps=float(venue_fill.intent.slippage_bps or 0.0),
+            mfe_usd=30.0,
+            mae_usd=-10.0,
+            capture_efficiency=0.50,
+            event_id="evt-mes-flat-final",
+        )
+        assert flat["state"] == "FLAT"
+
+        ledger = {
+            row["broker_account_id"]: row
+            for row in store.ledger_rows(conn)
+        }["ninja_paper"]
+        assert ledger["cash_reserved_usd"] == 0.0
+        assert ledger["margin_used_usd"] == 0.0
+        assert ledger["margin_available_usd"] == pytest.approx(2000.0)
+        assert ledger["cash_available_usd"] == pytest.approx(2000.0 + net)
+        assert ledger["realized_pnl_usd"] == pytest.approx(net)
+        assert conn.execute(
+            sa.select(sa.func.count()).select_from(
+                store.tables["active_positions"]
+            )
+        ).scalar_one() == 0
+        assert conn.execute(
+            sa.select(sa.func.count()).select_from(
+                store.tables["signal_consumptions"]
+            )
+        ).scalar_one() == 1
