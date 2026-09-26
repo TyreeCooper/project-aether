@@ -21,6 +21,15 @@ from aether_vnext.domain import (
     MarketObservation,
     OrderIntent,
     OrderIntentState,
+    QualityState,
+)
+from aether_vnext.equity import (
+    FirmEquityProjection,
+    SleeveEquityProjection,
+    conservative_mark_price,
+    conservative_unrealized_pnl_usd,
+    firm_equity_projection,
+    inventory_market_value_usd,
 )
 from aether_vnext.registry import ProductType, registry_row
 from aether_vnext.reservations import reservation_requirement
@@ -1987,6 +1996,179 @@ class VNextStore:
             sa.select(table).order_by(table.c.broker_account_id)
         ).mappings()
         return [dict(row) for row in rows]
+
+    def project_firm_equity(
+        self,
+        conn: Connection,
+        *,
+        observations: Mapping[str, MarketObservation],
+    ) -> FirmEquityProjection:
+        """Project conservative marked Firm equity from the durable book.
+
+        Cash-purchase inventory is marked at bid and its backing opening reserve
+        is removed once from cash_reserved before inventory MTM is added. Margin
+        positions keep reserved cash as capital and contribute conservative
+        unrealized P&L. Any OPEN asset without a HEALTHY current observation
+        makes the projection unavailable rather than guessed.
+        """
+        ledgers = self.tables["broker_account_ledgers"]
+        inventory = self.tables["sleeve_inventory"]
+        active_positions = self.tables["active_positions"]
+        trades = self.tables["open_trades"]
+        intents = self.tables["order_intents"]
+
+        ledger_rows = {
+            str(row["broker_account_id"]): row
+            for row in conn.execute(
+                sa.select(ledgers).order_by(ledgers.c.broker_account_id)
+            ).mappings()
+        }
+        if not ledger_rows:
+            raise RuntimeError("no broker sleeve ledgers are provisioned")
+
+        inventory_backing: dict[str, float] = {
+            broker_id: 0.0 for broker_id in ledger_rows
+        }
+        inventory_mtm: dict[str, float] = {
+            broker_id: 0.0 for broker_id in ledger_rows
+        }
+        non_inventory_unrealized: dict[str, float] = {
+            broker_id: 0.0 for broker_id in ledger_rows
+        }
+        expected_inventory_qty: dict[tuple[str, str], float] = {}
+
+        def require_observation(asset_id: str) -> MarketObservation:
+            observation = observations.get(asset_id)
+            if observation is None:
+                raise ValueError(
+                    f"missing current observation for OPEN asset: {asset_id}"
+                )
+            if observation.asset_id != asset_id:
+                raise ValueError(
+                    f"observation asset mismatch: expected {asset_id}, "
+                    f"got {observation.asset_id}"
+                )
+            if observation.quality_state is not QualityState.HEALTHY:
+                raise ValueError(
+                    f"non-healthy observation for OPEN asset: {asset_id}"
+                )
+            if observation.bid is None or observation.ask is None:
+                raise ValueError(
+                    f"two-sided quote required for OPEN asset: {asset_id}"
+                )
+            # Validates positive/non-crossed book before any mark is accepted.
+            conservative_mark_price(
+                side="long",
+                bid=float(observation.bid),
+                ask=float(observation.ask),
+            )
+            return observation
+
+        active_rows = conn.execute(
+            sa.select(active_positions).order_by(active_positions.c.position_key)
+        ).mappings().all()
+
+        for active in active_rows:
+            trade = conn.execute(
+                sa.select(trades).where(
+                    trades.c.trade_id == active["trade_id"]
+                )
+            ).mappings().one()
+            opening_intent = conn.execute(
+                sa.select(intents).where(
+                    intents.c.order_intent_id == trade["order_intent_id"]
+                )
+            ).mappings().one()
+
+            broker_id = str(opening_intent["broker_account_id"])
+            if broker_id not in ledger_rows:
+                raise RuntimeError(
+                    f"OPEN trade references unknown broker sleeve: {broker_id}"
+                )
+
+            asset_id = str(trade["asset_id"])
+            observation = require_observation(asset_id)
+
+            if _uses_cash_inventory(asset_id, str(trade["side"])):
+                inventory_backing[broker_id] += float(
+                    opening_intent["reserved_cash_usd"]
+                )
+                key = (broker_id, asset_id)
+                expected_inventory_qty[key] = (
+                    expected_inventory_qty.get(key, 0.0)
+                    + float(trade["quantity"])
+                )
+                continue
+
+            non_inventory_unrealized[broker_id] += (
+                conservative_unrealized_pnl_usd(
+                    registry_row(asset_id),
+                    side=str(trade["side"]),
+                    quantity=float(trade["quantity"]),
+                    avg_entry_price=float(trade["avg_entry_price"]),
+                    bid=float(observation.bid),
+                    ask=float(observation.ask),
+                )
+            )
+
+        inventory_rows = conn.execute(
+            sa.select(inventory).order_by(
+                inventory.c.broker_account_id,
+                inventory.c.asset_id,
+            )
+        ).mappings().all()
+        seen_inventory: set[tuple[str, str]] = set()
+
+        for row in inventory_rows:
+            broker_id = str(row["broker_account_id"])
+            asset_id = str(row["asset_id"])
+            key = (broker_id, asset_id)
+            expected_qty = expected_inventory_qty.get(key)
+            if expected_qty is None:
+                raise RuntimeError(
+                    f"orphan sleeve inventory without active cash trade: "
+                    f"{broker_id}/{asset_id}"
+                )
+            actual_qty = float(row["inventory_qty"])
+            if abs(actual_qty - expected_qty) > 1e-9:
+                raise RuntimeError(
+                    f"cash inventory quantity drift for {broker_id}/{asset_id}"
+                )
+
+            observation = require_observation(asset_id)
+            inventory_mtm[broker_id] += inventory_market_value_usd(
+                quantity=actual_qty,
+                conservative_bid=float(observation.bid),
+            )
+            seen_inventory.add(key)
+
+        missing_inventory = set(expected_inventory_qty) - seen_inventory
+        if missing_inventory:
+            broker_id, asset_id = sorted(missing_inventory)[0]
+            raise RuntimeError(
+                f"active cash trade missing sleeve inventory: "
+                f"{broker_id}/{asset_id}"
+            )
+
+        projections: list[SleeveEquityProjection] = []
+        for broker_id, ledger in sorted(ledger_rows.items()):
+            projections.append(
+                sleeve_equity_projection(
+                    broker_account_id=broker_id,
+                    cash_available_usd=float(ledger["cash_available_usd"]),
+                    cash_reserved_usd=float(ledger["cash_reserved_usd"]),
+                    cash_inventory_backing_reserve_usd=inventory_backing[
+                        broker_id
+                    ],
+                    inventory_mtm_usd=inventory_mtm[broker_id],
+                    non_inventory_unrealized_pnl_usd=(
+                        non_inventory_unrealized[broker_id]
+                    ),
+                    fees_accrued_usd=float(ledger["fees_accrued_usd"]),
+                )
+            )
+
+        return firm_equity_projection(projections)
 
     def event_rows(self, conn: Connection) -> list[dict[str, Any]]:
         table = self.tables["event_ledger"]
