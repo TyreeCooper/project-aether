@@ -239,8 +239,6 @@ class BrokerAccountLedger:
     cash_reserved_usd: float
     margin_used_usd: float
     margin_available_usd: float
-    inventory_qty: float
-    inventory_avg: float | None
     realized_pnl_usd: float
     unrealized_pnl_usd: float
     fees_accrued_usd: float
@@ -248,6 +246,16 @@ class BrokerAccountLedger:
     settled_cash_usd: float | None
     last_reconciled_at: datetime | None
     reconciliation_state: str
+
+
+@dataclass(frozen=True, slots=True)
+class SleeveInventoryRecord:
+    broker_account_id: str
+    asset_id: str
+    inventory_qty: float
+    inventory_avg: float
+    updated_at_utc: datetime
+    row_version: int = 1
 
 
 @dataclass(frozen=True, slots=True)
