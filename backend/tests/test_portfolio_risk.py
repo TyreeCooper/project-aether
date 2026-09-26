@@ -187,6 +187,7 @@ def test_aggregate_open_risk_ceiling_rejects_fifth_full_risk_candidate(monkeypat
                 ),
                 "routing_horizon": "swing",
             },
+            test_allow_sleeve_overflow=True,
         )
         assert opened["ok"] is True
 
@@ -308,6 +309,7 @@ def test_cluster_exposure_limit_rejects_otherwise_valid_setup(monkeypatch):
                 "cluster": "us_equity_beta",
                 "routing_horizon": "swing",
             },
+            test_allow_sleeve_overflow=True,
         )
         assert opened["ok"] is True
 
