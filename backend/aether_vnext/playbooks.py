@@ -48,6 +48,60 @@ _INTERVALS: Final = MappingProxyType(
 )
 
 
+SEED_ASSET_CLUSTERS: Final = MappingProxyType(
+    {
+        "btc": "crypto",
+        "eth": "crypto",
+        "eurusd": "fx",
+        "usdjpy": "fx",
+        "mes": "us_beta",
+        "mnq": "us_beta",
+        "mgc": "metal",
+        "mcl": "energy",
+        "us10y": "rates",
+        "nvda": "us_beta",
+        "tsla": "us_beta",
+        "pltr": "us_beta",
+    }
+)
+
+# Source-bound cross-asset Risk attribution. This is not directional netting.
+# ETH rider definitions consume their own ETH asset risk and additionally
+# attribute 50% of initial stop-risk to the BTC asset cap.
+_PLAYBOOK_ASSET_RISK_HITCHES: Final = {
+    "pb_eth_rider_v1_2": MappingProxyType({"btc": 0.50}),
+    "pb_eth_failed_break_v1_3": MappingProxyType({"btc": 0.50}),
+}
+PLAYBOOK_ASSET_RISK_HITCHES: Final = MappingProxyType(
+    _PLAYBOOK_ASSET_RISK_HITCHES
+)
+
+
+def cluster_for_asset(asset_id: str) -> str:
+    try:
+        return str(SEED_ASSET_CLUSTERS[str(asset_id)])
+    except KeyError as exc:
+        raise KeyError(f"unknown canonical cluster for asset: {asset_id}") from exc
+
+
+def cluster_for_playbook(playbook_id: str) -> str:
+    spec = playbook(playbook_id)
+    clusters = {cluster_for_asset(asset) for asset in spec.allowed_assets}
+    if len(clusters) != 1:
+        raise RuntimeError(
+            f"playbook spans multiple canonical clusters: {playbook_id}"
+        )
+    return next(iter(clusters))
+
+
+def asset_risk_hitches(playbook_id: str) -> MappingProxyType:
+    playbook(playbook_id)
+    mapping = PLAYBOOK_ASSET_RISK_HITCHES.get(str(playbook_id))
+    if mapping is None:
+        return MappingProxyType({})
+    return mapping
+
+
 @dataclass(frozen=True, slots=True)
 class PlaybookSpec:
     playbook_id: str
