@@ -9,6 +9,7 @@ import pytest
 from aether_vnext.domain import (
     BrokerAccountLedger,
     EventLedgerRecord,
+    SleeveInventoryRecord,
     MarketObservation,
     OrderIntent,
     PolicySnapshot,
@@ -93,16 +94,14 @@ def test_order_intent_contains_live_shaped_execution_fields() -> None:
     } <= names
 
 
-def test_broker_account_ledger_contains_v421_sleeve_fields() -> None:
-    names = {f.name for f in fields(BrokerAccountLedger)}
+def test_broker_account_ledger_and_inventory_cover_v421_sleeve_fields() -> None:
+    ledger_names = {f.name for f in fields(BrokerAccountLedger)}
     assert {
         "broker_account_id",
         "cash_available_usd",
         "cash_reserved_usd",
         "margin_used_usd",
         "margin_available_usd",
-        "inventory_qty",
-        "inventory_avg",
         "realized_pnl_usd",
         "unrealized_pnl_usd",
         "fees_accrued_usd",
@@ -110,7 +109,19 @@ def test_broker_account_ledger_contains_v421_sleeve_fields() -> None:
         "settled_cash_usd",
         "last_reconciled_at",
         "reconciliation_state",
-    } <= names
+    } <= ledger_names
+    assert "inventory_qty" not in ledger_names
+    assert "inventory_avg" not in ledger_names
+
+    inventory_names = {f.name for f in fields(SleeveInventoryRecord)}
+    assert {
+        "broker_account_id",
+        "asset_id",
+        "inventory_qty",
+        "inventory_avg",
+        "updated_at_utc",
+        "row_version",
+    } <= inventory_names
 
 
 def test_policy_snapshot_and_event_ledger_keep_configuration_lineage() -> None:
