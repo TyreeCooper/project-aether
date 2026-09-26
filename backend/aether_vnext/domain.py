@@ -144,6 +144,18 @@ class OrderIntent:
     slippage_usd: float | None
     slippage_bps: float | None
     idempotency_key: str
+    broker_account_id: str | None = None
+    intent_kind: str = "OPEN"
+    position_key: str | None = None
+    signal_key: str | None = None
+    reserved_cash_usd: float = 0.0
+    reserved_margin_usd: float = 0.0
+    ready_spread_bps: float | None = None
+    hard_stop_price: float | None = None
+    submit_timeout_at: datetime | None = None
+    fill_market_observation_id: str | None = None
+    trade_id: str | None = None
+    row_version: int = 1
 
 
 @dataclass(frozen=True, slots=True)
