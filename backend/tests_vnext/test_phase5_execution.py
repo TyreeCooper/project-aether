@@ -548,3 +548,181 @@ def test_margin_reservation_and_release_use_same_broker_ledger() -> None:
         }["ninja_paper"]
         assert ledger["margin_used_usd"] == 0.0
         assert ledger["margin_available_usd"] == pytest.approx(2000.0)
+
+
+def _submit_reserved_btc(conn, store: VNextStore) -> None:
+    out = _reserve_btc(conn, store)
+    assert out["ok"] is True
+    submitted = store.mark_order_intent_submitted(
+        conn,
+        order_intent_id="intent-reserve-1",
+        submitted_at_utc=T0,
+        acknowledged_at_utc=T0,
+        submit_timeout_at=None,
+        event_id="evt-submit-btc",
+        actor="paper-adapter",
+    )
+    assert submitted["state"] == "SUBMITTED"
+
+
+def _finalize_btc(conn, store: VNextStore, *, trade_id: str = "trade-1", qty: float = 0.01):
+    return store.finalize_filled_open(
+        conn,
+        order_intent_id="intent-reserve-1",
+        trade_id=trade_id,
+        setup_id="setup-1",
+        exit_plan_id="exit-plan-1",
+        fill_market_observation_id="obs-fill",
+        filled_at_utc=T0 + timedelta(milliseconds=250),
+        filled_qty=qty,
+        avg_fill_price=100_060.005,
+        slippage_usd=0.5,
+        slippage_bps=5.0,
+        initial_stop_risk_usd=50.0,
+        exit_plan_version="v1",
+        exit_plan_payload={"hard_stop_price": 95_000.0},
+        management_telemetry={},
+        event_id=f"evt-fill-{trade_id}",
+        actor="paper-adapter",
+    )
+
+
+def test_successful_fill_atomically_opens_consumes_signal_and_retains_reserve() -> None:
+    engine, store = _store_fixture()
+    with engine.begin() as conn:
+        _submit_reserved_btc(conn, store)
+
+    with engine.begin() as conn:
+        result = _finalize_btc(conn, store)
+        assert result["ok"] is True
+        assert result["state"] == "FILLED"
+
+        intents = store.tables["order_intents"]
+        intent = conn.execute(
+            sa.select(intents).where(
+                intents.c.order_intent_id == "intent-reserve-1"
+            )
+        ).mappings().one()
+        assert intent["state"] == "FILLED"
+        assert intent["trade_id"] == "trade-1"
+        assert intent["filled_qty"] == pytest.approx(0.01)
+        assert intent["fill_market_observation_id"] == "obs-fill"
+
+        open_trades = conn.execute(
+            sa.select(store.tables["open_trades"])
+        ).mappings().all()
+        assert len(open_trades) == 1
+        assert open_trades[0]["trade_id"] == "trade-1"
+        assert open_trades[0]["exit_plan_id"] == "exit-plan-1"
+
+        active = conn.execute(
+            sa.select(store.tables["active_positions"])
+        ).mappings().one()
+        assert active["position_key"] == "btc:daily_swing"
+        assert active["trade_id"] == "trade-1"
+
+        consumed = conn.execute(
+            sa.select(store.tables["signal_consumptions"])
+        ).mappings().one()
+        assert consumed["signal_key"] == "signal-1"
+        assert consumed["trade_id"] == "trade-1"
+
+        ledger = {
+            row["broker_account_id"]: row
+            for row in store.ledger_rows(conn)
+        }["kraken_paper"]
+        # v4.2.1: reservation remains locked while OPEN; it is released on FLAT.
+        assert ledger["cash_available_usd"] == pytest.approx(3900.0)
+        assert ledger["cash_reserved_usd"] == pytest.approx(100.0)
+
+
+def test_duplicate_fill_event_is_noop_and_does_not_duplicate_exposure() -> None:
+    engine, store = _store_fixture()
+    with engine.begin() as conn:
+        _submit_reserved_btc(conn, store)
+        first = _finalize_btc(conn, store)
+        second = _finalize_btc(
+            conn,
+            store,
+            trade_id="trade-should-not-exist",
+        )
+        assert first["duplicate"] is False
+        assert second["duplicate"] is True
+        assert second["trade_id"] == "trade-1"
+
+        assert conn.execute(
+            sa.select(sa.func.count()).select_from(store.tables["open_trades"])
+        ).scalar_one() == 1
+        assert conn.execute(
+            sa.select(sa.func.count()).select_from(store.tables["active_positions"])
+        ).scalar_one() == 1
+        assert conn.execute(
+            sa.select(sa.func.count()).select_from(store.tables["signal_consumptions"])
+        ).scalar_one() == 1
+
+
+def test_partial_fill_is_refused_without_consuming_signal_or_opening() -> None:
+    engine, store = _store_fixture()
+    with engine.begin() as conn:
+        _submit_reserved_btc(conn, store)
+        result = _finalize_btc(conn, store, qty=0.005)
+        assert result["ok"] is False
+        assert result["error"] == "partial_fill_disabled"
+        assert conn.execute(
+            sa.select(sa.func.count()).select_from(store.tables["open_trades"])
+        ).scalar_one() == 0
+        assert conn.execute(
+            sa.select(sa.func.count()).select_from(store.tables["signal_consumptions"])
+        ).scalar_one() == 0
+
+        ledger = {
+            row["broker_account_id"]: row
+            for row in store.ledger_rows(conn)
+        }["kraken_paper"]
+        assert ledger["cash_reserved_usd"] == pytest.approx(100.0)
+
+
+def test_reservation_timeout_is_durable_from_phase_a_not_submit_time() -> None:
+    engine, store = _store_fixture()
+    with engine.begin() as conn:
+        _reserve_btc(conn, store)
+        intents = store.tables["order_intents"]
+        row = conn.execute(
+            sa.select(intents).where(
+                intents.c.order_intent_id == "intent-reserve-1"
+            )
+        ).mappings().one()
+        assert row["submit_timeout_at"] == T0 + timedelta(seconds=15)
+
+    with engine.begin() as conn:
+        # Submit later; timeout remains anchored to reservation time.
+        store.mark_order_intent_submitted(
+            conn,
+            order_intent_id="intent-reserve-1",
+            submitted_at_utc=T0 + timedelta(seconds=5),
+            acknowledged_at_utc=T0 + timedelta(seconds=5),
+            submit_timeout_at=T0 + timedelta(seconds=20),
+            event_id="evt-late-submit",
+            actor="paper-adapter",
+        )
+        row = conn.execute(
+            sa.select(store.tables["order_intents"]).where(
+                store.tables["order_intents"].c.order_intent_id
+                == "intent-reserve-1"
+            )
+        ).mappings().one()
+        assert row["submit_timeout_at"] == T0 + timedelta(seconds=15)
+
+
+def test_reconciler_query_finds_only_expired_reserved_or_submitted_intents() -> None:
+    engine, store = _store_fixture()
+    with engine.begin() as conn:
+        _reserve_btc(conn, store)
+        assert store.stale_order_intent_ids(
+            conn,
+            at_utc=T0 + timedelta(seconds=15),
+        ) == ()
+        assert store.stale_order_intent_ids(
+            conn,
+            at_utc=T0 + timedelta(seconds=15, milliseconds=1),
+        ) == ("intent-reserve-1",)
