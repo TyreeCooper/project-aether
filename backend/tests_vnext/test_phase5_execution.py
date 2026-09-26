@@ -24,7 +24,9 @@ from aether_vnext.execution import (
     cancel_stale_paper_intent,
     entry_fill_price,
     exit_fill_price,
+    fill_submitted_paper_flatten_intent,
     fill_submitted_paper_intent,
+    gross_pnl_usd,
     paper_fill_due_at,
     phase_a_admission,
     stop_exit_fill_price,
@@ -1198,3 +1200,153 @@ def test_ready_to_reserved_to_submitted_to_filled_to_open_end_to_end() -> None:
         assert conn.execute(
             sa.select(sa.func.count()).select_from(store.tables["signal_consumptions"])
         ).scalar_one() == 1
+
+
+def _submitted_close_intent(
+    *,
+    side: str = "long",
+    exit_reason: str = "structure",
+    hard_stop_price: float | None = 95_000.0,
+) -> OrderIntent:
+    return replace(
+        _intent(
+            state=OrderIntentState.SUBMITTED,
+            side=side,
+            submitted_at=T0,
+            acknowledged_at=T0,
+        ),
+        order_intent_id="close-intent-1",
+        intent_kind="CLOSE",
+        exit_reason=exit_reason,
+        hard_stop_price=hard_stop_price,
+        position_key="btc:daily_swing",
+        signal_key="signal-1",
+        trade_id="trade-1",
+    )
+
+
+def test_flatten_fill_uses_conservative_exit_side_and_ignores_wide_spread_gate() -> None:
+    intent = _submitted_close_intent()
+    obs = _obs(
+        bid=99_000.0,
+        ask=101_000.0,
+        spread_bps=200.0,
+    )
+    transition = fill_submitted_paper_flatten_intent(
+        intent,
+        observation=obs,
+        registry_row=SEED_REGISTRY["btc"],
+        max_age_ms=1_000,
+        at_utc=T0 + timedelta(milliseconds=250),
+    )
+    assert transition.applied is True
+    assert transition.intent.state is OrderIntentState.FILLED
+    assert transition.intent.avg_fill_price == pytest.approx(
+        99_000.0 * 0.9995
+    )
+    assert transition.intent.filled_qty == intent.qty
+
+
+def test_hard_stop_flatten_fills_through_gap_not_at_perfect_stop() -> None:
+    intent = _submitted_close_intent(
+        exit_reason="hard_stop",
+        hard_stop_price=95_000.0,
+    )
+    obs = _obs(
+        bid=90_000.0,
+        ask=90_020.0,
+        spread_bps=2.0,
+    )
+    transition = fill_submitted_paper_flatten_intent(
+        intent,
+        observation=obs,
+        registry_row=SEED_REGISTRY["btc"],
+        max_age_ms=1_000,
+        at_utc=T0 + timedelta(milliseconds=250),
+    )
+    assert transition.intent.state is OrderIntentState.FILLED
+    assert transition.intent.avg_fill_price == pytest.approx(
+        90_000.0 * 0.9995
+    )
+    assert transition.intent.avg_fill_price < 95_000.0
+
+
+def test_flatten_rejects_stale_observation_but_does_not_consume_position() -> None:
+    intent = _submitted_close_intent()
+    transition = fill_submitted_paper_flatten_intent(
+        intent,
+        observation=_obs(quality=QualityState.STALE),
+        registry_row=SEED_REGISTRY["btc"],
+        max_age_ms=1_000,
+        at_utc=T0 + timedelta(milliseconds=250),
+    )
+    assert transition.intent.state is OrderIntentState.REJECTED
+    assert transition.intent.reject_code == "market_stale"
+
+
+def test_flatten_requires_close_intent_kind() -> None:
+    entry_intent = replace(
+        _intent(
+            state=OrderIntentState.SUBMITTED,
+            submitted_at=T0,
+            acknowledged_at=T0,
+        ),
+        intent_kind="OPEN",
+    )
+    transition = fill_submitted_paper_flatten_intent(
+        entry_intent,
+        observation=_obs(),
+        registry_row=SEED_REGISTRY["btc"],
+        max_age_ms=1_000,
+        at_utc=T0 + timedelta(milliseconds=250),
+    )
+    assert transition.applied is False
+    assert transition.reason == "illegal_intent_kind"
+
+
+def test_product_correct_gross_pnl_uses_actual_fill_prices() -> None:
+    assert gross_pnl_usd(
+        SEED_REGISTRY["btc"],
+        position_side="long",
+        qty=0.01,
+        entry_price=100_000.0,
+        exit_price=101_000.0,
+    ) == pytest.approx(10.0)
+
+    assert gross_pnl_usd(
+        SEED_REGISTRY["mes"],
+        position_side="long",
+        qty=1.0,
+        entry_price=6000.0,
+        exit_price=6005.0,
+    ) == pytest.approx(25.0)
+
+    assert gross_pnl_usd(
+        SEED_REGISTRY["eurusd"],
+        position_side="long",
+        qty=0.10,
+        entry_price=1.0800,
+        exit_price=1.0810,
+    ) == pytest.approx(10.0)
+
+    usdjpy = gross_pnl_usd(
+        SEED_REGISTRY["usdjpy"],
+        position_side="long",
+        qty=0.10,
+        entry_price=150.00,
+        exit_price=150.10,
+    )
+    assert usdjpy == pytest.approx(
+        (0.10 * 0.10 * 100_000.0) / 150.10
+    )
+
+
+def test_gross_pnl_direction_reverses_for_short() -> None:
+    profit = gross_pnl_usd(
+        SEED_REGISTRY["nvda"],
+        position_side="short",
+        qty=10,
+        entry_price=100.0,
+        exit_price=95.0,
+    )
+    assert profit == pytest.approx(50.0)
