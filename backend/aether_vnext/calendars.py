@@ -171,6 +171,19 @@ def calendar_decision(
                 focus=False,
                 reason="weekend",
             )
+        if early_close_min is not None and cur >= early_close_min:
+            return CalendarDecision(
+                calendar_id=calendar_id,
+                session_state=SessionState.CLOSED,
+                calendar_state=CalendarState.EARLY_CLOSE,
+                eligible=False,
+                focus=False,
+                reason="early_close",
+                session_end_et=time(
+                    early_close_min // 60,
+                    early_close_min % 60,
+                ),
+            )
         # Defined 16:59–17:05 ET rollover maintenance.
         if 16 * 60 + 59 <= cur < 17 * 60 + 5:
             return CalendarDecision(
@@ -219,6 +232,19 @@ def calendar_decision(
                 eligible=False,
                 focus=False,
                 reason="weekend",
+            )
+        if early_close_min is not None and cur >= early_close_min:
+            return CalendarDecision(
+                calendar_id=calendar_id,
+                session_state=SessionState.CLOSED,
+                calendar_state=CalendarState.EARLY_CLOSE,
+                eligible=False,
+                focus=False,
+                reason="early_close",
+                session_end_et=time(
+                    early_close_min // 60,
+                    early_close_min % 60,
+                ),
             )
         if 17 * 60 <= cur < 18 * 60:
             return CalendarDecision(
