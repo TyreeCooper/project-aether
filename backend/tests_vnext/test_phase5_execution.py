@@ -1350,3 +1350,285 @@ def test_gross_pnl_direction_reverses_for_short() -> None:
         exit_price=95.0,
     )
     assert profit == pytest.approx(50.0)
+
+
+def _open_btc_for_flatten(conn, store: VNextStore) -> None:
+    _submit_reserved_btc(conn, store)
+    opened = _finalize_btc(conn, store)
+    assert opened["ok"] is True
+    assert opened["state"] == "FILLED"
+
+
+def test_flatten_request_and_reserve_do_not_touch_open_reservation() -> None:
+    engine, store = _store_fixture()
+    with engine.begin() as conn:
+        _open_btc_for_flatten(conn, store)
+        before = {
+            row["broker_account_id"]: row
+            for row in store.ledger_rows(conn)
+        }["kraken_paper"]
+
+        requested = store.request_flatten(
+            conn,
+            trade_id="trade-1",
+            exit_reason="structure",
+            market_observation_id="obs-exit-request",
+            at_utc=T0 + timedelta(seconds=1),
+            event_id="evt-flat-request-1",
+        )
+        assert requested["state"] == "FLATTEN_REQUEST"
+
+        reserved = store.reserve_flatten_intent(
+            conn,
+            order_intent_id="close-intent-1",
+            trade_id="trade-1",
+            idempotency_key="close-idem-1",
+            exit_reason="structure",
+            market_observation_id="obs-exit-request",
+            reference_price=101_000.0,
+            ready_spread_bps=2.0,
+            created_at_utc=T0 + timedelta(seconds=1),
+            event_id="evt-flat-reserve-1",
+        )
+        assert reserved["state"] == "RESERVED"
+
+        after = {
+            row["broker_account_id"]: row
+            for row in store.ledger_rows(conn)
+        }["kraken_paper"]
+        assert after["cash_available_usd"] == pytest.approx(
+            before["cash_available_usd"]
+        )
+        assert after["cash_reserved_usd"] == pytest.approx(
+            before["cash_reserved_usd"]
+        )
+
+        close_intent = store.load_order_intent(
+            conn,
+            order_intent_id="close-intent-1",
+        )
+        assert close_intent is not None
+        assert close_intent.intent_kind == "CLOSE"
+        assert close_intent.exit_reason == "structure"
+        assert close_intent.reserved_cash_usd == 0.0
+        assert close_intent.reserved_margin_usd == 0.0
+        assert close_intent.trade_id == "trade-1"
+
+
+def test_full_flatten_lifecycle_books_closed_trade_and_releases_reserve_once() -> None:
+    engine, store = _store_fixture()
+    with engine.begin() as conn:
+        _open_btc_for_flatten(conn, store)
+        store.request_flatten(
+            conn,
+            trade_id="trade-1",
+            exit_reason="structure",
+            market_observation_id="obs-exit-request",
+            at_utc=T0 + timedelta(seconds=1),
+            event_id="evt-flat-request-2",
+        )
+        store.reserve_flatten_intent(
+            conn,
+            order_intent_id="close-intent-2",
+            trade_id="trade-1",
+            idempotency_key="close-idem-2",
+            exit_reason="structure",
+            market_observation_id="obs-exit-request",
+            reference_price=101_000.0,
+            ready_spread_bps=2.0,
+            created_at_utc=T0 + timedelta(seconds=1),
+            event_id="evt-flat-reserve-2",
+        )
+
+    with engine.begin() as conn:
+        store.mark_order_intent_submitted(
+            conn,
+            order_intent_id="close-intent-2",
+            submitted_at_utc=T0 + timedelta(seconds=1),
+            acknowledged_at_utc=T0 + timedelta(seconds=1),
+            submit_timeout_at=None,
+            event_id="evt-flat-submit-2",
+            actor="paper-adapter",
+        )
+        durable = store.load_order_intent(
+            conn,
+            order_intent_id="close-intent-2",
+        )
+        assert durable is not None
+        assert durable.state is OrderIntentState.SUBMITTED
+
+    observation = _obs(
+        bid=101_000.0,
+        ask=101_020.0,
+        spread_bps=2.0,
+    )
+    venue_fill = fill_submitted_paper_flatten_intent(
+        durable,
+        observation=observation,
+        registry_row=SEED_REGISTRY["btc"],
+        max_age_ms=1_000,
+        at_utc=T0 + timedelta(seconds=1, milliseconds=250),
+    )
+    assert venue_fill.intent.state is OrderIntentState.FILLED
+    exit_price = float(venue_fill.intent.avg_fill_price)
+
+    entry_price = 100_060.005
+    gross = gross_pnl_usd(
+        SEED_REGISTRY["btc"],
+        position_side="long",
+        qty=0.01,
+        entry_price=entry_price,
+        exit_price=exit_price,
+    )
+    fees = 2.0
+    net = gross - fees
+
+    with engine.begin() as conn:
+        flat = store.finalize_filled_flat(
+            conn,
+            close_order_intent_id="close-intent-2",
+            fill_market_observation_id="obs-exit-fill",
+            filled_at_utc=venue_fill.intent.filled_at,
+            filled_qty=venue_fill.intent.filled_qty,
+            exit_price=exit_price,
+            gross_pnl_usd=gross,
+            net_pnl_usd=net,
+            total_cost_usd=fees + float(venue_fill.intent.slippage_usd or 0.0),
+            fees_usd=fees,
+            slippage_usd=float(venue_fill.intent.slippage_usd or 0.0),
+            slippage_bps=float(venue_fill.intent.slippage_bps or 0.0),
+            mfe_usd=12.0,
+            mae_usd=-3.0,
+            capture_efficiency=0.75,
+            event_id="evt-flat-final-2",
+        )
+        assert flat["ok"] is True
+        assert flat["state"] == "FLAT"
+
+        closed = conn.execute(
+            sa.select(store.tables["closed_trades"])
+        ).mappings().one()
+        assert closed["trade_id"] == "trade-1"
+        assert closed["asset_id"] == "btc"
+        assert closed["position_key"] == "btc:daily_swing"
+        assert closed["side"] == "long"
+        assert closed["quantity"] == pytest.approx(0.01)
+        assert closed["avg_entry_price"] == pytest.approx(entry_price)
+        assert closed["exit_price"] == pytest.approx(exit_price)
+        assert closed["gross_pnl_usd"] == pytest.approx(gross)
+        assert closed["net_pnl_usd"] == pytest.approx(net)
+        assert closed["fees_usd"] == pytest.approx(fees)
+        assert closed["exit_reason"] == "structure"
+
+        assert conn.execute(
+            sa.select(sa.func.count()).select_from(
+                store.tables["active_positions"]
+            )
+        ).scalar_one() == 0
+        assert conn.execute(
+            sa.select(sa.func.count()).select_from(
+                store.tables["signal_consumptions"]
+            )
+        ).scalar_one() == 1
+
+        ledger = {
+            row["broker_account_id"]: row
+            for row in store.ledger_rows(conn)
+        }["kraken_paper"]
+        assert ledger["cash_reserved_usd"] == 0.0
+        assert ledger["cash_available_usd"] == pytest.approx(4000.0 + net)
+        assert ledger["realized_pnl_usd"] == pytest.approx(net)
+        assert ledger["fees_accrued_usd"] == pytest.approx(fees)
+
+    with engine.begin() as conn:
+        duplicate = store.finalize_filled_flat(
+            conn,
+            close_order_intent_id="close-intent-2",
+            fill_market_observation_id="obs-exit-fill",
+            filled_at_utc=venue_fill.intent.filled_at,
+            filled_qty=venue_fill.intent.filled_qty,
+            exit_price=exit_price,
+            gross_pnl_usd=gross,
+            net_pnl_usd=net,
+            total_cost_usd=fees + float(venue_fill.intent.slippage_usd or 0.0),
+            fees_usd=fees,
+            slippage_usd=float(venue_fill.intent.slippage_usd or 0.0),
+            slippage_bps=float(venue_fill.intent.slippage_bps or 0.0),
+            mfe_usd=12.0,
+            mae_usd=-3.0,
+            capture_efficiency=0.75,
+            event_id="evt-flat-final-duplicate",
+        )
+        assert duplicate["duplicate"] is True
+        ledger = {
+            row["broker_account_id"]: row
+            for row in store.ledger_rows(conn)
+        }["kraken_paper"]
+        assert ledger["cash_available_usd"] == pytest.approx(4000.0 + net)
+        assert ledger["realized_pnl_usd"] == pytest.approx(net)
+
+
+def test_rejected_close_releases_no_open_reserve_and_keeps_position_open() -> None:
+    engine, store = _store_fixture()
+    with engine.begin() as conn:
+        _open_btc_for_flatten(conn, store)
+        store.request_flatten(
+            conn,
+            trade_id="trade-1",
+            exit_reason="structure",
+            market_observation_id="obs-exit-request",
+            at_utc=T0 + timedelta(seconds=1),
+            event_id="evt-flat-request-3",
+        )
+        store.reserve_flatten_intent(
+            conn,
+            order_intent_id="close-intent-3",
+            trade_id="trade-1",
+            idempotency_key="close-idem-3",
+            exit_reason="structure",
+            market_observation_id="obs-exit-request",
+            reference_price=101_000.0,
+            ready_spread_bps=2.0,
+            created_at_utc=T0 + timedelta(seconds=1),
+            event_id="evt-flat-reserve-3",
+        )
+        store.mark_order_intent_submitted(
+            conn,
+            order_intent_id="close-intent-3",
+            submitted_at_utc=T0 + timedelta(seconds=1),
+            acknowledged_at_utc=T0 + timedelta(seconds=1),
+            submit_timeout_at=None,
+            event_id="evt-flat-submit-3",
+            actor="paper-adapter",
+        )
+        store.release_order_reservation(
+            conn,
+            order_intent_id="close-intent-3",
+            terminal_state="REJECTED",
+            reject_code="market_stale",
+            at_utc=T0 + timedelta(seconds=2),
+            event_id="evt-flat-reject-3",
+            actor="paper-adapter",
+        )
+
+        ledger = {
+            row["broker_account_id"]: row
+            for row in store.ledger_rows(conn)
+        }["kraken_paper"]
+        assert ledger["cash_available_usd"] == pytest.approx(3900.0)
+        assert ledger["cash_reserved_usd"] == pytest.approx(100.0)
+        assert conn.execute(
+            sa.select(sa.func.count()).select_from(
+                store.tables["active_positions"]
+            )
+        ).scalar_one() == 1
+        assert conn.execute(
+            sa.select(sa.func.count()).select_from(
+                store.tables["closed_trades"]
+            )
+        ).scalar_one() == 0
+        assert conn.execute(
+            sa.select(sa.func.count()).select_from(
+                store.tables["signal_consumptions"]
+            )
+        ).scalar_one() == 1
