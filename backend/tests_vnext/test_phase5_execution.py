@@ -322,6 +322,31 @@ def _store_fixture():
     with engine.begin() as conn:
         store.create_all_for_test(conn)
         assert store.provision_seed_ledgers_once(conn) is True
+        _insert_ready_ticket_row(
+            conn,
+            store,
+            ticket_id="ticket-1",
+            asset_id="btc",
+            route_id="btc:daily_swing:long",
+            signal_key="signal-1",
+            side="long",
+            horizon="daily_swing",
+            quantity=0.01,
+            market_observation_id="obs-ready",
+        )
+        _insert_ready_ticket_row(
+            conn,
+            store,
+            ticket_id="ticket-mes",
+            asset_id="mes",
+            route_id="mes:intraday:long",
+            signal_key="signal-mes-1",
+            side="long",
+            horizon="intraday",
+            quantity=1.0,
+            stop_price=5900.0,
+            market_observation_id="obs-ready-mes",
+        )
     return engine, store
 
 
@@ -976,26 +1001,39 @@ def test_phase_a_admission_blocks_degraded_fallback_and_crypto_short() -> None:
     assert short.reason == "product_side_unsupported"
 
 
-def _insert_ready_ticket_row(conn, store: VNextStore, *, ticket_id: str = "ticket-pre") -> None:
+def _insert_ready_ticket_row(
+    conn,
+    store: VNextStore,
+    *,
+    ticket_id: str = "ticket-pre",
+    asset_id: str = "btc",
+    route_id: str = "btc:daily_swing:long",
+    signal_key: str = "signal-pre",
+    side: str = "long",
+    horizon: str = "daily_swing",
+    quantity: float = 0.01,
+    stop_price: float = 95_000.0,
+    market_observation_id: str = "obs-ready",
+) -> None:
     tickets = store.tables["tickets"]
     conn.execute(
         tickets.insert().values(
             ticket_id=ticket_id,
-            setup_id="setup-pre",
+            setup_id=f"setup-{ticket_id}",
             firm_event_id=None,
-            asset_id="btc",
-            route_id="btc:daily_swing:long",
+            asset_id=asset_id,
+            route_id=route_id,
             state="READY",
-            signal_key="signal-pre",
-            side="long",
-            horizon="daily_swing",
-            stop_price=95_000.0,
-            quantity=0.01,
+            signal_key=signal_key,
+            side=side,
+            horizon=horizon,
+            stop_price=stop_price,
+            quantity=quantity,
             modeled_round_trip_cost_pct=0.1,
             reject_code=None,
             policy_version="policy-v1",
             configuration_hash="cfg",
-            market_observation_id="obs-ready",
+            market_observation_id=market_observation_id,
             first_killed_by=None,
             first_kill_reason=None,
             created_at_utc=T0,
