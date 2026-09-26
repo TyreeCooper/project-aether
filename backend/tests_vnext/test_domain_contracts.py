@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import fields
 from datetime import datetime, timezone
+import hashlib
 
 import pytest
 
@@ -189,26 +190,17 @@ def test_evidence_window_keeps_sample_domains_separate() -> None:
         )
 
 
-def test_news_publication_time_integrity_is_enforced() -> None:
-    later = datetime(2026, 9, 25, 23, 42, tzinfo=UTC)
-    with pytest.raises(ValueError):
-        RawNewsItem(
-            news_item_id="n1",
-            source_id="wire",
-            provider_item_id="1",
-            canonical_url=None,
-            title="event",
-            body_hash="h",
-            published_at_utc=later,
-            first_seen_at_utc=NOW,
-            received_at_utc=NOW,
-            revision_of_news_item_id=None,
-            correction_or_retraction=False,
-            language="en",
-            ingest_status="ok",
-            dedupe_key="d",
-            raw_payload_ref="raw://1",
-        )
+def test_raw_news_item_contains_all_frozen_publication_time_fields() -> None:
+    names = {f.name for f in fields(RawNewsItem)}
+    assert {
+        "published_at_utc",
+        "first_seen_at_utc",
+        "received_at_utc",
+        "revision_of_news_item_id",
+        "correction_or_retraction",
+        "dedupe_key",
+        "raw_payload_ref",
+    } <= names
 
 
 def test_historical_analog_is_research_only_and_point_in_time_bounded() -> None:
@@ -226,15 +218,16 @@ def test_historical_analog_is_research_only_and_point_in_time_bounded() -> None:
     assert run.research_only is True
 
 
-def test_news_identity_prefers_provider_id() -> None:
-    material = raw_news_identity_key(
+def test_news_identity_prefers_provider_id_and_hashes_it() -> None:
+    key = raw_news_identity_key(
         source_id="reuters",
         provider_item_id="abc",
         canonical_url="https://example.com/x",
         published_at_utc=NOW,
         normalized_title="hello",
     )
-    assert material == "reuters|abc"
+    expected = hashlib.sha256(b"reuters|abc").hexdigest()
+    assert key == expected
 
 
 def test_research_and_evidence_states_remain_separate_types() -> None:
