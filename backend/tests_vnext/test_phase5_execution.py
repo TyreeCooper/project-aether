@@ -854,3 +854,22 @@ def test_non_stop_flatten_uses_conservative_exit_side_plus_adverse_slip() -> Non
         obs,
         position_side="short",
     ) == pytest.approx(101.0 * 1.0005)
+
+
+def test_durable_order_intent_round_trips_into_domain_contract() -> None:
+    engine, store = _store_fixture()
+    with engine.begin() as conn:
+        _reserve_btc(conn, store)
+        intent = store.load_order_intent(
+            conn,
+            order_intent_id="intent-reserve-1",
+        )
+        assert intent is not None
+        assert intent.state is OrderIntentState.RESERVED
+        assert intent.broker_account_id == "kraken_paper"
+        assert intent.position_key == "btc:daily_swing"
+        assert intent.signal_key == "signal-1"
+        assert intent.reserved_cash_usd == pytest.approx(100.0)
+        assert intent.reserved_margin_usd == 0.0
+        assert intent.submit_timeout_at is not None
+        assert intent.row_version == 1
