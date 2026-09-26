@@ -147,6 +147,7 @@ class OrderIntent:
     idempotency_key: str
     broker_account_id: str | None = None
     intent_kind: str = "OPEN"
+    exit_reason: str | None = None
     position_key: str | None = None
     signal_key: str | None = None
     reserved_cash_usd: float = 0.0
