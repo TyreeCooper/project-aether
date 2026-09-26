@@ -188,6 +188,82 @@ class VNextStore:
             row_version=int(row["row_version"]),
         )
 
+    def reject_ticket_pre_reserve(
+        self,
+        conn: Connection,
+        *,
+        ticket_id: str,
+        reason_code: str,
+        at_utc: datetime,
+        event_id: str,
+        actor: str,
+        market_observation_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Persist a Portfolio Phase-A rejection with no OrderIntent/reserve."""
+        tickets = self.tables["tickets"]
+        row = conn.execute(
+            sa.select(tickets)
+            .where(tickets.c.ticket_id == ticket_id)
+            .with_for_update()
+        ).mappings().first()
+        if row is None:
+            raise KeyError(f"unknown ticket: {ticket_id}")
+        if row["state"] == "REJECTED":
+            return {
+                "ok": True,
+                "duplicate": True,
+                "state": "REJECTED",
+                "reject_code": row["reject_code"],
+            }
+        if row["state"] != "READY":
+            return {
+                "ok": False,
+                "error": "ticket_not_ready",
+                "state": row["state"],
+            }
+
+        observation_id = (
+            market_observation_id or row["market_observation_id"]
+        )
+        conn.execute(
+            tickets.update()
+            .where(tickets.c.ticket_id == ticket_id)
+            .values(
+                state="REJECTED",
+                reject_code=reason_code,
+                first_killed_by="Portfolio",
+                first_kill_reason=reason_code,
+                market_observation_id=observation_id,
+            )
+        )
+        self.append_event(
+            conn,
+            event_id=event_id,
+            aggregate_type="ticket",
+            aggregate_id=ticket_id,
+            prior_state="READY",
+            new_state="REJECTED",
+            seat="Portfolio",
+            reason_code=reason_code,
+            policy_version=row["policy_version"],
+            configuration_hash=row["configuration_hash"],
+            market_observation_id=observation_id,
+            actor=actor,
+            created_at_utc=at_utc,
+            payload={
+                "first_killed_by": "Portfolio",
+                "first_kill_reason": reason_code,
+                "order_intent_created": False,
+                "reservation_created": False,
+            },
+        )
+        return {
+            "ok": False,
+            "duplicate": False,
+            "state": "REJECTED",
+            "reject_code": reason_code,
+        }
+
     def reserve_order_intent(
         self,
         conn: Connection,
