@@ -590,3 +590,28 @@ profitability_ready assessment has live_execution_authorized=false and cannot
 bypass the existing LIVE HARD BLOCK.
 
 **AETH-VN-018 status:** CONTAINED.
+
+
+## AETH-VN-019 — C9.1 defines campaign invariants but no frozen ForwardPaperCampaign object
+
+**Class:** forward-evidence implementation identity / anti-invention control  
+**Discovered:** forward-paper burn-in handoff after Phase 9  
+**Status:** CONTAINED / IMPLEMENTATION ADAPTER  
+
+### Facts
+
+C9.1 binds forced-entry OFF, natural setup qualification, frozen route/playbook
+identity, real timestamps/PIT inputs, modeled+observed costs, route P&L/disposition
+accounting, no cherry-picking, and separation from historical validation. The
+bound package does not define an exact ForwardPaperCampaign schema or campaign ID
+format.
+
+### Control
+
+Schema 0020 adds only a thin immutable campaign ledger around the frozen
+EvidenceWindow model. It does not add a trading mode or trading rule. Direct
+paper_forward EvidenceWindow persistence is rejected; campaign-aware persistence
+requires a frozen campaign route, held-out historical baseline, matching
+configuration/playbook lineage, and canonical ClosedTrade evidence.
+
+**AETH-VN-019 status:** CONTAINED.

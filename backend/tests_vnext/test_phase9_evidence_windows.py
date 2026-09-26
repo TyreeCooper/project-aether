@@ -23,7 +23,7 @@ T0 = datetime(2026, 9, 26, 22, 15, tzinfo=UTC)
 def _window(
     *,
     window_id: str = "window-1",
-    domain: SampleDomain = SampleDomain.PAPER_FORWARD,
+    domain: SampleDomain = SampleDomain.HELD_OUT,
     trade_ids: tuple[str, ...] = ("trade-1", "trade-2"),
     playbook_version: str = "1.2",
     configuration_hash: str = "cfg-9c",
@@ -210,4 +210,30 @@ def test_store_rejects_playbook_version_and_policy_config_drift() -> None:
             store.record_evidence_window(
                 conn,
                 _window(policy_version="wrong-policy"),
+            )
+
+
+def test_direct_store_path_rejects_paper_forward_without_campaign() -> None:
+    engine = sa.create_engine(
+        "sqlite+pysqlite:///:memory:",
+        future=True,
+    )
+    store = VNextStore(schema=None)
+    with engine.begin() as conn:
+        store.create_all_for_test(conn)
+        conn.execute(
+            store.tables["policy_snapshots"].insert().values(
+                configuration_hash="cfg-9c",
+                policy_version="policy-9c",
+                effective_at_utc=T0,
+                changed_by="test",
+                change_reason="phase9c",
+                payload={},
+                created_at_utc=T0,
+            )
+        )
+        with pytest.raises(ValueError, match="campaign-aware"):
+            store.record_evidence_window(
+                conn,
+                _window(domain=SampleDomain.PAPER_FORWARD),
             )

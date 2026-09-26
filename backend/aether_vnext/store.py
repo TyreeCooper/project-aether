@@ -63,6 +63,11 @@ from aether_vnext.risk import (
 from aether_vnext.reason_codes import ReasonCode
 from aether_vnext.regime import RegimeTags
 from aether_vnext.burnin import ProfitabilityReadinessAssessment
+from aether_vnext.forward_paper import (
+    ForwardPaperCampaign,
+    ForwardPaperRouteBaseline,
+    parse_route_id,
+)
 from aether_vnext.research import (
     BacktestRun,
     FoldResult,
@@ -1364,6 +1369,220 @@ class VNextStore:
             )
         )
 
+    def record_forward_paper_campaign(
+        self,
+        conn: Connection,
+        campaign: ForwardPaperCampaign,
+        *,
+        routes: tuple[ForwardPaperRouteBaseline, ...],
+    ) -> None:
+        """Persist one immutable C9.1 campaign and its historical baselines."""
+        if not routes:
+            raise ValueError("forward-paper campaign requires at least one route")
+
+        policies = self.tables["policy_snapshots"]
+        policy = conn.execute(
+            sa.select(policies).where(
+                policies.c.configuration_hash == campaign.configuration_hash
+            )
+        ).mappings().first()
+        if policy is None:
+            raise KeyError(
+                f"unknown configuration_hash: {campaign.configuration_hash}"
+            )
+        if str(policy["policy_version"]) != campaign.policy_version:
+            raise ValueError("campaign policy_version/configuration_hash mismatch")
+
+        seen_route_ids: set[tuple[str, str]] = set()
+        for route in routes:
+            if route.campaign_id != campaign.campaign_id:
+                raise ValueError("campaign route campaign_id mismatch")
+            if route.configuration_hash != campaign.configuration_hash:
+                raise ValueError("campaign route configuration_hash mismatch")
+
+            key = (route.route_id, route.playbook_id)
+            if key in seen_route_ids:
+                raise ValueError("duplicate route/playbook in campaign baseline")
+            seen_route_ids.add(key)
+
+            spec = playbook(route.playbook_id)
+            if spec.version != route.playbook_version:
+                raise ValueError("campaign route playbook_version mismatch")
+            asset_id, horizon, side = parse_route_id(route.route_id)
+            if asset_id not in spec.allowed_assets:
+                raise ValueError("campaign route asset not allowed by playbook")
+            if horizon != spec.horizon:
+                raise ValueError("campaign route horizon mismatch")
+            if side not in spec.allowed_sides:
+                raise ValueError("campaign route side not allowed by playbook")
+
+            for window_id in route.historical_validation_window_ids:
+                baseline = self.load_evidence_window(
+                    conn,
+                    evidence_window_id=window_id,
+                )
+                if baseline is None:
+                    raise KeyError(
+                        f"unknown historical validation window: {window_id}"
+                    )
+                if baseline.sample_domain is not SampleDomain.HELD_OUT:
+                    raise ValueError(
+                        "forward-paper historical baseline must be held_out"
+                    )
+                if (
+                    baseline.route_id != route.route_id
+                    or baseline.playbook_id != route.playbook_id
+                    or baseline.playbook_version != route.playbook_version
+                    or baseline.configuration_hash != route.configuration_hash
+                ):
+                    raise ValueError(
+                        "historical baseline evidence family mismatch"
+                    )
+
+        conn.execute(
+            self.tables["forward_paper_campaigns"].insert().values(
+                campaign_id=campaign.campaign_id,
+                configuration_hash=campaign.configuration_hash,
+                policy_version=campaign.policy_version,
+                baseline_snapshot_hash=campaign.baseline_snapshot_hash,
+                started_at_utc=campaign.started_at_utc,
+                created_at_utc=campaign.created_at_utc,
+                forced_entry_enabled=False,
+                natural_setup_only=True,
+                real_market_time_required=True,
+                pit_inputs_required=True,
+                modeled_cost_capture_required=True,
+                observed_cost_capture_required=True,
+                route_pnl_accounting_required=True,
+                disposition_accounting_required=True,
+                no_cherry_pick=True,
+                historical_comparison_separate=True,
+                live_blocked=True,
+            )
+        )
+        route_table = self.tables["forward_paper_campaign_routes"]
+        for route in routes:
+            conn.execute(
+                route_table.insert().values(
+                    campaign_route_id=route.campaign_route_id,
+                    campaign_id=route.campaign_id,
+                    route_id=route.route_id,
+                    playbook_id=route.playbook_id,
+                    playbook_version=route.playbook_version,
+                    configuration_hash=route.configuration_hash,
+                    historical_validation_window_ids=list(
+                        route.historical_validation_window_ids
+                    ),
+                    historical_metrics_snapshot_hash=(
+                        route.historical_metrics_snapshot_hash
+                    ),
+                )
+            )
+
+    def record_forward_paper_evidence_window(
+        self,
+        conn: Connection,
+        *,
+        campaign_window_id: str,
+        campaign_route_id: str,
+        window: EvidenceWindow,
+        linked_at_utc: datetime,
+    ) -> None:
+        """Atomically persist one natural paper-forward evidence window."""
+        if not str(campaign_window_id).strip():
+            raise ValueError("campaign_window_id is required")
+        if linked_at_utc.tzinfo is None:
+            raise ValueError("linked_at_utc must be timezone-aware")
+        if window.sample_domain is not SampleDomain.PAPER_FORWARD:
+            raise ValueError(
+                "campaign evidence window must use paper_forward sample_domain"
+            )
+
+        route_table = self.tables["forward_paper_campaign_routes"]
+        route = conn.execute(
+            sa.select(route_table).where(
+                route_table.c.campaign_route_id == campaign_route_id
+            )
+        ).mappings().first()
+        if route is None:
+            raise KeyError("unknown forward-paper campaign route")
+
+        campaign = conn.execute(
+            sa.select(self.tables["forward_paper_campaigns"]).where(
+                self.tables["forward_paper_campaigns"].c.campaign_id
+                == route["campaign_id"]
+            )
+        ).mappings().one()
+
+        if (
+            window.route_id != route["route_id"]
+            or window.playbook_id != route["playbook_id"]
+            or window.playbook_version != route["playbook_version"]
+            or window.configuration_hash != route["configuration_hash"]
+            or window.policy_version != campaign["policy_version"]
+        ):
+            raise ValueError(
+                "paper-forward evidence does not match frozen campaign route"
+            )
+        if window.first_timestamp_utc < _stored_utc(campaign["started_at_utc"]):
+            raise ValueError(
+                "paper-forward evidence cannot predate campaign start"
+            )
+
+        closed = self.tables["closed_trades"]
+        lineage = self.tables["decision_lineage"]
+        setups = self.tables["setups"]
+
+        for trade_id in window.immutable_trade_ids:
+            row = conn.execute(
+                sa.select(
+                    closed.c.trade_id,
+                    closed.c.route_id,
+                    closed.c.configuration_hash,
+                    closed.c.firm_event_id,
+                    lineage.c.playbook_id.label("lineage_playbook_id"),
+                    lineage.c.playbook_version.label("lineage_playbook_version"),
+                    lineage.c.setup_id,
+                    setups.c.trigger_bar_close_exchange_ts,
+                )
+                .select_from(
+                    closed.join(
+                        lineage,
+                        closed.c.firm_event_id == lineage.c.firm_event_id,
+                    ).join(
+                        setups,
+                        lineage.c.setup_id == setups.c.setup_id,
+                    )
+                )
+                .where(closed.c.trade_id == trade_id)
+            ).mappings().first()
+            if row is None:
+                raise ValueError(
+                    f"paper-forward trade_id lacks canonical ClosedTrade lineage: {trade_id}"
+                )
+            if str(row["route_id"]) != window.route_id:
+                raise ValueError("paper-forward ClosedTrade route mismatch")
+            if str(row["configuration_hash"]) != window.configuration_hash:
+                raise ValueError("paper-forward ClosedTrade configuration mismatch")
+            if str(row["lineage_playbook_id"]) != window.playbook_id:
+                raise ValueError("paper-forward ClosedTrade playbook mismatch")
+            if str(row["lineage_playbook_version"]) != window.playbook_version:
+                raise ValueError("paper-forward ClosedTrade playbook version mismatch")
+            trigger_ts = _stored_utc(row["trigger_bar_close_exchange_ts"])
+            if trigger_ts < _stored_utc(campaign["started_at_utc"]):
+                raise ValueError("paper-forward Setup predates campaign start")
+
+        self._record_evidence_window_row(conn, window)
+        conn.execute(
+            self.tables["forward_paper_campaign_windows"].insert().values(
+                campaign_window_id=campaign_window_id,
+                campaign_id=route["campaign_id"],
+                campaign_route_id=campaign_route_id,
+                evidence_window_id=window.evidence_window_id,
+                linked_at_utc=linked_at_utc,
+            )
+        )
+
     def record_profitability_readiness_assessment(
         self,
         conn: Connection,
@@ -1421,12 +1640,12 @@ class VNextStore:
             )
         )
 
-    def record_evidence_window(
+    def _record_evidence_window_row(
         self,
         conn: Connection,
         window: EvidenceWindow,
     ) -> None:
-        """Append one immutable, single-domain evidence window."""
+        """Internal append primitive after caller-specific domain checks."""
         policies = self.tables["policy_snapshots"]
         policy = conn.execute(
             sa.select(policies).where(
@@ -1463,6 +1682,22 @@ class VNextStore:
                 created_at_utc=window.created_at_utc,
             )
         )
+
+    def record_evidence_window(
+        self,
+        conn: Connection,
+        window: EvidenceWindow,
+    ) -> None:
+        """Append non-forward evidence.
+
+        Paper-forward evidence must use record_forward_paper_evidence_window()
+        so C9.1 campaign identity and no-cherry-pick linkage are atomic.
+        """
+        if window.sample_domain is SampleDomain.PAPER_FORWARD:
+            raise ValueError(
+                "paper_forward evidence requires campaign-aware persistence"
+            )
+        self._record_evidence_window_row(conn, window)
 
     def load_evidence_window(
         self,

@@ -56,6 +56,9 @@ def test_book_of_record_has_required_tables() -> None:
         "traffic_experiments",
         "traffic_shadow_comparisons",
         "profitability_readiness_assessments",
+        "forward_paper_campaigns",
+        "forward_paper_campaign_routes",
+        "forward_paper_campaign_windows",
         "review_cards",
         "route_review_state",
         "signal_consumptions",
@@ -373,23 +376,24 @@ def test_phase5_execution_reservation_columns_are_in_current_schema() -> None:
     assert "fill_market_observation_id" not in columns
 
 
-def test_runtime_schema_facade_is_pinned_to_revision_0019() -> None:
+def test_runtime_schema_facade_is_pinned_to_revision_0020() -> None:
     backend = Path(__file__).resolve().parents[1]
     facade = (backend / "aether_vnext" / "schema.py").read_text(encoding="utf-8")
-    assert "schema_v0019" in facade
+    assert "schema_v0020" in facade
     migration = (
         backend
         / "alembic"
         / "versions"
-        / "0019_aether_vnext_profitability_readiness.py"
+        / "0020_aether_vnext_forward_paper_campaign.py"
     ).read_text(encoding="utf-8")
-    assert 'revision: str = "0019"' in migration
-    assert 'down_revision: Union[str, None] = "0018"' in migration
-    assert "profitability_readiness_assessments" in migration
-    assert "profitability_ready" in migration
-    assert "live_execution_authorized" in migration
-    assert "ck_profitability_readiness_never_live_authority" in migration
-    assert "trg_profitability_readiness_assessments_immutable" in migration
+    assert 'revision: str = "0020"' in migration
+    assert 'down_revision: Union[str, None] = "0019"' in migration
+    assert "forward_paper_campaigns" in migration
+    assert "forward_paper_campaign_routes" in migration
+    assert "forward_paper_campaign_windows" in migration
+    assert "ck_forward_campaign_forced_entry_off" in migration
+    assert "ck_forward_campaign_c91_invariants" in migration
+    assert "reject_immutable_mutation" in migration
 
 
 def test_phase6_atomic_risk_admission_schema_is_explicit() -> None:
