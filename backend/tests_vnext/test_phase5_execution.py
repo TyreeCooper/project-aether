@@ -692,7 +692,10 @@ def test_reservation_timeout_is_durable_from_phase_a_not_submit_time() -> None:
                 intents.c.order_intent_id == "intent-reserve-1"
             )
         ).mappings().one()
-        assert row["submit_timeout_at"] == T0 + timedelta(seconds=15)
+        # SQLite drops tzinfo on DateTime round-trip; PostgreSQL preserves it.
+        assert row["submit_timeout_at"].replace(tzinfo=UTC) == (
+            T0 + timedelta(seconds=15)
+        )
 
     with engine.begin() as conn:
         # Submit later; timeout remains anchored to reservation time.
@@ -711,7 +714,9 @@ def test_reservation_timeout_is_durable_from_phase_a_not_submit_time() -> None:
                 == "intent-reserve-1"
             )
         ).mappings().one()
-        assert row["submit_timeout_at"] == T0 + timedelta(seconds=15)
+        assert row["submit_timeout_at"].replace(tzinfo=UTC) == (
+            T0 + timedelta(seconds=15)
+        )
 
 
 def test_reconciler_query_finds_only_expired_reserved_or_submitted_intents() -> None:
