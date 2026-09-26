@@ -240,6 +240,19 @@ def test_ibkr_sell_leg_adds_sec_fee_and_short_borrow_default() -> None:
     assert costs.exit_fee_usd == pytest.approx(
         1.0 + (101.0 * 100.0 * IBKR_SEC_SELL_RATE)
     )
+    assert costs.carry_or_borrow_usd == 0.0
+
+    long_overnight = modeled_round_trip_cost(
+        nvda,
+        qty=100,
+        entry_price=100.0,
+        exit_reference_price=101.0,
+        spread_abs=0.02,
+        entry_side="buy",
+        exit_side="sell",
+        holding_days=10,
+    )
+    assert long_overnight.carry_or_borrow_usd == 0.0
 
     short_costs = modeled_round_trip_cost(
         nvda,
