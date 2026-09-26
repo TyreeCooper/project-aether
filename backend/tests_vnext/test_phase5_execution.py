@@ -560,7 +560,7 @@ def test_margin_reservation_and_release_use_same_broker_ledger() -> None:
             idempotency_key="idem-mes-1",
             signal_key="signal-mes-1",
             position_key="mes:intraday",
-            reserve_cash_usd=0.0,
+            reserve_cash_usd=1201.0,
             reserve_margin_usd=1200.0,
             ready_spread_bps=1.0,
             hard_stop_price=5900.0,
@@ -578,6 +578,8 @@ def test_margin_reservation_and_release_use_same_broker_ledger() -> None:
             row["broker_account_id"]: row
             for row in store.ledger_rows(conn)
         }["ninja_paper"]
+        assert ledger["cash_available_usd"] == pytest.approx(799.0)
+        assert ledger["cash_reserved_usd"] == pytest.approx(1201.0)
         assert ledger["margin_used_usd"] == pytest.approx(1200.0)
         assert ledger["margin_available_usd"] == pytest.approx(800.0)
 
@@ -595,6 +597,8 @@ def test_margin_reservation_and_release_use_same_broker_ledger() -> None:
             row["broker_account_id"]: row
             for row in store.ledger_rows(conn)
         }["ninja_paper"]
+        assert ledger["cash_available_usd"] == pytest.approx(2000.0)
+        assert ledger["cash_reserved_usd"] == 0.0
         assert ledger["margin_used_usd"] == 0.0
         assert ledger["margin_available_usd"] == pytest.approx(2000.0)
 
@@ -1632,3 +1636,44 @@ def test_rejected_close_releases_no_open_reserve_and_keeps_position_open() -> No
                 store.tables["signal_consumptions"]
             )
         ).scalar_one() == 1
+
+
+def test_margin_reservation_cannot_exist_without_matching_cash_reserve() -> None:
+    engine, store = _store_fixture()
+    with engine.begin() as conn:
+        with pytest.raises(
+            ValueError,
+            match="reserve_cash_usd must include at least the locked margin",
+        ):
+            store.reserve_order_intent(
+                conn,
+                order_intent_id="intent-mes-invalid",
+                ticket_id="ticket-mes",
+                firm_event_id=None,
+                asset_id="mes",
+                route_id="mes:intraday:long",
+                broker_account_id="ninja_paper",
+                broker="NinjaTrader",
+                venue="NinjaTrader",
+                symbol="MESZ26",
+                side="long",
+                qty=1.0,
+                order_type="market",
+                reference_price=6000.0,
+                expected_fill=6003.0,
+                idempotency_key="idem-mes-invalid",
+                signal_key="signal-mes-1",
+                position_key="mes:intraday",
+                reserve_cash_usd=100.0,
+                reserve_margin_usd=1200.0,
+                ready_spread_bps=1.0,
+                hard_stop_price=5900.0,
+                exit_plan_id="exit-plan-mes",
+                submit_timeout_at=None,
+                policy_version="policy-v1",
+                configuration_hash="cfg",
+                market_observation_id="obs-ready-mes",
+                created_at_utc=T0,
+                event_id="evt-mes-invalid",
+                actor="test",
+            )
