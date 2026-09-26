@@ -687,6 +687,14 @@ def test_successful_fill_atomically_opens_consumes_signal_and_retains_reserve() 
         assert ledger["cash_available_usd"] == pytest.approx(3900.0)
         assert ledger["cash_reserved_usd"] == pytest.approx(100.0)
 
+        inventory = conn.execute(
+            sa.select(store.tables["sleeve_inventory"])
+        ).mappings().one()
+        assert inventory["broker_account_id"] == "kraken_paper"
+        assert inventory["asset_id"] == "btc"
+        assert inventory["inventory_qty"] == pytest.approx(0.01)
+        assert inventory["inventory_avg"] == pytest.approx(100_060.005)
+
 
 def test_duplicate_fill_event_is_noop_and_does_not_duplicate_exposure() -> None:
     engine, store = _store_fixture()
@@ -1535,6 +1543,11 @@ def test_full_flatten_lifecycle_books_closed_trade_and_releases_reserve_once() -
                 store.tables["signal_consumptions"]
             )
         ).scalar_one() == 1
+        assert conn.execute(
+            sa.select(sa.func.count()).select_from(
+                store.tables["sleeve_inventory"]
+            )
+        ).scalar_one() == 0
 
         ledger = {
             row["broker_account_id"]: row
@@ -1753,6 +1766,11 @@ def test_futures_open_to_flat_releases_cash_and_margin_and_books_net() -> None:
         assert ledger["cash_reserved_usd"] == pytest.approx(1201.0)
         assert ledger["margin_used_usd"] == pytest.approx(1200.0)
         assert ledger["margin_available_usd"] == pytest.approx(800.0)
+        assert conn.execute(
+            sa.select(sa.func.count()).select_from(
+                store.tables["sleeve_inventory"]
+            )
+        ).scalar_one() == 0
 
         store.request_flatten(
             conn,
@@ -1915,3 +1933,110 @@ def test_conservative_stop_through_keeps_market_changed_precedence() -> None:
     )
     assert transition.intent.state is OrderIntentState.REJECTED
     assert transition.intent.reject_code == "market_changed"
+
+
+def test_kraken_btc_and_eth_inventory_rows_never_mix_units_or_average_price() -> None:
+    engine, store = _store_fixture()
+
+    with engine.begin() as conn:
+        _insert_exit_plan_row(
+            conn,
+            store,
+            exit_plan_id="exit-plan-eth",
+            hard_stop_price=3800.0,
+        )
+        _insert_ready_ticket_row(
+            conn,
+            store,
+            ticket_id="ticket-eth",
+            asset_id="eth",
+            route_id="eth:daily_swing:long",
+            signal_key="signal-eth-1",
+            side="long",
+            horizon="daily_swing",
+            quantity=0.02,
+            stop_price=3800.0,
+            market_observation_id="obs-ready-eth",
+            exit_plan_id="exit-plan-eth",
+        )
+
+        _submit_reserved_btc(conn, store)
+        btc_open = _finalize_btc(conn, store)
+        assert btc_open["state"] == "FILLED"
+
+        eth_reserved = store.reserve_order_intent(
+            conn,
+            order_intent_id="intent-eth-open",
+            ticket_id="ticket-eth",
+            firm_event_id=None,
+            asset_id="eth",
+            route_id="eth:daily_swing:long",
+            broker_account_id="kraken_paper",
+            broker="Kraken",
+            venue="Kraken",
+            symbol="ETHUSD",
+            side="long",
+            qty=0.02,
+            order_type="market",
+            reference_price=4000.0,
+            expected_fill=4002.0,
+            idempotency_key="idem-eth-open",
+            signal_key="signal-eth-1",
+            position_key="eth:daily_swing",
+            reserve_cash_usd=80.0,
+            reserve_margin_usd=0.0,
+            ready_spread_bps=2.0,
+            hard_stop_price=3800.0,
+            exit_plan_id="exit-plan-eth",
+            submit_timeout_at=None,
+            policy_version="policy-v1",
+            configuration_hash="cfg",
+            market_observation_id="obs-ready-eth",
+            created_at_utc=T0,
+            event_id="evt-eth-reserve",
+            actor="test",
+        )
+        assert eth_reserved["state"] == "RESERVED"
+
+        store.mark_order_intent_submitted(
+            conn,
+            order_intent_id="intent-eth-open",
+            submitted_at_utc=T0,
+            acknowledged_at_utc=T0,
+            submit_timeout_at=None,
+            event_id="evt-eth-submit",
+            actor="paper-adapter",
+        )
+        eth_open = store.finalize_filled_open(
+            conn,
+            order_intent_id="intent-eth-open",
+            trade_id="trade-eth",
+            setup_id="setup-ticket-eth",
+            exit_plan_id="exit-plan-eth",
+            fill_market_observation_id="obs-fill-eth",
+            filled_at_utc=T0 + timedelta(milliseconds=250),
+            filled_qty=0.02,
+            avg_fill_price=4002.0,
+            slippage_usd=0.04,
+            slippage_bps=5.0,
+            initial_stop_risk_usd=4.04,
+            management_telemetry={},
+            event_id="evt-eth-open",
+            actor="paper-adapter",
+        )
+        assert eth_open["state"] == "FILLED"
+
+        rows = conn.execute(
+            sa.select(store.tables["sleeve_inventory"]).order_by(
+                store.tables["sleeve_inventory"].c.asset_id
+            )
+        ).mappings().all()
+        assert len(rows) == 2
+        by_asset = {row["asset_id"]: row for row in rows}
+        assert set(by_asset) == {"btc", "eth"}
+        assert by_asset["btc"]["broker_account_id"] == "kraken_paper"
+        assert by_asset["eth"]["broker_account_id"] == "kraken_paper"
+        assert by_asset["btc"]["inventory_qty"] == pytest.approx(0.01)
+        assert by_asset["btc"]["inventory_avg"] == pytest.approx(100_060.005)
+        assert by_asset["eth"]["inventory_qty"] == pytest.approx(0.02)
+        assert by_asset["eth"]["inventory_avg"] == pytest.approx(4002.0)
