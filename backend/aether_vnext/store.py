@@ -184,6 +184,7 @@ class VNextStore:
             idempotency_key=row["idempotency_key"],
             broker_account_id=row["broker_account_id"],
             intent_kind=row["intent_kind"],
+            exit_reason=row["exit_reason"],
             position_key=row["position_key"],
             signal_key=row["signal_key"],
             reserved_cash_usd=float(row["reserved_cash_usd"]),
