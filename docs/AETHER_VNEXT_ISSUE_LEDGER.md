@@ -154,3 +154,23 @@ Held out:
 This issue must be reconciled against the intended protective-stop geometry before
 Phase 5 is declared COMPLETE. No legacy implementation is allowed to decide the
 answer by default.
+
+
+## AETH-VN-005 — PostgreSQL immutable-trigger function had malformed dollar quoting
+
+**Class:** migration correctness defect  
+**Discovered:** Phase 5 persistence audit of revision 0003  
+**Status:** CLOSED
+
+### Finding
+
+The frozen revision-0003 migration had generated the PostgreSQL PL/pgSQL body as
+`AS $ ... $;` instead of a valid dollar-quoted body. SQLite contract tests could not
+exercise that PostgreSQL-only statement, so ordinary unit CI did not reveal it.
+
+### Resolution
+
+Revision 0003 now uses an explicit `$aether$ ... $aether$` function delimiter.
+A regression test asserts both delimiters in the migration text.
+
+This was corrected before vNext deployment/cutover. No production schema was changed.
