@@ -1,9 +1,6 @@
 name: AETHER vNext CI
 
 on:
-  push:
-    branches:
-      - aether-vnext-swapout
   pull_request:
     branches:
       - main
