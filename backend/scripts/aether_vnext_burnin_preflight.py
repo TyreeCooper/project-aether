@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+from pathlib import Path
 
 from aether_vnext.db_runtime import open_vnext_engine
 from aether_vnext.forward_paper_preflight import (
@@ -58,7 +59,20 @@ def _serialize(result) -> dict[str, object]:
     }
 
 
-async def _main(campaign_id: str, routes_json: str) -> int:
+def _emit_report(payload: dict[str, object], output: str | None) -> None:
+    rendered = json.dumps(payload, indent=2, sort_keys=True)
+    print(rendered)
+    if output:
+        path = Path(output)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(rendered + "\n", encoding="utf-8")
+
+
+async def _main(
+    campaign_id: str,
+    routes_json: str,
+    output: str | None,
+) -> int:
     routes = _parse_routes(routes_json)
     store = VNextStore(schema="aether_vnext")
     async with open_vnext_engine() as engine:
@@ -71,7 +85,8 @@ async def _main(campaign_id: str, routes_json: str) -> int:
                     requested_routes=routes,
                 )
             )
-    print(json.dumps(_serialize(result), indent=2, sort_keys=True))
+    payload = _serialize(result)
+    _emit_report(payload, output)
     return 0 if result.startable else 2
 
 
@@ -79,5 +94,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--campaign-id", required=True)
     parser.add_argument("--routes-json", required=True)
+    parser.add_argument("--output")
     args = parser.parse_args()
-    raise SystemExit(asyncio.run(_main(args.campaign_id, args.routes_json)))
+    raise SystemExit(
+        asyncio.run(
+            _main(
+                args.campaign_id,
+                args.routes_json,
+                args.output,
+            )
+        )
+    )

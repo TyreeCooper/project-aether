@@ -38,3 +38,20 @@ The preflight must return `startable=true` before campaign creation is permitted
 A missing baseline is evidence work to complete, not a reason to synthesize data.
 
 PAPER ONLY and LIVE HARD BLOCKED remain unchanged.
+
+
+## Durable preflight evidence
+
+Every control-plane run writes and uploads:
+
+`aether-vnext-burnin-preflight-<github-run-id>`
+
+The artifact contains only the preflight result: configuration/policy identity,
+requested routes, held-out window IDs/counts, independent held-out n, baseline hashes,
+and blocker codes. It does not contain database credentials.
+
+The artifact is uploaded even when the preflight returns `startable=false`. The
+workflow propagates the nonzero status only after artifact upload, so a failed
+preflight remains inspectable instead of becoming an opaque red job.
+
+Artifact retention is 30 days.

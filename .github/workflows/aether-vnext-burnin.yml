@@ -92,12 +92,35 @@ jobs:
           PYTHONPATH: .
         run: python scripts/aether_vnext_bootstrap_policy.py
 
-      - name: Read-only burn-in preflight
+      - name: Run read-only burn-in preflight
+        id: preflight
         env:
           PYTHONPATH: .
           AETHER_BURNIN_CAMPAIGN_ID: ${{ inputs.campaign_id }}
           AETHER_BURNIN_ROUTES_JSON: ${{ inputs.routes_json }}
         shell: bash
         run: |
-          set -euo pipefail
-          python scripts/aether_vnext_burnin_preflight.py             --campaign-id "$AETHER_BURNIN_CAMPAIGN_ID"             --routes-json "$AETHER_BURNIN_ROUTES_JSON"
+          set +e
+          python scripts/aether_vnext_burnin_preflight.py \
+            --campaign-id "$AETHER_BURNIN_CAMPAIGN_ID" \
+            --routes-json "$AETHER_BURNIN_ROUTES_JSON" \
+            --output aether-vnext-burnin-preflight.json
+          status=$?
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload burn-in preflight report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-vnext-burnin-preflight-${{ github.run_id }}
+          path: backend/aether-vnext-burnin-preflight.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Propagate preflight result
+        if: ${{ steps.preflight.outputs.exit_code != '0' }}
+        shell: bash
+        run: |
+          echo "Burn-in preflight was not startable; inspect the uploaded JSON artifact."
+          exit "${{ steps.preflight.outputs.exit_code }}"
