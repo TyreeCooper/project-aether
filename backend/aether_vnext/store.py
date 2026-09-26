@@ -260,6 +260,7 @@ class VNextStore:
         return {
             "ok": False,
             "duplicate": False,
+            "error": reason_code,
             "state": "REJECTED",
             "reject_code": reason_code,
         }
@@ -315,15 +316,9 @@ class VNextStore:
         ledgers = self.tables["broker_account_ledgers"]
         signals = self.tables["signal_consumptions"]
         positions = self.tables["active_positions"]
+        tickets = self.tables["tickets"]
 
-        ledger = conn.execute(
-            sa.select(ledgers)
-            .where(ledgers.c.broker_account_id == broker_account_id)
-            .with_for_update()
-        ).mappings().first()
-        if ledger is None:
-            raise KeyError(f"unknown broker ledger: {broker_account_id}")
-
+        # Idempotent retry wins before re-evaluating mutable current state.
         existing = conn.execute(
             sa.select(intents).where(
                 intents.c.idempotency_key == idempotency_key
@@ -337,17 +332,76 @@ class VNextStore:
                 "state": existing["state"],
             }
 
+        ticket = conn.execute(
+            sa.select(tickets)
+            .where(tickets.c.ticket_id == ticket_id)
+            .with_for_update()
+        ).mappings().first()
+        if ticket is None:
+            return {
+                "ok": False,
+                "error": "unknown_ticket",
+                "ticket_id": ticket_id,
+            }
+        if ticket["state"] != "READY":
+            return {
+                "ok": False,
+                "error": "ticket_not_ready",
+                "state": ticket["state"],
+            }
+        if (
+            ticket["configuration_hash"] != configuration_hash
+            or ticket["policy_version"] != policy_version
+        ):
+            return self.reject_ticket_pre_reserve(
+                conn,
+                ticket_id=ticket_id,
+                reason_code="configuration_mismatch",
+                at_utc=created_at_utc,
+                event_id=event_id,
+                actor=actor,
+                market_observation_id=market_observation_id,
+            )
+        if (
+            ticket["asset_id"] != asset_id
+            or ticket["route_id"] != route_id
+            or ticket["signal_key"] != signal_key
+            or ticket["side"] != side
+            or abs(float(ticket["quantity"] or 0.0) - float(qty)) > 1e-12
+        ):
+            return self.reject_ticket_pre_reserve(
+                conn,
+                ticket_id=ticket_id,
+                reason_code="ticket_contract_mismatch",
+                at_utc=created_at_utc,
+                event_id=event_id,
+                actor=actor,
+                market_observation_id=market_observation_id,
+            )
+
+        ledger = conn.execute(
+            sa.select(ledgers)
+            .where(ledgers.c.broker_account_id == broker_account_id)
+            .with_for_update()
+        ).mappings().first()
+        if ledger is None:
+            raise KeyError(f"unknown broker ledger: {broker_account_id}")
+
         consumed = conn.execute(
             sa.select(signals.c.trade_id).where(
                 signals.c.signal_key == signal_key
             )
         ).first()
         if consumed is not None:
-            return {
-                "ok": False,
-                "error": "signal_consumed",
-                "signal_key": signal_key,
-            }
+            return self.reject_ticket_pre_reserve(
+                conn,
+                ticket_id=ticket_id,
+                reason_code="signal_consumed",
+                at_utc=created_at_utc,
+                event_id=event_id,
+                actor=actor,
+                market_observation_id=market_observation_id,
+            )
 
         active = conn.execute(
             sa.select(positions.c.trade_id).where(
@@ -355,28 +409,33 @@ class VNextStore:
             )
         ).first()
         if active is not None:
-            return {
-                "ok": False,
-                "error": "duplicate_position_key",
-                "position_key": position_key,
-            }
+            return self.reject_ticket_pre_reserve(
+                conn,
+                ticket_id=ticket_id,
+                reason_code="duplicate_position_key",
+                at_utc=created_at_utc,
+                event_id=event_id,
+                actor=actor,
+                market_observation_id=market_observation_id,
+            )
 
         cash_available = float(ledger["cash_available_usd"])
         cash_reserved = float(ledger["cash_reserved_usd"])
         margin_used = float(ledger["margin_used_usd"])
         margin_available = float(ledger["margin_available_usd"])
-        if cash_available + 1e-9 < reserve_cash_usd:
-            return {
-                "ok": False,
-                "error": "insufficient_capital",
-                "broker_account_id": broker_account_id,
-            }
-        if margin_available + 1e-9 < reserve_margin_usd:
-            return {
-                "ok": False,
-                "error": "insufficient_capital",
-                "broker_account_id": broker_account_id,
-            }
+        if (
+            cash_available + 1e-9 < reserve_cash_usd
+            or margin_available + 1e-9 < reserve_margin_usd
+        ):
+            return self.reject_ticket_pre_reserve(
+                conn,
+                ticket_id=ticket_id,
+                reason_code="insufficient_capital",
+                at_utc=created_at_utc,
+                event_id=event_id,
+                actor=actor,
+                market_observation_id=market_observation_id,
+            )
 
         conn.execute(
             intents.insert().values(
