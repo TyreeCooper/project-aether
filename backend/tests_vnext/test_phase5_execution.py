@@ -618,7 +618,7 @@ def _finalize_btc(conn, store: VNextStore, *, trade_id: str = "trade-1", qty: fl
         order_intent_id="intent-reserve-1",
         trade_id=trade_id,
         setup_id="setup-1",
-        exit_plan_id="exit-plan-1",
+        exit_plan_id="exit-plan-btc",
         fill_market_observation_id="obs-fill",
         filled_at_utc=T0 + timedelta(milliseconds=250),
         filled_qty=qty,
@@ -658,7 +658,7 @@ def test_successful_fill_atomically_opens_consumes_signal_and_retains_reserve() 
         ).mappings().all()
         assert len(open_trades) == 1
         assert open_trades[0]["trade_id"] == "trade-1"
-        assert open_trades[0]["exit_plan_id"] == "exit-plan-1"
+        assert open_trades[0]["exit_plan_id"] == "exit-plan-btc"
 
         active = conn.execute(
             sa.select(store.tables["active_positions"])
