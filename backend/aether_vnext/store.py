@@ -531,7 +531,7 @@ class VNextStore:
                 at_utc=created_at_utc,
                 event_id=event_id,
                 actor=actor,
-                observation_id_at_reserve=market_observation_id,
+                market_observation_id=market_observation_id,
             )
         if ticket["exit_plan_id"] is None:
             return self.reject_ticket_pre_reserve(
@@ -541,7 +541,7 @@ class VNextStore:
                 at_utc=created_at_utc,
                 event_id=event_id,
                 actor=actor,
-                observation_id_at_reserve=market_observation_id,
+                market_observation_id=market_observation_id,
             )
         canonical_broker_account_id = ASSET_BROKER_ACCOUNT.get(asset_id)
         if canonical_broker_account_id is None:
@@ -552,7 +552,7 @@ class VNextStore:
                 at_utc=created_at_utc,
                 event_id=event_id,
                 actor=actor,
-                observation_id_at_reserve=market_observation_id,
+                market_observation_id=market_observation_id,
             )
         if broker_account_id != canonical_broker_account_id:
             return self.reject_ticket_pre_reserve(
@@ -562,7 +562,7 @@ class VNextStore:
                 at_utc=created_at_utc,
                 event_id=event_id,
                 actor=actor,
-                observation_id_at_reserve=market_observation_id,
+                market_observation_id=market_observation_id,
             )
 
         expected_idempotency_key = open_intent_idempotency_key(
@@ -581,7 +581,7 @@ class VNextStore:
                 at_utc=created_at_utc,
                 event_id=event_id,
                 actor=actor,
-                observation_id_at_reserve=market_observation_id,
+                market_observation_id=market_observation_id,
             )
 
         if (
@@ -599,7 +599,7 @@ class VNextStore:
                 at_utc=created_at_utc,
                 event_id=event_id,
                 actor=actor,
-                observation_id_at_reserve=market_observation_id,
+                market_observation_id=market_observation_id,
             )
 
         observation = conn.execute(
@@ -615,7 +615,7 @@ class VNextStore:
                 at_utc=created_at_utc,
                 event_id=event_id,
                 actor=actor,
-                observation_id_at_reserve=market_observation_id,
+                market_observation_id=market_observation_id,
             )
         if observation["asset_id"] != asset_id:
             return self.reject_ticket_pre_reserve(
@@ -625,7 +625,7 @@ class VNextStore:
                 at_utc=created_at_utc,
                 event_id=event_id,
                 actor=actor,
-                observation_id_at_reserve=market_observation_id,
+                market_observation_id=market_observation_id,
             )
         if (
             observation["quality_state"] != "healthy"
@@ -639,7 +639,7 @@ class VNextStore:
                 at_utc=created_at_utc,
                 event_id=event_id,
                 actor=actor,
-                observation_id_at_reserve=market_observation_id,
+                market_observation_id=market_observation_id,
             )
         modeled_cost_pct = ticket["modeled_round_trip_cost_pct"]
         if modeled_cost_pct is None:
@@ -650,7 +650,7 @@ class VNextStore:
                 at_utc=created_at_utc,
                 event_id=event_id,
                 actor=actor,
-                observation_id_at_reserve=market_observation_id,
+                market_observation_id=market_observation_id,
             )
 
         requirement = reservation_requirement(
@@ -678,7 +678,7 @@ class VNextStore:
                 at_utc=created_at_utc,
                 event_id=event_id,
                 actor=actor,
-                observation_id_at_reserve=market_observation_id,
+                market_observation_id=market_observation_id,
             )
 
         reserve_cash_usd = requirement.reserve_cash_usd
@@ -707,7 +707,7 @@ class VNextStore:
                 at_utc=created_at_utc,
                 event_id=event_id,
                 actor=actor,
-                observation_id_at_reserve=market_observation_id,
+                market_observation_id=market_observation_id,
             )
 
         active = conn.execute(
@@ -723,7 +723,7 @@ class VNextStore:
                 at_utc=created_at_utc,
                 event_id=event_id,
                 actor=actor,
-                observation_id_at_reserve=market_observation_id,
+                market_observation_id=market_observation_id,
             )
 
         cash_available = float(ledger["cash_available_usd"])
@@ -741,7 +741,7 @@ class VNextStore:
                 at_utc=created_at_utc,
                 event_id=event_id,
                 actor=actor,
-                observation_id_at_reserve=market_observation_id,
+                market_observation_id=market_observation_id,
             )
 
         conn.execute(
@@ -812,7 +812,7 @@ class VNextStore:
             reason_code="portfolio.reserve",
             policy_version=policy_version,
             configuration_hash=configuration_hash,
-            observation_id_at_reserve=market_observation_id,
+            market_observation_id=market_observation_id,
             actor=actor,
             created_at_utc=created_at_utc,
             payload={
@@ -1360,7 +1360,7 @@ class VNextStore:
             reason_code="portfolio.flatten_reserve",
             policy_version=trade["policy_version"],
             configuration_hash=trade["configuration_hash"],
-            observation_id_at_reserve=market_observation_id,
+            market_observation_id=market_observation_id,
             actor=actor,
             created_at_utc=created_at_utc,
             payload={
