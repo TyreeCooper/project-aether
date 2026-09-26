@@ -495,3 +495,28 @@ concentration it emits an explicitly labeled descriptive max_trade_count_share r
 than pretending that normalization is a source-bound promotion gate.
 
 **AETH-VN-014 status:** CONTAINED.
+
+
+## AETH-VN-015 — Decay materiality thresholds and rolling/reference window sizes are not source-bound
+
+**Class:** profitability decay-policy parameterization / anti-invention control  
+**Discovered:** Phase 9 P8 decay-monitor conversion  
+**Status:** CONTAINED  
+**Blocks raw decay monitoring:** NO  
+**Blocks autonomous material-decay classification without a versioned policy:** YES
+
+### Facts
+
+Part IV requires Review to compare recent versus reference expectancy, capture,
+execution drag, cost drift, and regime mix. It says WATCHLIST DECAY begins when
+those measures materially worsen, but does not bind numeric materiality thresholds
+or universal rolling/reference window sizes.
+
+### Control
+
+vNext records exact directional deltas. A versioned materiality decision may classify
+DECAY_CONFIRMED. When deterioration exists and materiality is unbound, the monitor
+queues Review as MATERIALITY_UNBOUND rather than inventing a threshold. The decay
+monitor cannot mutate route Review state, Risk fractions, playbook rules, or side.
+
+**AETH-VN-015 status:** CONTAINED.

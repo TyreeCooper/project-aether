@@ -47,6 +47,7 @@ from aether_vnext.evidence import (
     ProfitabilityEvidence,
     SampleDomain,
 )
+from aether_vnext.decay import DecayAssessment, DecayCohort, assess_decay
 from aether_vnext.freeze import EvidenceState
 from aether_vnext.registry import ProductType, registry_row
 from aether_vnext.reservations import reservation_requirement
@@ -1186,6 +1187,142 @@ class VNextStore:
             metrics_snapshot_hash=str(row["metrics_snapshot_hash"]),
             created_at_utc=_stored_utc(row["created_at_utc"]),
         )
+
+    def assess_and_queue_decay(
+        self,
+        conn: Connection,
+        *,
+        decay_request_id: str,
+        reference: DecayCohort,
+        recent: DecayCohort,
+        materiality_decision: bool | None,
+        materiality_policy_version: str | None,
+        created_at_utc: datetime,
+    ) -> dict[str, Any]:
+        """Evaluate decay and automatically queue Review when required."""
+        assessment = assess_decay(
+            reference,
+            recent,
+            materiality_decision=materiality_decision,
+            materiality_policy_version=materiality_policy_version,
+        )
+        if not assessment.request_review:
+            return {
+                "decay_request_id": None,
+                "status": assessment.status.value,
+                "request_review": False,
+                "queued": False,
+                "route_state_mutated": False,
+                "assessment": assessment,
+            }
+        persisted = self.record_decay_review_request(
+            conn,
+            decay_request_id=decay_request_id,
+            assessment=assessment,
+            created_at_utc=created_at_utc,
+        )
+        return {
+            **persisted,
+            "queued": True,
+            "assessment": assessment,
+        }
+
+    def record_decay_review_request(
+        self,
+        conn: Connection,
+        *,
+        decay_request_id: str,
+        assessment: DecayAssessment,
+        created_at_utc: datetime,
+    ) -> dict[str, Any]:
+        """Append one decay-monitor result without mutating Review/strategy state."""
+        if not str(decay_request_id).strip():
+            raise ValueError("decay_request_id is required")
+        if created_at_utc.tzinfo is None:
+            raise ValueError("created_at_utc must be timezone-aware")
+        if not assessment.request_review:
+            raise ValueError(
+                "decay assessment does not require a Review queue entry"
+            )
+
+        evidence = self.tables["profitability_evidence"]
+        queue = self.tables["decay_review_requests"]
+
+        reference = conn.execute(
+            sa.select(evidence).where(
+                evidence.c.evidence_id == assessment.reference_evidence_id
+            )
+        ).mappings().first()
+        recent = conn.execute(
+            sa.select(evidence).where(
+                evidence.c.evidence_id == assessment.recent_evidence_id
+            )
+        ).mappings().first()
+        if reference is None or recent is None:
+            raise KeyError("decay request references unknown ProfitabilityEvidence")
+
+        for row, role in ((reference, "reference"), (recent, "recent")):
+            if str(row["route_id"]) != assessment.route_id:
+                raise ValueError(f"{role} evidence route_id mismatch")
+            if str(row["playbook_id"]) != assessment.playbook_id:
+                raise ValueError(f"{role} evidence playbook_id mismatch")
+            if str(row["playbook_version"]) != assessment.playbook_version:
+                raise ValueError(f"{role} evidence playbook_version mismatch")
+            if str(row["configuration_hash"]) != assessment.configuration_hash:
+                raise ValueError(f"{role} evidence configuration_hash mismatch")
+
+        metric_deltas = {
+            "net_expectancy_usd": assessment.expectancy_delta_usd,
+            "capture_efficiency": assessment.capture_efficiency_delta,
+            "execution_drag_usd_per_trade": (
+                assessment.execution_drag_delta_usd_per_trade
+            ),
+            "average_cost_usd_per_trade": (
+                assessment.average_cost_delta_usd_per_trade
+            ),
+            "regime_mix": dict(assessment.regime_mix_delta),
+        }
+        conn.execute(
+            queue.insert().values(
+                decay_request_id=decay_request_id,
+                route_id=assessment.route_id,
+                playbook_id=assessment.playbook_id,
+                playbook_version=assessment.playbook_version,
+                configuration_hash=assessment.configuration_hash,
+                reference_evidence_id=assessment.reference_evidence_id,
+                recent_evidence_id=assessment.recent_evidence_id,
+                status=assessment.status.value,
+                request_review=assessment.request_review,
+                materiality_decision=assessment.materiality_decision,
+                materiality_policy_version=assessment.materiality_policy_version,
+                metric_deltas=metric_deltas,
+                deterioration_dimensions=list(
+                    assessment.deterioration_dimensions
+                ),
+                unresolved_rules=list(assessment.unresolved_rules),
+                created_at_utc=created_at_utc,
+            )
+        )
+        return {
+            "decay_request_id": decay_request_id,
+            "status": assessment.status.value,
+            "request_review": assessment.request_review,
+            "route_state_mutated": False,
+        }
+
+    def load_decay_review_request(
+        self,
+        conn: Connection,
+        *,
+        decay_request_id: str,
+    ) -> dict[str, Any] | None:
+        table = self.tables["decay_review_requests"]
+        row = conn.execute(
+            sa.select(table).where(
+                table.c.decay_request_id == decay_request_id
+            )
+        ).mappings().first()
+        return dict(row) if row is not None else None
 
     def record_profitability_review(
         self,

@@ -46,6 +46,7 @@ def test_book_of_record_has_required_tables() -> None:
         "closed_trades",
         "evidence_windows",
         "profitability_evidence",
+        "decay_review_requests",
         "review_cards",
         "route_review_state",
         "signal_consumptions",
@@ -363,22 +364,23 @@ def test_phase5_execution_reservation_columns_are_in_current_schema() -> None:
     assert "fill_market_observation_id" not in columns
 
 
-def test_runtime_schema_facade_is_pinned_to_revision_0015() -> None:
+def test_runtime_schema_facade_is_pinned_to_revision_0016() -> None:
     backend = Path(__file__).resolve().parents[1]
     facade = (backend / "aether_vnext" / "schema.py").read_text(encoding="utf-8")
-    assert "schema_v0015" in facade
+    assert "schema_v0016" in facade
     migration = (
         backend
         / "alembic"
         / "versions"
-        / "0015_aether_vnext_regime_tags.py"
+        / "0016_aether_vnext_decay_review_queue.py"
     ).read_text(encoding="utf-8")
-    assert 'revision: str = "0015"' in migration
-    assert 'down_revision: Union[str, None] = "0014"' in migration
-    assert "regime_tags" in migration
-    assert "setups" in migration
-    assert "closed_trades" in migration
-    assert "trg_setup_regime_tags_immutable" in migration
+    assert 'revision: str = "0016"' in migration
+    assert 'down_revision: Union[str, None] = "0015"' in migration
+    assert "decay_review_requests" in migration
+    assert "reference_evidence_id" in migration
+    assert "recent_evidence_id" in migration
+    assert "trg_decay_review_requests_immutable" in migration
+    assert "reject_immutable_mutation" in migration
 
 
 def test_phase6_atomic_risk_admission_schema_is_explicit() -> None:
