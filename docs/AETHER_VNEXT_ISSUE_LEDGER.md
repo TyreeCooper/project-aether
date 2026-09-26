@@ -54,3 +54,27 @@ No legacy test or implementation is allowed to become design authority for vNext
 - **CLOSED** — resolved with evidence.
 
 **AETH-VN-001 status:** CONTAINED + BLOCKS_MERGE.
+
+
+## AETH-VN-002 — External market-data/calendar bindings are intentionally unbound
+
+**Class:** planned external dependency / anti-invention control  
+**Discovered:** Phase 2 Product Registry closure  
+**Status:** CONTAINED  
+**Blocks Phase 2 contract closure:** NO  
+**Blocks route FIRE without binding:** YES
+
+### Facts
+
+- The Master requires each product row to identify market-data sources and a stale threshold.
+- The frozen specification does not provide a numeric stale threshold for the seed products.
+- The repository currently has a concrete Kraken public-data implementation for BTC/ETH.
+- No new vNext provider identity is being invented for tastyfx, NinjaTrader, or IBKR market data.
+- Non-crypto calendar decisions require a date-specific holiday/early-close provider. If none is supplied, vNext returns ineligible rather than assuming NORMAL.
+- Futures require an exact `current_contract` and expiry before lifecycle FIRE is eligible. Family symbols and continuous research symbols cannot substitute for executable contracts.
+
+### Control
+
+The Product Registry explicitly represents BOUND vs UNBOUND market data and exposes binding functions. Until a product has an approved source, stale threshold, calendar exception provider where applicable, and futures contract binding where applicable, it cannot become execution-eligible.
+
+This dependency is expected to be resolved in the market-data/adapter phases. It is not permission to use legacy strategy/data behavior as a fallback.
