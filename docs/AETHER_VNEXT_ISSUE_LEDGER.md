@@ -9,9 +9,9 @@
 **Class:** legacy baseline defect  
 **Discovered:** PR #12 repository-wide CI  
 **vNext isolation CI:** GREEN  
-**Repository-wide legacy CI:** RED  
+**Repository-wide CI:** GREEN as of run #515  
 **Blocks vNext development:** NO  
-**Blocks final merge/cutover:** YES until resolved or legacy path/tests are retired by the cutover plan
+**Blocks final merge/cutover:** NO — repaired and verified
 
 ### Evidence
 
@@ -34,16 +34,24 @@ The branch did not modify either side of the failing contract:
 
 Therefore this is not a regression introduced by the replacement runtime.
 
-### Current decision
+### Resolution
 
-Do **not** bend vNext around this legacy mismatch.
+A legacy-only repair restored the intended broker-sleeve contract without importing
+legacy code into vNext or making legacy behavior design authority for vNext.
 
-Keep the defect visible while replacement work continues behind the isolated vNext CI gate. Before final merge/cutover, choose exactly one controlled resolution:
+Repair details:
+- `PaperPortfolio` now owns a `SleeveBook` and persists/restores it.
+- direct legacy opens debit the target sleeve and closes credit the same sleeve.
+- two-phase filled intents can be applied without double-debiting the sleeve.
+- later frozen futures seed margins are used for legacy paper futures.
+- focused synthetic legacy risk/cap tests use an explicit test-only sleeve-overflow
+  fixture rather than weakening normal broker-local capacity.
+- vNext remains fully isolated from `app.*`.
 
-1. retire the legacy runtime and its obsolete tests as part of the cutover commit; or
-2. make an isolated legacy-only repair if the old runtime must remain active longer.
+Verification:
+- repository-wide CI run #515: **365 passed, 1 warning**.
+- AETHER vNext CI run #98: **SUCCESS**.
 
-No legacy test or implementation is allowed to become design authority for vNext merely to make this check green.
 
 ## Status vocabulary
 
@@ -53,7 +61,7 @@ No legacy test or implementation is allowed to become design authority for vNext
 - **BLOCKS_MERGE** — development may continue, but merge/cutover is forbidden.
 - **CLOSED** — resolved with evidence.
 
-**AETH-VN-001 status:** CONTAINED + BLOCKS_MERGE.
+**AETH-VN-001 status:** CLOSED.
 
 
 ## AETH-VN-002 — External market-data/calendar bindings are intentionally unbound
@@ -78,3 +86,32 @@ No legacy test or implementation is allowed to become design authority for vNext
 The Product Registry explicitly represents BOUND vs UNBOUND market data and exposes binding functions. Until a product has an approved source, stale threshold, calendar exception provider where applicable, and futures contract binding where applicable, it cannot become execution-eligible.
 
 This dependency is expected to be resolved in the market-data/adapter phases. It is not permission to use legacy strategy/data behavior as a fallback.
+
+
+## AETH-VN-003 — Superseded GitHub Actions runs appeared frozen
+
+**Class:** CI orchestration / operator visibility  
+**Discovered:** 2026-09-26 during Phase 4 start  
+**Status:** CLOSED
+
+### Facts
+
+- A prior repository-wide run (#509) remained stuck inside `python -m pytest -q`
+  even though the isolated vNext workflow for the same head completed successfully.
+- A fresh run after the legacy sleeve repair completed normally, proving the repository
+  test suite itself was not permanently deadlocked.
+- Rapid sequential commits were also creating multiple overlapping PR workflow runs,
+  which made the Actions page show several pending/red rows at once.
+
+### Resolution
+
+Both PR workflows now use concurrency cancellation so a newer commit supersedes older
+in-progress work for the same branch. Both jobs also have a 10-minute timeout so a
+runner cannot remain pending indefinitely without terminating.
+
+Verification:
+- repository-wide CI run #515: SUCCESS, 365 passed.
+- AETHER vNext CI run #98: SUCCESS.
+
+Historical failed/cancelled/stale rows may remain visible in the GitHub Actions history;
+they are not the status of the current PR head.
