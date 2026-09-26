@@ -388,6 +388,7 @@ def test_b9_portfolio_risk_exhaustion_then_close_restores_entry_capacity(
                 ),
                 "routing_horizon": "swing",
             },
+            test_allow_sleeve_overflow=True,
         )
         assert row["ok"] is True
         seeded.append(row)
@@ -595,6 +596,7 @@ def test_b9_instrument_caps_and_live_order_boundary_remain_hard(
         quantity=2.0,
         price=100_000.0,
         stop_price=95_000.0,
+        test_allow_sleeve_overflow=True,
     )
     assert crypto_open["ok"] is True
     assert crypto_open["coin_quantity"] == 2.0

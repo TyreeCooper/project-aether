@@ -3,8 +3,14 @@ on:
   push:
     branches: [main]
   pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
 jobs:
   backend-tests:
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -20,6 +26,8 @@ jobs:
           for file in app/static/*.js; do
             node --check "$file"
           done
-      - run: python -m pytest -q
+      - name: Run backend tests
+        run: timeout --signal=TERM --kill-after=10s 300s python -m pytest -q -o faulthandler_timeout=60
         env:
           PYTHONPATH: .
+          PYTHONUNBUFFERED: "1"

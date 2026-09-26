@@ -1,0 +1,62 @@
+name: AETHER vNext CI
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'backend/aether_vnext/**'
+      - 'backend/tests_vnext/**'
+      - 'backend/alembic/versions/**'
+      - 'docs/AETHER_VNEXT_PHASE0_CONTROL.md'
+      - '.github/workflows/aether-vnext-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vnext-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  vnext-contract:
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run isolated vNext tests
+        env:
+          PYTHONPATH: .
+          PYTHONUNBUFFERED: "1"
+        run: python -m pytest -q tests_vnext
+      - name: Prove vNext live block and legacy isolation
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import sys
+          import aether_vnext
+
+          contract = aether_vnext.runtime_contract()
+          assert contract["paper_only"] is True
+          assert contract["live_blocked"] is True
+          assert contract["legacy_compatibility_required"] is False
+
+          legacy = [
+              name for name in sys.modules
+              if name == "app" or name.startswith("app.")
+          ]
+          assert legacy == [], legacy
+          print("AETHER vNext isolation contract: GREEN")
+          PY
