@@ -430,7 +430,7 @@ def fill_submitted_paper_flatten_intent(
 
     slip_usd = slip_cost_usd(
         registry_row,
-        qty=intent.qty,
+        qty=intent.requested_qty,
         price=float(reference_price),
         slip_bps=policy.slip_bps,
     )
@@ -438,11 +438,11 @@ def fill_submitted_paper_flatten_intent(
         intent,
         state=OrderIntentState.FILLED,
         filled_at=at_utc,
-        filled_qty=intent.qty,
+        filled_qty=intent.requested_qty,
         avg_fill_price=fill_price,
         reject_code=None,
-        slippage_usd=slip_usd,
-        slippage_bps=policy.slip_bps,
+        slip_usd=slip_usd,
+        slip_bps=policy.slip_bps,
     )
     return ExecutionTransition(updated, True, "filled")
 
@@ -499,7 +499,7 @@ def fill_submitted_paper_intent(
         raise ValueError("entry quote side missing")
     slip_usd = slip_cost_usd(
         registry_row,
-        qty=intent.qty,
+        qty=intent.requested_qty,
         price=reference_price,
         slip_bps=policy.slip_bps,
     )
@@ -507,11 +507,11 @@ def fill_submitted_paper_intent(
         intent,
         state=OrderIntentState.FILLED,
         filled_at=at_utc,
-        filled_qty=intent.qty,
+        filled_qty=intent.requested_qty,
         avg_fill_price=fill_price,
         reject_code=None,
-        slippage_usd=slip_usd,
-        slippage_bps=policy.slip_bps,
+        slip_usd=slip_usd,
+        slip_bps=policy.slip_bps,
     )
     return ExecutionTransition(updated, True, "filled")
 
