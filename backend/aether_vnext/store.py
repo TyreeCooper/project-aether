@@ -753,7 +753,7 @@ class VNextStore:
         )
 
         if not preflight_valid:
-            return self.reserve_order_intent(
+            return self._reserve_order_intent_after_admission(
                 conn,
                 order_intent_id=order_intent_id,
                 ticket_id=ticket_id,
@@ -923,7 +923,7 @@ class VNextStore:
                 market_observation_id=market_observation_id,
             )
 
-        result = self.reserve_order_intent(
+        result = self._reserve_order_intent_after_admission(
             conn,
             order_intent_id=order_intent_id,
             ticket_id=ticket_id,
@@ -1285,7 +1285,7 @@ class VNextStore:
             "reject_code": reason_code,
         }
 
-    def reserve_order_intent(
+    def _reserve_order_intent_after_admission(
         self,
         conn: Connection,
         *,
@@ -1330,6 +1330,13 @@ class VNextStore:
         if submit_timeout_at is None:
             submit_timeout_at = created_at_utc + timedelta(milliseconds=15_000)
 
+        """Low-level persistence primitive after admission checks.
+
+        Runtime OPEN callers must use reserve_risk_checked_open_intent(). This
+        method remains private so execution-contract unit tests can exercise
+        reservation mechanics without constructing the entire Risk/Governor
+        pipeline.
+        """
         intents = self.tables["order_intents"]
         ledgers = self.tables["broker_account_ledgers"]
         signals = self.tables["signal_consumptions"]

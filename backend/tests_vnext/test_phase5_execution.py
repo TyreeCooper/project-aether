@@ -442,7 +442,7 @@ def _reserve_btc(
     reserve_cash_usd: float | None = None,
     reserve_margin_usd: float | None = None,
 ):
-    return store.reserve_order_intent(
+    return store._reserve_order_intent_after_admission(
         conn,
         order_intent_id=order_intent_id,
         ticket_id="ticket-1",
@@ -654,7 +654,7 @@ def test_submit_and_reject_release_are_separate_transactions_and_idempotent() ->
 def test_margin_reservation_and_release_use_same_broker_ledger() -> None:
     engine, store = _store_fixture()
     with engine.begin() as conn:
-        out = store.reserve_order_intent(
+        out = store._reserve_order_intent_after_admission(
             conn,
             order_intent_id="intent-mes-1",
             ticket_id="ticket-mes",
@@ -1806,7 +1806,7 @@ def test_rejected_close_releases_no_open_reserve_and_keeps_position_open() -> No
 def test_caller_cannot_override_source_owned_reservation_amounts() -> None:
     engine, store = _store_fixture()
     with engine.begin() as conn:
-        result = store.reserve_order_intent(
+        result = store._reserve_order_intent_after_admission(
             conn,
             order_intent_id="intent-mes-invalid",
             ticket_id="ticket-mes",
@@ -1859,7 +1859,7 @@ def test_futures_open_to_flat_releases_cash_and_margin_and_books_net() -> None:
     engine, store = _store_fixture()
 
     with engine.begin() as conn:
-        reserved = store.reserve_order_intent(
+        reserved = store._reserve_order_intent_after_admission(
             conn,
             order_intent_id="intent-mes-open",
             ticket_id="ticket-mes",
@@ -2158,7 +2158,7 @@ def test_kraken_btc_and_eth_inventory_rows_never_mix_units_or_average_price() ->
         btc_open = _finalize_btc(conn, store)
         assert btc_open["state"] == "FILLED"
 
-        eth_reserved = store.reserve_order_intent(
+        eth_reserved = store._reserve_order_intent_after_admission(
             conn,
             order_intent_id="intent-eth-open",
             ticket_id="ticket-eth",
@@ -2281,7 +2281,7 @@ def test_phase_a_rejects_noncanonical_idempotency_key_without_reserving() -> Non
 def test_phase_a_rejects_wrong_broker_sleeve_without_reserving() -> None:
     engine, store = _store_fixture()
     with engine.begin() as conn:
-        result = store.reserve_order_intent(
+        result = store._reserve_order_intent_after_admission(
             conn,
             order_intent_id="intent-wrong-sleeve",
             ticket_id="ticket-1",
