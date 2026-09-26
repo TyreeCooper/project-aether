@@ -2350,7 +2350,7 @@ def test_phase_a_stores_source_derived_reserve_and_prices() -> None:
         assert intent["reference_price"] == pytest.approx(
             req.entry_reference_price
         )
-        assert intent["expected_fill"] == pytest.approx(
+        assert intent["expected_fill_price"] == pytest.approx(
             req.computed_entry_price
         )
 
