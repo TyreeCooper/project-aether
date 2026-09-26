@@ -4,6 +4,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
+import sqlalchemy as sa
 
 from aether_vnext.domain import (
     CalendarState,
@@ -27,6 +28,7 @@ from aether_vnext.execution import (
     submit_paper_intent,
 )
 from aether_vnext.registry import SEED_REGISTRY
+from aether_vnext.store import VNextStore
 
 
 UTC = timezone.utc
@@ -304,3 +306,245 @@ def test_entry_fill_never_uses_mid_or_last() -> None:
     assert entry_fill_price(obs, position_side="short") == pytest.approx(
         99.0 * 0.9995
     )
+
+
+def _store_fixture():
+    engine = sa.create_engine("sqlite+pysqlite:///:memory:", future=True)
+    store = VNextStore(schema=None)
+    with engine.begin() as conn:
+        store.create_all_for_test(conn)
+        assert store.provision_seed_ledgers_once(conn) is True
+    return engine, store
+
+
+def _reserve_btc(
+    conn,
+    store: VNextStore,
+    *,
+    order_intent_id: str = "intent-reserve-1",
+    idempotency_key: str = "idem-reserve-1",
+    reserve_cash_usd: float = 100.0,
+    reserve_margin_usd: float = 0.0,
+):
+    return store.reserve_order_intent(
+        conn,
+        order_intent_id=order_intent_id,
+        ticket_id="ticket-1",
+        firm_event_id=None,
+        asset_id="btc",
+        route_id="btc:daily_swing:long",
+        broker_account_id="kraken_paper",
+        broker="Kraken",
+        venue="Kraken",
+        symbol="XBTUSD",
+        side="long",
+        qty=0.01,
+        order_type="market",
+        reference_price=100_000.0,
+        expected_fill=100_060.0,
+        idempotency_key=idempotency_key,
+        signal_key="signal-1",
+        position_key="btc:daily_swing",
+        reserve_cash_usd=reserve_cash_usd,
+        reserve_margin_usd=reserve_margin_usd,
+        ready_spread_bps=2.0,
+        hard_stop_price=95_000.0,
+        exit_plan_id=None,
+        submit_timeout_at=None,
+        policy_version="policy-v1",
+        configuration_hash="cfg",
+        market_observation_id="obs-ready",
+        created_at_utc=T0,
+        event_id=f"evt-{order_intent_id}",
+        actor="test",
+    )
+
+
+def test_phase_a_reserve_moves_only_target_broker_ledger_and_not_signal() -> None:
+    engine, store = _store_fixture()
+    with engine.begin() as conn:
+        out = _reserve_btc(conn, store)
+        assert out["ok"] is True
+        assert out["state"] == "RESERVED"
+
+        rows = {
+            row["broker_account_id"]: row
+            for row in store.ledger_rows(conn)
+        }
+        assert rows["kraken_paper"]["cash_available_usd"] == pytest.approx(3900.0)
+        assert rows["kraken_paper"]["cash_reserved_usd"] == pytest.approx(100.0)
+        assert rows["tastyfx_paper"]["cash_available_usd"] == pytest.approx(2000.0)
+        assert rows["ninja_paper"]["cash_available_usd"] == pytest.approx(2000.0)
+        assert rows["ibkr_paper"]["cash_available_usd"] == pytest.approx(2000.0)
+
+        consumed = conn.execute(
+            sa.select(sa.func.count()).select_from(store.tables["signal_consumptions"])
+        ).scalar_one()
+        assert consumed == 0
+
+
+def test_phase_a_duplicate_idempotency_does_not_double_reserve() -> None:
+    engine, store = _store_fixture()
+    with engine.begin() as conn:
+        first = _reserve_btc(conn, store)
+        second = _reserve_btc(
+            conn,
+            store,
+            order_intent_id="intent-different",
+            idempotency_key="idem-reserve-1",
+        )
+        assert first["duplicate"] is False
+        assert second["duplicate"] is True
+        ledger = {
+            row["broker_account_id"]: row
+            for row in store.ledger_rows(conn)
+        }["kraken_paper"]
+        assert ledger["cash_available_usd"] == pytest.approx(3900.0)
+        assert ledger["cash_reserved_usd"] == pytest.approx(100.0)
+
+
+def test_phase_a_insufficient_broker_cash_rolls_back_reservation_shape() -> None:
+    engine, store = _store_fixture()
+    with engine.begin() as conn:
+        out = _reserve_btc(
+            conn,
+            store,
+            order_intent_id="intent-too-big",
+            idempotency_key="idem-too-big",
+            reserve_cash_usd=5000.0,
+        )
+        assert out["ok"] is False
+        assert out["error"] == "insufficient_capital"
+        ledger = {
+            row["broker_account_id"]: row
+            for row in store.ledger_rows(conn)
+        }["kraken_paper"]
+        assert ledger["cash_available_usd"] == pytest.approx(4000.0)
+        assert ledger["cash_reserved_usd"] == 0.0
+        intents = conn.execute(
+            sa.select(sa.func.count()).select_from(store.tables["order_intents"])
+        ).scalar_one()
+        assert intents == 0
+
+
+def test_submit_and_reject_release_are_separate_transactions_and_idempotent() -> None:
+    engine, store = _store_fixture()
+    with engine.begin() as conn:
+        _reserve_btc(conn, store)
+
+    with engine.begin() as conn:
+        submitted = store.mark_order_intent_submitted(
+            conn,
+            order_intent_id="intent-reserve-1",
+            submitted_at_utc=T0,
+            acknowledged_at_utc=T0,
+            submit_timeout_at=T0 + timedelta(seconds=15),
+            event_id="evt-submit-1",
+            actor="paper-adapter",
+        )
+        assert submitted["state"] == "SUBMITTED"
+
+    with engine.begin() as conn:
+        duplicate_submit = store.mark_order_intent_submitted(
+            conn,
+            order_intent_id="intent-reserve-1",
+            submitted_at_utc=T0,
+            acknowledged_at_utc=T0,
+            submit_timeout_at=T0 + timedelta(seconds=15),
+            event_id="evt-submit-duplicate",
+            actor="paper-adapter",
+        )
+        assert duplicate_submit["duplicate"] is True
+
+    with engine.begin() as conn:
+        released = store.release_order_reservation(
+            conn,
+            order_intent_id="intent-reserve-1",
+            terminal_state="REJECTED",
+            reject_code="market_stale",
+            at_utc=T0 + timedelta(milliseconds=250),
+            event_id="evt-reject-1",
+            actor="paper-adapter",
+            fill_market_observation_id=None,
+        )
+        assert released["state"] == "REJECTED"
+
+    with engine.begin() as conn:
+        duplicate_release = store.release_order_reservation(
+            conn,
+            order_intent_id="intent-reserve-1",
+            terminal_state="REJECTED",
+            reject_code="market_stale",
+            at_utc=T0 + timedelta(milliseconds=251),
+            event_id="evt-reject-duplicate",
+            actor="paper-adapter",
+            fill_market_observation_id=None,
+        )
+        assert duplicate_release["duplicate"] is True
+        ledger = {
+            row["broker_account_id"]: row
+            for row in store.ledger_rows(conn)
+        }["kraken_paper"]
+        assert ledger["cash_available_usd"] == pytest.approx(4000.0)
+        assert ledger["cash_reserved_usd"] == 0.0
+
+
+def test_margin_reservation_and_release_use_same_broker_ledger() -> None:
+    engine, store = _store_fixture()
+    with engine.begin() as conn:
+        out = store.reserve_order_intent(
+            conn,
+            order_intent_id="intent-mes-1",
+            ticket_id="ticket-mes",
+            firm_event_id=None,
+            asset_id="mes",
+            route_id="mes:intraday:long",
+            broker_account_id="ninja_paper",
+            broker="NinjaTrader",
+            venue="NinjaTrader",
+            symbol="MESZ26",
+            side="long",
+            qty=1.0,
+            order_type="market",
+            reference_price=6000.0,
+            expected_fill=6003.0,
+            idempotency_key="idem-mes-1",
+            signal_key="signal-mes-1",
+            position_key="mes:intraday",
+            reserve_cash_usd=0.0,
+            reserve_margin_usd=1200.0,
+            ready_spread_bps=1.0,
+            hard_stop_price=5900.0,
+            exit_plan_id=None,
+            submit_timeout_at=None,
+            policy_version="policy-v1",
+            configuration_hash="cfg",
+            market_observation_id="obs-ready-mes",
+            created_at_utc=T0,
+            event_id="evt-mes-reserve",
+            actor="test",
+        )
+        assert out["ok"] is True
+        ledger = {
+            row["broker_account_id"]: row
+            for row in store.ledger_rows(conn)
+        }["ninja_paper"]
+        assert ledger["margin_used_usd"] == pytest.approx(1200.0)
+        assert ledger["margin_available_usd"] == pytest.approx(800.0)
+
+    with engine.begin() as conn:
+        store.release_order_reservation(
+            conn,
+            order_intent_id="intent-mes-1",
+            terminal_state="CANCELLED_STALE",
+            reject_code="submit_timeout",
+            at_utc=T0 + timedelta(seconds=16),
+            event_id="evt-mes-release",
+            actor="reconciler",
+        )
+        ledger = {
+            row["broker_account_id"]: row
+            for row in store.ledger_rows(conn)
+        }["ninja_paper"]
+        assert ledger["margin_used_usd"] == 0.0
+        assert ledger["margin_available_usd"] == pytest.approx(2000.0)
