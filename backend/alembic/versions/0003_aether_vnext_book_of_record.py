@@ -68,11 +68,11 @@ def upgrade() -> None:
             CREATE OR REPLACE FUNCTION {SCHEMA}.reject_immutable_mutation()
             RETURNS trigger
             LANGUAGE plpgsql
-            AS $
+            AS $aether$
             BEGIN
                 RAISE EXCEPTION 'AETHER vNext immutable record cannot be updated or deleted';
             END;
-            $;
+            $aether$;
             """
         )
     )
