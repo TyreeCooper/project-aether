@@ -8,6 +8,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Protocol
 
+from aether_vnext.bars import MarketPrint
 from aether_vnext.market_data import RawQuote
 
 
@@ -21,6 +22,18 @@ class MarketDataAdapter(Protocol):
         *,
         received_at_utc: datetime,
     ) -> tuple[RawQuote, ...]: ...
+
+
+class MarketPrintAdapter(Protocol):
+    adapter_id: str
+    adapter_version: str
+
+    def parse_prints(
+        self,
+        payload: Any,
+        *,
+        received_at_utc: datetime,
+    ) -> tuple[MarketPrint, ...]: ...
 
 
 class KrakenPublicTickerV2:
