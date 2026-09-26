@@ -7,6 +7,7 @@ import hashlib
 import pytest
 
 from aether_vnext.domain import (
+    BrokerAccountLedger,
     EventLedgerRecord,
     MarketObservation,
     OrderIntent,
@@ -89,6 +90,26 @@ def test_order_intent_contains_live_shaped_execution_fields() -> None:
         "fill_market_observation_id",
         "trade_id",
         "row_version",
+    } <= names
+
+
+def test_broker_account_ledger_contains_v421_sleeve_fields() -> None:
+    names = {f.name for f in fields(BrokerAccountLedger)}
+    assert {
+        "broker_account_id",
+        "cash_available_usd",
+        "cash_reserved_usd",
+        "margin_used_usd",
+        "margin_available_usd",
+        "inventory_qty",
+        "inventory_avg",
+        "realized_pnl_usd",
+        "unrealized_pnl_usd",
+        "fees_accrued_usd",
+        "carry_accrued_usd",
+        "settled_cash_usd",
+        "last_reconciled_at",
+        "reconciliation_state",
     } <= names
 
 
