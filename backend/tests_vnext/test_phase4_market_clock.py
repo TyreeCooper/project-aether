@@ -523,3 +523,28 @@ def test_market_pipeline_preserves_closed_session_observation_but_blocks_executi
     assert result.observation.session_state is SessionState.CLOSED
     assert result.executable is False
     assert result.reason == "session_closed"
+
+
+def test_degraded_fallback_is_preserved_but_cannot_authorize_execution() -> None:
+    row = bind_market_data(
+        SEED_REGISTRY["btc"],
+        primary_source_id="primary",
+        fallback_source_id="fallback",
+        stale_threshold_ms=1_000,
+    )
+    result = MarketDataPipeline(registry={"btc": row}).evaluate(
+        asset_id="btc",
+        quotes=(
+            _quote(
+                source_id="primary",
+                exchange_ts=T0 - timedelta(seconds=5),
+                received_ts=T0 - timedelta(seconds=5),
+            ),
+            _quote(source_id="fallback"),
+        ),
+        calendar=_calendar(),
+        as_of_utc=T0,
+    )
+    assert result.observation is not None
+    assert result.observation.quality_state is QualityState.DEGRADED
+    assert result.executable is False
