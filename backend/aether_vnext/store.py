@@ -1014,6 +1014,35 @@ class VNextStore:
                 issues.append(
                     f"risk_reservation_nonpositive:{intent_id}"
                 )
+            firm_event_id = intent["firm_event_id"]
+            if firm_event_id is not None:
+                lineage_row = conn.execute(
+                    sa.select(self.tables["decision_lineage"]).where(
+                        self.tables["decision_lineage"].c.firm_event_id
+                        == firm_event_id
+                    )
+                ).mappings().first()
+                if lineage_row is None:
+                    issues.append(
+                        f"risk_reservation_lineage_missing:{intent_id}"
+                    )
+                elif lineage_row["playbook_id"] is not None:
+                    actual_hitches = {
+                        str(target): float(fraction)
+                        for target, fraction in dict(
+                            lineage_row["asset_risk_hitches"] or {}
+                        ).items()
+                    }
+                    expected_hitches = {
+                        str(target): float(fraction)
+                        for target, fraction in asset_risk_hitches(
+                            str(lineage_row["playbook_id"])
+                        ).items()
+                    }
+                    if actual_hitches != expected_hitches:
+                        issues.append(
+                            f"risk_reservation_hitch_mismatch:{intent_id}"
+                        )
 
         return tuple(sorted(set(issues)))
 
@@ -1026,19 +1055,26 @@ class VNextStore:
     ) -> RiskExposure:
         intents = self.tables["order_intents"]
         reservations = self.tables["risk_admission_reservations"]
+        lineage = self.tables["decision_lineage"]
 
         rows = conn.execute(
             sa.select(
                 intents.c.order_intent_id,
+                intents.c.firm_event_id,
                 reservations.c.asset_id,
                 reservations.c.cluster_id,
                 reservations.c.stop_risk_usd,
+                lineage.c.playbook_id,
+                lineage.c.asset_risk_hitches,
             )
             .select_from(
                 intents.outerjoin(
                     reservations,
                     reservations.c.order_intent_id
                     == intents.c.order_intent_id,
+                ).outerjoin(
+                    lineage,
+                    lineage.c.firm_event_id == intents.c.firm_event_id,
                 )
             )
             .where(
@@ -1067,6 +1103,30 @@ class VNextStore:
             portfolio_risk += risk
             if str(row["asset_id"]) == asset_id:
                 asset_risk += risk
+
+            playbook_id = row["playbook_id"]
+            hitches = {
+                str(target): float(fraction)
+                for target, fraction in dict(
+                    row["asset_risk_hitches"] or {}
+                ).items()
+            }
+            if playbook_id is not None:
+                expected_hitches = {
+                    str(target): float(fraction)
+                    for target, fraction in asset_risk_hitches(
+                        str(playbook_id)
+                    ).items()
+                }
+                if hitches != expected_hitches:
+                    raise RuntimeError(
+                        "pending OPEN playbook Risk hitch drift: "
+                        f"{row['order_intent_id']}"
+                    )
+            for target_asset, fraction in hitches.items():
+                if target_asset == asset_id:
+                    asset_risk += risk * fraction
+
             if str(row["cluster_id"]) == cluster_id:
                 cluster_risk += risk
 
@@ -1166,6 +1226,35 @@ class VNextStore:
         ticket = conn.execute(
             sa.select(tickets).where(tickets.c.ticket_id == ticket_id)
         ).mappings().first()
+
+        candidate_hitches: dict[str, float] = {}
+        if ticket is not None and ticket["firm_event_id"] is not None:
+            candidate_lineage = conn.execute(
+                sa.select(self.tables["decision_lineage"]).where(
+                    self.tables["decision_lineage"].c.firm_event_id
+                    == ticket["firm_event_id"]
+                )
+            ).mappings().first()
+            if candidate_lineage is None:
+                raise RuntimeError("READY ticket missing decision lineage")
+            candidate_hitches = {
+                str(target): float(fraction)
+                for target, fraction in dict(
+                    candidate_lineage["asset_risk_hitches"] or {}
+                ).items()
+            }
+            candidate_playbook = candidate_lineage["playbook_id"]
+            if candidate_playbook is not None:
+                expected_candidate_hitches = {
+                    str(target): float(fraction)
+                    for target, fraction in asset_risk_hitches(
+                        str(candidate_playbook)
+                    ).items()
+                }
+                if candidate_hitches != expected_candidate_hitches:
+                    raise RuntimeError(
+                        "READY ticket playbook Risk hitch drift"
+                    )
 
         # Let the existing Phase-A contract own canonical rejection behavior
         # when the ticket cannot be risk-evaluated as a valid READY candidate.
@@ -1357,6 +1446,29 @@ class VNextStore:
             reason_code = "portfolio_risk_full"
         else:
             reason_code = None
+            for target_asset, fraction in sorted(
+                candidate_hitches.items()
+            ):
+                target_cluster = cluster_for_asset(target_asset)
+                target_open = open_snapshot.exposure_for(
+                    asset_id=target_asset,
+                    cluster_id=target_cluster,
+                )
+                target_pending = self._pending_open_risk_exposure(
+                    conn,
+                    asset_id=target_asset,
+                    cluster_id=target_cluster,
+                )
+                target_occupied = (
+                    target_open.asset_open_risk_usd
+                    + target_pending.asset_open_risk_usd
+                )
+                if (
+                    target_occupied + candidate_risk * fraction
+                    > limits.asset_usd + epsilon
+                ):
+                    reason_code = "asset_risk_full"
+                    break
 
         if reason_code is not None:
             return self.reject_ticket_pre_reserve(
@@ -3560,6 +3672,7 @@ class VNextStore:
         """
         active_positions = self.tables["active_positions"]
         trades = self.tables["open_trades"]
+        lineage = self.tables["decision_lineage"]
 
         rows: list[BookRiskPosition] = []
         active_rows = conn.execute(
@@ -3634,6 +3747,41 @@ class VNextStore:
                     f"initial stop-risk drift for trade: {trade['trade_id']}"
                 )
 
+            hitch_usd: tuple[tuple[str, float], ...] = ()
+            firm_event_id = trade["firm_event_id"]
+            if firm_event_id is not None:
+                lineage_row = conn.execute(
+                    sa.select(lineage).where(
+                        lineage.c.firm_event_id == firm_event_id
+                    )
+                ).mappings().first()
+                if lineage_row is None:
+                    raise RuntimeError(
+                        f"OpenTrade missing decision lineage: {trade['trade_id']}"
+                    )
+                hitches = {
+                    str(target): float(fraction)
+                    for target, fraction in dict(
+                        lineage_row["asset_risk_hitches"] or {}
+                    ).items()
+                }
+                playbook_id = lineage_row["playbook_id"]
+                if playbook_id is not None:
+                    expected_hitches = {
+                        str(target): float(fraction)
+                        for target, fraction in asset_risk_hitches(
+                            str(playbook_id)
+                        ).items()
+                    }
+                    if hitches != expected_hitches:
+                        raise RuntimeError(
+                            f"OpenTrade playbook Risk hitch drift: {trade['trade_id']}"
+                        )
+                hitch_usd = tuple(
+                    (target_asset, computed_risk * fraction)
+                    for target_asset, fraction in sorted(hitches.items())
+                )
+
             rows.append(
                 BookRiskPosition(
                     trade_id=str(trade["trade_id"]),
@@ -3641,6 +3789,7 @@ class VNextStore:
                     asset_id=asset_id,
                     cluster_id=cluster_id,
                     stop_risk_usd=computed_risk,
+                    asset_risk_hitches_usd=hitch_usd,
                 )
             )
 
