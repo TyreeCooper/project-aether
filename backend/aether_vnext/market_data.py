@@ -12,7 +12,7 @@ import hashlib
 from typing import Iterable
 
 from aether_vnext.calendars import CalendarDecision
-from aether_vnext.domain import MarketObservation, QualityState, SessionState
+from aether_vnext.domain import MarketObservation, QualityState
 from aether_vnext.registry import ProductRegistryRow
 
 
@@ -63,7 +63,10 @@ def _age_ms(raw: RawQuote, as_of_utc: datetime) -> int:
     reference = raw.exchange_ts or raw.received_ts
     if reference.tzinfo is None:
         raise ValueError("exchange_ts must be timezone-aware when provided")
-    return max(0, int((as_of_utc - reference).total_seconds() * 1000))
+    age_ms = int((as_of_utc - reference).total_seconds() * 1000)
+    if age_ms < 0:
+        raise ValueError("market timestamp cannot be after decision time")
+    return age_ms
 
 
 def _book_invalid(raw: RawQuote) -> bool:
@@ -153,7 +156,13 @@ def select_source(
     stale_threshold_ms: int,
 ) -> SourceSelection:
     """Select primary, then fallback, without silently neutralizing bad data."""
-    by_source = {quote.source_id: quote for quote in quotes}
+    # A provider payload may contain multiple assets under one source_id. Select
+    # only the requested asset before source precedence is evaluated.
+    by_source = {
+        quote.source_id: quote
+        for quote in quotes
+        if quote.asset_id.lower() == registry_row.asset_id
+    }
     attempted: list[str] = []
     rejections: list[str] = []
 
