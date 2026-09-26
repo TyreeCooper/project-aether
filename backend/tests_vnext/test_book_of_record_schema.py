@@ -332,19 +332,21 @@ def test_phase5_execution_reservation_columns_are_in_current_schema() -> None:
     } <= columns
 
 
-def test_runtime_schema_facade_is_pinned_to_revision_0007() -> None:
+def test_runtime_schema_facade_is_pinned_to_revision_0008() -> None:
     backend = Path(__file__).resolve().parents[1]
     facade = (backend / "aether_vnext" / "schema.py").read_text(encoding="utf-8")
-    assert "schema_v0007" in facade
+    assert "schema_v0008" in facade
     migration = (
         backend
         / "alembic"
         / "versions"
-        / "0007_aether_vnext_close_intent_reason.py"
+        / "0008_aether_vnext_sleeve_ledger_fields.py"
     ).read_text(encoding="utf-8")
-    assert 'revision: str = "0007"' in migration
-    assert 'down_revision: Union[str, None] = "0006"' in migration
-    assert "exit_reason" in migration
+    assert 'revision: str = "0008"' in migration
+    assert 'down_revision: Union[str, None] = "0007"' in migration
+    assert "inventory_qty" in migration
+    assert "inventory_avg" in migration
+    assert "carry_accrued_usd" in migration
 
 
 def test_closed_trade_is_self_contained_execution_evidence() -> None:
@@ -378,3 +380,24 @@ def test_closed_trade_is_self_contained_execution_evidence() -> None:
 def test_close_order_intent_persists_exit_reason() -> None:
     _, store = _engine_and_store()
     assert "exit_reason" in store.tables["order_intents"].c
+
+
+def test_broker_ledger_contains_complete_v421_sleeve_fields() -> None:
+    _, store = _engine_and_store()
+    columns = set(store.tables["broker_account_ledgers"].c.keys())
+    assert {
+        "cash_available_usd",
+        "cash_reserved_usd",
+        "margin_used_usd",
+        "margin_available_usd",
+        "inventory_qty",
+        "inventory_avg",
+        "realized_pnl_usd",
+        "unrealized_pnl_usd",
+        "fees_accrued_usd",
+        "carry_accrued_usd",
+        "settled_cash_usd",
+        "last_reconciled_at",
+        "reconciliation_state",
+        "row_version",
+    } <= columns
