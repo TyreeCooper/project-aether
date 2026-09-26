@@ -170,6 +170,8 @@ class VNextStore:
 
         intents = self.tables["order_intents"]
         ledgers = self.tables["broker_account_ledgers"]
+        signals = self.tables["signal_consumptions"]
+        positions = self.tables["active_positions"]
 
         ledger = conn.execute(
             sa.select(ledgers)
@@ -190,6 +192,30 @@ class VNextStore:
                 "duplicate": True,
                 "order_intent_id": existing["order_intent_id"],
                 "state": existing["state"],
+            }
+
+        consumed = conn.execute(
+            sa.select(signals.c.trade_id).where(
+                signals.c.signal_key == signal_key
+            )
+        ).first()
+        if consumed is not None:
+            return {
+                "ok": False,
+                "error": "signal_consumed",
+                "signal_key": signal_key,
+            }
+
+        active = conn.execute(
+            sa.select(positions.c.trade_id).where(
+                positions.c.position_key == position_key
+            )
+        ).first()
+        if active is not None:
+            return {
+                "ok": False,
+                "error": "duplicate_position_key",
+                "position_key": position_key,
             }
 
         cash_available = float(ledger["cash_available_usd"])
