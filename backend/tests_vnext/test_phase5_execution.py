@@ -974,3 +974,64 @@ def test_phase_a_admission_blocks_degraded_fallback_and_crypto_short() -> None:
     )
     assert short.allowed is False
     assert short.reason == "product_side_unsupported"
+
+
+def _insert_ready_ticket_row(conn, store: VNextStore, *, ticket_id: str = "ticket-pre") -> None:
+    tickets = store.tables["tickets"]
+    conn.execute(
+        tickets.insert().values(
+            ticket_id=ticket_id,
+            setup_id="setup-pre",
+            firm_event_id=None,
+            asset_id="btc",
+            route_id="btc:daily_swing:long",
+            state="READY",
+            signal_key="signal-pre",
+            side="long",
+            horizon="daily_swing",
+            stop_price=95_000.0,
+            quantity=0.01,
+            modeled_round_trip_cost_pct=0.1,
+            reject_code=None,
+            policy_version="policy-v1",
+            configuration_hash="cfg",
+            market_observation_id="obs-ready",
+            first_killed_by=None,
+            first_kill_reason=None,
+            created_at_utc=T0,
+        )
+    )
+
+
+def test_phase_a_failure_rejects_ticket_without_intent_or_reserve() -> None:
+    engine, store = _store_fixture()
+    with engine.begin() as conn:
+        _insert_ready_ticket_row(conn, store)
+        result = store.reject_ticket_pre_reserve(
+            conn,
+            ticket_id="ticket-pre",
+            reason_code="market_stale",
+            at_utc=T0,
+            event_id="evt-ticket-reject",
+            actor="portfolio",
+        )
+        assert result["state"] == "REJECTED"
+
+        ticket = conn.execute(
+            sa.select(store.tables["tickets"]).where(
+                store.tables["tickets"].c.ticket_id == "ticket-pre"
+            )
+        ).mappings().one()
+        assert ticket["first_killed_by"] == "Portfolio"
+        assert ticket["first_kill_reason"] == "market_stale"
+        assert ticket["reject_code"] == "market_stale"
+
+        assert conn.execute(
+            sa.select(sa.func.count()).select_from(store.tables["order_intents"])
+        ).scalar_one() == 0
+        ledger = {
+            row["broker_account_id"]: row
+            for row in store.ledger_rows(conn)
+        }["kraken_paper"]
+        assert ledger["cash_available_usd"] == pytest.approx(4000.0)
+        assert ledger["cash_reserved_usd"] == 0.0
