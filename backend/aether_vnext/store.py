@@ -370,11 +370,22 @@ class VNextStore:
                 actor=actor,
                 market_observation_id=market_observation_id,
             )
+        if ticket["exit_plan_id"] is None:
+            return self.reject_ticket_pre_reserve(
+                conn,
+                ticket_id=ticket_id,
+                reason_code="exit_plan_missing",
+                at_utc=created_at_utc,
+                event_id=event_id,
+                actor=actor,
+                market_observation_id=market_observation_id,
+            )
         if (
             ticket["asset_id"] != asset_id
             or ticket["route_id"] != route_id
             or ticket["signal_key"] != signal_key
             or ticket["side"] != side
+            or ticket["exit_plan_id"] != exit_plan_id
             or abs(float(ticket["quantity"] or 0.0) - float(qty)) > 1e-12
         ):
             return self.reject_ticket_pre_reserve(
@@ -613,8 +624,6 @@ class VNextStore:
         slippage_usd: float,
         slippage_bps: float,
         initial_stop_risk_usd: float,
-        exit_plan_version: str,
-        exit_plan_payload: Mapping[str, Any],
         management_telemetry: Mapping[str, Any],
         event_id: str,
         actor: str,
@@ -635,6 +644,7 @@ class VNextStore:
         positions = self.tables["active_positions"]
         signals = self.tables["signal_consumptions"]
         lineage = self.tables["decision_lineage"]
+        exit_plans = self.tables["exit_plans"]
 
         intent = conn.execute(
             sa.select(intents)
@@ -702,6 +712,45 @@ class VNextStore:
                 "state": intent["state"],
             }
 
+        plan = conn.execute(
+            sa.select(exit_plans).where(
+                exit_plans.c.exit_plan_id == exit_plan_id
+            )
+        ).mappings().first()
+        if plan is None:
+            return {
+                "ok": False,
+                "error": "exit_plan_missing",
+                "state": intent["state"],
+            }
+        if intent["exit_plan_id"] not in {None, exit_plan_id}:
+            return {
+                "ok": False,
+                "error": "ticket_contract_mismatch",
+                "state": intent["state"],
+            }
+
+        exit_plan_payload = {
+            "exit_plan_id": plan["exit_plan_id"],
+            "version": plan["version"],
+            "hard_stop_price": plan["hard_stop_price"],
+            "structure_rule_id": plan["structure_rule_id"],
+            "time_stop_deadline_utc": (
+                _stored_utc(plan["time_stop_deadline_utc"]).isoformat()
+                if plan["time_stop_deadline_utc"] is not None
+                else None
+            ),
+            "trailing_policy": dict(plan["trailing_policy"]),
+            "profit_take_policy": dict(plan["profit_take_policy"]),
+            "session_close_policy": plan["session_close_policy"],
+            "stale_mark_policy": plan["stale_mark_policy"],
+            "governor_halt_behavior": plan["governor_halt_behavior"],
+            "created_from_playbook_version": plan[
+                "created_from_playbook_version"
+            ],
+            "payload_hash": plan["payload_hash"],
+        }
+
         conn.execute(
             trades.insert().values(
                 trade_id=trade_id,
@@ -717,8 +766,8 @@ class VNextStore:
                 quantity=filled_qty,
                 avg_entry_price=avg_fill_price,
                 initial_stop_risk_usd=initial_stop_risk_usd,
-                exit_plan_version=exit_plan_version,
-                exit_plan_payload=dict(exit_plan_payload),
+                exit_plan_version=plan["version"],
+                exit_plan_payload=exit_plan_payload,
                 management_telemetry=dict(management_telemetry),
                 policy_version=intent["policy_version"],
                 configuration_hash=intent["configuration_hash"],
