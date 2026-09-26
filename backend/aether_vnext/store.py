@@ -69,6 +69,10 @@ from aether_vnext.research import (
     ResearchDatasetSnapshot,
     ResearchExperiment,
 )
+from aether_vnext.traffic_experiments import (
+    ShadowComparison,
+    TrafficExperiment,
+)
 from aether_vnext.review import (
     ReviewGateInput,
     assess_review_gates,
@@ -1271,6 +1275,91 @@ class VNextStore:
                 benchmark_result=dict(fold.benchmark_result),
                 passed=fold.passed,
                 failure_reasons=list(fold.failure_reasons),
+            )
+        )
+
+    def record_traffic_experiment(
+        self,
+        conn: Connection,
+        experiment: TrafficExperiment,
+    ) -> None:
+        policies = self.tables["policy_snapshots"]
+        known = {
+            str(row["configuration_hash"])
+            for row in conn.execute(
+                sa.select(policies.c.configuration_hash).where(
+                    policies.c.configuration_hash.in_(
+                        (
+                            experiment.control_configuration_hash,
+                            experiment.treatment_configuration_hash,
+                        )
+                    )
+                )
+            ).mappings()
+        }
+        expected = {
+            experiment.control_configuration_hash,
+            experiment.treatment_configuration_hash,
+        }
+        if known != expected:
+            raise KeyError("traffic experiment references unknown configuration_hash")
+        conn.execute(
+            self.tables["traffic_experiments"].insert().values(
+                experiment_id=experiment.experiment_id,
+                change_family=experiment.change_family.value,
+                control_configuration_hash=(
+                    experiment.control_configuration_hash
+                ),
+                treatment_configuration_hash=(
+                    experiment.treatment_configuration_hash
+                ),
+                hypothesis=experiment.hypothesis,
+                owner=experiment.owner,
+                created_at_utc=experiment.created_at_utc,
+            )
+        )
+
+    def record_traffic_shadow_comparison(
+        self,
+        conn: Connection,
+        comparison: ShadowComparison,
+    ) -> None:
+        experiment = conn.execute(
+            sa.select(self.tables["traffic_experiments"]).where(
+                self.tables["traffic_experiments"].c.experiment_id
+                == comparison.experiment_id
+            )
+        ).mappings().first()
+        if experiment is None:
+            raise KeyError("unknown traffic experiment")
+        expected_configs = {
+            str(experiment["control_configuration_hash"]),
+            str(experiment["treatment_configuration_hash"]),
+        }
+        actual_configs = {
+            comparison.current_configuration_hash,
+            comparison.prior_configuration_hash,
+        }
+        if actual_configs != expected_configs:
+            raise ValueError(
+                "shadow comparison configurations do not match experiment"
+            )
+        conn.execute(
+            self.tables["traffic_shadow_comparisons"].insert().values(
+                shadow_comparison_id=comparison.shadow_comparison_id,
+                experiment_id=comparison.experiment_id,
+                opportunity_id=comparison.opportunity_id,
+                current_configuration_hash=(
+                    comparison.current_configuration_hash
+                ),
+                prior_configuration_hash=(
+                    comparison.prior_configuration_hash
+                ),
+                would_pass_under_prior_policy=(
+                    comparison.would_pass_under_prior_policy
+                ),
+                order_created=False,
+                evaluated_at_utc=comparison.evaluated_at_utc,
             )
         )
 

@@ -53,6 +53,8 @@ def test_book_of_record_has_required_tables() -> None:
         "research_experiments",
         "backtest_runs",
         "fold_results",
+        "traffic_experiments",
+        "traffic_shadow_comparisons",
         "review_cards",
         "route_review_state",
         "signal_consumptions",
@@ -370,23 +372,21 @@ def test_phase5_execution_reservation_columns_are_in_current_schema() -> None:
     assert "fill_market_observation_id" not in columns
 
 
-def test_runtime_schema_facade_is_pinned_to_revision_0017() -> None:
+def test_runtime_schema_facade_is_pinned_to_revision_0018() -> None:
     backend = Path(__file__).resolve().parents[1]
     facade = (backend / "aether_vnext" / "schema.py").read_text(encoding="utf-8")
-    assert "schema_v0017" in facade
+    assert "schema_v0018" in facade
     migration = (
         backend
         / "alembic"
         / "versions"
-        / "0017_aether_vnext_research_integrity.py"
+        / "0018_aether_vnext_traffic_experiments.py"
     ).read_text(encoding="utf-8")
-    assert 'revision: str = "0017"' in migration
-    assert 'down_revision: Union[str, None] = "0016"' in migration
-    assert "research_hypotheses" in migration
-    assert "research_dataset_snapshots" in migration
-    assert "research_experiments" in migration
-    assert "backtest_runs" in migration
-    assert "fold_results" in migration
+    assert 'revision: str = "0018"' in migration
+    assert 'down_revision: Union[str, None] = "0017"' in migration
+    assert "traffic_experiments" in migration
+    assert "traffic_shadow_comparisons" in migration
+    assert "ck_shadow_comparison_no_order" in migration
     assert "reject_immutable_mutation" in migration
 
 

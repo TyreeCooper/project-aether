@@ -543,3 +543,25 @@ cross-product threshold, and KEEP_TRUSTED now requires the persisted capacity re
 to be ready.
 
 **AETH-VN-016 status:** CONTAINED.
+
+
+## AETH-VN-017 — Traffic experiment deterioration tolerances are not universal source constants
+
+**Class:** config-experiment promotion parameterization / anti-invention control  
+**Discovered:** Phase 9 P9 traffic/config conversion  
+**Status:** CONTAINED  
+
+### Facts
+
+Part IV requires a looser traffic policy to improve OOS net expectancy without
+unacceptable drawdown, cost, or cluster deterioration. It does not bind one
+cross-product numeric tolerance for those three acceptability judgments.
+
+### Control
+
+vNext isolates control/treatment configuration hashes and requires explicit
+drawdown/cost/cluster acceptability evidence before experiment promotion. Missing
+criteria fail closed. Shadow comparisons cannot create orders, and traffic counts
+have no target-trade-count field.
+
+**AETH-VN-017 status:** CONTAINED.
