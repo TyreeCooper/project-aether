@@ -575,7 +575,7 @@ class VNextStore:
         if row is None:
             return None
         return ShortabilityEvidence(
-            evidence_id=str(row["evidence_id"]),
+            evidence_id=row["evidence_id"],
             asset_id=str(row["asset_id"]),
             provider_id=str(row["provider_id"]),
             market_data_contract_id=int(row["market_data_contract_id"]),
@@ -675,7 +675,7 @@ class VNextStore:
                 else str(row["fallback_reason"])
             ),
             calendar_state=CalendarState(str(row["calendar_state"])),
-            data_version=str(row["data_version"]),
+            data_version=row["data_version"],
         )
 
     def record_market_ingress_attempt(
@@ -921,15 +921,15 @@ class VNextStore:
             setup_id=str(row["setup_id"]),
             lineage=Lineage(
                 asset_id=str(row["asset_id"]),
-                route_id=str(row["route_id"]),
-                policy_version=str(row["policy_version"]),
-                configuration_hash=str(row["configuration_hash"]),
+                route_id=row["route_id"],
+                policy_version=row["policy_version"],
+                configuration_hash=row["configuration_hash"],
                 market_observation_id=str(row["market_observation_id"]),
                 created_at_utc=_stored_utc(row["created_at_utc"]),
                 firm_event_id=str(row["firm_event_id"]),
                 setup_id=str(row["setup_id"]),
-                playbook_id=str(row["playbook_id"]),
-                playbook_version=str(row["playbook_version"]),
+                playbook_id=row["playbook_id"],
+                playbook_version=row["playbook_version"],
                 risk_cluster_id=str(row["risk_cluster_id"]),
                 asset_risk_hitches={
                     str(k): float(v)
@@ -3196,8 +3196,8 @@ class VNextStore:
             policy_version=str(row["policy_version"]),
             configuration_hash=str(row["configuration_hash"]),
             data_version=str(row["data_version"]),
-            fill_model_version=str(row["fill_model_version"]),
-            fee_schedule_version=str(row["fee_schedule_version"]),
+            fill_model_version=row["fill_model_version"],
+            fee_schedule_version=row["fee_schedule_version"],
             in_sample_window=(
                 dict(row["in_sample_window"])
                 if row["in_sample_window"] is not None
@@ -3231,8 +3231,8 @@ class VNextStore:
             model_risks=tuple(
                 str(item) for item in (row["model_risks"] or [])
             ),
-            verdict=str(row["verdict"]),
-            reviewer=str(row["reviewer"]),
+            verdict=row["verdict"],
+            reviewer=row["reviewer"],
             as_of_utc=_stored_utc(row["as_of_utc"]),
         )
 
