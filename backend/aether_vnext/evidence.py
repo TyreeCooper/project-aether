@@ -123,14 +123,18 @@ class EvidenceWindow:
                 raise ValueError(f"{name} must be timezone-aware")
         if self.first_timestamp_utc > self.last_timestamp_utc:
             raise ValueError("EvidenceWindow timestamps are reversed")
+        if not isinstance(self.immutable_trade_ids, tuple):
+            raise ValueError("immutable_trade_ids must be an immutable tuple")
         ids = tuple(str(value).strip() for value in self.immutable_trade_ids)
         if not ids or any(not value for value in ids):
             raise ValueError("immutable_trade_ids must contain nonblank IDs")
         if len(ids) != len(set(ids)):
             raise ValueError("duplicate immutable_trade_id in EvidenceWindow")
-        if int(self.n) != len(ids):
+        if not isinstance(self.n, int) or isinstance(self.n, bool):
+            raise ValueError("EvidenceWindow n must be an integer")
+        if self.n != len(ids):
             raise ValueError("EvidenceWindow n must equal immutable_trade_ids length")
-        if int(self.n) <= 0:
+        if self.n <= 0:
             raise ValueError("EvidenceWindow n must be positive")
 
 

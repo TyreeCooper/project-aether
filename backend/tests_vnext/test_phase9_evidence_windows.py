@@ -237,3 +237,36 @@ def test_direct_store_path_rejects_paper_forward_without_campaign() -> None:
                 conn,
                 _window(domain=SampleDomain.PAPER_FORWARD),
             )
+
+
+
+@pytest.mark.parametrize("invalid_n", (True, 1.0, "1"))
+def test_window_rejects_non_integer_n(invalid_n: object) -> None:
+    base = _window(trade_ids=("trade-1",))
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs["n"] = invalid_n
+    with pytest.raises(ValueError, match="n must be an integer"):
+        EvidenceWindow(**kwargs)
+
+
+@pytest.mark.parametrize(
+    "invalid_ids",
+    (
+        "x",
+        ["trade-1"],
+    ),
+)
+def test_window_rejects_mutable_or_scalar_trade_id_containers(
+    invalid_ids: object,
+) -> None:
+    base = _window(trade_ids=("trade-1",))
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs["immutable_trade_ids"] = invalid_ids
+    with pytest.raises(ValueError, match="must be an immutable tuple"):
+        EvidenceWindow(**kwargs)
