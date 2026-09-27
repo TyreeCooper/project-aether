@@ -16,6 +16,8 @@ from aether_vnext.forward_paper_preflight import (
     forward_paper_campaign_route_id,
     forward_paper_route_baseline_hash,
 )
+from aether_vnext.playbook_exits import exit_rule
+from aether_vnext.playbooks import playbook
 from aether_vnext.store import VNextStore, canonical_payload_hash
 
 
@@ -163,6 +165,50 @@ def forward_paper_ledger_blockers(
                     "forward_paper_ledger:campaign_route_id_mismatch:"
                     f"{route_id}"
                 )
+
+            try:
+                current_spec = playbook(route_baseline.playbook_id)
+            except KeyError:
+                blockers.append(
+                    "forward_paper_ledger:source_playbook_missing:"
+                    f"{route_id}"
+                )
+            else:
+                try:
+                    source_asset_id, source_horizon, source_side = parse_route_id(
+                        route_baseline.route_id
+                    )
+                except ValueError:
+                    blockers.append(
+                        "forward_paper_ledger:source_playbook_mismatch:"
+                        f"{route_id}"
+                    )
+                else:
+                    if (
+                        current_spec.version != route_baseline.playbook_version
+                        or not current_spec.scout_definition_enabled
+                        or source_asset_id not in current_spec.allowed_assets
+                        or source_horizon != current_spec.horizon
+                        or source_side not in current_spec.allowed_sides
+                    ):
+                        blockers.append(
+                            "forward_paper_ledger:source_playbook_mismatch:"
+                            f"{route_id}"
+                        )
+                    try:
+                        current_exit = exit_rule(route_baseline.playbook_id)
+                    except KeyError:
+                        blockers.append(
+                            "forward_paper_ledger:source_exit_contract_missing:"
+                            f"{route_id}"
+                        )
+                    else:
+                        if not current_exit.source_complete:
+                            blockers.append(
+                                "forward_paper_ledger:"
+                                "source_exit_contract_incomplete:"
+                                f"{route_id}"
+                            )
 
             asset_id, _, _ = parse_route_id(route_baseline.route_id)
             try:

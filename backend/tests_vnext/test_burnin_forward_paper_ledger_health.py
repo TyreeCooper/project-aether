@@ -5,6 +5,7 @@ from datetime import timedelta
 
 import sqlalchemy as sa
 
+import aether_vnext.forward_paper_health as forward_paper_health_module
 from aether_vnext.burnin_readiness import blocker_class
 from aether_vnext.evidence import EvidenceWindow, SampleDomain
 from aether_vnext.forward_paper_health import forward_paper_ledger_blockers
@@ -713,3 +714,45 @@ def test_forward_paper_ledger_health_revalidates_campaign_policy_root() -> None:
     expected = "forward_paper_ledger:campaign_policy_snapshot_mismatch"
     assert expected in blockers
     assert blocker_class(expected) == "environment_initialization"
+
+
+
+def test_forward_paper_ledger_health_revalidates_current_playbook_source(
+    monkeypatch,
+) -> None:
+    engine, store = _store()
+    campaign_id = "burnin-health-source-playbook-drift"
+    with engine.begin() as conn:
+        result = _start_campaign(
+            conn,
+            store,
+            campaign_id=campaign_id,
+        )
+        route = result.routes[0]
+        current_spec = forward_paper_health_module.playbook(route.playbook_id)
+        drifted_spec = replace(
+            current_spec,
+            version="9.9",
+        )
+        monkeypatch.setattr(
+            forward_paper_health_module,
+            "playbook",
+            lambda playbook_id: (
+                drifted_spec
+                if playbook_id == route.playbook_id
+                else forward_paper_health_module.playbook(playbook_id)
+            ),
+        )
+
+        blockers = forward_paper_ledger_blockers(
+            conn,
+            store=store,
+            campaign_id=campaign_id,
+        )
+
+    expected = (
+        "forward_paper_ledger:source_playbook_mismatch:"
+        + route.campaign_route_id
+    )
+    assert expected in blockers
+    assert blocker_class(expected) == "source_authority"

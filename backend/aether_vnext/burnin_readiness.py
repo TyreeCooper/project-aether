@@ -93,6 +93,9 @@ def blocker_class(code: str) -> str:
     }:
         return "environment_initialization"
 
+    if value.startswith("forward_paper_ledger:source_"):
+        return "source_authority"
+
     if value.startswith("forward_paper_ledger:runtime_binding_"):
         return "external_runtime_configuration"
 
