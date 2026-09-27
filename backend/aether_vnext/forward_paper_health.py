@@ -292,6 +292,35 @@ def forward_paper_ledger_blockers(
                         "historical_baseline_family_mismatch:"
                         f"{route_id}:{window_id}"
                     )
+
+                raw_heldout_trade_ids = source["immutable_trade_ids"]
+                heldout_trade_ids = (
+                    tuple(
+                        str(value).strip()
+                        for value in raw_heldout_trade_ids
+                    )
+                    if isinstance(raw_heldout_trade_ids, list)
+                    else ()
+                )
+                heldout_n = source["n"]
+                heldout_sample_shape_ok = bool(
+                    isinstance(raw_heldout_trade_ids, list)
+                    and isinstance(heldout_n, int)
+                    and not isinstance(heldout_n, bool)
+                    and heldout_trade_ids
+                    and all(heldout_trade_ids)
+                    and len(heldout_trade_ids)
+                    == len(set(heldout_trade_ids))
+                    and heldout_n == len(heldout_trade_ids)
+                )
+                if not heldout_sample_shape_ok:
+                    blockers.append(
+                        "forward_paper_ledger:"
+                        "historical_baseline_sample_invalid:"
+                        f"{route_id}:{window_id}"
+                    )
+                    hash_inputs_complete = False
+
                 run_id = str(prov["backtest_run_id"])
                 dataset_id = str(prov["dataset_snapshot_id"])
                 raw_fold_ids = prov["fold_result_ids"]
@@ -429,44 +458,42 @@ def forward_paper_ledger_blockers(
                             "historical_provenance_fold_window_mismatch:"
                             f"{route_id}:{window_id}"
                         )
-                expected_provenance_hash = canonical_payload_hash(
-                    {
-                        "backtest_run_id": run_id,
-                        "dataset_snapshot_id": dataset_id,
-                        "fold_result_ids": sorted(fold_ids),
-                        "route_id": str(source["route_id"]),
-                        "playbook_id": str(source["playbook_id"]),
-                        "playbook_version": str(source["playbook_version"]),
-                        "configuration_hash": str(
-                            source["configuration_hash"]
-                        ),
-                        "immutable_trade_ids": sorted(
-                            str(value)
-                            for value in (
-                                source["immutable_trade_ids"] or ()
-                            )
-                        ),
-                        "metrics_snapshot_hash": str(
-                            source["metrics_snapshot_hash"]
-                        ),
-                    }
-                )
-                if expected_provenance_hash != str(prov["provenance_hash"]):
-                    blockers.append(
-                        "forward_paper_ledger:"
-                        "historical_provenance_hash_mismatch:"
-                        f"{route_id}:{window_id}"
+                if heldout_sample_shape_ok:
+                    expected_provenance_hash = canonical_payload_hash(
+                        {
+                            "backtest_run_id": run_id,
+                            "dataset_snapshot_id": dataset_id,
+                            "fold_result_ids": sorted(fold_ids),
+                            "route_id": str(source["route_id"]),
+                            "playbook_id": str(source["playbook_id"]),
+                            "playbook_version": str(source["playbook_version"]),
+                            "configuration_hash": str(
+                                source["configuration_hash"]
+                            ),
+                            "immutable_trade_ids": sorted(
+                                heldout_trade_ids
+                            ),
+                            "metrics_snapshot_hash": str(
+                                source["metrics_snapshot_hash"]
+                            ),
+                        }
                     )
-                merged = dict(source)
-                merged.update(
-                    {
-                        "backtest_run_id": prov["backtest_run_id"],
-                        "dataset_snapshot_id": prov["dataset_snapshot_id"],
-                        "fold_result_ids": prov["fold_result_ids"],
-                        "provenance_hash": prov["provenance_hash"],
-                    }
-                )
-                source_rows.append(merged)
+                    if expected_provenance_hash != str(prov["provenance_hash"]):
+                        blockers.append(
+                            "forward_paper_ledger:"
+                            "historical_provenance_hash_mismatch:"
+                            f"{route_id}:{window_id}"
+                        )
+                    merged = dict(source)
+                    merged.update(
+                        {
+                            "backtest_run_id": prov["backtest_run_id"],
+                            "dataset_snapshot_id": prov["dataset_snapshot_id"],
+                            "fold_result_ids": prov["fold_result_ids"],
+                            "provenance_hash": prov["provenance_hash"],
+                        }
+                    )
+                    source_rows.append(merged)
 
             if (
                 hash_inputs_complete

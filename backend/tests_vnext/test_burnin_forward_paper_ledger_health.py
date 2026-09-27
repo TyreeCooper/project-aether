@@ -957,3 +957,76 @@ def test_forward_paper_ledger_health_rejects_scalar_dataset_asset_ids() -> None:
     )
     assert expected in blockers
     assert blocker_class(expected) == "empirical_evidence"
+
+
+
+def test_forward_paper_ledger_health_rejects_scalar_heldout_trade_ids() -> None:
+    engine, store = _store()
+    campaign_id = "burnin-health-scalar-heldout-trades"
+    with engine.begin() as conn:
+        result = _start_campaign(
+            conn,
+            store,
+            campaign_id=campaign_id,
+        )
+        window_id = result.routes[0].historical_validation_window_ids[0]
+        evidence = store.tables["evidence_windows"]
+        conn.execute(
+            evidence.update()
+            .where(evidence.c.evidence_window_id == window_id)
+            .values(immutable_trade_ids="x")
+        )
+
+        blockers = forward_paper_ledger_blockers(
+            conn,
+            store=store,
+            campaign_id=campaign_id,
+        )
+
+    expected = (
+        "forward_paper_ledger:historical_baseline_sample_invalid:"
+        + result.routes[0].campaign_route_id
+        + ":"
+        + window_id
+    )
+    assert expected in blockers
+    assert blocker_class(expected) == "empirical_evidence"
+
+
+def test_forward_paper_ledger_health_rejects_non_integer_heldout_n() -> None:
+    engine, store = _store()
+    campaign_id = "burnin-health-invalid-heldout-n"
+    with engine.begin() as conn:
+        result = _start_campaign(
+            conn,
+            store,
+            campaign_id=campaign_id,
+        )
+        window_id = result.routes[0].historical_validation_window_ids[0]
+        conn.execute(sa.text("PRAGMA ignore_check_constraints = ON"))
+        try:
+            conn.execute(
+                sa.text(
+                    "UPDATE evidence_windows "
+                    "SET n = 'not-an-integer' "
+                    "WHERE evidence_window_id = :window_id"
+                ),
+                {"window_id": window_id},
+            )
+
+            blockers = forward_paper_ledger_blockers(
+                conn,
+                store=store,
+                campaign_id=campaign_id,
+            )
+        finally:
+            conn.execute(sa.text("PRAGMA ignore_check_constraints = OFF"))
+
+    expected = (
+        "forward_paper_ledger:historical_baseline_sample_invalid:"
+        + result.routes[0].campaign_route_id
+        + ":"
+        + window_id
+    )
+    assert expected in blockers
+    assert blocker_class(expected) == "empirical_evidence"
