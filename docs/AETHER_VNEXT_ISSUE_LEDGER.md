@@ -698,3 +698,56 @@ The implementation deliberately separates "binding supplied" from "provider heal
 proven." A complete manifest cannot by itself establish profitability or P11.
 
 **AETH-VN-021 status:** OPEN / EXTERNAL VALUES REQUIRED.
+
+
+## AETH-VN-022 — tastyfx private FIX specification/session contract is unavailable to the repository
+
+**Class:** external provider specification / integration dependency  
+**Discovered:** FX market-data integration hardening  
+**Status:** OPEN / EXTERNAL PROVIDER SPEC REQUIRED  
+**Blocks generic FIX application layer:** NO  
+**Blocks operational EURUSD/USDJPY tastyfx market-data source:** YES  
+**Blocks canonical Campaign #1 while those routes require tastyfx:** YES
+
+### Facts
+
+tastyfx publicly identifies FIX as its programmatic connection path. The repository
+now implements the public FIX 5.0 SP2 / FIXT 1.1 market-data application boundary,
+including standard top-of-book request fields, full-refresh BBO parsing, market-data
+reject parsing, reviewed-symbol mapping, and fail-closed malformed/crossed-book
+handling.
+
+The public material does not bind the private provider session contract required for
+an operational tastyfx connection. AETHER does not invent:
+
+- session CompIDs;
+- broker-private logon/session tags;
+- SSL endpoint values;
+- broker-private symbol conventions;
+- sequence/recovery requirements beyond the public standard;
+- provider conformance expectations;
+- approved credentials or static-IP configuration.
+
+### Control
+
+The intended source ID is preserved as:
+
+`tastyfx_fix_market_data`
+
+Its repository capability state is explicitly:
+
+`provider_spec_pending`
+
+Strict runtime binding/preflight therefore reports
+`primary_market_source_provider_spec_pending` rather than treating the public FIX
+parser as a live provider integration.
+
+### Resolution requirement
+
+Close this issue only after the approved tastyfx private FIX specification/session
+configuration is available, reviewed symbol bindings for EURUSD/USDJPY are recorded,
+demo integration succeeds, and provider conformance requirements are satisfied.
+
+No guessed provider-private FIX values may be used to close the issue.
+
+**AETH-VN-022 status:** OPEN / EXTERNAL PROVIDER SPEC REQUIRED.

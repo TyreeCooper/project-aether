@@ -2,18 +2,18 @@
 
 Status: external burn-in prerequisite. This document does not authorize LIVE.
 
-The frozen Product Registry contains product economics and broker families. Real
-forward-paper burn-in additionally needs time-varying external facts that the source
-specification requires but does not numerically bind. Those values must be reviewed
-and supplied; the code must not invent them.
+Frozen product economics live in the canonical Product Registry. Real forward-paper
+burn-in additionally requires reviewed, time-varying runtime facts. AETHER must not
+invent executable symbols, provider identities, stale thresholds, futures contracts,
+contract IDs, expiry dates, exchange-calendar identities, or equity-borrow policy.
 
-## Required secret
+## Required manifest
 
-GitHub Environment `aether-vnext-burnin` must contain:
+GitHub Environment `aether-vnext-burnin` supplies:
 
 `AETHER_VNEXT_RUNTIME_BINDINGS_JSON`
 
-The value is a JSON object:
+Top-level shape:
 
 ```json
 {
@@ -27,81 +27,117 @@ The value is a JSON object:
       "fallback_market_source_id": null,
       "stale_threshold_ms": "<REQUIRED_POSITIVE_INTEGER>",
       "calendar_provider_id": null,
+      "calendar_market_id": null,
       "current_contract": null,
       "market_data_contract_id": null,
       "expiry_utc": null,
       "next_contract": null,
       "shortability_provider_id": null,
-      "source_ref": "<reviewed source / ticket / provider reference>"
+      "shortability_stale_threshold_ms": null,
+      "source_ref": "<reviewed source/ticket/provider reference>"
     }
   ]
 }
 ```
 
-The example intentionally leaves the stale threshold unresolved. The Master requires
-a stale threshold, but the frozen seed does not bind a numeric value.
+The stale threshold is intentionally not supplied by the frozen seed and must be a
+reviewed external value.
 
-## Completeness rules
+## Strict seed-universe rule
 
-Every asset entering Campaign #1 requires:
+Real burn-in initialization requires exactly these 12 assets:
 
-- a nonblank executable broker symbol;
-- a named primary market-data source;
-- a positive stale-threshold value;
-- a calendar-provider identity for every non-24x7 product;
-- for futures: current executable contract, expiry timestamp, and next contract;
-- when NinjaTrader market data is bound: the reviewed positive numeric contract ID
-  corresponding to the current executable contract;
-- for borrow-required equities: a shortability/locate provider identity;
-- a configuration hash equal to the canonical vNext freeze.
+`btc, eth, eurusd, usdjpy, mes, mnq, mgc, mcl, us10y, nvda, tsla, pltr`
 
-For futures, `broker_symbol` must equal `current_contract`. A current contract
-inside the frozen 48-hour roll cutoff is not burn-in-ready. NinjaTrader quote events
-identify instruments by numeric `contractId`, so a NinjaTrader market-data binding
-also requires `market_data_contract_id`; AETHER does not infer that ID from the
-contract symbol.
+A partial strict manifest is not "complete." Missing or unexpected assets make the
+strict import fail before any runtime-registry database mutation.
 
-The runtime binding record is stored in `product_registry_state`. Campaign
-preflight freezes the binding content hash into every campaign route so a binding
-cannot silently change between evidence inspection and campaign persistence.
+## Binding requirements by product
 
-## Seed-twelve unresolved external fields
+Every Campaign #1 asset requires:
 
-| Asset | Source-bound facts already present | External facts still required |
+- nonblank executable broker symbol;
+- primary market-data source identity;
+- positive market-data stale threshold;
+- canonical configuration hash.
+
+Exchange-calendar products additionally require:
+
+- implemented calendar-provider identity;
+- reviewed provider market identity where that provider requires one.
+
+FX OTC does not require an exchange-holiday provider. Its frozen calendar contract is
+the explicit 24x5 weekend boundary plus the 16:59–17:05 ET rollover maintenance
+window.
+
+Futures additionally require:
+
+- current executable contract;
+- positive numeric provider contract ID when the provider identifies contracts that way;
+- timezone-aware expiry;
+- next contract;
+- current broker symbol equal to current executable contract;
+- current contract outside the frozen 48-hour roll cutoff.
+
+IBKR equities additionally require a reviewed positive `market_data_contract_id`
+(conid). Equity short routes require:
+
+- implemented shortability-provider identity;
+- positive shortability stale threshold;
+- fresh provider-derived borrow evidence at Phase A.
+
+Long equity routes do not depend on locate availability.
+
+## Implemented market-source state
+
+Current repository capability:
+
+| Assets | Source | Repository state |
 |---|---|---|
-| BTC | Kraken family; XBTUSD; crypto 24x7; long-only | approved stale threshold; optional fallback; source reference |
-| ETH | Kraken family; ETHUSD; crypto 24x7; long-only | approved stale threshold; optional fallback; source reference |
-| EURUSD | tastyfx family; FX economics/calendar class | executable broker symbol; market-data source; stale threshold; calendar provider |
-| USDJPY | tastyfx family; FX economics/calendar class | executable broker symbol; market-data source; stale threshold; calendar provider |
-| MES | NinjaTrader family; MES economics | current contract; NinjaTrader contract ID; expiry; next contract; market-data source; stale threshold; calendar provider |
-| MNQ | NinjaTrader family; MNQ economics | current contract; NinjaTrader contract ID; expiry; next contract; market-data source; stale threshold; calendar provider |
-| MGC | NinjaTrader family; MGC economics | current contract; NinjaTrader contract ID; expiry; next contract; market-data source; stale threshold; calendar provider |
-| MCL | NinjaTrader family; MCL economics | current contract; NinjaTrader contract ID; expiry; next contract; market-data source; stale threshold; calendar provider |
-| US10Y | NinjaTrader family; executable family ZN; 1/64 tick = $15.625 | current ZN contract; NinjaTrader contract ID; expiry; next contract; market-data source; stale threshold; calendar provider |
-| NVDA | IBKR family; equity economics; short requires locate | executable broker symbol; market-data source; stale threshold; calendar provider; shortability provider |
-| TSLA | IBKR family; equity economics; short requires locate | executable broker symbol; market-data source; stale threshold; calendar provider; shortability provider |
-| PLTR | IBKR family; equity economics; short requires locate | executable broker symbol; market-data source; stale threshold; calendar provider; shortability provider |
+| BTC, ETH | Kraken public WebSocket v2 | Implemented |
+| MES, MNQ, MGC, MCL, US10Y | NinjaTrader DEMO market-data transport | Implemented |
+| NVDA, TSLA, PLTR | IBKR Web API SMD top-of-book | Implemented |
+| EURUSD, USDJPY | tastyfx FIX 5.0 SP2 / FIXT 1.1 | Public FIX layer implemented; provider-private session/spec/conformance pending |
 
-## Workflow behavior
+A named source is not enough. Canonical preflight requires the reviewed source to have
+an implemented repository capability for the asset. tastyfx remains intentionally
+fail-closed as `provider_spec_pending` until its private FIX specification/session
+contract is supplied and reviewed.
 
-The approved preflight label resolves to `initialize_and_preflight`:
+## Calendar state
 
-1. validate the dedicated burn-in database;
-2. refuse a legacy database target;
-3. migrate the vNext schema;
-4. bootstrap the canonical policy snapshot;
-5. apply `AETHER_VNEXT_RUNTIME_BINDINGS_JSON`;
-6. fail if any supplied binding is incomplete;
-7. run the canonical 74-route campaign preflight;
-8. upload both the binding report and preflight report.
+- BTC/ETH: crypto 24x7, no external exchange-holiday provider.
+- EURUSD/USDJPY: frozen FX OTC weekly/rollover contract, no exchange-holiday provider.
+- Futures/equities: TradingHours-backed authoritative date-specific snapshot provider
+  is implemented; reviewed `calendar_market_id` values remain external binding facts.
 
-The campaign-start approval path does not rewrite runtime bindings. It reads the
-persisted binding state, re-runs canonical preflight, freezes each binding hash, and
-only then persists Campaign #1.
+## Equity shortability state
+
+IBKR shortability support is implemented from documented market-data fields:
+
+- 7636 — shortable shares;
+- 7637 — fee-rate raw value;
+- 7644 — shortability descriptor;
+- 6509 — market-data availability state.
+
+AETHER persists immutable shortability evidence and stamps the exact evidence ID onto
+a short OrderIntent when Phase A admits it. Delayed/frozen/not-subscribed evidence,
+stale evidence, contract/provider mismatch, or insufficient shares cannot authorize
+the short.
+
+## Persistence identity
+
+Runtime bindings live in `product_registry_state` and are content-hashed. Campaign
+preflight freezes the exact runtime binding hash into each forward-paper campaign
+route, preventing silent drift between evidence inspection and campaign persistence.
+
+Strict import validates the entire manifest before persistence. A failed strict import
+does not partially rewrite `product_registry_state`.
 
 ## Non-negotiable boundary
 
-A successful binding manifest proves that required external identities and lifecycle
-facts were supplied. It does not by itself prove provider connectivity, quote health,
-holiday-feed health, broker availability, or profitability. Those remain runtime and
-empirical gates. PAPER ONLY and LIVE HARD BLOCKED remain unchanged.
+A complete binding manifest proves reviewed identity/configuration only. It does not
+prove provider connectivity, quote health, calendar health, broker availability,
+held-out evidence sufficiency, strategy profitability, or P11 readiness.
+
+PAPER ONLY and LIVE HARD BLOCKED remain unchanged.

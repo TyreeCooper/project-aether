@@ -587,3 +587,61 @@ Implementation:
 The binding manifest proves reviewed identity/lifecycle configuration only. It does
 not prove live provider connectivity, current quote health, holiday-feed health, or
 profitability. Those remain runtime/empirical gates.
+
+
+## Post-Phase-9 integration checkpoint — 2026-09-27
+
+This section supersedes older "next build target" wording above where later work has
+already closed the repository-side gaps.
+
+Current verified implementation head before this documentation closeout:
+
+`255225e4f6e01633c91065f55e70f0582cb4ff67`
+
+Verified CI at that head:
+
+- AETHER vNext CI #421 — SUCCESS;
+- repository CI #730 — SUCCESS.
+
+Repository-side integration now includes:
+
+- durable runtime Product Registry bindings with campaign-route binding hashes;
+- provider-neutral market ingress and immutable ingress-attempt evidence;
+- Kraken BTC/ETH public WebSocket v2 market-data path;
+- TradingHours-backed exchange-calendar snapshot provider;
+- explicit FX OTC 24x5/weekend + rollover calendar semantics;
+- IBKR equity top-of-book transport and operator-local ingress probe;
+- immutable IBKR equity shortability evidence with exact evidence lineage on admitted
+  short OrderIntents;
+- NinjaTrader DEMO futures market-data transport and canonical ingress probe;
+- provider-neutral FIX 5.0 SP2/FIXT 1.1 market-data application layer;
+- tastyfx FIX source identity retained as fail-closed `provider_spec_pending`;
+- exact seed-12 runtime-manifest enforcement;
+- atomic strict manifest validation before any runtime-registry mutation;
+- read-only burn-in readiness audit covering database isolation, schema completeness,
+  seed-12 binding coverage, canonical preflight state, and blocker classification.
+
+### Current real-burn-in gates
+
+The repository is no longer blocked on generic provider abstractions for crypto,
+futures DEMO, equities, exchange calendars, or equity locate evidence.
+
+Real Campaign #1 remains blocked until external and empirical facts are supplied and
+verified:
+
+1. dedicated non-production PostgreSQL burn-in target;
+2. configured/protected GitHub Environment `aether-vnext-burnin`;
+3. reviewed exact seed-12 runtime binding manifest;
+4. tastyfx private FIX specification, approved session configuration, reviewed
+   EURUSD/USDJPY symbol contract, demo integration, and conformance;
+5. canonical held-out research provenance for every executable route;
+6. canonical preflight `startable=true`.
+
+Campaign #1 is NOT started. P11 empirical profitability readiness is NOT established.
+PAPER ONLY / LIVE HARD BLOCKED remains unchanged.
+
+The protected readiness action is:
+
+`aether-vnext-burnin-readiness-approved`
+
+It is read-only and must not be confused with initialization or campaign start.
