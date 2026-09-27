@@ -487,6 +487,135 @@ class VNextStore:
             )
         )
 
+    def load_market_observation(
+        self,
+        conn: Connection,
+        *,
+        observation_id: str,
+    ) -> MarketObservation | None:
+        table = self.tables["market_observations"]
+        row = conn.execute(
+            sa.select(table).where(
+                table.c.observation_id == str(observation_id)
+            )
+        ).mappings().first()
+        if row is None:
+            return None
+        return MarketObservation(
+            observation_id=str(row["observation_id"]),
+            asset_id=str(row["asset_id"]),
+            venue=str(row["venue"]),
+            bid=(None if row["bid"] is None else float(row["bid"])),
+            ask=(None if row["ask"] is None else float(row["ask"])),
+            last=(None if row["last"] is None else float(row["last"])),
+            mark=(None if row["mark"] is None else float(row["mark"])),
+            source=str(row["source"]),
+            exchange_ts=(
+                None
+                if row["exchange_ts"] is None
+                else _stored_utc(row["exchange_ts"])
+            ),
+            received_ts=_stored_utc(row["received_ts"]),
+            age_ms=int(row["age_ms"]),
+            spread_abs=(
+                None
+                if row["spread_abs"] is None
+                else float(row["spread_abs"])
+            ),
+            spread_bps=(
+                None
+                if row["spread_bps"] is None
+                else float(row["spread_bps"])
+            ),
+            session_state=SessionState(str(row["session_state"])),
+            quality_state=QualityState(str(row["quality_state"])),
+            fallback_reason=(
+                None
+                if row["fallback_reason"] is None
+                else str(row["fallback_reason"])
+            ),
+            calendar_state=CalendarState(str(row["calendar_state"])),
+            data_version=str(row["data_version"]),
+        )
+
+    def record_market_ingress_attempt(
+        self,
+        conn: Connection,
+        *,
+        attempt_id: str,
+        asset_id: str,
+        configuration_hash: str,
+        runtime_registry_binding_hash: str | None,
+        as_of_utc: datetime,
+        calendar_id: str,
+        calendar_provider_id: str | None,
+        observation_id: str | None,
+        executable: bool,
+        reason: str,
+        attempted_sources: tuple[str, ...],
+        rejection_reasons: tuple[str, ...],
+        created_at_utc: datetime,
+    ) -> None:
+        if not str(attempt_id).strip():
+            raise ValueError("attempt_id is required")
+        if not str(asset_id).strip():
+            raise ValueError("asset_id is required")
+        if not str(configuration_hash).strip():
+            raise ValueError("configuration_hash is required")
+        if not str(calendar_id).strip():
+            raise ValueError("calendar_id is required")
+        if not str(reason).strip():
+            raise ValueError("reason is required")
+        if as_of_utc.tzinfo is None or created_at_utc.tzinfo is None:
+            raise ValueError("market ingress timestamps must be timezone-aware")
+        if observation_id is not None:
+            observation = self.load_market_observation(
+                conn,
+                observation_id=observation_id,
+            )
+            if observation is None:
+                raise KeyError(
+                    f"unknown market observation: {observation_id}"
+                )
+            if observation.asset_id != str(asset_id).strip().lower():
+                raise ValueError("market ingress observation asset mismatch")
+
+        conn.execute(
+            self.tables["market_ingress_attempts"].insert().values(
+                attempt_id=str(attempt_id),
+                asset_id=str(asset_id).strip().lower(),
+                configuration_hash=str(configuration_hash),
+                runtime_registry_binding_hash=runtime_registry_binding_hash,
+                as_of_utc=as_of_utc,
+                calendar_id=str(calendar_id),
+                calendar_provider_id=calendar_provider_id,
+                observation_id=observation_id,
+                executable=bool(executable),
+                reason=str(reason),
+                attempted_sources=list(attempted_sources),
+                rejection_reasons=list(rejection_reasons),
+                created_at_utc=created_at_utc,
+            )
+        )
+
+    def latest_market_ingress_attempt(
+        self,
+        conn: Connection,
+        *,
+        asset_id: str,
+    ) -> dict[str, Any] | None:
+        table = self.tables["market_ingress_attempts"]
+        row = conn.execute(
+            sa.select(table)
+            .where(table.c.asset_id == str(asset_id).strip().lower())
+            .order_by(
+                table.c.as_of_utc.desc(),
+                table.c.attempt_id.desc(),
+            )
+            .limit(1)
+        ).mappings().first()
+        return None if row is None else dict(row)
+
     def record_watch_setup(
         self,
         conn: Connection,

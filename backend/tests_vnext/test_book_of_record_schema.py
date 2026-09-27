@@ -31,6 +31,7 @@ def test_book_of_record_has_required_tables() -> None:
     assert {
         "product_registry_state",
         "market_observations",
+        "market_ingress_attempts",
         "policy_snapshots",
         "governor_state",
         "risk_admission_guard",
@@ -377,11 +378,11 @@ def test_phase5_execution_reservation_columns_are_in_current_schema() -> None:
     assert "fill_market_observation_id" not in columns
 
 
-def test_runtime_schema_facade_is_pinned_to_revision_0022() -> None:
+def test_runtime_schema_facade_is_pinned_to_revision_0023() -> None:
     _, store = _engine_and_store()
     backend = Path(__file__).resolve().parents[1]
     facade = (backend / "aether_vnext" / "schema.py").read_text(encoding="utf-8")
-    assert "schema_v0022" in facade
+    assert "schema_v0023" in facade
 
     campaign_migration = (
         backend
@@ -420,6 +421,34 @@ def test_runtime_schema_facade_is_pinned_to_revision_0022() -> None:
 
     campaign_routes = store.tables["forward_paper_campaign_routes"]
     assert "runtime_registry_binding_hash" in campaign_routes.c
+
+    ingress_migration = (
+        backend
+        / "alembic"
+        / "versions"
+        / "0023_aether_vnext_market_ingress_attempts.py"
+    ).read_text(encoding="utf-8")
+    assert 'revision: str = "0023"' in ingress_migration
+    assert 'down_revision: Union[str, None] = "0022"' in ingress_migration
+    assert "market_ingress_attempts" in ingress_migration
+    assert "trg_market_ingress_attempts_immutable" in ingress_migration
+
+    ingress = store.tables["market_ingress_attempts"]
+    assert {
+        "attempt_id",
+        "asset_id",
+        "configuration_hash",
+        "runtime_registry_binding_hash",
+        "as_of_utc",
+        "calendar_id",
+        "calendar_provider_id",
+        "observation_id",
+        "executable",
+        "reason",
+        "attempted_sources",
+        "rejection_reasons",
+        "created_at_utc",
+    } <= set(ingress.c.keys())
 
 
 def test_phase6_atomic_risk_admission_schema_is_explicit() -> None:
