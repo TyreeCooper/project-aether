@@ -11,7 +11,7 @@ from aether_vnext.forward_paper_preflight import (
     forward_paper_baseline_snapshot_hash,
     forward_paper_route_baseline_hash,
 )
-from aether_vnext.store import VNextStore
+from aether_vnext.store import VNextStore, canonical_payload_hash
 
 
 def _stored_utc(value: datetime) -> datetime:
@@ -54,6 +54,9 @@ def forward_paper_ledger_blockers(
 
     evidence = store.tables["evidence_windows"]
     provenance = store.tables["held_out_evidence_provenance"]
+    runs = store.tables["backtest_runs"]
+    datasets = store.tables["research_dataset_snapshots"]
+    folds = store.tables["fold_results"]
 
     routes: list[ForwardPaperRouteBaseline] = []
     route_by_id: dict[str, dict[str, object]] = {}
@@ -131,6 +134,165 @@ def forward_paper_ledger_blockers(
                     blockers.append(
                         "forward_paper_ledger:"
                         "historical_baseline_family_mismatch:"
+                        f"{route_id}:{window_id}"
+                    )
+                    source_complete = False
+
+                run_id = str(prov["backtest_run_id"])
+                dataset_id = str(prov["dataset_snapshot_id"])
+                fold_ids = tuple(
+                    str(value).strip()
+                    for value in (prov["fold_result_ids"] or ())
+                )
+                run = conn.execute(
+                    sa.select(runs).where(
+                        runs.c.backtest_run_id == run_id
+                    )
+                ).mappings().first()
+                if run is None:
+                    blockers.append(
+                        "forward_paper_ledger:"
+                        "historical_provenance_run_missing:"
+                        f"{route_id}:{window_id}"
+                    )
+                    source_complete = False
+                elif (
+                    str(run["run_type"]).strip().lower() != "held_out"
+                    or run["finished_at_utc"] is None
+                    or str(run["playbook_id"])
+                    != route_baseline.playbook_id
+                    or str(run["playbook_version"])
+                    != route_baseline.playbook_version
+                    or str(run["configuration_hash"])
+                    != route_baseline.configuration_hash
+                    or str(run["dataset_snapshot_id"]) != dataset_id
+                ):
+                    blockers.append(
+                        "forward_paper_ledger:"
+                        "historical_provenance_run_mismatch:"
+                        f"{route_id}:{window_id}"
+                    )
+                    source_complete = False
+
+                dataset = conn.execute(
+                    sa.select(datasets).where(
+                        datasets.c.dataset_snapshot_id == dataset_id
+                    )
+                ).mappings().first()
+                asset_id = route_baseline.route_id.split(":", 1)[0]
+                if dataset is None:
+                    blockers.append(
+                        "forward_paper_ledger:"
+                        "historical_provenance_dataset_missing:"
+                        f"{route_id}:{window_id}"
+                    )
+                    source_complete = False
+                elif (
+                    not bool(dataset["pit"])
+                    or asset_id not in {
+                        str(value).strip().lower()
+                        for value in (dataset["asset_ids"] or ())
+                    }
+                ):
+                    blockers.append(
+                        "forward_paper_ledger:"
+                        "historical_provenance_dataset_mismatch:"
+                        f"{route_id}:{window_id}"
+                    )
+                    source_complete = False
+
+                selected = tuple(
+                    dict(row)
+                    for row in conn.execute(
+                        sa.select(folds).where(
+                            folds.c.fold_result_id.in_(fold_ids)
+                        )
+                    ).mappings()
+                ) if fold_ids else ()
+                fold_set_valid = bool(
+                    fold_ids
+                    and all(fold_ids)
+                    and len(fold_ids) == len(set(fold_ids))
+                    and len(selected) == len(fold_ids)
+                    and all(
+                        str(row["backtest_run_id"]) == run_id
+                        for row in selected
+                    )
+                )
+                if not fold_set_valid:
+                    blockers.append(
+                        "forward_paper_ledger:"
+                        "historical_provenance_fold_mismatch:"
+                        f"{route_id}:{window_id}"
+                    )
+                    source_complete = False
+                else:
+                    ordered = tuple(
+                        sorted(
+                            selected,
+                            key=lambda row: (
+                                _stored_utc(row["test_start_utc"]),
+                                _stored_utc(row["test_end_utc"]),
+                                str(row["fold_result_id"]),
+                            ),
+                        )
+                    )
+                    overlaps = any(
+                        _stored_utc(current["test_start_utc"])
+                        <= _stored_utc(prior["test_end_utc"])
+                        for prior, current in zip(
+                            ordered,
+                            ordered[1:],
+                        )
+                    )
+                    first_test_at = min(
+                        _stored_utc(row["test_start_utc"])
+                        for row in ordered
+                    )
+                    last_test_at = max(
+                        _stored_utc(row["test_end_utc"])
+                        for row in ordered
+                    )
+                    contained = (
+                        _stored_utc(source["first_timestamp_utc"])
+                        >= first_test_at
+                        and _stored_utc(source["last_timestamp_utc"])
+                        <= last_test_at
+                    )
+                    if overlaps or not contained:
+                        blockers.append(
+                            "forward_paper_ledger:"
+                            "historical_provenance_fold_window_mismatch:"
+                            f"{route_id}:{window_id}"
+                        )
+                        source_complete = False
+
+                expected_provenance_hash = canonical_payload_hash(
+                    {
+                        "backtest_run_id": run_id,
+                        "dataset_snapshot_id": dataset_id,
+                        "fold_result_ids": sorted(fold_ids),
+                        "route_id": str(source["route_id"]),
+                        "playbook_id": str(source["playbook_id"]),
+                        "playbook_version": str(source["playbook_version"]),
+                        "configuration_hash": str(
+                            source["configuration_hash"]
+                        ),
+                        "immutable_trade_ids": sorted(
+                            str(value)
+                            for value in (
+                                source["immutable_trade_ids"] or ()
+                            )
+                        ),
+                        "metrics_snapshot_hash": str(
+                            source["metrics_snapshot_hash"]
+                        ),
+                    }
+                )
+                if expected_provenance_hash != str(prov["provenance_hash"]):
+                    blockers.append(
+                        "forward_paper_ledger:"
+                        "historical_provenance_hash_mismatch:"
                         f"{route_id}:{window_id}"
                     )
                     source_complete = False

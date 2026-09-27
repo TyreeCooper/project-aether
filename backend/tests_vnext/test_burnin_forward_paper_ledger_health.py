@@ -198,3 +198,79 @@ def test_forward_paper_ledger_health_recomputes_historical_baseline_hash() -> No
         + result.routes[0].campaign_route_id,
     )
     assert blocker_class(blockers[0]) == "empirical_evidence"
+
+
+
+def test_forward_paper_ledger_health_revalidates_research_provenance_chain() -> None:
+    engine, store = _store()
+    campaign_id = "burnin-health-provenance-drift"
+    with engine.begin() as conn:
+        result = _start_campaign(
+            conn,
+            store,
+            campaign_id=campaign_id,
+        )
+        window_id = result.routes[0].historical_validation_window_ids[0]
+        provenance = conn.execute(
+            sa.select(store.tables["held_out_evidence_provenance"]).where(
+                store.tables["held_out_evidence_provenance"].c.evidence_window_id
+                == window_id
+            )
+        ).mappings().one()
+
+        conn.execute(
+            store.tables["backtest_runs"].update()
+            .where(
+                store.tables["backtest_runs"].c.backtest_run_id
+                == provenance["backtest_run_id"]
+            )
+            .values(configuration_hash="tampered-research-config")
+        )
+
+        blockers = forward_paper_ledger_blockers(
+            conn,
+            store=store,
+            campaign_id=campaign_id,
+        )
+
+    expected = (
+        "forward_paper_ledger:historical_provenance_run_mismatch:"
+        + result.routes[0].campaign_route_id
+        + ":"
+        + window_id
+    )
+    assert expected in blockers
+    assert blocker_class(expected) == "empirical_evidence"
+
+
+def test_forward_paper_ledger_health_recomputes_provenance_hash() -> None:
+    engine, store = _store()
+    campaign_id = "burnin-health-provenance-hash"
+    with engine.begin() as conn:
+        result = _start_campaign(
+            conn,
+            store,
+            campaign_id=campaign_id,
+        )
+        window_id = result.routes[0].historical_validation_window_ids[0]
+        provenance = store.tables["held_out_evidence_provenance"]
+        conn.execute(
+            provenance.update()
+            .where(provenance.c.evidence_window_id == window_id)
+            .values(provenance_hash="tampered-provenance-hash")
+        )
+
+        blockers = forward_paper_ledger_blockers(
+            conn,
+            store=store,
+            campaign_id=campaign_id,
+        )
+
+    expected = (
+        "forward_paper_ledger:historical_provenance_hash_mismatch:"
+        + result.routes[0].campaign_route_id
+        + ":"
+        + window_id
+    )
+    assert expected in blockers
+    assert blocker_class(expected) == "empirical_evidence"
