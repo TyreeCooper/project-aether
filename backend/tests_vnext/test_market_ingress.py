@@ -158,20 +158,20 @@ def test_stale_quote_records_failed_attempt_without_inventing_observation() -> N
     assert observation_count == 0
 
 
-def test_noncrypto_ingress_requires_bound_calendar_provider_identity() -> None:
+def test_exchange_ingress_requires_bound_calendar_provider_identity() -> None:
     engine, store = _store()
     with engine.begin() as conn:
         record_test_runtime_binding(
             conn,
             store,
-            asset_id="eurusd",
+            asset_id="nvda",
             configuration_hash=CONFIGURATION_HASH,
             now=T0,
         )
         unavailable = ingest_market_quotes(
             conn,
             store,
-            asset_id="eurusd",
+            asset_id="nvda",
             quotes=(),
             calendar_provider=None,
             as_of_utc=T0,
@@ -185,14 +185,14 @@ def test_noncrypto_ingress_requires_bound_calendar_provider_identity() -> None:
         record_test_runtime_binding(
             conn,
             store2,
-            asset_id="eurusd",
+            asset_id="nvda",
             configuration_hash=CONFIGURATION_HASH,
             now=T0,
         )
         mismatch = ingest_market_quotes(
             conn,
             store2,
-            asset_id="eurusd",
+            asset_id="nvda",
             quotes=(),
             calendar_provider=WrongCalendarProvider(),
             as_of_utc=T0,
@@ -202,10 +202,10 @@ def test_noncrypto_ingress_requires_bound_calendar_provider_identity() -> None:
     assert mismatch.reason == "calendar_provider_identity_mismatch"
 
 
-def test_noncrypto_ingress_accepts_identified_calendar_provider_but_session_stays_authoritative() -> None:
+def test_fx_otc_ingress_needs_no_exchange_calendar_provider() -> None:
     engine, store = _store()
-    # T0 is Saturday evening EDT, so FX is closed regardless of a NORMAL holiday
-    # exception. The infrastructure persists the quote but cannot make it executable.
+    # T0 is Saturday evening EDT. FX closure comes from the frozen OTC weekly
+    # contract; no exchange-holiday provider is needed or consulted.
     with engine.begin() as conn:
         record_test_runtime_binding(
             conn,
@@ -226,7 +226,7 @@ def test_noncrypto_ingress_accepts_identified_calendar_provider_but_session_stay
                     venue="tastyfx",
                 ),
             ),
-            calendar_provider=StaticCalendarProvider(),
+            calendar_provider=None,
             as_of_utc=T0 + timedelta(milliseconds=100),
         )
 

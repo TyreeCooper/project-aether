@@ -272,3 +272,22 @@ def test_non_futures_binding_rejects_market_data_contract_id() -> None:
         market_data_contract_id=123,
     )
     assert "non_futures_contract_fields_present" in binding_blockers(binding)
+
+
+def test_fx_otc_strict_calendar_gate_uses_frozen_weekly_contract() -> None:
+    binding = RuntimeRegistryBinding(
+        asset_id="eurusd",
+        broker_symbol="EUR/USD",
+        primary_market_source_id="reviewed.fx.source",
+        stale_threshold_ms=1500,
+        calendar_provider_id=None,
+        source_ref="reviewed-fx-binding",
+    )
+    blockers = binding_blockers(
+        binding,
+        as_of_utc=T0,
+        require_calendar_provider_implementation=True,
+    )
+    assert "calendar_provider_missing" not in blockers
+    assert "calendar_provider_implementation_missing" not in blockers
+    assert "calendar_provider_calendar_unsupported" not in blockers

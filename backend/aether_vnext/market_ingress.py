@@ -23,6 +23,7 @@ from aether_vnext.calendars import (
     CalendarExceptionProvider,
     calendar_decision,
 )
+from aether_vnext.calendar_sources import calendar_requires_external_provider
 from aether_vnext.domain import MarketObservation, QualityState
 from aether_vnext.freeze import CONFIGURATION_HASH
 from aether_vnext.market_data import RawQuote
@@ -234,7 +235,7 @@ def ingest_market_quotes(
 
     row = materialize_bound_registry_row(binding, as_of_utc=as_of_utc)
 
-    if base.calendar_id != "crypto_24x7":
+    if calendar_requires_external_provider(base.calendar_id):
         expected_provider_id = str(binding.calendar_provider_id or "").strip()
         if calendar_provider is None:
             return finish(

@@ -165,16 +165,32 @@ def test_us_rth_early_close_is_authoritative_from_provider() -> None:
     assert decision.session_end_et == time(13, 0)
 
 
-def test_fx_rollover_window_is_maintenance() -> None:
-    # 17:01 ET = 21:01 UTC while EDT is active.
-    when = datetime(2026, 9, 28, 21, 1, tzinfo=UTC)
-    decision = calendar_decision(
+def test_fx_otc_uses_frozen_weekly_contract_without_exchange_provider() -> None:
+    # Monday 10:00 ET: eligible/focus from the Master-defined OTC session.
+    normal = calendar_decision(
         calendar_id="fx_otc",
-        at_utc=when,
-        exception_provider=StaticExceptions({}),
+        at_utc=datetime(2026, 9, 28, 14, 0, tzinfo=UTC),
+        exception_provider=None,
     )
-    assert decision.eligible is False
-    assert decision.reason == "fx_rollover"
+    assert normal.eligible is True
+    assert normal.focus is True
+
+    # 17:01 ET = 21:01 UTC while EDT is active.
+    rollover = calendar_decision(
+        calendar_id="fx_otc",
+        at_utc=datetime(2026, 9, 28, 21, 1, tzinfo=UTC),
+        exception_provider=None,
+    )
+    assert rollover.eligible is False
+    assert rollover.reason == "fx_rollover"
+
+    saturday = calendar_decision(
+        calendar_id="fx_otc",
+        at_utc=datetime(2026, 9, 26, 16, 0, tzinfo=UTC),
+        exception_provider=None,
+    )
+    assert saturday.eligible is False
+    assert saturday.reason == "weekend"
 
 
 def test_kraken_fee_uses_26bps_per_leg_not_legacy_80bps() -> None:

@@ -29,6 +29,21 @@ class CalendarProviderCapability:
         return str(calendar_id).strip() in self.supported_calendar_ids
 
 
+EXTERNAL_CALENDAR_PROVIDER_IDS: Final = frozenset(
+    {
+        "us_rth",
+        "us_fut_idx",
+        "us_fut_metal_nrg",
+        "us_fut_rates",
+    }
+)
+
+
+def calendar_requires_external_provider(calendar_id: str) -> bool:
+    """Whether frozen AETHER truth requires date-specific exchange-calendar data."""
+    return str(calendar_id).strip() in EXTERNAL_CALENDAR_PROVIDER_IDS
+
+
 IMPLEMENTED_CALENDAR_PROVIDERS: Final = MappingProxyType(
     {
         TRADINGHOURS_CALENDAR_PROVIDER_ID: CalendarProviderCapability(
@@ -62,7 +77,7 @@ def calendar_provider_implementation_blockers(
     market_id: str | None = None,
 ) -> tuple[str, ...]:
     calendar = str(calendar_id).strip()
-    if calendar == "crypto_24x7":
+    if calendar in {"crypto_24x7", "fx_otc"}:
         return ()
 
     provider = None if provider_id is None else str(provider_id).strip()

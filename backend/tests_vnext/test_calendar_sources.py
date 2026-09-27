@@ -54,9 +54,9 @@ def test_tradinghours_requires_reviewed_market_identity() -> None:
     ) == ()
 
 
-def test_fx_otc_remains_fail_closed_until_distinct_calendar_provider_exists() -> None:
+def test_fx_otc_does_not_require_exchange_calendar_provider() -> None:
     assert calendar_provider_implementation_blockers(
         calendar_id="fx_otc",
-        provider_id=TRADINGHOURS_CALENDAR_PROVIDER_ID,
-        market_id="not-used",
-    ) == ("calendar_provider_calendar_unsupported",)
+        provider_id=None,
+        market_id=None,
+    ) == ()

@@ -32,7 +32,10 @@ def make_runtime_binding(
         fallback_market_source_id=None,
         stale_threshold_ms=1500,
         calendar_provider_id=(
-            None if base.calendar_id == "crypto_24x7" else "test.calendar"
+            "test.calendar"
+            if base.calendar_id
+            in {"us_rth", "us_fut_idx", "us_fut_metal_nrg", "us_fut_rates"}
+            else None
         ),
         current_contract=contract,
         expiry_utc=expiry,

@@ -2,7 +2,9 @@
 
 The Master requires DST/holiday/early-close aware exchange calendars. Static clock
 strings are display summaries only. This module therefore separates weekly session
-rules from date-specific calendar exceptions and refuses to invent holiday state.
+rules from date-specific exchange exceptions and refuses to invent holiday state.
+FX OTC is not an exchange calendar: its frozen contract is the explicit 24x5 weekend
+boundary plus the 16:59-17:05 ET rollover maintenance window.
 """
 from __future__ import annotations
 
@@ -96,7 +98,7 @@ def _date_exception(
     ts_et: datetime,
     provider: CalendarExceptionProvider | None,
 ) -> CalendarException | None:
-    if calendar_id == "crypto_24x7":
+    if calendar_id in {"crypto_24x7", "fx_otc"}:
         return CalendarException(
             calendar_id=calendar_id,
             session_date=ts_et.date(),

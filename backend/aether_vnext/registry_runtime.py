@@ -17,6 +17,7 @@ import json
 
 from aether_vnext.calendar_sources import (
     calendar_provider_implementation_blockers,
+    calendar_requires_external_provider,
 )
 from aether_vnext.market_sources import market_source_implementation_blockers
 from aether_vnext.ninjatrader_market import NINJATRADER_MARKET_SOURCE_ID
@@ -173,7 +174,7 @@ def binding_blockers(
     if binding.stale_threshold_ms is None:
         blockers.append("stale_threshold_missing")
 
-    if base.calendar_id != "crypto_24x7":
+    if calendar_requires_external_provider(base.calendar_id):
         calendar_provider_id = _clean(binding.calendar_provider_id)
         if calendar_provider_id is None:
             blockers.append("calendar_provider_missing")
