@@ -27,6 +27,7 @@ from aether_vnext.shortability_sources import (
 )
 from aether_vnext.registry import (
     ProductRegistryRow,
+    SEED_REGISTRY,
     bind_futures_contract,
     bind_market_data,
     registry_row,
@@ -105,6 +106,47 @@ def binding_payload(binding: RuntimeRegistryBinding) -> dict[str, object]:
         ),
         "source_ref": _clean(binding.source_ref),
     }
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeBindingUniverse:
+    expected_asset_ids: tuple[str, ...]
+    supplied_asset_ids: tuple[str, ...]
+    missing_asset_ids: tuple[str, ...]
+    unexpected_asset_ids: tuple[str, ...]
+
+    @property
+    def exact(self) -> bool:
+        return not self.missing_asset_ids and not self.unexpected_asset_ids
+
+
+def runtime_binding_universe(
+    bindings: tuple[RuntimeRegistryBinding, ...],
+) -> RuntimeBindingUniverse:
+    expected = tuple(sorted(SEED_REGISTRY))
+    supplied = tuple(
+        sorted(binding.asset_id.strip().lower() for binding in bindings)
+    )
+    expected_set = set(expected)
+    supplied_set = set(supplied)
+    return RuntimeBindingUniverse(
+        expected_asset_ids=expected,
+        supplied_asset_ids=supplied,
+        missing_asset_ids=tuple(sorted(expected_set - supplied_set)),
+        unexpected_asset_ids=tuple(sorted(supplied_set - expected_set)),
+    )
+
+
+def runtime_binding_universe_blockers(
+    bindings: tuple[RuntimeRegistryBinding, ...],
+) -> tuple[str, ...]:
+    universe = runtime_binding_universe(bindings)
+    blockers: list[str] = []
+    if universe.missing_asset_ids:
+        blockers.append("runtime_binding_seed_universe_missing_assets")
+    if universe.unexpected_asset_ids:
+        blockers.append("runtime_binding_seed_universe_unexpected_assets")
+    return tuple(blockers)
 
 
 def binding_hash(binding: RuntimeRegistryBinding) -> str:

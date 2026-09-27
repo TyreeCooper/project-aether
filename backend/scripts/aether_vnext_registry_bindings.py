@@ -17,6 +17,9 @@ from aether_vnext.freeze import CONFIGURATION_HASH
 from aether_vnext.registry_runtime import (
     RuntimeRegistryBinding,
     binding_blockers,
+    binding_hash,
+    runtime_binding_universe,
+    runtime_binding_universe_blockers,
 )
 from aether_vnext.store import VNextStore
 
@@ -93,11 +96,72 @@ def _parse_manifest(payload: dict) -> tuple[str, str, tuple[RuntimeRegistryBindi
     return registry_version, configuration_hash, bindings
 
 
+def _validation_report(
+    *,
+    registry_version: str,
+    configuration_hash: str,
+    bindings: tuple[RuntimeRegistryBinding, ...],
+    as_of_utc: datetime,
+    require_seed_universe: bool,
+    require_implemented_source: bool,
+    require_implemented_calendar: bool,
+    require_implemented_shortability: bool,
+) -> dict[str, object]:
+    universe = runtime_binding_universe(bindings)
+    manifest_blockers = (
+        runtime_binding_universe_blockers(bindings)
+        if require_seed_universe
+        else ()
+    )
+    rows: list[dict[str, object]] = []
+    for binding in bindings:
+        blockers = binding_blockers(
+            binding,
+            as_of_utc=as_of_utc,
+            require_market_source_implementation=(
+                require_implemented_source
+            ),
+            require_calendar_provider_implementation=(
+                require_implemented_calendar
+            ),
+            require_shortability_provider_implementation=(
+                require_implemented_shortability
+            ),
+        )
+        rows.append(
+            {
+                "asset_id": binding.asset_id.strip().lower(),
+                "binding_hash": binding_hash(binding),
+                "blockers": list(blockers),
+                "complete": not blockers,
+            }
+        )
+    incomplete_count = sum(1 for row in rows if not row["complete"])
+    return {
+        "registry_version": registry_version,
+        "configuration_hash": configuration_hash,
+        "require_seed_universe": require_seed_universe,
+        "require_implemented_source": require_implemented_source,
+        "require_implemented_calendar": require_implemented_calendar,
+        "require_implemented_shortability": require_implemented_shortability,
+        "expected_asset_ids": list(universe.expected_asset_ids),
+        "supplied_asset_ids": list(universe.supplied_asset_ids),
+        "missing_asset_ids": list(universe.missing_asset_ids),
+        "unexpected_asset_ids": list(universe.unexpected_asset_ids),
+        "manifest_blockers": list(manifest_blockers),
+        "binding_count": len(rows),
+        "complete_binding_count": len(rows) - incomplete_count,
+        "incomplete_binding_count": incomplete_count,
+        "bindings": rows,
+    }
+
+
 async def _main(
     *,
     manifest_json: str | None,
     manifest_file: str | None,
     require_complete: bool,
+    require_seed_universe: bool,
     require_implemented_source: bool,
     require_implemented_calendar: bool,
     require_implemented_shortability: bool,
@@ -109,58 +173,42 @@ async def _main(
     )
     registry_version, configuration_hash, bindings = _parse_manifest(payload)
     now = datetime.now(timezone.utc)
-    report_rows: list[dict[str, object]] = []
+    report = _validation_report(
+        registry_version=registry_version,
+        configuration_hash=configuration_hash,
+        bindings=bindings,
+        as_of_utc=now,
+        require_seed_universe=require_seed_universe,
+        require_implemented_source=require_implemented_source,
+        require_implemented_calendar=require_implemented_calendar,
+        require_implemented_shortability=require_implemented_shortability,
+    )
 
-    store = VNextStore(schema="aether_vnext")
-    async with open_vnext_engine() as engine:
-        async with engine.begin() as connection:
-            def apply(sync_conn):
-                for binding in bindings:
-                    blockers = binding_blockers(
-                        binding,
-                        as_of_utc=now,
-                        require_market_source_implementation=(
-                            require_implemented_source
-                        ),
-                        require_calendar_provider_implementation=(
-                            require_implemented_calendar
-                        ),
-                        require_shortability_provider_implementation=(
-                            require_implemented_shortability
-                        ),
-                    )
-                    digest = store.upsert_runtime_registry_binding(
-                        sync_conn,
-                        binding,
-                        registry_version=registry_version,
-                        configuration_hash=configuration_hash,
-                        updated_at_utc=now,
-                    )
-                    report_rows.append(
-                        {
-                            "asset_id": binding.asset_id.strip().lower(),
-                            "binding_hash": digest,
-                            "blockers": list(blockers),
-                            "complete": not blockers,
-                        }
-                    )
-            await connection.run_sync(apply)
-
-    report = {
-        "registry_version": registry_version,
-        "configuration_hash": configuration_hash,
-        "require_implemented_source": require_implemented_source,
-        "require_implemented_calendar": require_implemented_calendar,
-        "require_implemented_shortability": require_implemented_shortability,
-        "binding_count": len(report_rows),
-        "complete_binding_count": sum(
-            1 for row in report_rows if row["complete"]
-        ),
-        "incomplete_binding_count": sum(
-            1 for row in report_rows if not row["complete"]
-        ),
-        "bindings": report_rows,
-    }
+    strict_failure = bool(report["manifest_blockers"]) or bool(
+        report["incomplete_binding_count"]
+    )
+    if require_complete and strict_failure:
+        report["persisted"] = False
+    else:
+        store = VNextStore(schema="aether_vnext")
+        async with open_vnext_engine() as engine:
+            async with engine.begin() as connection:
+                def apply(sync_conn):
+                    for binding in bindings:
+                        digest = store.upsert_runtime_registry_binding(
+                            sync_conn,
+                            binding,
+                            registry_version=registry_version,
+                            configuration_hash=configuration_hash,
+                            updated_at_utc=now,
+                        )
+                        expected = binding_hash(binding)
+                        if digest != expected:
+                            raise RuntimeError(
+                                "runtime binding persistence hash drift"
+                            )
+                await connection.run_sync(apply)
+        report["persisted"] = True
     rendered = json.dumps(report, indent=2, sort_keys=True)
     print(rendered)
     if output:
@@ -168,7 +216,7 @@ async def _main(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(rendered + "\n", encoding="utf-8")
 
-    if require_complete and report["incomplete_binding_count"]:
+    if require_complete and strict_failure:
         return 2
     return 0
 
@@ -179,6 +227,11 @@ if __name__ == "__main__":
     source.add_argument("--manifest-json")
     source.add_argument("--manifest-file")
     parser.add_argument("--require-complete", action="store_true")
+    parser.add_argument(
+        "--require-seed-universe",
+        action="store_true",
+        help="require exactly the canonical seed-12 asset universe",
+    )
     parser.add_argument(
         "--require-implemented-source",
         action="store_true",
@@ -205,6 +258,7 @@ if __name__ == "__main__":
                 manifest_json=args.manifest_json,
                 manifest_file=args.manifest_file,
                 require_complete=args.require_complete,
+                require_seed_universe=args.require_seed_universe,
                 require_implemented_source=args.require_implemented_source,
                 require_implemented_calendar=args.require_implemented_calendar,
                 require_implemented_shortability=(

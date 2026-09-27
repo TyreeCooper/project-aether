@@ -18,6 +18,7 @@ def test_burnin_dispatch_is_same_repo_label_gated_and_environment_protected() ->
     assert "github.event.pull_request.head.repo.full_name == github.repository" in source
     assert "github.event.pull_request.head.ref == 'aether-vnext-swapout'" in source
     assert "aether-vnext-burnin-preflight-approved" in source
+    assert "aether-vnext-burnin-readiness-approved" in source
     assert "aether-vnext-kraken-probe-approved" in source
     assert "aether-vnext-calendar-probe-approved" in source
     assert "aether-vnext-burnin-start-approved" in source
@@ -31,6 +32,7 @@ def test_burnin_dispatch_is_same_repo_label_gated_and_environment_protected() ->
     assert "AETHER_VNEXT_TRADINGHOURS_API_TOKEN" in source
     assert "aether_vnext_registry_bindings.py" in source
     assert "--require-complete" in source
+    assert "--require-seed-universe" in source
     assert "--require-implemented-source" in source
     assert "--require-implemented-calendar" in source
     assert "--require-implemented-shortability" in source
@@ -41,6 +43,8 @@ def test_burnin_dispatch_is_same_repo_label_gated_and_environment_protected() ->
 
     assert "routes_json" not in source
     assert "--routes-json" not in source
+    assert "aether_vnext_burnin_readiness.py" in source
+    assert "aether-vnext-burnin-readiness-" in source
     assert "aether_vnext_burnin_preflight.py" in source
     assert "aether_vnext_burnin_start.py" in source
 

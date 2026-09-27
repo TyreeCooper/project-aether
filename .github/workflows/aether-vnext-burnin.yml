@@ -10,6 +10,7 @@ on:
         type: choice
         options:
           - preflight
+          - readiness_report
           - initialize_and_preflight
           - initialize_kraken_probe
           - initialize_calendar_probe
@@ -43,6 +44,7 @@ jobs:
         github.event.pull_request.head.ref == 'aether-vnext-swapout' &&
         (
           github.event.label.name == 'aether-vnext-burnin-preflight-approved' ||
+          github.event.label.name == 'aether-vnext-burnin-readiness-approved' ||
           github.event.label.name == 'aether-vnext-kraken-probe-approved' ||
           github.event.label.name == 'aether-vnext-calendar-probe-approved' ||
           github.event.label.name == 'aether-vnext-burnin-start-approved'
@@ -87,6 +89,9 @@ jobs:
             case "$PR_LABEL" in
               aether-vnext-burnin-preflight-approved)
                 action="initialize_and_preflight"
+                ;;
+              aether-vnext-burnin-readiness-approved)
+                action="readiness_report"
                 ;;
               aether-vnext-kraken-probe-approved)
                 action="initialize_kraken_probe"
@@ -192,6 +197,7 @@ jobs:
           args=(
             --manifest-json "$AETHER_VNEXT_RUNTIME_BINDINGS_JSON"
             --require-complete
+            --require-seed-universe
             --require-implemented-calendar
             --require-implemented-shortability
             --output aether-vnext-runtime-bindings.json
@@ -255,9 +261,41 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+      - name: Run read-only burn-in readiness audit
+        id: readiness
+        if: ${{ steps.request.outputs.action == 'readiness_report' }}
+        env:
+          PYTHONPATH: .
+          AETHER_BURNIN_CAMPAIGN_ID: ${{ steps.request.outputs.campaign_id }}
+        shell: bash
+        run: |
+          set +e
+          python scripts/aether_vnext_burnin_readiness.py \
+            --campaign-id "$AETHER_BURNIN_CAMPAIGN_ID" \
+            --output aether-vnext-burnin-readiness.json
+          status=$?
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload burn-in readiness audit
+        if: ${{ always() && steps.request.outputs.action == 'readiness_report' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-vnext-burnin-readiness-${{ github.run_id }}
+          path: backend/aether-vnext-burnin-readiness.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Propagate burn-in readiness result
+        if: ${{ steps.request.outputs.action == 'readiness_report' && steps.readiness.outputs.exit_code != '0' }}
+        shell: bash
+        run: |
+          echo "Burn-in readiness is not green; inspect the JSON artifact."
+          exit "${{ steps.readiness.outputs.exit_code }}"
+
       - name: Run canonical read-only burn-in preflight
         id: preflight
-        if: ${{ steps.request.outputs.action != 'initialize_kraken_probe' && steps.request.outputs.action != 'initialize_calendar_probe' }}
+        if: ${{ steps.request.outputs.action != 'initialize_kraken_probe' && steps.request.outputs.action != 'initialize_calendar_probe' && steps.request.outputs.action != 'readiness_report' }}
         env:
           PYTHONPATH: .
           AETHER_BURNIN_CAMPAIGN_ID: ${{ steps.request.outputs.campaign_id }}
@@ -272,7 +310,7 @@ jobs:
           exit 0
 
       - name: Upload canonical burn-in preflight
-        if: ${{ always() && steps.request.outputs.action != 'initialize_kraken_probe' && steps.request.outputs.action != 'initialize_calendar_probe' }}
+        if: ${{ always() && steps.request.outputs.action != 'initialize_kraken_probe' && steps.request.outputs.action != 'initialize_calendar_probe' && steps.request.outputs.action != 'readiness_report' }}
         uses: actions/upload-artifact@v4
         with:
           name: aether-vnext-burnin-preflight-${{ github.run_id }}
@@ -281,7 +319,7 @@ jobs:
           retention-days: 30
 
       - name: Propagate canonical preflight result
-        if: ${{ steps.request.outputs.action != 'initialize_kraken_probe' && steps.request.outputs.action != 'initialize_calendar_probe' && steps.preflight.outputs.exit_code != '0' }}
+        if: ${{ steps.request.outputs.action != 'initialize_kraken_probe' && steps.request.outputs.action != 'initialize_calendar_probe' && steps.request.outputs.action != 'readiness_report' && steps.preflight.outputs.exit_code != '0' }}
         shell: bash
         run: |
           echo "Canonical burn-in preflight is not startable; inspect the JSON artifact."

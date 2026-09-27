@@ -7,7 +7,12 @@ from pathlib import Path
 import pytest
 
 from aether_vnext.freeze import CONFIGURATION_HASH
-from aether_vnext.registry_runtime import binding_blockers
+from aether_vnext.registry import SEED_REGISTRY
+from aether_vnext.registry_runtime import (
+    binding_blockers,
+    runtime_binding_universe,
+    runtime_binding_universe_blockers,
+)
 
 
 SCRIPT = (
@@ -166,3 +171,81 @@ def test_manifest_parser_preserves_shortability_freshness_policy() -> None:
     _, _, bindings = module._parse_manifest(payload)
     assert bindings[0].shortability_provider_id == "ibkr_webapi_shortability"
     assert bindings[0].shortability_stale_threshold_ms == 2000
+
+
+def test_seed_universe_detects_partial_runtime_manifest() -> None:
+    module = _module()
+    payload = {
+        "registry_version": "partial-v1",
+        "configuration_hash": CONFIGURATION_HASH,
+        "bindings": [
+            {
+                "asset_id": "btc",
+                "broker_symbol": "XBTUSD",
+                "primary_market_source_id": "kraken_public",
+                "stale_threshold_ms": 1000,
+                "calendar_provider_id": None,
+            }
+        ],
+    }
+    version, config, bindings = module._parse_manifest(payload)
+    universe = runtime_binding_universe(bindings)
+
+    assert version == "partial-v1"
+    assert config == CONFIGURATION_HASH
+    assert universe.exact is False
+    assert "btc" in universe.supplied_asset_ids
+    assert set(universe.missing_asset_ids) == set(SEED_REGISTRY) - {"btc"}
+    assert runtime_binding_universe_blockers(bindings) == (
+        "runtime_binding_seed_universe_missing_assets",
+    )
+
+
+@pytest.mark.asyncio
+async def test_strict_partial_manifest_fails_before_database_mutation(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    module = _module()
+    opened = False
+
+    def forbidden_engine():
+        nonlocal opened
+        opened = True
+        raise AssertionError("strict invalid manifest must not open database")
+
+    monkeypatch.setattr(module, "open_vnext_engine", forbidden_engine)
+    output = tmp_path / "report.json"
+    payload = {
+        "registry_version": "partial-v1",
+        "configuration_hash": CONFIGURATION_HASH,
+        "bindings": [
+            {
+                "asset_id": "btc",
+                "broker_symbol": "XBTUSD",
+                "primary_market_source_id": "kraken_public",
+                "stale_threshold_ms": 1000,
+                "calendar_provider_id": None,
+            }
+        ],
+    }
+
+    code = await module._main(
+        manifest_json=json.dumps(payload),
+        manifest_file=None,
+        require_complete=True,
+        require_seed_universe=True,
+        require_implemented_source=True,
+        require_implemented_calendar=True,
+        require_implemented_shortability=True,
+        output=str(output),
+    )
+
+    assert code == 2
+    assert opened is False
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["persisted"] is False
+    assert report["manifest_blockers"] == [
+        "runtime_binding_seed_universe_missing_assets"
+    ]
+    assert set(report["missing_asset_ids"]) == set(SEED_REGISTRY) - {"btc"}
