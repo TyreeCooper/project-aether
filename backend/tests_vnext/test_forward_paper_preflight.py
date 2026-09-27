@@ -94,6 +94,29 @@ def test_route_request_requires_canonical_identity(
         ForwardPaperRouteRequest(**kwargs)
 
 
+@pytest.mark.parametrize("campaign_id", (" preflight-001 ", 1, ""))
+def test_preflight_requires_canonical_campaign_id(
+    campaign_id: object,
+) -> None:
+    engine, store = _store()
+    with engine.begin() as conn:
+        with pytest.raises(
+            ValueError,
+            match="campaign_id must be canonical text",
+        ):
+            preflight_forward_paper_campaign_from_book(
+                conn,
+                store,
+                campaign_id=campaign_id,
+                requested_routes=(
+                    ForwardPaperRouteRequest(
+                        route_id="eurusd:intraday:long",
+                        playbook_id="pb_fx_intraday_v1_2",
+                    ),
+                ),
+            )
+
+
 def test_preflight_is_read_only_and_reports_exact_coverage() -> None:
     engine, store = _store()
     with engine.begin() as conn:

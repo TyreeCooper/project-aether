@@ -325,8 +325,12 @@ def preflight_forward_paper_campaign_from_book(
     require_shortability_provider_implementation: bool = False,
 ) -> ForwardPaperPreflightResult:
     """Inspect whether the current vNext book can start a C9.1 campaign."""
-    if not str(campaign_id).strip():
-        raise ValueError("campaign_id is required")
+    if (
+        not isinstance(campaign_id, str)
+        or not campaign_id
+        or campaign_id != campaign_id.strip()
+    ):
+        raise ValueError("campaign_id must be canonical text")
     if not requested_routes:
         raise ValueError("requested_routes cannot be empty")
 
