@@ -597,15 +597,21 @@ def forward_paper_ledger_blockers(
                 f"forward_paper_ledger:window_predates_campaign:{window_id}"
             )
 
-        trade_ids = tuple(
-            str(value).strip()
-            for value in (window["immutable_trade_ids"] or ())
+        raw_trade_ids = window["immutable_trade_ids"]
+        trade_ids = (
+            tuple(str(value).strip() for value in raw_trade_ids)
+            if isinstance(raw_trade_ids, list)
+            else ()
         )
+        sample_n = window["n"]
         sample_shape_ok = bool(
-            trade_ids
+            isinstance(raw_trade_ids, list)
+            and isinstance(sample_n, int)
+            and not isinstance(sample_n, bool)
+            and trade_ids
             and all(trade_ids)
             and len(trade_ids) == len(set(trade_ids))
-            and int(window["n"]) == len(trade_ids)
+            and sample_n == len(trade_ids)
         )
         if not sample_shape_ok:
             blockers.append(

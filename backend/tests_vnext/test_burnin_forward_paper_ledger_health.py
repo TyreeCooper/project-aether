@@ -756,3 +756,128 @@ def test_forward_paper_ledger_health_revalidates_current_playbook_source(
     )
     assert expected in blockers
     assert blocker_class(expected) == "source_authority"
+
+
+
+def test_forward_paper_ledger_health_rejects_scalar_trade_id_payload() -> None:
+    engine, store = _store()
+    campaign_id = "burnin-health-scalar-trade-ids"
+    window_id = "burnin-health-scalar-trade-ids-paper"
+    with engine.begin() as conn:
+        result = _start_campaign(
+            conn,
+            store,
+            campaign_id=campaign_id,
+        )
+        route = result.routes[0]
+        window = EvidenceWindow(
+            evidence_window_id=window_id,
+            route_id=route.route_id,
+            playbook_id=route.playbook_id,
+            playbook_version=route.playbook_version,
+            policy_version=result.campaign.policy_version,
+            configuration_hash=result.campaign.configuration_hash,
+            sample_domain=SampleDomain.PAPER_FORWARD,
+            first_timestamp_utc=T0 + timedelta(minutes=1),
+            last_timestamp_utc=T0 + timedelta(hours=1),
+            n=1,
+            immutable_trade_ids=("x",),
+            metrics_snapshot_hash="burnin-health-scalar-trade-ids-metrics",
+            created_at_utc=T0 + timedelta(hours=2),
+        )
+        store._record_evidence_window_row(conn, window)
+        conn.execute(
+            store.tables["forward_paper_campaign_windows"].insert().values(
+                campaign_window_id="burnin-health-scalar-trade-ids-link",
+                campaign_id=result.campaign.campaign_id,
+                campaign_route_id=route.campaign_route_id,
+                evidence_window_id=window.evidence_window_id,
+                linked_at_utc=T0 + timedelta(hours=3),
+            )
+        )
+        conn.execute(
+            store.tables["evidence_windows"].update()
+            .where(
+                store.tables["evidence_windows"].c.evidence_window_id
+                == window_id
+            )
+            .values(immutable_trade_ids="x")
+        )
+
+        blockers = forward_paper_ledger_blockers(
+            conn,
+            store=store,
+            campaign_id=campaign_id,
+        )
+
+    expected = (
+        "forward_paper_ledger:window_trade_sample_invalid:"
+        + window_id
+    )
+    assert expected in blockers
+    assert not any(
+        blocker.startswith(
+            "forward_paper_ledger:missing_closed_trade_lineage:"
+            + window_id
+            + ":"
+        )
+        for blocker in blockers
+    )
+
+
+def test_forward_paper_ledger_health_rejects_non_integer_sample_n() -> None:
+    engine, store = _store()
+    campaign_id = "burnin-health-invalid-sample-n"
+    window_id = "burnin-health-invalid-sample-n-paper"
+    with engine.begin() as conn:
+        result = _start_campaign(
+            conn,
+            store,
+            campaign_id=campaign_id,
+        )
+        route = result.routes[0]
+        window = EvidenceWindow(
+            evidence_window_id=window_id,
+            route_id=route.route_id,
+            playbook_id=route.playbook_id,
+            playbook_version=route.playbook_version,
+            policy_version=result.campaign.policy_version,
+            configuration_hash=result.campaign.configuration_hash,
+            sample_domain=SampleDomain.PAPER_FORWARD,
+            first_timestamp_utc=T0 + timedelta(minutes=1),
+            last_timestamp_utc=T0 + timedelta(hours=1),
+            n=1,
+            immutable_trade_ids=("x",),
+            metrics_snapshot_hash="burnin-health-invalid-sample-n-metrics",
+            created_at_utc=T0 + timedelta(hours=2),
+        )
+        store._record_evidence_window_row(conn, window)
+        conn.execute(
+            store.tables["forward_paper_campaign_windows"].insert().values(
+                campaign_window_id="burnin-health-invalid-sample-n-link",
+                campaign_id=result.campaign.campaign_id,
+                campaign_route_id=route.campaign_route_id,
+                evidence_window_id=window.evidence_window_id,
+                linked_at_utc=T0 + timedelta(hours=3),
+            )
+        )
+        conn.execute(
+            sa.text(
+                "UPDATE evidence_windows "
+                "SET n = 'not-an-integer' "
+                "WHERE evidence_window_id = :window_id"
+            ),
+            {"window_id": window_id},
+        )
+
+        blockers = forward_paper_ledger_blockers(
+            conn,
+            store=store,
+            campaign_id=campaign_id,
+        )
+
+    expected = (
+        "forward_paper_ledger:window_trade_sample_invalid:"
+        + window_id
+    )
+    assert expected in blockers
