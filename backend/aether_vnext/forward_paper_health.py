@@ -193,7 +193,6 @@ def forward_paper_ledger_blockers(
                         "historical_provenance_dataset_mismatch:"
                         f"{route_id}:{window_id}"
                     )
-                    source_complete = False
 
                 selected = tuple(
                     dict(row)
