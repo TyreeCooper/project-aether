@@ -201,3 +201,40 @@ def test_preflight_rejects_scout_enabled_route_with_incomplete_exit_contract() -
         )
     assert out.startable is False
     assert out.route_results[0].blockers == ("exit_contract_incomplete",)
+
+
+
+def test_preflight_blocks_malformed_persisted_heldout_sample() -> None:
+    engine, store = _store()
+    with engine.begin() as conn:
+        record_provenanced_held_out(
+            conn,
+            store,
+            _window("malformed-heldout"),
+        )
+        conn.execute(
+            store.tables["evidence_windows"].update()
+            .where(
+                store.tables["evidence_windows"].c.evidence_window_id
+                == "malformed-heldout"
+            )
+            .values(immutable_trade_ids="x")
+        )
+
+        out = preflight_forward_paper_campaign_from_book(
+            conn,
+            store,
+            campaign_id="preflight-malformed-heldout",
+            requested_routes=(
+                ForwardPaperRouteRequest(
+                    route_id="eurusd:intraday:long",
+                    playbook_id="pb_fx_intraday_v1_2",
+                ),
+            ),
+        )
+
+    assert out.startable is False
+    assert out.route_results[0].blockers == (
+        "held_out_window_reload_failed",
+    )
+    assert "one_or_more_routes_not_startable" in out.blockers

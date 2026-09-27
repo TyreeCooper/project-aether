@@ -2780,6 +2780,14 @@ class VNextStore:
         ).mappings().first()
         if row is None:
             return None
+        raw_trade_ids = row["immutable_trade_ids"]
+        raw_n = row["n"]
+        if not isinstance(raw_trade_ids, list):
+            raise ValueError(
+                "persisted EvidenceWindow immutable_trade_ids must be a JSON list"
+            )
+        if not isinstance(raw_n, int) or isinstance(raw_n, bool):
+            raise ValueError("persisted EvidenceWindow n must be an integer")
         return EvidenceWindow(
             evidence_window_id=str(row["evidence_window_id"]),
             route_id=str(row["route_id"]),
@@ -2790,10 +2798,9 @@ class VNextStore:
             sample_domain=SampleDomain(str(row["sample_domain"])),
             first_timestamp_utc=_stored_utc(row["first_timestamp_utc"]),
             last_timestamp_utc=_stored_utc(row["last_timestamp_utc"]),
-            n=int(row["n"]),
+            n=raw_n,
             immutable_trade_ids=tuple(
-                str(value)
-                for value in (row["immutable_trade_ids"] or [])
+                str(value) for value in raw_trade_ids
             ),
             metrics_snapshot_hash=str(row["metrics_snapshot_hash"]),
             created_at_utc=_stored_utc(row["created_at_utc"]),

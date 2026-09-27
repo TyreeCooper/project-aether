@@ -484,16 +484,20 @@ def preflight_forward_paper_campaign_from_book(
                     else "missing_current_held_out_baseline"
                 )
             else:
-                windows = tuple(
-                    store.load_evidence_window(
-                        conn,
-                        evidence_window_id=str(row["evidence_window_id"]),
+                try:
+                    windows = tuple(
+                        store.load_evidence_window(
+                            conn,
+                            evidence_window_id=str(row["evidence_window_id"]),
+                        )
+                        for row in rows
                     )
-                    for row in rows
-                )
+                except (TypeError, ValueError):
+                    windows = ()
+                    route_blockers.append("held_out_window_reload_failed")
                 if any(window is None for window in windows):
                     route_blockers.append("held_out_window_reload_failed")
-                else:
+                elif windows:
                     concrete = tuple(
                         window for window in windows if window is not None
                     )
