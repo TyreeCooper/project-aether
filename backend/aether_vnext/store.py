@@ -2236,6 +2236,7 @@ class VNextStore:
                 )
             )
         ).mappings().first()
+        exact_replay = False
         if existing_link is not None:
             existing_window = conn.execute(
                 sa.select(evidence).where(
@@ -2273,11 +2274,11 @@ class VNextStore:
                 and _stored_utc(existing_window["created_at_utc"])
                 == window.created_at_utc
             )
-            if exact_link and exact_window:
-                return
-            raise ValueError(
-                "forward-paper evidence replay identity mismatch"
-            )
+            if not (exact_link and exact_window):
+                raise ValueError(
+                    "forward-paper evidence replay identity mismatch"
+                )
+            exact_replay = True
 
         route_table = self.tables["forward_paper_campaign_routes"]
         route = conn.execute(
@@ -2309,6 +2310,8 @@ class VNextStore:
             raise ValueError(
                 "paper-forward evidence cannot predate campaign start"
             )
+        if exact_replay:
+            return
 
         closed = self.tables["closed_trades"]
         lineage = self.tables["decision_lineage"]
