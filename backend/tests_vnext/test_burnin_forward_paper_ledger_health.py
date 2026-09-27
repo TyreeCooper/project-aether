@@ -326,3 +326,64 @@ def test_forward_paper_ledger_health_dataset_mismatch_is_fail_closed() -> None:
     )
     assert expected in blockers
     assert blocker_class(expected) == "empirical_evidence"
+
+
+
+def test_forward_paper_ledger_health_detects_cross_campaign_route_link_both_sides() -> None:
+    engine, store = _store()
+    with engine.begin() as conn:
+        first = _start_campaign(
+            conn,
+            store,
+            campaign_id="burnin-health-link-a",
+        )
+        second = _start_campaign(
+            conn,
+            store,
+            campaign_id="burnin-health-link-b",
+        )
+        route = second.routes[0]
+        window = EvidenceWindow(
+            evidence_window_id="burnin-health-cross-link-paper",
+            route_id=route.route_id,
+            playbook_id=route.playbook_id,
+            playbook_version=route.playbook_version,
+            policy_version=second.campaign.policy_version,
+            configuration_hash=second.campaign.configuration_hash,
+            sample_domain=SampleDomain.PAPER_FORWARD,
+            first_timestamp_utc=T0 + timedelta(hours=1),
+            last_timestamp_utc=T0 + timedelta(hours=2),
+            n=1,
+            immutable_trade_ids=("burnin-health-cross-link-trade",),
+            metrics_snapshot_hash="burnin-health-cross-link-metrics",
+            created_at_utc=T0 + timedelta(hours=3),
+        )
+        store._record_evidence_window_row(conn, window)
+        conn.execute(
+            store.tables["forward_paper_campaign_windows"].insert().values(
+                campaign_window_id="burnin-health-cross-link",
+                campaign_id=first.campaign.campaign_id,
+                campaign_route_id=route.campaign_route_id,
+                evidence_window_id=window.evidence_window_id,
+                linked_at_utc=T0 + timedelta(hours=3),
+            )
+        )
+
+        first_blockers = forward_paper_ledger_blockers(
+            conn,
+            store=store,
+            campaign_id=first.campaign.campaign_id,
+        )
+        second_blockers = forward_paper_ledger_blockers(
+            conn,
+            store=store,
+            campaign_id=second.campaign.campaign_id,
+        )
+
+    expected = (
+        "forward_paper_ledger:cross_campaign_route_link:"
+        "burnin-health-cross-link"
+    )
+    assert expected in first_blockers
+    assert expected in second_blockers
+    assert blocker_class(expected) == "empirical_evidence"

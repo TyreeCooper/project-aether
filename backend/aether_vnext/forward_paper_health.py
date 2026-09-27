@@ -340,24 +340,48 @@ def forward_paper_ledger_blockers(
     closed = store.tables["closed_trades"]
     lineage = store.tables["decision_lineage"]
     setups = store.tables["setups"]
+    owned_route_ids = tuple(route_by_id)
     link_rows = tuple(
         conn.execute(
             sa.select(links)
-            .where(links.c.campaign_id == campaign_key)
+            .where(
+                sa.or_(
+                    links.c.campaign_id == campaign_key,
+                    links.c.campaign_route_id.in_(owned_route_ids),
+                )
+            )
             .order_by(links.c.campaign_window_id.asc())
         ).mappings()
     )
     for link in link_rows:
         campaign_window_id = str(link["campaign_window_id"])
+        link_campaign_id = str(link["campaign_id"])
         campaign_route_id = str(link["campaign_route_id"])
         route = route_by_id.get(campaign_route_id)
         if route is None:
-            blockers.append(
-                "forward_paper_ledger:missing_campaign_route:"
-                f"{campaign_window_id}"
-            )
+            referenced_route = conn.execute(
+                sa.select(route_table).where(
+                    route_table.c.campaign_route_id == campaign_route_id
+                )
+            ).mappings().first()
+            if (
+                referenced_route is not None
+                and str(referenced_route["campaign_id"]) != campaign_key
+            ):
+                blockers.append(
+                    "forward_paper_ledger:cross_campaign_route_link:"
+                    f"{campaign_window_id}"
+                )
+            else:
+                blockers.append(
+                    "forward_paper_ledger:missing_campaign_route:"
+                    f"{campaign_window_id}"
+                )
             continue
-        if str(route["campaign_id"]) != campaign_key:
+        if (
+            link_campaign_id != campaign_key
+            or str(route["campaign_id"]) != campaign_key
+        ):
             blockers.append(
                 "forward_paper_ledger:cross_campaign_route_link:"
                 f"{campaign_window_id}"
