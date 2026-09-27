@@ -277,3 +277,47 @@ def test_preflight_blocks_malformed_heldout_provenance_shape() -> None:
     )
     assert out.route_results[0].route_baseline_hash is None
     assert "one_or_more_routes_not_startable" in out.blockers
+
+
+
+def test_preflight_revalidates_heldout_backtest_run() -> None:
+    engine, store = _store()
+    with engine.begin() as conn:
+        record_provenanced_held_out(
+            conn,
+            store,
+            _window("run-drift"),
+        )
+        provenance = conn.execute(
+            sa.select(store.tables["held_out_evidence_provenance"]).where(
+                store.tables["held_out_evidence_provenance"].c.evidence_window_id
+                == "run-drift"
+            )
+        ).mappings().one()
+        runs = store.tables["backtest_runs"]
+        conn.execute(
+            runs.update()
+            .where(
+                runs.c.backtest_run_id
+                == provenance["backtest_run_id"]
+            )
+            .values(run_type="in_sample")
+        )
+
+        out = preflight_forward_paper_campaign_from_book(
+            conn,
+            store,
+            campaign_id="preflight-run-drift",
+            requested_routes=(
+                ForwardPaperRouteRequest(
+                    route_id="eurusd:intraday:long",
+                    playbook_id="pb_fx_intraday_v1_2",
+                ),
+            ),
+        )
+
+    assert out.startable is False
+    assert "held_out_provenance_run_invalid" in (
+        out.route_results[0].blockers
+    )
+    assert out.route_results[0].route_baseline_hash is None

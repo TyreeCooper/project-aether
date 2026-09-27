@@ -345,6 +345,7 @@ def preflight_forward_paper_campaign_from_book(
     baseline_payload: list[dict[str, object]] = []
     evidence = store.tables["evidence_windows"]
     provenance = store.tables["held_out_evidence_provenance"]
+    runs = store.tables["backtest_runs"]
 
     for request in sorted(
         requested_routes,
@@ -507,6 +508,36 @@ def preflight_forward_paper_campaign_from_book(
                     route_blockers.append(
                         "held_out_baseline_provenance_invalid"
                     )
+
+                run_provenance_ok = provenance_shape_ok
+                if provenance_shape_ok:
+                    for row in rows:
+                        run = conn.execute(
+                            sa.select(runs).where(
+                                runs.c.backtest_run_id
+                                == str(row["backtest_run_id"]).strip()
+                            )
+                        ).mappings().first()
+                        if (
+                            run is None
+                            or str(run["run_type"]).strip().lower()
+                            != "held_out"
+                            or run["finished_at_utc"] is None
+                            or str(run["playbook_id"])
+                            != request.playbook_id
+                            or str(run["playbook_version"])
+                            != spec.version
+                            or str(run["configuration_hash"])
+                            != CONFIGURATION_HASH
+                            or str(run["dataset_snapshot_id"])
+                            != str(row["dataset_snapshot_id"]).strip()
+                        ):
+                            run_provenance_ok = False
+                            break
+                if not run_provenance_ok:
+                    route_blockers.append(
+                        "held_out_provenance_run_invalid"
+                    )
                 try:
                     windows = tuple(
                         store.load_evidence_window(
@@ -528,6 +559,7 @@ def preflight_forward_paper_campaign_from_book(
                     if (
                         runtime_registry_binding_hash is not None
                         and provenance_shape_ok
+                        and run_provenance_ok
                     ):
                         route_hash = _route_baseline_hash(
                             route_id=request.route_id,
