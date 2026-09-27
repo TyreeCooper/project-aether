@@ -616,3 +616,48 @@ def test_campaign_start_retry_fails_closed_on_unhealthy_evidence_ledger() -> Non
 
     assert campaign_count == 1
     assert route_count == 1
+
+
+
+def test_existing_campaign_replay_rejects_scalar_historical_window_ids() -> None:
+    engine, store = _store()
+    campaign_id = "burnin-existing-route-json-drift"
+    request = ForwardPaperRouteRequest(
+        route_id="eurusd:intraday:long",
+        playbook_id="pb_fx_intraday_v1_2",
+    )
+    with engine.begin() as conn:
+        record_provenanced_held_out(
+            conn,
+            store,
+            _window("heldout-existing-route-json"),
+        )
+        result = _start_forward_paper_campaign_for_requests(
+            conn,
+            store,
+            campaign_id=campaign_id,
+            requested_routes=(request,),
+            started_at_utc=T0,
+            created_at_utc=T0,
+        )
+        conn.execute(
+            store.tables["forward_paper_campaign_routes"].update()
+            .where(
+                store.tables["forward_paper_campaign_routes"].c.campaign_route_id
+                == result.routes[0].campaign_route_id
+            )
+            .values(historical_validation_window_ids="heldout-existing-route-json")
+        )
+
+        with pytest.raises(
+            RuntimeError,
+            match="route baseline JSON invalid",
+        ):
+            _start_forward_paper_campaign_for_requests(
+                conn,
+                store,
+                campaign_id=campaign_id,
+                requested_routes=(request,),
+                started_at_utc=T0,
+                created_at_utc=T0,
+            )

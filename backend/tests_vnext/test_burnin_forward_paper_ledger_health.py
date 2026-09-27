@@ -1030,3 +1030,34 @@ def test_forward_paper_ledger_health_rejects_non_integer_heldout_n() -> None:
     )
     assert expected in blockers
     assert blocker_class(expected) == "empirical_evidence"
+
+
+
+def test_forward_paper_ledger_health_rejects_scalar_route_baseline_ids() -> None:
+    engine, store = _store()
+    campaign_id = "burnin-health-route-baseline-json"
+    with engine.begin() as conn:
+        result = _start_campaign(
+            conn,
+            store,
+            campaign_id=campaign_id,
+        )
+        route_id = result.routes[0].campaign_route_id
+        conn.execute(
+            store.tables["forward_paper_campaign_routes"].update()
+            .where(
+                store.tables["forward_paper_campaign_routes"].c.campaign_route_id
+                == route_id
+            )
+            .values(historical_validation_window_ids="heldout-scalar")
+        )
+
+        blockers = forward_paper_ledger_blockers(
+            conn,
+            store=store,
+            campaign_id=campaign_id,
+        )
+
+    expected = "forward_paper_ledger:invalid_route_baseline:" + route_id
+    assert blockers == (expected,)
+    assert blocker_class(expected) == "empirical_evidence"

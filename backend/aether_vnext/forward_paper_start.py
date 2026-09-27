@@ -85,8 +85,13 @@ def _load_existing_start_result(
             route_table.c.campaign_route_id.asc(),
         )
     ).mappings()
-    routes = tuple(
-        ForwardPaperRouteBaseline(
+    def _route_from_row(route) -> ForwardPaperRouteBaseline:
+        raw_window_ids = route["historical_validation_window_ids"]
+        if not isinstance(raw_window_ids, list):
+            raise RuntimeError(
+                "existing forward-paper campaign route baseline JSON invalid"
+            )
+        return ForwardPaperRouteBaseline(
             campaign_route_id=str(route["campaign_route_id"]),
             campaign_id=str(route["campaign_id"]),
             route_id=str(route["route_id"]),
@@ -97,15 +102,14 @@ def _load_existing_start_result(
                 route["runtime_registry_binding_hash"]
             ),
             historical_validation_window_ids=tuple(
-                str(value)
-                for value in route["historical_validation_window_ids"]
+                str(value) for value in raw_window_ids
             ),
             historical_metrics_snapshot_hash=str(
                 route["historical_metrics_snapshot_hash"]
             ),
         )
-        for route in route_rows
-    )
+
+    routes = tuple(_route_from_row(route) for route in route_rows)
     if not routes:
         raise RuntimeError("existing forward-paper campaign has no routes")
     return ForwardPaperStartResult(campaign=campaign, routes=routes)

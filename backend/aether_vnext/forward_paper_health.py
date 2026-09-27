@@ -128,6 +128,11 @@ def forward_paper_ledger_blockers(
                 f"forward_paper_ledger:route_configuration_mismatch:{route_id}"
             )
         try:
+            raw_window_ids = row["historical_validation_window_ids"]
+            if not isinstance(raw_window_ids, list):
+                raise ValueError(
+                    "historical_validation_window_ids must be a JSON list"
+                )
             route_baseline = ForwardPaperRouteBaseline(
                 campaign_route_id=route_id,
                 campaign_id=str(row["campaign_id"]),
@@ -139,10 +144,7 @@ def forward_paper_ledger_blockers(
                     row["runtime_registry_binding_hash"]
                 ),
                 historical_validation_window_ids=tuple(
-                    str(value)
-                    for value in (
-                        row["historical_validation_window_ids"] or ()
-                    )
+                    str(value) for value in raw_window_ids
                 ),
                 historical_metrics_snapshot_hash=str(
                     row["historical_metrics_snapshot_hash"]
