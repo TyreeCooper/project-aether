@@ -219,3 +219,17 @@ def test_cost_multiplier_cannot_be_negative_or_nonfinite() -> None:
     for value in (-1.0, math.inf, math.nan):
         with pytest.raises(ValueError, match="cost_multiplier"):
             route_metrics(_trades(), cost_multiplier=value)
+
+@pytest.mark.parametrize("benchmark_id", (" always_flat ", 1, ""))
+def test_benchmark_comparison_requires_canonical_identity(
+    benchmark_id: object,
+) -> None:
+    with pytest.raises(ValueError, match="benchmark_id must be canonical text"):
+        compare_to_benchmark(
+            benchmark_id=benchmark_id,
+            candidate_path=_path(),
+            baseline_path=_path(),
+            candidate_trades=_trades(),
+            baseline_trades=(),
+        )
+

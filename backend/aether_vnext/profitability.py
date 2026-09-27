@@ -267,11 +267,15 @@ def compare_to_benchmark(
     candidate_trades: Iterable[EconomicTrade],
     baseline_trades: Iterable[EconomicTrade],
 ) -> BenchmarkComparison:
-    if not str(benchmark_id).strip():
-        raise ValueError("benchmark_id is required")
+    if (
+        not isinstance(benchmark_id, str)
+        or not benchmark_id
+        or benchmark_id != benchmark_id.strip()
+    ):
+        raise ValueError("benchmark_id must be canonical text")
     assert_same_economic_path(candidate_path, baseline_path)
     return BenchmarkComparison(
-        benchmark_id=str(benchmark_id),
+        benchmark_id=benchmark_id,
         candidate_path=candidate_path,
         baseline_path=baseline_path,
         candidate=cost_stress_profile(tuple(candidate_trades)),
