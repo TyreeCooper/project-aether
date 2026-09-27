@@ -161,7 +161,7 @@ def _insecure_localhost_context(url: str) -> ssl.SSLContext:
     parsed = urlparse(url)
     if parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
         raise ValueError(
-            "insecure TLS is permitted only for an explicitly local IBKR gateway"
+            "insecure TLS is permitted only for localhost/loopback IBKR gateway"
         )
     context = ssl.create_default_context()
     context.check_hostname = False
