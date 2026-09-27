@@ -225,6 +225,7 @@ def preflight_forward_paper_campaign_from_book(
     requested_routes: tuple[ForwardPaperRouteRequest, ...],
     as_of_utc: datetime | None = None,
     require_market_source_implementation: bool = False,
+    require_market_print_implementation: bool = False,
     require_calendar_provider_implementation: bool = False,
     require_shortability_provider_implementation: bool = False,
 ) -> ForwardPaperPreflightResult:
@@ -332,6 +333,9 @@ def preflight_forward_paper_campaign_from_book(
                         as_of_utc=as_of_utc,
                         require_market_source_implementation=(
                             require_market_source_implementation
+                        ),
+                        require_market_print_implementation=(
+                            require_market_print_implementation
                         ),
                         require_calendar_provider_implementation=(
                             require_calendar_provider_implementation
@@ -507,6 +511,7 @@ def preflight_canonical_forward_paper_campaign_from_book(
         requested_routes=canonical_forward_paper_route_requests(),
         as_of_utc=as_of_utc,
         require_market_source_implementation=True,
+        require_market_print_implementation=True,
         require_calendar_provider_implementation=True,
         require_shortability_provider_implementation=True,
     )

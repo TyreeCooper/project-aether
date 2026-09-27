@@ -20,7 +20,10 @@ from aether_vnext.calendar_sources import (
     calendar_requires_external_provider,
 )
 from aether_vnext.ibkr_webapi_market import IBKR_WEBAPI_MARKET_SOURCE_ID
-from aether_vnext.market_sources import market_source_implementation_blockers
+from aether_vnext.market_sources import (
+    market_print_implementation_blockers,
+    market_source_implementation_blockers,
+)
 from aether_vnext.ninjatrader_market import NINJATRADER_MARKET_SOURCE_ID
 from aether_vnext.shortability_sources import (
     shortability_provider_implementation_blockers,
@@ -199,6 +202,7 @@ def binding_blockers(
     *,
     as_of_utc: datetime | None = None,
     require_market_source_implementation: bool = False,
+    require_market_print_implementation: bool = False,
     require_calendar_provider_implementation: bool = False,
     require_shortability_provider_implementation: bool = False,
 ) -> tuple[str, ...]:
@@ -234,6 +238,14 @@ def binding_blockers(
                 source_id=fallback_source_id,
                 asset_id=asset_id,
                 role="fallback",
+            )
+        )
+    if require_market_print_implementation:
+        blockers.extend(
+            market_print_implementation_blockers(
+                primary_source_id=primary_source_id,
+                fallback_source_id=fallback_source_id,
+                asset_id=asset_id,
             )
         )
     if binding.stale_threshold_ms is None:

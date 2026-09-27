@@ -388,3 +388,35 @@ def test_ibkr_shortability_strict_provider_gate_requires_implemented_source() ->
         unknown,
         require_shortability_provider_implementation=True,
     )
+
+
+def test_strict_market_print_gate_distinguishes_crypto_from_quote_only_sources() -> None:
+    crypto = RuntimeRegistryBinding(
+        asset_id="btc",
+        broker_symbol="XBTUSD",
+        primary_market_source_id="kraken_public",
+        stale_threshold_ms=1500,
+        calendar_provider_id=None,
+        source_ref="reviewed-kraken-binding",
+    )
+    assert "market_print_source_implementation_missing" not in binding_blockers(
+        crypto,
+        require_market_print_implementation=True,
+    )
+
+    equity = RuntimeRegistryBinding(
+        asset_id="nvda",
+        broker_symbol="NVDA",
+        primary_market_source_id=IBKR_WEBAPI_MARKET_SOURCE_ID,
+        stale_threshold_ms=1500,
+        calendar_provider_id="tradinghours_v3",
+        calendar_market_id="US.NASDAQ",
+        market_data_contract_id=4815747,
+        shortability_provider_id=IBKR_WEBAPI_SHORTABILITY_PROVIDER_ID,
+        shortability_stale_threshold_ms=1500,
+        source_ref="reviewed-ibkr-binding",
+    )
+    assert "market_print_source_implementation_missing" in binding_blockers(
+        equity,
+        require_market_print_implementation=True,
+    )

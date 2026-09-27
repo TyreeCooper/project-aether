@@ -100,6 +100,59 @@ class KrakenPublicTickerV2:
         return tuple(out)
 
 
+class KrakenPublicTradeV2:
+    """Parser-only vNext adapter for Kraken public trade v2 payloads."""
+
+    adapter_id = "kraken_public_trade"
+    adapter_version = "kraken_public_trade_v2"
+
+    _PAIR_TO_ASSET = {
+        "BTC/USD": "btc",
+        "XBT/USD": "btc",
+        "ETH/USD": "eth",
+    }
+
+    def parse_prints(
+        self,
+        payload: Any,
+        *,
+        received_at_utc: datetime,
+    ) -> tuple[MarketPrint, ...]:
+        if received_at_utc.tzinfo is None:
+            raise ValueError("received_at_utc must be timezone-aware")
+        if not isinstance(payload, dict) or payload.get("channel") != "trade":
+            return ()
+
+        out: list[MarketPrint] = []
+        for row in payload.get("data") or ():
+            if not isinstance(row, dict):
+                continue
+            asset_id = self._PAIR_TO_ASSET.get(
+                str(row.get("symbol") or "")
+            )
+            if asset_id is None:
+                continue
+            try:
+                price = float(row["price"])
+                qty = float(row["qty"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            exchange_ts = _parse_optional_timestamp(row.get("timestamp"))
+            if price <= 0 or qty <= 0 or exchange_ts is None:
+                continue
+            out.append(
+                MarketPrint(
+                    asset_id=asset_id,
+                    price=price,
+                    volume=qty,
+                    exchange_ts=exchange_ts,
+                    received_ts=received_at_utc,
+                    source_id=self.adapter_id,
+                )
+            )
+        return tuple(out)
+
+
 def _parse_optional_timestamp(value: Any) -> datetime | None:
     if value is None:
         return None

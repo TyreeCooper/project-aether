@@ -5,6 +5,7 @@ from aether_vnext.ninjatrader_market import NINJATRADER_MARKET_SOURCE_ID
 from aether_vnext.market_sources import (
     IMPLEMENTED_MARKET_SOURCES,
     PENDING_MARKET_SOURCES,
+    market_print_implementation_blockers,
     market_source_capability,
     market_source_implementation_blockers,
 )
@@ -27,6 +28,10 @@ def test_implemented_market_sources_are_explicit_and_asset_scoped() -> None:
     assert capability.public_market_data is True
     assert capability.transport_id == "kraken_public_websocket_v2"
     assert capability.supported_assets == frozenset({"btc", "eth"})
+    assert capability.market_print_transport_id == (
+        "kraken_public_websocket_v2_trade"
+    )
+    assert capability.market_print_parser_version == "kraken_public_trade_v2"
 
     ibkr = market_source_capability(IBKR_WEBAPI_MARKET_SOURCE_ID)
     assert ibkr is not None
@@ -140,3 +145,37 @@ def test_tastyfx_fix_source_is_known_but_not_operational_without_private_spec() 
         binding,
         require_market_source_implementation=True,
     ) == ("primary_market_source_provider_spec_pending",)
+
+
+def test_market_print_capability_is_distinct_from_quote_implementation() -> None:
+    assert market_print_implementation_blockers(
+        primary_source_id="kraken_public",
+        fallback_source_id=None,
+        asset_id="btc",
+    ) == ()
+
+    assert market_print_implementation_blockers(
+        primary_source_id=IBKR_WEBAPI_MARKET_SOURCE_ID,
+        fallback_source_id=None,
+        asset_id="nvda",
+    ) == ("market_print_source_implementation_missing",)
+
+    assert market_print_implementation_blockers(
+        primary_source_id=NINJATRADER_MARKET_SOURCE_ID,
+        fallback_source_id=None,
+        asset_id="mes",
+    ) == ("market_print_source_implementation_missing",)
+
+    assert market_print_implementation_blockers(
+        primary_source_id=TASTYFX_FIX_MARKET_SOURCE_ID,
+        fallback_source_id=None,
+        asset_id="eurusd",
+    ) == ("market_print_source_provider_spec_pending",)
+
+
+def test_market_print_capability_can_use_reviewed_fallback_source() -> None:
+    assert market_print_implementation_blockers(
+        primary_source_id=IBKR_WEBAPI_MARKET_SOURCE_ID,
+        fallback_source_id="kraken_public",
+        asset_id="btc",
+    ) == ()

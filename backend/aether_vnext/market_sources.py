@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Final
 
-from aether_vnext.adapters import KrakenPublicTickerV2
+from aether_vnext.adapters import KrakenPublicTickerV2, KrakenPublicTradeV2
 from aether_vnext.ibkr_webapi_market import (
     IBKR_WEBAPI_ADAPTER_VERSION,
     IBKR_WEBAPI_MARKET_SOURCE_ID,
@@ -37,6 +37,8 @@ class MarketSourceCapability:
     supported_assets: frozenset[str]
     public_market_data: bool
     implemented: bool = True
+    market_print_transport_id: str | None = None
+    market_print_parser_version: str | None = None
 
     def supports_asset(self, asset_id: str) -> bool:
         return str(asset_id).strip().lower() in self.supported_assets
@@ -50,6 +52,8 @@ IMPLEMENTED_MARKET_SOURCES: Final = MappingProxyType(
             parser_version=KrakenPublicTickerV2.adapter_version,
             supported_assets=frozenset({"btc", "eth"}),
             public_market_data=True,
+            market_print_transport_id="kraken_public_websocket_v2_trade",
+            market_print_parser_version=KrakenPublicTradeV2.adapter_version,
         ),
         IBKR_WEBAPI_MARKET_SOURCE_ID: MarketSourceCapability(
             source_id=IBKR_WEBAPI_MARKET_SOURCE_ID,
@@ -131,3 +135,52 @@ def market_source_implementation_blockers(
             f"{normalized_role}_market_source_asset_unsupported",
         )
     return ()
+
+
+
+def market_print_implementation_blockers(
+    *,
+    primary_source_id: str | None,
+    fallback_source_id: str | None,
+    asset_id: str,
+) -> tuple[str, ...]:
+    """Require at least one reviewed market source to provide real trade prints.
+
+    Quote/BBO support is not sufficient for completed-bar strategy evaluation.
+    The function never treats last-price quote updates as matched trades.
+    """
+    sources = tuple(
+        source
+        for source in (
+            None if primary_source_id is None else str(primary_source_id).strip(),
+            None if fallback_source_id is None else str(fallback_source_id).strip(),
+        )
+        if source
+    )
+    if not sources:
+        return ("market_print_source_missing",)
+
+    saw_provider_spec_pending = False
+    saw_asset_supported = False
+    for source in sources:
+        capability = market_source_capability(source)
+        if capability is None:
+            continue
+        if not capability.implemented:
+            if source == TASTYFX_FIX_MARKET_SOURCE_ID:
+                saw_provider_spec_pending = True
+            continue
+        if not capability.supports_asset(asset_id):
+            continue
+        saw_asset_supported = True
+        if (
+            str(capability.market_print_transport_id or "").strip()
+            and str(capability.market_print_parser_version or "").strip()
+        ):
+            return ()
+
+    if saw_provider_spec_pending:
+        return ("market_print_source_provider_spec_pending",)
+    if saw_asset_supported:
+        return ("market_print_source_implementation_missing",)
+    return ("market_print_source_asset_unsupported",)
