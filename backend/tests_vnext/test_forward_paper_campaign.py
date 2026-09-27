@@ -10,6 +10,7 @@ from aether_vnext.evidence import EvidenceWindow, SampleDomain
 from aether_vnext.forward_paper import (
     ForwardPaperCampaign,
     ForwardPaperRouteBaseline,
+    parse_route_id,
 )
 from aether_vnext.store import VNextStore
 from tests_vnext.held_out_support import record_provenanced_held_out
@@ -183,6 +184,25 @@ def _record_closed_trade_lineage(
             market_observation_id=f"obs:{trade_id}",
         )
     )
+
+@pytest.mark.parametrize(
+    "route_id",
+    (
+        " eurusd:intraday:long",
+        "eurusd:intraday:long ",
+        "eurusd: intraday:long",
+        1,
+    ),
+)
+def test_parse_route_id_rejects_noncanonical_input(
+    route_id: object,
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match="route_id must be canonical asset:horizon:side",
+    ):
+        parse_route_id(route_id)
+
 
 def test_campaign_contract_hard_locks_c91_safety_invariants() -> None:
     assert _campaign().forced_entry_enabled is False

@@ -123,9 +123,22 @@ class ForwardPaperRouteBaseline:
 
 
 def parse_route_id(route_id: str) -> tuple[str, str, str]:
-    parts = tuple(str(route_id).split(":"))
-    if len(parts) != 3 or any(not part for part in parts):
-        raise ValueError("route_id must be asset:horizon:side")
+    if (
+        not isinstance(route_id, str)
+        or not route_id
+        or route_id != route_id.strip()
+    ):
+        raise ValueError("route_id must be canonical asset:horizon:side")
+    parts = tuple(route_id.split(":"))
+    if (
+        len(parts) != 3
+        or any(
+            not part
+            or part != part.strip()
+            for part in parts
+        )
+    ):
+        raise ValueError("route_id must be canonical asset:horizon:side")
     asset_id, horizon, side = parts
     if side not in {"long", "short"}:
         raise ValueError("route_id side must be long or short")
