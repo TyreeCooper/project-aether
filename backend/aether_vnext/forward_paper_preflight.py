@@ -565,20 +565,26 @@ def preflight_forward_paper_campaign_from_book(
                             break
                         raw_asset_ids = dataset["asset_ids"]
                         dataset_asset_ids = (
-                            tuple(
-                                str(value).strip().lower()
-                                for value in raw_asset_ids
-                            )
+                            tuple(raw_asset_ids)
                             if isinstance(raw_asset_ids, list)
                             else ()
                         )
+                        dataset_asset_ids_canonical = bool(
+                            isinstance(raw_asset_ids, list)
+                            and dataset_asset_ids
+                            and all(
+                                isinstance(value, str)
+                                and bool(value)
+                                and value == value.strip()
+                                and value == value.lower()
+                                for value in raw_asset_ids
+                            )
+                            and len(dataset_asset_ids)
+                            == len(set(dataset_asset_ids))
+                        )
                         if (
                             not bool(dataset["pit"])
-                            or not isinstance(raw_asset_ids, list)
-                            or not dataset_asset_ids
-                            or any(not value for value in dataset_asset_ids)
-                            or len(dataset_asset_ids)
-                            != len(set(dataset_asset_ids))
+                            or not dataset_asset_ids_canonical
                             or asset_id not in set(dataset_asset_ids)
                         ):
                             dataset_provenance_ok = False
