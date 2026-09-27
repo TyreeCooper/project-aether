@@ -1061,3 +1061,42 @@ def test_forward_paper_ledger_health_rejects_scalar_route_baseline_ids() -> None
     expected = "forward_paper_ledger:invalid_route_baseline:" + route_id
     assert blockers == (expected,)
     assert blocker_class(expected) == "empirical_evidence"
+
+
+
+def test_forward_paper_ledger_health_preserves_root_blockers_without_routes() -> None:
+    engine, store = _store()
+    campaign_id = "burnin-health-no-routes-root-drift"
+    with engine.begin() as conn:
+        _start_campaign(
+            conn,
+            store,
+            campaign_id=campaign_id,
+        )
+        conn.execute(
+            store.tables["forward_paper_campaigns"].update()
+            .where(
+                store.tables["forward_paper_campaigns"].c.campaign_id
+                == campaign_id
+            )
+            .values(policy_version="tampered-policy-version")
+        )
+        conn.execute(
+            store.tables["forward_paper_campaign_routes"].delete().where(
+                store.tables["forward_paper_campaign_routes"].c.campaign_id
+                == campaign_id
+            )
+        )
+
+        blockers = forward_paper_ledger_blockers(
+            conn,
+            store=store,
+            campaign_id=campaign_id,
+        )
+
+    assert blockers == (
+        "forward_paper_ledger:campaign_policy_snapshot_mismatch",
+        "forward_paper_ledger:campaign_has_no_routes",
+    )
+    assert blocker_class(blockers[0]) == "environment_initialization"
+    assert blocker_class(blockers[1]) == "empirical_evidence"

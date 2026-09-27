@@ -110,7 +110,8 @@ def forward_paper_ledger_blockers(
         ).mappings()
     )
     if not route_rows:
-        return ("forward_paper_ledger:campaign_has_no_routes",)
+        blockers.append("forward_paper_ledger:campaign_has_no_routes")
+        return tuple(dict.fromkeys(blockers))
 
     evidence = store.tables["evidence_windows"]
     provenance = store.tables["held_out_evidence_provenance"]
