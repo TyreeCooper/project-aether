@@ -373,6 +373,49 @@ def test_forward_paper_ledger_health_dataset_mismatch_is_fail_closed() -> None:
 
 
 
+def test_forward_paper_ledger_health_rejects_noncanonical_dataset_asset_ids() -> None:
+    engine, store = _store()
+    campaign_id = "burnin-health-dataset-noncanonical"
+    with engine.begin() as conn:
+        result = _start_campaign(
+            conn,
+            store,
+            campaign_id=campaign_id,
+        )
+        window_id = result.routes[0].historical_validation_window_ids[0]
+        provenance = conn.execute(
+            sa.select(store.tables["held_out_evidence_provenance"]).where(
+                store.tables["held_out_evidence_provenance"].c.evidence_window_id
+                == window_id
+            )
+        ).mappings().one()
+
+        datasets = store.tables["research_dataset_snapshots"]
+        conn.execute(
+            datasets.update()
+            .where(
+                datasets.c.dataset_snapshot_id
+                == provenance["dataset_snapshot_id"]
+            )
+            .values(asset_ids=[" EURUSD "])
+        )
+
+        blockers = forward_paper_ledger_blockers(
+            conn,
+            store=store,
+            campaign_id=campaign_id,
+        )
+
+    expected = (
+        "forward_paper_ledger:historical_provenance_dataset_mismatch:"
+        + result.routes[0].campaign_route_id
+        + ":"
+        + window_id
+    )
+    assert expected in blockers
+    assert blocker_class(expected) == "empirical_evidence"
+
+
 def test_forward_paper_ledger_health_detects_cross_campaign_route_link_both_sides() -> None:
     engine, store = _store()
     with engine.begin() as conn:
