@@ -294,9 +294,11 @@ def forward_paper_ledger_blockers(
                     )
                 run_id = str(prov["backtest_run_id"])
                 dataset_id = str(prov["dataset_snapshot_id"])
-                fold_ids = tuple(
-                    str(value).strip()
-                    for value in (prov["fold_result_ids"] or ())
+                raw_fold_ids = prov["fold_result_ids"]
+                fold_ids = (
+                    tuple(str(value).strip() for value in raw_fold_ids)
+                    if isinstance(raw_fold_ids, list)
+                    else ()
                 )
                 run = conn.execute(
                     sa.select(runs).where(
@@ -337,18 +339,31 @@ def forward_paper_ledger_blockers(
                         "historical_provenance_dataset_missing:"
                         f"{route_id}:{window_id}"
                     )
-                elif (
-                    not bool(dataset["pit"])
-                    or asset_id not in {
-                        str(value).strip().lower()
-                        for value in (dataset["asset_ids"] or ())
-                    }
-                ):
-                    blockers.append(
-                        "forward_paper_ledger:"
-                        "historical_provenance_dataset_mismatch:"
-                        f"{route_id}:{window_id}"
+                else:
+                    raw_asset_ids = dataset["asset_ids"]
+                    dataset_asset_ids = (
+                        tuple(
+                            str(value).strip().lower()
+                            for value in raw_asset_ids
+                        )
+                        if isinstance(raw_asset_ids, list)
+                        else ()
                     )
+                    dataset_shape_ok = bool(
+                        isinstance(raw_asset_ids, list)
+                        and dataset_asset_ids
+                        and all(dataset_asset_ids)
+                    )
+                    if (
+                        not bool(dataset["pit"])
+                        or not dataset_shape_ok
+                        or asset_id not in set(dataset_asset_ids)
+                    ):
+                        blockers.append(
+                            "forward_paper_ledger:"
+                            "historical_provenance_dataset_mismatch:"
+                            f"{route_id}:{window_id}"
+                        )
 
                 selected = tuple(
                     dict(row)
@@ -359,7 +374,8 @@ def forward_paper_ledger_blockers(
                     ).mappings()
                 ) if fold_ids else ()
                 fold_set_valid = bool(
-                    fold_ids
+                    isinstance(raw_fold_ids, list)
+                    and fold_ids
                     and all(fold_ids)
                     and len(fold_ids) == len(set(fold_ids))
                     and len(selected) == len(fold_ids)
