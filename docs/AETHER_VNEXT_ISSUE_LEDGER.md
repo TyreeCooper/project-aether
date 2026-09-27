@@ -659,3 +659,42 @@ No production database, legacy evidence, synthetic held-out evidence, or fake ca
 state may be used to close this issue.
 
 **AETH-VN-020 status:** OPEN / EXTERNAL SETUP REQUIRED.
+
+
+## AETH-VN-021 — Real runtime Product Registry bindings are not yet supplied
+
+**Class:** external market-data / lifecycle / calendar binding dependency  
+**Discovered:** canonical Campaign #1 executability hardening  
+**Status:** OPEN / EXTERNAL VALUES REQUIRED  
+**Blocks real canonical Campaign #1:** YES  
+**Blocks PAPER/LIVE safety:** NO — fail closed
+
+### Facts
+
+The Master requires executable broker symbols, primary/fallback market-data identity,
+a stale threshold, authoritative calendar handling, and explicit futures lifecycle
+truth. The frozen source does not supply all runtime values needed for the seed twelve,
+and it does not bind a numeric stale threshold.
+
+Repository support now exists to persist reviewed values in
+`product_registry_state`, hash them, preflight them, and freeze the exact binding
+hash onto every Campaign #1 route. Schema revision 0022 carries that frozen identity.
+
+The GitHub Environment must supply `AETHER_VNEXT_RUNTIME_BINDINGS_JSON` during the
+approved initialize/preflight run. The manifest must not use guessed stale thresholds,
+guessed futures contracts/expiries, guessed provider IDs, or guessed locate sources.
+
+### Remaining external evidence
+
+At minimum:
+- reviewed market-data source and stale threshold for each Campaign #1 asset;
+- executable broker symbols;
+- authoritative non-crypto calendar-provider identities;
+- current/next futures contracts and expiries, outside the 48-hour roll cutoff;
+- shortability/locate-provider identities for borrow-required equities;
+- provider connectivity and quote/calendar health verified at runtime.
+
+The implementation deliberately separates "binding supplied" from "provider health
+proven." A complete manifest cannot by itself establish profitability or P11.
+
+**AETH-VN-021 status:** OPEN / EXTERNAL VALUES REQUIRED.

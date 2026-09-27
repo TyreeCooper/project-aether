@@ -526,9 +526,9 @@ Burn-in control-plane implementation commits:
 - pre-merge canonical dispatch bridge: `4e79016fc519b93de60b558aa0cc87f0dad0c840`;
 - legacy target-database rejection: `a8a554985107aad2b352bea13ea987a9d15a9ad2`.
 
-Latest verified CI before trusted-dispatch hardening:
-- AETHER vNext CI #400: SUCCESS;
-- repository CI #709: SUCCESS.
+Latest verified CI:
+- AETHER vNext CI #403: SUCCESS;
+- repository CI #712: SUCCESS.
 
 External gate before campaign #1:
 - provision or identify a dedicated non-production PostgreSQL database for vNext;
@@ -561,3 +561,29 @@ Three gaps were subsequently corrected:
 
 These controls do not create historical evidence, market-data bindings, broker
 readiness, or profitability. Real preflight and Campaign #1 remain externally gated.
+
+### Runtime Product Registry burn-in gate — IMPLEMENTED
+
+Additional hardening after the trusted-dispatch bridge:
+
+- schema revision 0022 freezes a runtime Product Registry binding hash on every
+  forward-paper campaign route;
+- reviewed external binding truth is persisted in `product_registry_state`;
+- campaign preflight now requires durable broker-symbol, market-source, stale-threshold,
+  calendar-provider, futures-lifecycle, and locate-provider facts where applicable;
+- futures broker symbol/current-contract drift and the 48-hour roll cutoff fail closed;
+- Campaign #1 cannot start from a transient or caller-only binding;
+- initialization can apply `AETHER_VNEXT_RUNTIME_BINDINGS_JSON` and emits a durable
+  binding report before canonical preflight;
+- no numeric stale thresholds, current futures contracts, expiries, provider IDs, or
+  locate sources were invented.
+
+Implementation:
+- `e94440563fdf2d02a270d73bddf49ddbc7955a26` —
+  `feat(vnext-registry): gate burn-in on durable runtime bindings`;
+- `a3666c7beeb8ccf8615fab80b4dbb18d716438c6` —
+  pytest helper collection correction.
+
+The binding manifest proves reviewed identity/lifecycle configuration only. It does
+not prove live provider connectivity, current quote health, holiday-feed health, or
+profitability. Those remain runtime/empirical gates.
