@@ -222,6 +222,33 @@ class ReviewCard:
     reviewer: str
     configuration_hash: str
 
+    def __post_init__(self) -> None:
+        for name in (
+            "review_card_id",
+            "route_id",
+            "playbook_id",
+            "playbook_version",
+            "evidence_state",
+            "decision_reason",
+            "reviewer",
+            "configuration_hash",
+        ):
+            value = getattr(self, name)
+            if (
+                not isinstance(value, str)
+                or not value
+                or value != value.strip()
+            ):
+                raise ValueError(f"{name} must be canonical text")
+        if self.evidence_id is not None and (
+            not isinstance(self.evidence_id, str)
+            or not self.evidence_id
+            or self.evidence_id != self.evidence_id.strip()
+        ):
+            raise ValueError("evidence_id must be canonical text when present")
+        if self.as_of_utc.tzinfo is None:
+            raise ValueError("as_of_utc must be timezone-aware")
+
 
 @dataclass(frozen=True, slots=True)
 class GovernorStateRecord:

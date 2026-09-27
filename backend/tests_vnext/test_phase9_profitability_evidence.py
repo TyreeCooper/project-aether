@@ -133,6 +133,46 @@ def _store() -> tuple[sa.Engine, VNextStore]:
     return engine, store
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    (
+        ("review_card_id", " review-1 ", "review_card_id must be canonical text"),
+        ("route_id", 1, "route_id must be canonical text"),
+        ("playbook_id", "", "playbook_id must be canonical text"),
+        ("playbook_version", " 1.2 ", "playbook_version must be canonical text"),
+        ("evidence_state", 1, "evidence_state must be canonical text"),
+        ("evidence_id", " evidence-1 ", "evidence_id must be canonical text when present"),
+        ("decision_reason", "", "decision_reason must be canonical text"),
+        ("reviewer", " Review ", "reviewer must be canonical text"),
+        ("configuration_hash", 1, "configuration_hash must be canonical text"),
+    ),
+)
+def test_review_card_requires_canonical_identity(
+    field: str,
+    value: object,
+    message: str,
+) -> None:
+    base = _card()
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs[field] = value
+    with pytest.raises(ValueError, match=message):
+        ReviewCard(**kwargs)
+
+
+def test_review_card_requires_timezone_aware_as_of() -> None:
+    base = _card()
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs["as_of_utc"] = NOW.replace(tzinfo=None)
+    with pytest.raises(ValueError, match="as_of_utc must be timezone-aware"):
+        ReviewCard(**kwargs)
+
+
 def test_profitability_evidence_round_trips_and_review_points_to_it() -> None:
     engine, store = _store()
     evidence = _evidence()
