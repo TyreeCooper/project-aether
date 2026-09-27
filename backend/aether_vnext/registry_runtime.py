@@ -36,6 +36,7 @@ class RuntimeRegistryBinding:
     primary_market_source_id: str | None
     stale_threshold_ms: int | None
     calendar_provider_id: str | None
+    calendar_market_id: str | None = None
     fallback_market_source_id: str | None = None
     current_contract: str | None = None
     market_data_contract_id: int | None = None
@@ -76,6 +77,7 @@ def binding_payload(binding: RuntimeRegistryBinding) -> dict[str, object]:
         "fallback_market_source_id": _clean(binding.fallback_market_source_id),
         "stale_threshold_ms": binding.stale_threshold_ms,
         "calendar_provider_id": _clean(binding.calendar_provider_id),
+        "calendar_market_id": _clean(binding.calendar_market_id),
         "current_contract": _clean(binding.current_contract),
         "market_data_contract_id": binding.market_data_contract_id,
         "expiry_utc": (
@@ -117,6 +119,7 @@ def binding_from_payload(payload: dict[str, object]) -> RuntimeRegistryBinding:
         fallback_market_source_id=_clean(payload.get("fallback_market_source_id")),
         stale_threshold_ms=stale,
         calendar_provider_id=_clean(payload.get("calendar_provider_id")),
+        calendar_market_id=_clean(payload.get("calendar_market_id")),
         current_contract=_clean(payload.get("current_contract")),
         market_data_contract_id=market_data_contract_id,
         expiry_utc=expiry,
@@ -179,6 +182,7 @@ def binding_blockers(
                 calendar_provider_implementation_blockers(
                     calendar_id=base.calendar_id,
                     provider_id=calendar_provider_id,
+                    market_id=_clean(binding.calendar_market_id),
                 )
             )
 

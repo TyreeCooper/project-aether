@@ -118,3 +118,25 @@ def test_cli_exposes_implemented_calendar_gate() -> None:
     source = SCRIPT.read_text(encoding="utf-8")
     assert "--require-implemented-calendar" in source
     assert "require_calendar_provider_implementation" in source
+
+
+def test_manifest_parser_preserves_calendar_market_identity() -> None:
+    module = _module()
+    payload = {
+        "registry_version": "calendar-market-id-v1",
+        "configuration_hash": CONFIGURATION_HASH,
+        "bindings": [
+            {
+                "asset_id": "nvda",
+                "broker_symbol": "NVDA",
+                "primary_market_source_id": "reviewed.equity.source",
+                "stale_threshold_ms": 1500,
+                "calendar_provider_id": "tradinghours_v3",
+                "calendar_market_id": "US.NYSE",
+                "shortability_provider_id": "reviewed.locate",
+            }
+        ],
+    }
+    _, _, bindings = module._parse_manifest(payload)
+    assert bindings[0].calendar_provider_id == "tradinghours_v3"
+    assert bindings[0].calendar_market_id == "US.NYSE"

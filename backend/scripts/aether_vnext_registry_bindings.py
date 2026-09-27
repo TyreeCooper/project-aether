@@ -57,6 +57,7 @@ def _binding(row: object) -> RuntimeRegistryBinding:
         fallback_market_source_id=row.get("fallback_market_source_id"),
         stale_threshold_ms=stale,
         calendar_provider_id=row.get("calendar_provider_id"),
+        calendar_market_id=row.get("calendar_market_id"),
         current_contract=row.get("current_contract"),
         market_data_contract_id=market_data_contract_id,
         expiry_utc=expiry,
