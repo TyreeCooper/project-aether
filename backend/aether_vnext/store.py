@@ -2341,9 +2341,6 @@ class VNextStore:
             raise ValueError(
                 "paper-forward evidence link cannot predate evidence creation"
             )
-        if exact_replay:
-            return
-
         closed = self.tables["closed_trades"]
         lineage = self.tables["decision_lineage"]
         setups = self.tables["setups"]
@@ -2429,6 +2426,9 @@ class VNextStore:
                 raise ValueError(
                     "paper-forward evidence predates ClosedTrade close"
                 )
+
+        if exact_replay:
+            return
 
         try:
             with conn.begin_nested():
