@@ -660,7 +660,23 @@ def preflight_forward_paper_campaign_from_book(
                 if provenance_shape_ok:
                     for row in rows:
                         raw_trade_ids = row["immutable_trade_ids"]
-                        if not isinstance(raw_trade_ids, list):
+                        raw_n = row["n"]
+                        trade_ids_canonical = bool(
+                            isinstance(raw_trade_ids, list)
+                            and raw_trade_ids
+                            and all(
+                                isinstance(value, str)
+                                and bool(value)
+                                and value == value.strip()
+                                for value in raw_trade_ids
+                            )
+                            and len(raw_trade_ids)
+                            == len(set(raw_trade_ids))
+                            and isinstance(raw_n, int)
+                            and not isinstance(raw_n, bool)
+                            and raw_n == len(raw_trade_ids)
+                        )
+                        if not trade_ids_canonical:
                             provenance_hash_ok = False
                             break
                         expected_provenance_hash = canonical_payload_hash(
@@ -678,10 +694,7 @@ def preflight_forward_paper_campaign_from_book(
                                 "configuration_hash": str(
                                     row["configuration_hash"]
                                 ),
-                                "immutable_trade_ids": sorted(
-                                    str(value).strip()
-                                    for value in raw_trade_ids
-                                ),
+                                "immutable_trade_ids": sorted(raw_trade_ids),
                                 "metrics_snapshot_hash": str(
                                     row["metrics_snapshot_hash"]
                                 ),

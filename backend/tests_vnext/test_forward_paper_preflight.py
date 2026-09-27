@@ -242,6 +242,46 @@ def test_preflight_blocks_malformed_persisted_heldout_sample() -> None:
 
 
 
+def test_preflight_rejects_noncanonical_heldout_trade_ids() -> None:
+    engine, store = _store()
+    with engine.begin() as conn:
+        record_provenanced_held_out(
+            conn,
+            store,
+            _window("noncanonical-heldout-trades"),
+        )
+        evidence = store.tables["evidence_windows"]
+        conn.execute(
+            evidence.update()
+            .where(
+                evidence.c.evidence_window_id
+                == "noncanonical-heldout-trades"
+            )
+            .values(immutable_trade_ids=[" hist-1 ", "hist-2"])
+        )
+
+        out = preflight_forward_paper_campaign_from_book(
+            conn,
+            store,
+            campaign_id="preflight-noncanonical-heldout-trades",
+            requested_routes=(
+                ForwardPaperRouteRequest(
+                    route_id="eurusd:intraday:long",
+                    playbook_id="pb_fx_intraday_v1_2",
+                ),
+            ),
+        )
+
+    assert out.startable is False
+    assert "held_out_provenance_hash_invalid" in (
+        out.route_results[0].blockers
+    )
+    assert "held_out_window_reload_failed" in (
+        out.route_results[0].blockers
+    )
+    assert out.route_results[0].route_baseline_hash is None
+
+
 def test_preflight_blocks_malformed_heldout_provenance_shape() -> None:
     engine, store = _store()
     with engine.begin() as conn:
