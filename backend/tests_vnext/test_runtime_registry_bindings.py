@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
 import sqlalchemy as sa
 
 from aether_vnext.evidence import EvidenceWindow, SampleDomain
@@ -10,6 +11,7 @@ from aether_vnext.forward_paper_preflight import (
     preflight_forward_paper_campaign_from_book,
 )
 from aether_vnext.freeze import CONFIGURATION_HASH
+from aether_vnext.ninjatrader_market import NINJATRADER_MARKET_SOURCE_ID
 from aether_vnext.registry_runtime import (
     RuntimeRegistryBinding,
     binding_blockers,
@@ -208,3 +210,65 @@ def test_strict_preflight_rejects_bound_source_without_repository_adapter() -> N
         "primary_market_source_implementation_missing"
         in out.route_results[0].blockers
     )
+
+
+def test_ninjatrader_futures_binding_requires_reviewed_contract_id() -> None:
+    missing = RuntimeRegistryBinding(
+        asset_id="mes",
+        broker_symbol="MESZ6",
+        primary_market_source_id=NINJATRADER_MARKET_SOURCE_ID,
+        stale_threshold_ms=1500,
+        calendar_provider_id="reviewed.calendar",
+        current_contract="MESZ6",
+        market_data_contract_id=None,
+        expiry_utc=T0 + timedelta(days=60),
+        next_contract="MESH7",
+        source_ref="reviewed-ninjatrader-binding",
+    )
+    blockers = binding_blockers(missing, as_of_utc=T0)
+    assert "market_data_contract_id_missing" in blockers
+
+    bound = RuntimeRegistryBinding(
+        asset_id="mes",
+        broker_symbol="MESZ6",
+        primary_market_source_id=NINJATRADER_MARKET_SOURCE_ID,
+        stale_threshold_ms=1500,
+        calendar_provider_id="reviewed.calendar",
+        current_contract="MESZ6",
+        market_data_contract_id=987654,
+        expiry_utc=T0 + timedelta(days=60),
+        next_contract="MESH7",
+        source_ref="reviewed-ninjatrader-binding",
+    )
+    assert "market_data_contract_id_missing" not in binding_blockers(
+        bound,
+        as_of_utc=T0,
+    )
+    assert binding_hash(bound) != binding_hash(missing)
+
+
+def test_market_data_contract_id_must_be_positive_integer() -> None:
+    with pytest.raises(ValueError, match="market_data_contract_id"):
+        RuntimeRegistryBinding(
+            asset_id="mes",
+            broker_symbol="MESZ6",
+            primary_market_source_id=NINJATRADER_MARKET_SOURCE_ID,
+            stale_threshold_ms=1500,
+            calendar_provider_id="reviewed.calendar",
+            current_contract="MESZ6",
+            market_data_contract_id=0,
+            expiry_utc=T0 + timedelta(days=60),
+            next_contract="MESH7",
+        )
+
+
+def test_non_futures_binding_rejects_market_data_contract_id() -> None:
+    binding = RuntimeRegistryBinding(
+        asset_id="btc",
+        broker_symbol="XBTUSD",
+        primary_market_source_id="kraken_public",
+        stale_threshold_ms=1000,
+        calendar_provider_id=None,
+        market_data_contract_id=123,
+    )
+    assert "non_futures_contract_fields_present" in binding_blockers(binding)

@@ -44,6 +44,12 @@ def _binding(row: object) -> RuntimeRegistryBinding:
         expiry = datetime.fromisoformat(str(expiry_raw).replace("Z", "+00:00"))
     stale_raw = row.get("stale_threshold_ms")
     stale = None if stale_raw in (None, "") else int(stale_raw)
+    contract_id_raw = row.get("market_data_contract_id")
+    market_data_contract_id = (
+        None
+        if contract_id_raw in (None, "")
+        else int(contract_id_raw)
+    )
     return RuntimeRegistryBinding(
         asset_id=str(row.get("asset_id") or ""),
         broker_symbol=row.get("broker_symbol"),
@@ -52,6 +58,7 @@ def _binding(row: object) -> RuntimeRegistryBinding:
         stale_threshold_ms=stale,
         calendar_provider_id=row.get("calendar_provider_id"),
         current_contract=row.get("current_contract"),
+        market_data_contract_id=market_data_contract_id,
         expiry_utc=expiry,
         next_contract=row.get("next_contract"),
         shortability_provider_id=row.get("shortability_provider_id"),

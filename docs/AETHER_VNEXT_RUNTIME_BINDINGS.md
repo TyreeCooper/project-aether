@@ -28,6 +28,7 @@ The value is a JSON object:
       "stale_threshold_ms": "<REQUIRED_POSITIVE_INTEGER>",
       "calendar_provider_id": null,
       "current_contract": null,
+      "market_data_contract_id": null,
       "expiry_utc": null,
       "next_contract": null,
       "shortability_provider_id": null,
@@ -49,11 +50,16 @@ Every asset entering Campaign #1 requires:
 - a positive stale-threshold value;
 - a calendar-provider identity for every non-24x7 product;
 - for futures: current executable contract, expiry timestamp, and next contract;
+- when NinjaTrader market data is bound: the reviewed positive numeric contract ID
+  corresponding to the current executable contract;
 - for borrow-required equities: a shortability/locate provider identity;
 - a configuration hash equal to the canonical vNext freeze.
 
 For futures, `broker_symbol` must equal `current_contract`. A current contract
-inside the frozen 48-hour roll cutoff is not burn-in-ready.
+inside the frozen 48-hour roll cutoff is not burn-in-ready. NinjaTrader quote events
+identify instruments by numeric `contractId`, so a NinjaTrader market-data binding
+also requires `market_data_contract_id`; AETHER does not infer that ID from the
+contract symbol.
 
 The runtime binding record is stored in `product_registry_state`. Campaign
 preflight freezes the binding content hash into every campaign route so a binding
@@ -67,11 +73,11 @@ cannot silently change between evidence inspection and campaign persistence.
 | ETH | Kraken family; ETHUSD; crypto 24x7; long-only | approved stale threshold; optional fallback; source reference |
 | EURUSD | tastyfx family; FX economics/calendar class | executable broker symbol; market-data source; stale threshold; calendar provider |
 | USDJPY | tastyfx family; FX economics/calendar class | executable broker symbol; market-data source; stale threshold; calendar provider |
-| MES | NinjaTrader family; MES economics | current contract; expiry; next contract; market-data source; stale threshold; calendar provider |
-| MNQ | NinjaTrader family; MNQ economics | current contract; expiry; next contract; market-data source; stale threshold; calendar provider |
-| MGC | NinjaTrader family; MGC economics | current contract; expiry; next contract; market-data source; stale threshold; calendar provider |
-| MCL | NinjaTrader family; MCL economics | current contract; expiry; next contract; market-data source; stale threshold; calendar provider |
-| US10Y | NinjaTrader family; executable family ZN; 1/64 tick = $15.625 | current ZN contract; expiry; next contract; market-data source; stale threshold; calendar provider |
+| MES | NinjaTrader family; MES economics | current contract; NinjaTrader contract ID; expiry; next contract; market-data source; stale threshold; calendar provider |
+| MNQ | NinjaTrader family; MNQ economics | current contract; NinjaTrader contract ID; expiry; next contract; market-data source; stale threshold; calendar provider |
+| MGC | NinjaTrader family; MGC economics | current contract; NinjaTrader contract ID; expiry; next contract; market-data source; stale threshold; calendar provider |
+| MCL | NinjaTrader family; MCL economics | current contract; NinjaTrader contract ID; expiry; next contract; market-data source; stale threshold; calendar provider |
+| US10Y | NinjaTrader family; executable family ZN; 1/64 tick = $15.625 | current ZN contract; NinjaTrader contract ID; expiry; next contract; market-data source; stale threshold; calendar provider |
 | NVDA | IBKR family; equity economics; short requires locate | executable broker symbol; market-data source; stale threshold; calendar provider; shortability provider |
 | TSLA | IBKR family; equity economics; short requires locate | executable broker symbol; market-data source; stale threshold; calendar provider; shortability provider |
 | PLTR | IBKR family; equity economics; short requires locate | executable broker symbol; market-data source; stale threshold; calendar provider; shortability provider |

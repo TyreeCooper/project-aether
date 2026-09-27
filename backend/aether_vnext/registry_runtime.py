@@ -16,6 +16,7 @@ import hashlib
 import json
 
 from aether_vnext.market_sources import market_source_implementation_blockers
+from aether_vnext.ninjatrader_market import NINJATRADER_MARKET_SOURCE_ID
 from aether_vnext.registry import (
     ProductRegistryRow,
     bind_futures_contract,
@@ -34,6 +35,7 @@ class RuntimeRegistryBinding:
     calendar_provider_id: str | None
     fallback_market_source_id: str | None = None
     current_contract: str | None = None
+    market_data_contract_id: int | None = None
     expiry_utc: datetime | None = None
     next_contract: str | None = None
     shortability_provider_id: str | None = None
@@ -44,6 +46,14 @@ class RuntimeRegistryBinding:
             raise ValueError("asset_id is required")
         if self.stale_threshold_ms is not None and self.stale_threshold_ms <= 0:
             raise ValueError("stale_threshold_ms must be positive")
+        if (
+            self.market_data_contract_id is not None
+            and (
+                isinstance(self.market_data_contract_id, bool)
+                or self.market_data_contract_id <= 0
+            )
+        ):
+            raise ValueError("market_data_contract_id must be a positive integer")
         if self.expiry_utc is not None and self.expiry_utc.tzinfo is None:
             raise ValueError("expiry_utc must be timezone-aware")
 
@@ -64,6 +74,7 @@ def binding_payload(binding: RuntimeRegistryBinding) -> dict[str, object]:
         "stale_threshold_ms": binding.stale_threshold_ms,
         "calendar_provider_id": _clean(binding.calendar_provider_id),
         "current_contract": _clean(binding.current_contract),
+        "market_data_contract_id": binding.market_data_contract_id,
         "expiry_utc": (
             binding.expiry_utc.isoformat()
             if binding.expiry_utc is not None
@@ -92,6 +103,10 @@ def binding_from_payload(payload: dict[str, object]) -> RuntimeRegistryBinding:
         expiry = datetime.fromisoformat(str(expiry_raw).replace("Z", "+00:00"))
     stale_raw = payload.get("stale_threshold_ms")
     stale = None if stale_raw is None else int(stale_raw)
+    contract_id_raw = payload.get("market_data_contract_id")
+    market_data_contract_id = (
+        None if contract_id_raw is None else int(contract_id_raw)
+    )
     return RuntimeRegistryBinding(
         asset_id=str(payload.get("asset_id") or ""),
         broker_symbol=_clean(payload.get("broker_symbol")),
@@ -100,6 +115,7 @@ def binding_from_payload(payload: dict[str, object]) -> RuntimeRegistryBinding:
         stale_threshold_ms=stale,
         calendar_provider_id=_clean(payload.get("calendar_provider_id")),
         current_contract=_clean(payload.get("current_contract")),
+        market_data_contract_id=market_data_contract_id,
         expiry_utc=expiry,
         next_contract=_clean(payload.get("next_contract")),
         shortability_provider_id=_clean(payload.get("shortability_provider_id")),
@@ -163,6 +179,11 @@ def binding_blockers(
         next_contract = _clean(binding.next_contract)
         if current_contract is None:
             blockers.append("current_futures_contract_missing")
+        if (
+            primary_source_id == NINJATRADER_MARKET_SOURCE_ID
+            or fallback_source_id == NINJATRADER_MARKET_SOURCE_ID
+        ) and binding.market_data_contract_id is None:
+            blockers.append("market_data_contract_id_missing")
         if binding.expiry_utc is None:
             blockers.append("futures_expiry_missing")
         if next_contract is None:
@@ -188,6 +209,7 @@ def binding_blockers(
         value is not None
         for value in (
             _clean(binding.current_contract),
+            binding.market_data_contract_id,
             binding.expiry_utc,
             _clean(binding.next_contract),
         )

@@ -89,3 +89,26 @@ def test_cli_exposes_implemented_source_gate() -> None:
     source = SCRIPT.read_text(encoding="utf-8")
     assert "--require-implemented-source" in source
     assert "require_market_source_implementation" in source
+
+
+def test_manifest_parser_preserves_ninjatrader_contract_id() -> None:
+    module = _module()
+    payload = {
+        "registry_version": "futures-contract-id-v1",
+        "configuration_hash": CONFIGURATION_HASH,
+        "bindings": [
+            {
+                "asset_id": "mes",
+                "broker_symbol": "MESZ6",
+                "primary_market_source_id": "ninjatrader_market_data",
+                "stale_threshold_ms": 1500,
+                "calendar_provider_id": "reviewed.calendar",
+                "current_contract": "MESZ6",
+                "market_data_contract_id": 987654,
+                "expiry_utc": "2026-12-18T14:30:00Z",
+                "next_contract": "MESH7",
+            }
+        ],
+    }
+    _, _, bindings = module._parse_manifest(payload)
+    assert bindings[0].market_data_contract_id == 987654
