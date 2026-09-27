@@ -16,6 +16,7 @@ from typing import Any, Mapping
 
 import sqlalchemy as sa
 from sqlalchemy.engine import Connection
+from sqlalchemy.exc import IntegrityError
 
 from aether_vnext.clerk import ClerkDecision
 from aether_vnext.domain import (
@@ -2228,24 +2229,26 @@ class VNextStore:
 
         links = self.tables["forward_paper_campaign_windows"]
         evidence = self.tables["evidence_windows"]
-        existing_link = conn.execute(
-            sa.select(links).where(
-                sa.or_(
-                    links.c.campaign_window_id == campaign_window_id,
-                    links.c.evidence_window_id == window.evidence_window_id,
-                )
-            )
-        ).mappings().first()
-        exact_replay = False
-        if existing_link is not None:
-            existing_window = conn.execute(
-                sa.select(evidence).where(
-                    evidence.c.evidence_window_id
-                    == existing_link["evidence_window_id"]
+        def _replay_state() -> bool | None:
+            existing_link = conn.execute(
+                sa.select(links).where(
+                    sa.or_(
+                        links.c.campaign_window_id == campaign_window_id,
+                        links.c.evidence_window_id == window.evidence_window_id,
+                    )
                 )
             ).mappings().first()
-            exact_link = (
-                str(existing_link["campaign_window_id"]) == campaign_window_id
+            existing_window = conn.execute(
+                sa.select(evidence).where(
+                    evidence.c.evidence_window_id == window.evidence_window_id
+                )
+            ).mappings().first()
+            if existing_link is None and existing_window is None:
+                return None
+
+            exact_link = bool(
+                existing_link is not None
+                and str(existing_link["campaign_window_id"]) == campaign_window_id
                 and str(existing_link["campaign_route_id"]) == campaign_route_id
                 and str(existing_link["evidence_window_id"])
                 == window.evidence_window_id
@@ -2274,11 +2277,14 @@ class VNextStore:
                 and _stored_utc(existing_window["created_at_utc"])
                 == window.created_at_utc
             )
-            if not (exact_link and exact_window):
-                raise ValueError(
-                    "forward-paper evidence replay identity mismatch"
-                )
-            exact_replay = True
+            return exact_link and exact_window
+
+        replay_state = _replay_state()
+        if replay_state is False:
+            raise ValueError(
+                "forward-paper evidence replay identity mismatch"
+            )
+        exact_replay = replay_state is True
 
         route_table = self.tables["forward_paper_campaign_routes"]
         route = conn.execute(
@@ -2356,16 +2362,27 @@ class VNextStore:
             if trigger_ts < _stored_utc(campaign["started_at_utc"]):
                 raise ValueError("paper-forward Setup predates campaign start")
 
-        self._record_evidence_window_row(conn, window)
-        conn.execute(
-            self.tables["forward_paper_campaign_windows"].insert().values(
-                campaign_window_id=campaign_window_id,
-                campaign_id=route["campaign_id"],
-                campaign_route_id=campaign_route_id,
-                evidence_window_id=window.evidence_window_id,
-                linked_at_utc=linked_at_utc,
-            )
-        )
+        try:
+            with conn.begin_nested():
+                self._record_evidence_window_row(conn, window)
+                conn.execute(
+                    links.insert().values(
+                        campaign_window_id=campaign_window_id,
+                        campaign_id=route["campaign_id"],
+                        campaign_route_id=campaign_route_id,
+                        evidence_window_id=window.evidence_window_id,
+                        linked_at_utc=linked_at_utc,
+                    )
+                )
+        except IntegrityError as exc:
+            replay_state = _replay_state()
+            if replay_state is True:
+                return
+            if replay_state is False:
+                raise ValueError(
+                    "forward-paper evidence concurrent replay identity mismatch"
+                ) from exc
+            raise
 
     def record_profitability_readiness_assessment(
         self,

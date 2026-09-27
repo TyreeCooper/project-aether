@@ -421,3 +421,54 @@ def test_paper_forward_exact_replay_rechecks_frozen_route_identity() -> None:
 
     assert evidence_count == 1
     assert link_count == 1
+
+
+
+def test_paper_forward_orphan_evidence_row_fails_closed() -> None:
+    engine, store = _store()
+    window = _window(
+        window_id="paper-orphan-evidence",
+        domain=SampleDomain.PAPER_FORWARD,
+        trade_ids=("trade-orphan-evidence",),
+    )
+    route = _route()
+
+    with engine.begin() as conn:
+        store.record_forward_paper_campaign(
+            conn,
+            _campaign(),
+            routes=(route,),
+        )
+        store._record_evidence_window_row(conn, window)
+
+        with pytest.raises(
+            ValueError,
+            match="replay identity mismatch",
+        ):
+            store.record_forward_paper_evidence_window(
+                conn,
+                campaign_window_id="fp-window-orphan-evidence",
+                campaign_route_id=route.campaign_route_id,
+                window=window,
+                linked_at_utc=T0 + timedelta(hours=2),
+            )
+
+        evidence_count = conn.execute(
+            sa.select(sa.func.count()).select_from(
+                store.tables["evidence_windows"]
+            ).where(
+                store.tables["evidence_windows"].c.evidence_window_id
+                == window.evidence_window_id
+            )
+        ).scalar_one()
+        link_count = conn.execute(
+            sa.select(sa.func.count()).select_from(
+                store.tables["forward_paper_campaign_windows"]
+            ).where(
+                store.tables["forward_paper_campaign_windows"].c.evidence_window_id
+                == window.evidence_window_id
+            )
+        ).scalar_one()
+
+    assert evidence_count == 1
+    assert link_count == 0
