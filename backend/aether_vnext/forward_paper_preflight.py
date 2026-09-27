@@ -495,19 +495,25 @@ def preflight_forward_paper_campaign_from_book(
                     isinstance(row["fold_result_ids"], list)
                     and bool(row["fold_result_ids"])
                     and all(
-                        str(value).strip()
+                        isinstance(value, str)
+                        and bool(value)
+                        and value == value.strip()
                         for value in row["fold_result_ids"]
                     )
                     and len(row["fold_result_ids"])
-                    == len(
-                        {
-                            str(value).strip()
-                            for value in row["fold_result_ids"]
-                        }
-                    )
-                    and bool(str(row["backtest_run_id"]).strip())
-                    and bool(str(row["dataset_snapshot_id"]).strip())
-                    and bool(str(row["provenance_hash"]).strip())
+                    == len(set(row["fold_result_ids"]))
+                    and isinstance(row["backtest_run_id"], str)
+                    and bool(row["backtest_run_id"])
+                    and row["backtest_run_id"]
+                    == row["backtest_run_id"].strip()
+                    and isinstance(row["dataset_snapshot_id"], str)
+                    and bool(row["dataset_snapshot_id"])
+                    and row["dataset_snapshot_id"]
+                    == row["dataset_snapshot_id"].strip()
+                    and isinstance(row["provenance_hash"], str)
+                    and bool(row["provenance_hash"])
+                    and row["provenance_hash"]
+                    == row["provenance_hash"].strip()
                     for row in rows
                 )
                 if not provenance_shape_ok:
@@ -521,7 +527,7 @@ def preflight_forward_paper_campaign_from_book(
                         run = conn.execute(
                             sa.select(runs).where(
                                 runs.c.backtest_run_id
-                                == str(row["backtest_run_id"]).strip()
+                                == row["backtest_run_id"]
                             )
                         ).mappings().first()
                         if (
@@ -536,7 +542,7 @@ def preflight_forward_paper_campaign_from_book(
                             or str(run["configuration_hash"])
                             != CONFIGURATION_HASH
                             or str(run["dataset_snapshot_id"])
-                            != str(row["dataset_snapshot_id"]).strip()
+                            != row["dataset_snapshot_id"]
                         ):
                             run_provenance_ok = False
                             break
@@ -551,7 +557,7 @@ def preflight_forward_paper_campaign_from_book(
                         dataset = conn.execute(
                             sa.select(datasets).where(
                                 datasets.c.dataset_snapshot_id
-                                == str(row["dataset_snapshot_id"]).strip()
+                                == row["dataset_snapshot_id"]
                             )
                         ).mappings().first()
                         if dataset is None:
@@ -585,10 +591,7 @@ def preflight_forward_paper_campaign_from_book(
                 fold_provenance_ok = provenance_shape_ok
                 if provenance_shape_ok:
                     for row in rows:
-                        fold_ids = tuple(
-                            str(value).strip()
-                            for value in row["fold_result_ids"]
-                        )
+                        fold_ids = tuple(row["fold_result_ids"])
                         selected = tuple(
                             dict(fold)
                             for fold in conn.execute(
@@ -601,7 +604,7 @@ def preflight_forward_paper_campaign_from_book(
                             len(selected) != len(fold_ids)
                             or any(
                                 str(fold["backtest_run_id"])
-                                != str(row["backtest_run_id"]).strip()
+                                != row["backtest_run_id"]
                                 for fold in selected
                             )
                         ):
@@ -656,15 +659,10 @@ def preflight_forward_paper_campaign_from_book(
                             break
                         expected_provenance_hash = canonical_payload_hash(
                             {
-                                "backtest_run_id": str(
-                                    row["backtest_run_id"]
-                                ).strip(),
-                                "dataset_snapshot_id": str(
-                                    row["dataset_snapshot_id"]
-                                ).strip(),
+                                "backtest_run_id": row["backtest_run_id"],
+                                "dataset_snapshot_id": row["dataset_snapshot_id"],
                                 "fold_result_ids": sorted(
-                                    str(value).strip()
-                                    for value in row["fold_result_ids"]
+                                    row["fold_result_ids"]
                                 ),
                                 "route_id": str(row["route_id"]),
                                 "playbook_id": str(row["playbook_id"]),

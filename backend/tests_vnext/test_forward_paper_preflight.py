@@ -281,6 +281,45 @@ def test_preflight_blocks_malformed_heldout_provenance_shape() -> None:
 
 
 
+def test_preflight_rejects_noncanonical_heldout_provenance_ids() -> None:
+    engine, store = _store()
+    with engine.begin() as conn:
+        record_provenanced_held_out(
+            conn,
+            store,
+            _window("noncanonical-provenance-ids"),
+        )
+        provenance = store.tables["held_out_evidence_provenance"]
+        conn.execute(
+            provenance.update()
+            .where(
+                provenance.c.evidence_window_id
+                == "noncanonical-provenance-ids"
+            )
+            .values(
+                fold_result_ids=[" fold:noncanonical-provenance-ids "],
+            )
+        )
+
+        out = preflight_forward_paper_campaign_from_book(
+            conn,
+            store,
+            campaign_id="preflight-noncanonical-provenance-ids",
+            requested_routes=(
+                ForwardPaperRouteRequest(
+                    route_id="eurusd:intraday:long",
+                    playbook_id="pb_fx_intraday_v1_2",
+                ),
+            ),
+        )
+
+    assert out.startable is False
+    assert "held_out_baseline_provenance_invalid" in (
+        out.route_results[0].blockers
+    )
+    assert out.route_results[0].route_baseline_hash is None
+
+
 def test_preflight_revalidates_heldout_backtest_run() -> None:
     engine, store = _store()
     with engine.begin() as conn:
