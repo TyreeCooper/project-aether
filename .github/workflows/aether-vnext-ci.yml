@@ -118,6 +118,11 @@ jobs:
           print("connection mode:", "database-url" if cfg.database_url else "managed-identity")
           PY
 
+      - name: Refuse legacy production database target
+        env:
+          PYTHONPATH: .
+        run: python scripts/aether_vnext_check_db_isolation.py
+
       - name: Initialize isolated vNext book
         env:
           PYTHONPATH: .

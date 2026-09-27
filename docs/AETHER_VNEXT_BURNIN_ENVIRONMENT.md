@@ -75,3 +75,17 @@ and select branch `aether-vnext-swapout`. Its branch version contains a
 6. uploads the JSON result before propagating a non-startable status.
 
 No hand-selected route list is accepted by this bridge.
+
+
+## Target-database isolation guard
+
+Before any vNext migration runs, the control plane performs a read-only inspection of
+the configured PostgreSQL database. Initialization is refused if known legacy Aether
+runtime tables are present in the `public` schema, including runtime state, fills,
+orders, account/position snapshots, intelligence snapshots, or desk-trade history.
+
+This is a second boundary in addition to the dedicated `AETHER_VNEXT_*` variable
+namespace: even a mistakenly copied production connection secret should fail before
+schema 0001–0020 is applied.
+
+The guard does not mutate the database.
