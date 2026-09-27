@@ -83,3 +83,9 @@ def test_manifest_loader_requires_exactly_one_source(tmp_path: Path) -> None:
             manifest_json=json.dumps(payload),
             manifest_file=str(path),
         )
+
+
+def test_cli_exposes_implemented_source_gate() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert "--require-implemented-source" in source
+    assert "require_market_source_implementation" in source

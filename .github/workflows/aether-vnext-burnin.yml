@@ -186,6 +186,7 @@ jobs:
           python scripts/aether_vnext_registry_bindings.py \
             --manifest-json "$AETHER_VNEXT_RUNTIME_BINDINGS_JSON" \
             --require-complete \
+            --require-implemented-source \
             --output aether-vnext-runtime-bindings.json
 
       - name: Upload runtime Product Registry binding report

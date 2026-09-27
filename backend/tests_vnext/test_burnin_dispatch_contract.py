@@ -29,6 +29,7 @@ def test_burnin_dispatch_is_same_repo_label_gated_and_environment_protected() ->
     assert "AETHER_VNEXT_RUNTIME_BINDINGS_JSON" in source
     assert "aether_vnext_registry_bindings.py" in source
     assert "--require-complete" in source
+    assert "--require-implemented-source" in source
     assert "aether_vnext_kraken_market_probe.py" in source
     assert "--assets btc,eth" in source
     assert "--require-executable" in source

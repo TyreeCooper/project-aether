@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 import hashlib
 import json
 
+from aether_vnext.market_sources import market_source_implementation_blockers
 from aether_vnext.registry import (
     ProductRegistryRow,
     bind_futures_contract,
@@ -110,6 +111,7 @@ def binding_blockers(
     binding: RuntimeRegistryBinding,
     *,
     as_of_utc: datetime | None = None,
+    require_market_source_implementation: bool = False,
 ) -> tuple[str, ...]:
     """Return exact missing/unsafe external binding facts for one seed asset."""
     asset_id = binding.asset_id.strip().lower()
@@ -122,8 +124,29 @@ def binding_blockers(
     broker_symbol = _clean(binding.broker_symbol)
     if broker_symbol is None:
         blockers.append("runtime_broker_symbol_missing")
-    if _clean(binding.primary_market_source_id) is None:
+    primary_source_id = _clean(binding.primary_market_source_id)
+    fallback_source_id = _clean(binding.fallback_market_source_id)
+    if primary_source_id is None:
         blockers.append("market_data_source_missing")
+    elif require_market_source_implementation:
+        blockers.extend(
+            market_source_implementation_blockers(
+                source_id=primary_source_id,
+                asset_id=asset_id,
+                role="primary",
+            )
+        )
+    if (
+        fallback_source_id is not None
+        and require_market_source_implementation
+    ):
+        blockers.extend(
+            market_source_implementation_blockers(
+                source_id=fallback_source_id,
+                asset_id=asset_id,
+                role="fallback",
+            )
+        )
     if binding.stale_threshold_ms is None:
         blockers.append("stale_threshold_missing")
 

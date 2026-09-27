@@ -83,6 +83,7 @@ async def _main(
     manifest_json: str | None,
     manifest_file: str | None,
     require_complete: bool,
+    require_implemented_source: bool,
     output: str | None,
 ) -> int:
     payload = _load_payload(
@@ -98,7 +99,13 @@ async def _main(
         async with engine.begin() as connection:
             def apply(sync_conn):
                 for binding in bindings:
-                    blockers = binding_blockers(binding, as_of_utc=now)
+                    blockers = binding_blockers(
+                        binding,
+                        as_of_utc=now,
+                        require_market_source_implementation=(
+                            require_implemented_source
+                        ),
+                    )
                     digest = store.upsert_runtime_registry_binding(
                         sync_conn,
                         binding,
@@ -119,6 +126,7 @@ async def _main(
     report = {
         "registry_version": registry_version,
         "configuration_hash": configuration_hash,
+        "require_implemented_source": require_implemented_source,
         "binding_count": len(report_rows),
         "complete_binding_count": sum(
             1 for row in report_rows if row["complete"]
@@ -146,6 +154,11 @@ if __name__ == "__main__":
     source.add_argument("--manifest-json")
     source.add_argument("--manifest-file")
     parser.add_argument("--require-complete", action="store_true")
+    parser.add_argument(
+        "--require-implemented-source",
+        action="store_true",
+        help="fail bindings whose reviewed source lacks a vNext implementation",
+    )
     parser.add_argument("--output")
     args = parser.parse_args()
     raise SystemExit(
@@ -154,6 +167,7 @@ if __name__ == "__main__":
                 manifest_json=args.manifest_json,
                 manifest_file=args.manifest_file,
                 require_complete=args.require_complete,
+                require_implemented_source=args.require_implemented_source,
                 output=args.output,
             )
         )

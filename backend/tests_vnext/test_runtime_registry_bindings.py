@@ -158,3 +158,53 @@ def test_forward_preflight_rejects_unbound_runtime_product_even_with_real_heldou
     assert out.startable is False
     assert out.route_results[0].held_out_window_count == 1
     assert "runtime_product_binding_missing" in out.route_results[0].blockers
+
+
+def test_strict_preflight_rejects_bound_source_without_repository_adapter() -> None:
+    engine, store = _store()
+    binding = make_runtime_binding("eurusd", now=T0)
+    window = EvidenceWindow(
+        evidence_window_id="heldout-source-implementation-gate",
+        route_id="eurusd:intraday:long",
+        playbook_id="pb_fx_intraday_v1_2",
+        playbook_version="1.2",
+        policy_version="runtime-binding-policy",
+        configuration_hash=CONFIGURATION_HASH,
+        sample_domain=SampleDomain.HELD_OUT,
+        first_timestamp_utc=T0 - timedelta(days=10),
+        last_timestamp_utc=T0 - timedelta(days=9),
+        n=1,
+        immutable_trade_ids=("hist-source-1",),
+        metrics_snapshot_hash="metrics-source-implementation-1",
+        created_at_utc=T0 - timedelta(days=1),
+    )
+
+    with engine.begin() as conn:
+        store.upsert_runtime_registry_binding(
+            conn,
+            binding,
+            registry_version="registry-runtime-test-v1",
+            configuration_hash=CONFIGURATION_HASH,
+            updated_at_utc=T0,
+        )
+        record_provenanced_held_out(conn, store, window)
+        out = preflight_forward_paper_campaign_from_book(
+            conn,
+            store,
+            campaign_id="source-implementation-gate",
+            requested_routes=(
+                ForwardPaperRouteRequest(
+                    route_id="eurusd:intraday:long",
+                    playbook_id="pb_fx_intraday_v1_2",
+                ),
+            ),
+            as_of_utc=T0,
+            require_market_source_implementation=True,
+        )
+
+    assert out.startable is False
+    assert out.route_results[0].held_out_window_count == 1
+    assert (
+        "primary_market_source_implementation_missing"
+        in out.route_results[0].blockers
+    )
