@@ -235,6 +235,7 @@ def test_preflight_blocks_malformed_persisted_heldout_sample() -> None:
 
     assert out.startable is False
     assert out.route_results[0].blockers == (
+        "held_out_provenance_hash_invalid",
         "held_out_window_reload_failed",
     )
     assert "one_or_more_routes_not_startable" in out.blockers
