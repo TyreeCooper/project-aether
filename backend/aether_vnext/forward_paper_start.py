@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 import sqlalchemy as sa
 from sqlalchemy.engine import Connection
+from sqlalchemy.exc import IntegrityError
 
 from aether_vnext.forward_paper import ForwardPaperCampaign, ForwardPaperRouteBaseline
 from aether_vnext.freeze import CONFIGURATION_HASH
@@ -113,6 +114,7 @@ def _reuse_existing_campaign(
     existing: ForwardPaperStartResult,
     *,
     requested_routes: tuple[ForwardPaperRouteRequest, ...],
+    expected_baseline_snapshot_hash: str | None = None,
 ) -> ForwardPaperStartResult:
     if existing.campaign.configuration_hash != CONFIGURATION_HASH:
         raise RuntimeError(
@@ -150,6 +152,14 @@ def _reuse_existing_campaign(
         raise RuntimeError(
             "existing forward-paper campaign baseline integrity mismatch"
         )
+    if (
+        expected_baseline_snapshot_hash is not None
+        and existing.campaign.baseline_snapshot_hash
+        != expected_baseline_snapshot_hash
+    ):
+        raise RuntimeError(
+            "concurrent campaign start baseline mismatch"
+        )
     return existing
 
 
@@ -186,11 +196,35 @@ def _persist_forward_paper_campaign_from_preflight(
         started_at_utc=started_at_utc,
         created_at_utc=created_at_utc,
     )
-    store.record_forward_paper_campaign(
-        conn,
-        campaign,
-        routes=routes,
-    )
+    try:
+        with conn.begin_nested():
+            store.record_forward_paper_campaign(
+                conn,
+                campaign,
+                routes=routes,
+            )
+    except IntegrityError:
+        existing = _load_existing_start_result(
+            conn,
+            store,
+            campaign_id=campaign_id,
+        )
+        if existing is None:
+            raise
+        requested_routes = tuple(
+            ForwardPaperRouteRequest(
+                route_id=route.route_id,
+                playbook_id=route.playbook_id,
+            )
+            for route in routes
+        )
+        return _reuse_existing_campaign(
+            existing,
+            requested_routes=requested_routes,
+            expected_baseline_snapshot_hash=(
+                preflight.baseline_snapshot_hash
+            ),
+        )
     return ForwardPaperStartResult(campaign=campaign, routes=routes)
 
 
