@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import timedelta
 
 import pytest
@@ -11,6 +12,7 @@ from aether_vnext.restart import load_restart_snapshot
 from aether_vnext.runtime_close_execution_bridge import (
     submit_runtime_reserved_close,
 )
+from aether_vnext.runtime_close_fill_bridge import fill_runtime_submitted_close
 from aether_vnext.runtime_close_reserve_bridge import reserve_runtime_flatten
 from aether_vnext.runtime_execution_bridge import submit_runtime_reserved_open
 from aether_vnext.runtime_portfolio_bridge import reserve_runtime_ready_ticket
@@ -246,6 +248,123 @@ def test_reconciler_cancels_stale_close_without_releasing_open_position() -> Non
         assert tuple(
             row["trade_id"] for row in restart.active_positions
         ) == ("trade-runtime-close",)
+        assert tuple(
+            row["trade_id"] for row in restart.open_trade_records
+        ) == ("trade-runtime-close",)
+
+
+
+def test_stale_close_can_be_reissued_and_reach_durable_flat() -> None:
+    engine, store, obs = _fixture()
+    stale_close_id = "intent-runtime-stale-close-first"
+    retry_close_id = "intent-runtime-stale-close-second"
+
+    with engine.begin() as conn:
+        observation_id = _open_and_request(conn, store, obs)
+
+        first_reserved = reserve_runtime_flatten(
+            conn,
+            store,
+            order_intent_id=stale_close_id,
+            trade_id="trade-runtime-close",
+            idempotency_key="idem-runtime-stale-close-first",
+            exit_reason=ExitReason.STRUCTURE,
+            market_observation_id=observation_id,
+            created_at_utc=T0 + timedelta(seconds=1),
+            event_id="evt-runtime-stale-close-first-reserve",
+        )
+        assert first_reserved["state"] == "RESERVED"
+
+        first_submitted = submit_runtime_reserved_close(
+            conn,
+            store,
+            order_intent_id=stale_close_id,
+            submitted_at_utc=T0 + timedelta(seconds=2),
+            event_id="evt-runtime-stale-close-first-submit",
+        )
+        assert first_submitted["state"] == "SUBMITTED"
+
+        stale = reconcile_stale_intents(
+            conn,
+            store=store,
+            at_utc=T0 + timedelta(seconds=16, milliseconds=1),
+        )
+        assert len(stale) == 1
+        assert stale[0]["state"] == "CANCELLED_STALE"
+
+        retry_reserved = reserve_runtime_flatten(
+            conn,
+            store,
+            order_intent_id=retry_close_id,
+            trade_id="trade-runtime-close",
+            idempotency_key="idem-runtime-stale-close-second",
+            exit_reason=ExitReason.STRUCTURE,
+            market_observation_id=observation_id,
+            created_at_utc=T0 + timedelta(seconds=17),
+            event_id="evt-runtime-stale-close-second-reserve",
+        )
+        assert retry_reserved["state"] == "RESERVED"
+        assert retry_reserved["duplicate"] is False
+
+        retry_submitted = submit_runtime_reserved_close(
+            conn,
+            store,
+            order_intent_id=retry_close_id,
+            submitted_at_utc=T0 + timedelta(seconds=18),
+            event_id="evt-runtime-stale-close-second-submit",
+        )
+        assert retry_submitted["state"] == "SUBMITTED"
+
+        fill_at = T0 + timedelta(seconds=18, milliseconds=250)
+        fill_obs = replace(
+            obs,
+            observation_id="obs-runtime-stale-close-retry-fill",
+            bid=101_000.0,
+            ask=101_020.0,
+            last=101_010.0,
+            mark=101_010.0,
+            spread_abs=20.0,
+            spread_bps=(20.0 / 101_010.0) * 10_000.0,
+            exchange_ts=fill_at,
+            received_ts=fill_at,
+            age_ms=0,
+        )
+        store.record_market_observation(conn, fill_obs)
+
+        flat = fill_runtime_submitted_close(
+            conn,
+            store,
+            order_intent_id=retry_close_id,
+            fill_market_observation_id=fill_obs.observation_id,
+            filled_at_utc=fill_at,
+            event_id="evt-runtime-stale-close-second-fill",
+        )
+        assert flat["state"] == "FLAT"
+        assert flat["trade_id"] == "trade-runtime-close"
+
+        first_terminal = store.load_order_intent(
+            conn,
+            order_intent_id=stale_close_id,
+        )
+        second_terminal = store.load_order_intent(
+            conn,
+            order_intent_id=retry_close_id,
+        )
+        assert first_terminal is not None
+        assert first_terminal.state.value == "CANCELLED_STALE"
+        assert second_terminal is not None
+        assert second_terminal.state.value == "FILLED"
+
+        assert _count(conn, store.tables["active_positions"]) == 0
+        assert _count(conn, store.tables["closed_trades"]) == 1
+        assert _count(conn, store.tables["open_trades"]) == 1
+        assert _count(conn, store.tables["signal_consumptions"]) == 1
+        assert _count(conn, store.tables["risk_admission_reservations"]) == 0
+        assert store.risk_admission_reconciliation_issues(conn) == ()
+
+        restart = load_restart_snapshot(conn, store=store)
+        assert restart.in_flight_order_intents == ()
+        assert restart.active_positions == ()
         assert tuple(
             row["trade_id"] for row in restart.open_trade_records
         ) == ("trade-runtime-close",)
