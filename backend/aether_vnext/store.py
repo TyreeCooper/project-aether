@@ -2324,6 +2324,36 @@ class VNextStore:
             raise ValueError(
                 "paper-forward evidence does not match frozen campaign route"
             )
+
+        asset_id, _, _ = parse_route_id(window.route_id)
+        try:
+            current_runtime = self.load_runtime_registry_binding(
+                conn,
+                asset_id=asset_id,
+            )
+        except (KeyError, RuntimeError, TypeError, ValueError) as exc:
+            raise ValueError(
+                "paper-forward runtime Product Registry binding invalid"
+            ) from exc
+        if current_runtime is None:
+            raise ValueError(
+                "paper-forward runtime Product Registry binding missing"
+            )
+        if (
+            str(current_runtime["configuration_hash"])
+            != str(route["configuration_hash"])
+        ):
+            raise ValueError(
+                "paper-forward runtime Product Registry configuration drift"
+            )
+        if (
+            str(current_runtime["binding_hash"])
+            != str(route["runtime_registry_binding_hash"])
+        ):
+            raise ValueError(
+                "paper-forward runtime Product Registry binding drift"
+            )
+
         campaign_started_at = _stored_utc(campaign["started_at_utc"])
         if window.first_timestamp_utc < campaign_started_at:
             raise ValueError(

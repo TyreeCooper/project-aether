@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import timedelta
 
 import sqlalchemy as sa
@@ -12,6 +13,7 @@ from aether_vnext.forward_paper_start import (
     _start_forward_paper_campaign_for_requests,
 )
 from tests_vnext.held_out_support import record_provenanced_held_out
+from tests_vnext.runtime_registry_support import make_runtime_binding
 from tests_vnext.test_forward_paper_campaign import _record_closed_trade_lineage
 from tests_vnext.test_forward_paper_start import T0, _store, _window
 
@@ -512,3 +514,39 @@ def test_forward_paper_ledger_health_detects_evidence_before_trade_close() -> No
     )
     assert expected in blockers
     assert blocker_class(expected) == "empirical_evidence"
+
+
+
+def test_forward_paper_ledger_health_detects_runtime_binding_drift() -> None:
+    engine, store = _store()
+    campaign_id = "burnin-health-runtime-binding-drift"
+    with engine.begin() as conn:
+        result = _start_campaign(
+            conn,
+            store,
+            campaign_id=campaign_id,
+        )
+        drifted_binding = replace(
+            make_runtime_binding("eurusd", now=T0),
+            broker_symbol="EURUSD-DRIFT",
+        )
+        store.upsert_runtime_registry_binding(
+            conn,
+            drifted_binding,
+            registry_version="test-runtime-registry-v2",
+            configuration_hash=result.campaign.configuration_hash,
+            updated_at_utc=T0 + timedelta(hours=1),
+        )
+
+        blockers = forward_paper_ledger_blockers(
+            conn,
+            store=store,
+            campaign_id=campaign_id,
+        )
+
+    expected = (
+        "forward_paper_ledger:runtime_binding_hash_mismatch:"
+        + result.routes[0].campaign_route_id
+    )
+    assert expected in blockers
+    assert blocker_class(expected) == "external_runtime_configuration"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -13,6 +14,7 @@ from aether_vnext.forward_paper import (
 from aether_vnext.store import VNextStore
 from tests_vnext.held_out_support import record_provenanced_held_out
 from tests_vnext.runtime_registry_support import (
+    make_runtime_binding,
     record_test_runtime_binding,
     runtime_binding_hash,
 )
@@ -866,3 +868,60 @@ def test_paper_forward_exact_replay_revalidates_canonical_trade_lineage() -> Non
 
     assert evidence_count == 1
     assert link_count == 1
+
+
+
+def test_paper_forward_window_rejects_runtime_binding_drift() -> None:
+    engine, store = _store()
+    trade_id = "trade-runtime-binding-drift"
+    with engine.begin() as conn:
+        store.record_forward_paper_campaign(
+            conn,
+            _campaign(),
+            routes=(_route(),),
+        )
+        _record_closed_trade_lineage(
+            conn,
+            store,
+            trade_id=trade_id,
+        )
+        drifted_binding = replace(
+            make_runtime_binding("eurusd", now=T0),
+            broker_symbol="EURUSD-DRIFT",
+        )
+        store.upsert_runtime_registry_binding(
+            conn,
+            drifted_binding,
+            registry_version="test-runtime-registry-v2",
+            configuration_hash="cfg-fp",
+            updated_at_utc=T0 + timedelta(hours=1),
+        )
+        window = _window(
+            window_id="paper-runtime-binding-drift",
+            domain=SampleDomain.PAPER_FORWARD,
+            trade_ids=(trade_id,),
+            first_at=T0 + timedelta(minutes=1),
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="runtime Product Registry binding drift",
+        ):
+            store.record_forward_paper_evidence_window(
+                conn,
+                campaign_window_id="fp-window-runtime-binding-drift",
+                campaign_route_id=_route().campaign_route_id,
+                window=window,
+                linked_at_utc=T0 + timedelta(hours=3),
+            )
+
+        link_count = conn.execute(
+            sa.select(sa.func.count()).select_from(
+                store.tables["forward_paper_campaign_windows"]
+            ).where(
+                store.tables["forward_paper_campaign_windows"].c.campaign_window_id
+                == "fp-window-runtime-binding-drift"
+            )
+        ).scalar_one()
+
+    assert link_count == 0

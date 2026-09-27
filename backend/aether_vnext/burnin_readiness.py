@@ -84,6 +84,9 @@ def blocker_class(code: str) -> str:
     }:
         return "external_runtime_configuration"
 
+    if value.startswith("forward_paper_ledger:runtime_binding_"):
+        return "external_runtime_configuration"
+
     if value.startswith("forward_paper_ledger:"):
         return "empirical_evidence"
 

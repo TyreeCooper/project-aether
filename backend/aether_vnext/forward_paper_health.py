@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import sqlalchemy as sa
 from sqlalchemy.engine import Connection
 
-from aether_vnext.forward_paper import ForwardPaperRouteBaseline
+from aether_vnext.forward_paper import ForwardPaperRouteBaseline, parse_route_id
 from aether_vnext.forward_paper_preflight import (
     forward_paper_baseline_snapshot_hash,
     forward_paper_route_baseline_hash,
@@ -89,6 +89,42 @@ def forward_paper_ledger_blockers(
                 ),
             )
             routes.append(route_baseline)
+
+            asset_id, _, _ = parse_route_id(route_baseline.route_id)
+            try:
+                current_runtime = store.load_runtime_registry_binding(
+                    conn,
+                    asset_id=asset_id,
+                )
+            except (KeyError, RuntimeError, TypeError, ValueError):
+                blockers.append(
+                    "forward_paper_ledger:runtime_binding_invalid:"
+                    f"{route_id}"
+                )
+            else:
+                if current_runtime is None:
+                    blockers.append(
+                        "forward_paper_ledger:runtime_binding_missing:"
+                        f"{route_id}"
+                    )
+                else:
+                    if (
+                        str(current_runtime["configuration_hash"])
+                        != route_baseline.configuration_hash
+                    ):
+                        blockers.append(
+                            "forward_paper_ledger:"
+                            "runtime_binding_configuration_mismatch:"
+                            f"{route_id}"
+                        )
+                    if (
+                        str(current_runtime["binding_hash"])
+                        != route_baseline.runtime_registry_binding_hash
+                    ):
+                        blockers.append(
+                            "forward_paper_ledger:runtime_binding_hash_mismatch:"
+                            f"{route_id}"
+                        )
 
             source_rows: list[dict[str, object]] = []
             hash_inputs_complete = True
