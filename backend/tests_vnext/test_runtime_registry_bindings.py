@@ -11,6 +11,7 @@ from aether_vnext.forward_paper_preflight import (
     preflight_forward_paper_campaign_from_book,
 )
 from aether_vnext.freeze import CONFIGURATION_HASH
+from aether_vnext.ibkr_webapi_market import IBKR_WEBAPI_MARKET_SOURCE_ID
 from aether_vnext.ninjatrader_market import NINJATRADER_MARKET_SOURCE_ID
 from aether_vnext.registry_runtime import (
     RuntimeRegistryBinding,
@@ -291,3 +292,54 @@ def test_fx_otc_strict_calendar_gate_uses_frozen_weekly_contract() -> None:
     assert "calendar_provider_missing" not in blockers
     assert "calendar_provider_implementation_missing" not in blockers
     assert "calendar_provider_calendar_unsupported" not in blockers
+
+
+def test_ibkr_equity_binding_requires_reviewed_conid() -> None:
+    missing = RuntimeRegistryBinding(
+        asset_id="nvda",
+        broker_symbol="NVDA",
+        primary_market_source_id=IBKR_WEBAPI_MARKET_SOURCE_ID,
+        stale_threshold_ms=1500,
+        calendar_provider_id="tradinghours_v3",
+        calendar_market_id="US.NASDAQ",
+        market_data_contract_id=None,
+        shortability_provider_id="reviewed.locate",
+        source_ref="reviewed-ibkr-binding",
+    )
+    blockers = binding_blockers(missing)
+    assert "market_data_contract_id_missing" in blockers
+
+    bound = RuntimeRegistryBinding(
+        asset_id="nvda",
+        broker_symbol="NVDA",
+        primary_market_source_id=IBKR_WEBAPI_MARKET_SOURCE_ID,
+        stale_threshold_ms=1500,
+        calendar_provider_id="tradinghours_v3",
+        calendar_market_id="US.NASDAQ",
+        market_data_contract_id=4815747,
+        shortability_provider_id="reviewed.locate",
+        source_ref="reviewed-ibkr-binding",
+    )
+    assert "market_data_contract_id_missing" not in binding_blockers(bound)
+    assert "non_futures_contract_fields_present" not in binding_blockers(bound)
+    assert binding_hash(bound) != binding_hash(missing)
+
+
+def test_ibkr_equity_strict_source_gate_accepts_implemented_transport() -> None:
+    binding = RuntimeRegistryBinding(
+        asset_id="tsla",
+        broker_symbol="TSLA",
+        primary_market_source_id=IBKR_WEBAPI_MARKET_SOURCE_ID,
+        stale_threshold_ms=1500,
+        calendar_provider_id="tradinghours_v3",
+        calendar_market_id="US.NASDAQ",
+        market_data_contract_id=76792991,
+        shortability_provider_id="reviewed.locate",
+        source_ref="reviewed-ibkr-binding",
+    )
+    blockers = binding_blockers(
+        binding,
+        require_market_source_implementation=True,
+    )
+    assert "primary_market_source_implementation_missing" not in blockers
+    assert "primary_market_source_asset_unsupported" not in blockers

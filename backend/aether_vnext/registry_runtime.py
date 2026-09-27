@@ -19,6 +19,7 @@ from aether_vnext.calendar_sources import (
     calendar_provider_implementation_blockers,
     calendar_requires_external_provider,
 )
+from aether_vnext.ibkr_webapi_market import IBKR_WEBAPI_MARKET_SOURCE_ID
 from aether_vnext.market_sources import market_source_implementation_blockers
 from aether_vnext.ninjatrader_market import NINJATRADER_MARKET_SOURCE_ID
 from aether_vnext.registry import (
@@ -222,16 +223,27 @@ def binding_blockers(
             )
             if as_of_utc >= cutoff:
                 blockers.append("futures_contract_in_roll_cutoff")
-    elif any(
-        value is not None
-        for value in (
-            _clean(binding.current_contract),
-            binding.market_data_contract_id,
-            binding.expiry_utc,
-            _clean(binding.next_contract),
+    else:
+        ibkr_market_bound = (
+            primary_source_id == IBKR_WEBAPI_MARKET_SOURCE_ID
+            or fallback_source_id == IBKR_WEBAPI_MARKET_SOURCE_ID
         )
-    ):
-        blockers.append("non_futures_contract_fields_present")
+        if ibkr_market_bound and binding.market_data_contract_id is None:
+            blockers.append("market_data_contract_id_missing")
+        if (
+            binding.market_data_contract_id is not None
+            and not ibkr_market_bound
+        ):
+            blockers.append("non_futures_contract_fields_present")
+        if any(
+            value is not None
+            for value in (
+                _clean(binding.current_contract),
+                binding.expiry_utc,
+                _clean(binding.next_contract),
+            )
+        ):
+            blockers.append("non_futures_contract_fields_present")
 
     return tuple(dict.fromkeys(blockers))
 

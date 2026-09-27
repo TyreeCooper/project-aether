@@ -13,6 +13,11 @@ from types import MappingProxyType
 from typing import Final
 
 from aether_vnext.adapters import KrakenPublicTickerV2
+from aether_vnext.ibkr_webapi_market import (
+    IBKR_WEBAPI_ADAPTER_VERSION,
+    IBKR_WEBAPI_MARKET_SOURCE_ID,
+    IBKR_WEBAPI_TRANSPORT_ID,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +41,13 @@ IMPLEMENTED_MARKET_SOURCES: Final = MappingProxyType(
             parser_version=KrakenPublicTickerV2.adapter_version,
             supported_assets=frozenset({"btc", "eth"}),
             public_market_data=True,
+        ),
+        IBKR_WEBAPI_MARKET_SOURCE_ID: MarketSourceCapability(
+            source_id=IBKR_WEBAPI_MARKET_SOURCE_ID,
+            transport_id=IBKR_WEBAPI_TRANSPORT_ID,
+            parser_version=IBKR_WEBAPI_ADAPTER_VERSION,
+            supported_assets=frozenset({"nvda", "tsla", "pltr"}),
+            public_market_data=False,
         ),
     }
 )

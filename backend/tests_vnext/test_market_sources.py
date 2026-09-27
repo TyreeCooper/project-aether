@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from aether_vnext.ibkr_webapi_market import IBKR_WEBAPI_MARKET_SOURCE_ID
 from aether_vnext.market_sources import (
     IMPLEMENTED_MARKET_SOURCES,
     market_source_capability,
@@ -11,14 +12,24 @@ from aether_vnext.registry_runtime import (
 )
 
 
-def test_kraken_public_is_the_only_current_implemented_market_source() -> None:
-    assert set(IMPLEMENTED_MARKET_SOURCES) == {"kraken_public"}
+def test_implemented_market_sources_are_explicit_and_asset_scoped() -> None:
+    assert set(IMPLEMENTED_MARKET_SOURCES) == {
+        "kraken_public",
+        IBKR_WEBAPI_MARKET_SOURCE_ID,
+    }
     capability = market_source_capability("kraken_public")
     assert capability is not None
     assert capability.implemented is True
     assert capability.public_market_data is True
     assert capability.transport_id == "kraken_public_websocket_v2"
     assert capability.supported_assets == frozenset({"btc", "eth"})
+
+    ibkr = market_source_capability(IBKR_WEBAPI_MARKET_SOURCE_ID)
+    assert ibkr is not None
+    assert ibkr.implemented is True
+    assert ibkr.public_market_data is False
+    assert ibkr.transport_id == "ibkr_webapi_smd_websocket"
+    assert ibkr.supported_assets == frozenset({"nvda", "tsla", "pltr"})
 
 
 def test_unknown_reviewed_source_is_not_mistaken_for_implemented_code() -> None:
@@ -63,3 +74,16 @@ def test_runtime_binding_can_require_repository_source_implementation() -> None:
         fx,
         require_market_source_implementation=True,
     ) == ("primary_market_source_implementation_missing",)
+
+
+def test_ibkr_market_source_is_equity_only() -> None:
+    assert market_source_implementation_blockers(
+        source_id=IBKR_WEBAPI_MARKET_SOURCE_ID,
+        asset_id="nvda",
+        role="primary",
+    ) == ()
+    assert market_source_implementation_blockers(
+        source_id=IBKR_WEBAPI_MARKET_SOURCE_ID,
+        asset_id="eurusd",
+        role="primary",
+    ) == ("primary_market_source_asset_unsupported",)
