@@ -76,8 +76,21 @@ class ResearchExperiment:
             "configuration_hash",
             "owner",
         ):
-            if not str(getattr(self, name)).strip():
-                raise ValueError(f"{name} is required")
+            value = getattr(self, name)
+            if (
+                not isinstance(value, str)
+                or not value
+                or value != value.strip()
+            ):
+                raise ValueError(f"{name} must be canonical text")
+        for name in ("parent_experiment_id", "supersedes_experiment_id"):
+            value = getattr(self, name)
+            if value is not None and (
+                not isinstance(value, str)
+                or not value
+                or value != value.strip()
+            ):
+                raise ValueError(f"{name} must be canonical text when present")
         if self.created_at_utc.tzinfo is None:
             raise ValueError("created_at_utc must be timezone-aware")
         if self.frozen_at_utc is not None:

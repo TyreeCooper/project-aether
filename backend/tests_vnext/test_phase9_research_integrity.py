@@ -185,6 +185,43 @@ def test_research_ledger_retains_failed_candidate_and_reproducibility_lineage() 
     assert len(annotations) == 1
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    (
+        ("experiment_id", " exp-1 ", "experiment_id must be canonical text"),
+        ("hypothesis_id", 1, "hypothesis_id must be canonical text"),
+        ("parameter_space_hash", "", "parameter_space_hash must be canonical text"),
+        ("dataset_snapshot_id", " ds-1 ", "dataset_snapshot_id must be canonical text"),
+        ("code_commit_sha", 1, "code_commit_sha must be canonical text"),
+        ("configuration_hash", " cfg-research-1 ", "configuration_hash must be canonical text"),
+        ("owner", "", "owner must be canonical text"),
+        (
+            "parent_experiment_id",
+            " parent ",
+            "parent_experiment_id must be canonical text when present",
+        ),
+        (
+            "supersedes_experiment_id",
+            1,
+            "supersedes_experiment_id must be canonical text when present",
+        ),
+    ),
+)
+def test_research_experiment_requires_canonical_identity(
+    field: str,
+    value: object,
+    message: str,
+) -> None:
+    base = _experiment()
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs[field] = value
+    with pytest.raises(ValueError, match=message):
+        ResearchExperiment(**kwargs)
+
+
 def test_parameter_variants_require_distinct_experiment_ids() -> None:
     engine, store = _store()
     with engine.begin() as conn:
