@@ -1069,3 +1069,42 @@ def test_paper_forward_exact_replay_rejects_non_integer_persisted_n() -> None:
                 )
         finally:
             conn.execute(sa.text("PRAGMA ignore_check_constraints = OFF"))
+
+
+
+def test_campaign_route_baseline_rejects_blank_historical_window_ids() -> None:
+    base = _route()
+    with pytest.raises(
+        ValueError,
+        match="historical_validation_window_ids must contain nonblank IDs",
+    ):
+        ForwardPaperRouteBaseline(
+            campaign_route_id=base.campaign_route_id,
+            campaign_id=base.campaign_id,
+            route_id=base.route_id,
+            playbook_id=base.playbook_id,
+            playbook_version=base.playbook_version,
+            configuration_hash=base.configuration_hash,
+            runtime_registry_binding_hash=base.runtime_registry_binding_hash,
+            historical_validation_window_ids=("",),
+            historical_metrics_snapshot_hash=base.historical_metrics_snapshot_hash,
+        )
+
+
+def test_campaign_route_baseline_rejects_trim_equivalent_window_ids() -> None:
+    base = _route()
+    with pytest.raises(
+        ValueError,
+        match="historical_validation_window_ids cannot contain duplicates",
+    ):
+        ForwardPaperRouteBaseline(
+            campaign_route_id=base.campaign_route_id,
+            campaign_id=base.campaign_id,
+            route_id=base.route_id,
+            playbook_id=base.playbook_id,
+            playbook_version=base.playbook_version,
+            configuration_hash=base.configuration_hash,
+            runtime_registry_binding_hash=base.runtime_registry_binding_hash,
+            historical_validation_window_ids=("heldout-1", " heldout-1 "),
+            historical_metrics_snapshot_hash=base.historical_metrics_snapshot_hash,
+        )
