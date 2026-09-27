@@ -9,6 +9,7 @@ from sqlalchemy.engine import Connection
 from aether_vnext.forward_paper import ForwardPaperRouteBaseline, parse_route_id
 from aether_vnext.forward_paper_preflight import (
     forward_paper_baseline_snapshot_hash,
+    forward_paper_campaign_route_id,
     forward_paper_route_baseline_hash,
 )
 from aether_vnext.store import VNextStore, canonical_payload_hash
@@ -89,6 +90,22 @@ def forward_paper_ledger_blockers(
                 ),
             )
             routes.append(route_baseline)
+
+            expected_campaign_route_id = forward_paper_campaign_route_id(
+                campaign_id=campaign_key,
+                route_id=route_baseline.route_id,
+                playbook_id=route_baseline.playbook_id,
+                playbook_version=route_baseline.playbook_version,
+                configuration_hash=route_baseline.configuration_hash,
+                runtime_registry_binding_hash=(
+                    route_baseline.runtime_registry_binding_hash
+                ),
+            )
+            if expected_campaign_route_id != route_baseline.campaign_route_id:
+                blockers.append(
+                    "forward_paper_ledger:campaign_route_id_mismatch:"
+                    f"{route_id}"
+                )
 
             asset_id, _, _ = parse_route_id(route_baseline.route_id)
             try:

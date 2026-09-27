@@ -617,3 +617,36 @@ def test_forward_paper_ledger_health_detects_lineage_key_drift() -> None:
     )
     assert expected in blockers
     assert blocker_class(expected) == "empirical_evidence"
+
+
+
+def test_forward_paper_ledger_health_rederives_campaign_route_id() -> None:
+    engine, store = _store()
+    campaign_id = "burnin-health-route-id-drift"
+    with engine.begin() as conn:
+        result = _start_campaign(
+            conn,
+            store,
+            campaign_id=campaign_id,
+        )
+        original_route_id = result.routes[0].campaign_route_id
+        route_table = store.tables["forward_paper_campaign_routes"]
+        tampered_route_id = "tampered-campaign-route-id"
+        conn.execute(
+            route_table.update()
+            .where(route_table.c.campaign_route_id == original_route_id)
+            .values(campaign_route_id=tampered_route_id)
+        )
+
+        blockers = forward_paper_ledger_blockers(
+            conn,
+            store=store,
+            campaign_id=campaign_id,
+        )
+
+    expected = (
+        "forward_paper_ledger:campaign_route_id_mismatch:"
+        + tampered_route_id
+    )
+    assert expected in blockers
+    assert blocker_class(expected) == "empirical_evidence"

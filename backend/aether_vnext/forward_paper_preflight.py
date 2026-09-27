@@ -180,6 +180,28 @@ def _canonical_hash(payload: object) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def forward_paper_campaign_route_id(
+    *,
+    campaign_id: str,
+    route_id: str,
+    playbook_id: str,
+    playbook_version: str,
+    configuration_hash: str,
+    runtime_registry_binding_hash: str,
+) -> str:
+    """Return the canonical deterministic identity for one campaign route."""
+    return _canonical_hash(
+        {
+            "campaign_id": campaign_id,
+            "route_id": route_id,
+            "playbook_id": playbook_id,
+            "playbook_version": playbook_version,
+            "configuration_hash": configuration_hash,
+            "runtime_registry_binding_hash": runtime_registry_binding_hash,
+        }
+    )
+
+
 def forward_paper_baseline_snapshot_hash(
     *,
     configuration_hash: str,
@@ -488,17 +510,15 @@ def preflight_forward_paper_campaign_from_book(
                             rows=rows,
                         )
                     if route_hash is not None:
-                        campaign_route_id = _canonical_hash(
-                            {
-                                "campaign_id": campaign_id,
-                                "route_id": request.route_id,
-                                "playbook_id": request.playbook_id,
-                                "playbook_version": spec.version,
-                                "configuration_hash": CONFIGURATION_HASH,
-                                "runtime_registry_binding_hash": (
-                                    runtime_registry_binding_hash
-                                ),
-                            }
+                        campaign_route_id = forward_paper_campaign_route_id(
+                            campaign_id=campaign_id,
+                            route_id=request.route_id,
+                            playbook_id=request.playbook_id,
+                            playbook_version=spec.version,
+                            configuration_hash=CONFIGURATION_HASH,
+                            runtime_registry_binding_hash=(
+                                runtime_registry_binding_hash
+                            ),
                         )
                         if not route_blockers:
                             baseline_payload.append(
