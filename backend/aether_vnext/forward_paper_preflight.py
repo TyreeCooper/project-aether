@@ -35,10 +35,14 @@ class ForwardPaperRouteRequest:
     playbook_id: str
 
     def __post_init__(self) -> None:
-        if not str(self.route_id).strip():
-            raise ValueError("route_id is required")
-        if not str(self.playbook_id).strip():
-            raise ValueError("playbook_id is required")
+        for name in ("route_id", "playbook_id"):
+            value = getattr(self, name)
+            if (
+                not isinstance(value, str)
+                or not value
+                or value != value.strip()
+            ):
+                raise ValueError(f"{name} must be canonical text")
 
 
 @dataclass(frozen=True, slots=True)

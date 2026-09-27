@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
 import sqlalchemy as sa
 
 from aether_vnext.evidence import EvidenceWindow, SampleDomain
@@ -69,6 +70,28 @@ def _window(
         metrics_snapshot_hash=f"metrics:{window_id}",
         created_at_utc=T0 - timedelta(days=1),
     )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("route_id", " eurusd:intraday:long "),
+        ("route_id", 1),
+        ("playbook_id", " pb_fx_intraday_v1_2 "),
+        ("playbook_id", ""),
+    ),
+)
+def test_route_request_requires_canonical_identity(
+    field: str,
+    value: object,
+) -> None:
+    kwargs = {
+        "route_id": "eurusd:intraday:long",
+        "playbook_id": "pb_fx_intraday_v1_2",
+    }
+    kwargs[field] = value
+    with pytest.raises(ValueError, match=f"{field} must be canonical text"):
+        ForwardPaperRouteRequest(**kwargs)
 
 
 def test_preflight_is_read_only_and_reports_exact_coverage() -> None:
