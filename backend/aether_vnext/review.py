@@ -44,8 +44,12 @@ class ReviewGateInput:
     last10_stop_grind_confirmed: bool | None = None
 
     def __post_init__(self) -> None:
-        if not self.evidence_id:
-            raise ValueError("evidence_id is required")
+        if (
+            not isinstance(self.evidence_id, str)
+            or not self.evidence_id
+            or self.evidence_id != self.evidence_id.strip()
+        ):
+            raise ValueError("evidence_id must be canonical text")
         if int(self.n_closed) < 0:
             raise ValueError("n_closed cannot be negative")
         if int(self.radar_eligible_routes) < 0:

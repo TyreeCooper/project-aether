@@ -36,6 +36,14 @@ def _gate(**overrides) -> ReviewGateInput:
     return ReviewGateInput(**values)
 
 
+@pytest.mark.parametrize("evidence_id", (" e1 ", 1, ""))
+def test_review_gate_requires_canonical_evidence_id(
+    evidence_id: object,
+) -> None:
+    with pytest.raises(ValueError, match="evidence_id must be canonical text"):
+        _gate(evidence_id=evidence_id)
+
+
 def test_probation_keep_gate_is_exact_and_no_keep_below_15() -> None:
     good = assess_review_gates(_gate(n_closed=15))
     assert good.probation_keep_eligible is True
