@@ -2797,6 +2797,24 @@ class VNextStore:
         ).mappings().first()
         if row is None:
             return None
+        required_text = {
+            "evidence_window_id": row["evidence_window_id"],
+            "route_id": row["route_id"],
+            "playbook_id": row["playbook_id"],
+            "playbook_version": row["playbook_version"],
+            "policy_version": row["policy_version"],
+            "configuration_hash": row["configuration_hash"],
+            "metrics_snapshot_hash": row["metrics_snapshot_hash"],
+        }
+        for name, value in required_text.items():
+            if (
+                not isinstance(value, str)
+                or not value
+                or value != value.strip()
+            ):
+                raise ValueError(
+                    f"persisted EvidenceWindow {name} must be canonical text"
+                )
         raw_trade_ids = row["immutable_trade_ids"]
         raw_n = row["n"]
         if (
@@ -2814,18 +2832,18 @@ class VNextStore:
         if not isinstance(raw_n, int) or isinstance(raw_n, bool):
             raise ValueError("persisted EvidenceWindow n must be an integer")
         return EvidenceWindow(
-            evidence_window_id=str(row["evidence_window_id"]),
-            route_id=str(row["route_id"]),
-            playbook_id=str(row["playbook_id"]),
-            playbook_version=str(row["playbook_version"]),
-            policy_version=str(row["policy_version"]),
-            configuration_hash=str(row["configuration_hash"]),
+            evidence_window_id=row["evidence_window_id"],
+            route_id=row["route_id"],
+            playbook_id=row["playbook_id"],
+            playbook_version=row["playbook_version"],
+            policy_version=row["policy_version"],
+            configuration_hash=row["configuration_hash"],
             sample_domain=SampleDomain(str(row["sample_domain"])),
             first_timestamp_utc=_stored_utc(row["first_timestamp_utc"]),
             last_timestamp_utc=_stored_utc(row["last_timestamp_utc"]),
             n=raw_n,
             immutable_trade_ids=tuple(raw_trade_ids),
-            metrics_snapshot_hash=str(row["metrics_snapshot_hash"]),
+            metrics_snapshot_hash=row["metrics_snapshot_hash"],
             created_at_utc=_stored_utc(row["created_at_utc"]),
         )
 

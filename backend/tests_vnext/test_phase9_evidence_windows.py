@@ -319,6 +319,46 @@ def test_window_requires_canonical_trade_ids(
         EvidenceWindow(**kwargs)
 
 
+def test_store_reload_rejects_noncanonical_scalar_identity() -> None:
+    engine = sa.create_engine(
+        "sqlite+pysqlite:///:memory:",
+        future=True,
+    )
+    store = VNextStore(schema=None)
+    with engine.begin() as conn:
+        store.create_all_for_test(conn)
+        conn.execute(
+            store.tables["policy_snapshots"].insert().values(
+                configuration_hash="cfg-9c",
+                policy_version="policy-9c",
+                effective_at_utc=T0,
+                changed_by="test",
+                change_reason="phase9c",
+                payload={},
+                created_at_utc=T0,
+            )
+        )
+        window = _window(window_id="canonical-scalar-reload")
+        store.record_evidence_window(conn, window)
+        conn.execute(
+            store.tables["evidence_windows"].update()
+            .where(
+                store.tables["evidence_windows"].c.evidence_window_id
+                == window.evidence_window_id
+            )
+            .values(route_id=" eurusd:intraday:long ")
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="persisted EvidenceWindow route_id must be canonical text",
+        ):
+            store.load_evidence_window(
+                conn,
+                evidence_window_id=window.evidence_window_id,
+            )
+
+
 def test_store_reload_rejects_noncanonical_trade_ids() -> None:
     engine = sa.create_engine(
         "sqlite+pysqlite:///:memory:",
