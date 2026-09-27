@@ -94,19 +94,34 @@ def test_reconciler_cancels_stale_open_once_and_releases_all_pending_risk() -> N
         assert first[0]["duplicate"] is False
 
         terminal = store.load_order_intent(conn, order_intent_id=intent_id)
-        ticket = store.load_ticket(
-            conn,
-            ticket_id="ticket-runtime-portfolio",
-        )
+        persisted_intent = conn.execute(
+            sa.select(store.tables["order_intents"]).where(
+                store.tables["order_intents"].c.order_intent_id == intent_id
+            )
+        ).mappings().one()
+        persisted_ticket = conn.execute(
+            sa.select(store.tables["tickets"]).where(
+                store.tables["tickets"].c.ticket_id
+                == "ticket-runtime-portfolio"
+            )
+        ).mappings().one()
+        persisted_lineage = conn.execute(
+            sa.select(store.tables["decision_lineage"]).where(
+                store.tables["decision_lineage"].c.firm_event_id
+                == "firm-runtime-portfolio"
+            )
+        ).mappings().one()
+
         assert terminal is not None
         assert terminal.state.value == "CANCELLED_STALE"
         assert terminal.reject_code == "submit_timeout"
-        assert terminal.first_killed_by == "Portfolio"
-        assert terminal.first_kill_reason == "submit_timeout"
-        assert ticket is not None
-        assert ticket.state.value == "REJECTED"
-        assert ticket.first_killed_by == "Portfolio"
-        assert ticket.first_kill_reason == "submit_timeout"
+        assert persisted_intent["first_killed_by"] == "Portfolio"
+        assert persisted_intent["first_kill_reason"] == "submit_timeout"
+        assert persisted_ticket["state"] == "REJECTED"
+        assert persisted_ticket["first_killed_by"] == "Portfolio"
+        assert persisted_ticket["first_kill_reason"] == "submit_timeout"
+        assert persisted_lineage["first_killed_by"] == "Portfolio"
+        assert persisted_lineage["first_kill_reason"] == "submit_timeout"
 
         assert _count(conn, store.tables["risk_admission_reservations"]) == 0
         assert _count(conn, store.tables["active_positions"]) == 0
