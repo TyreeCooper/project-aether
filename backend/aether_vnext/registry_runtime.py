@@ -22,6 +22,9 @@ from aether_vnext.calendar_sources import (
 from aether_vnext.ibkr_webapi_market import IBKR_WEBAPI_MARKET_SOURCE_ID
 from aether_vnext.market_sources import market_source_implementation_blockers
 from aether_vnext.ninjatrader_market import NINJATRADER_MARKET_SOURCE_ID
+from aether_vnext.shortability_sources import (
+    shortability_provider_implementation_blockers,
+)
 from aether_vnext.registry import (
     ProductRegistryRow,
     bind_futures_contract,
@@ -45,6 +48,7 @@ class RuntimeRegistryBinding:
     expiry_utc: datetime | None = None
     next_contract: str | None = None
     shortability_provider_id: str | None = None
+    shortability_stale_threshold_ms: int | None = None
     source_ref: str | None = None
 
     def __post_init__(self) -> None:
@@ -60,6 +64,13 @@ class RuntimeRegistryBinding:
             )
         ):
             raise ValueError("market_data_contract_id must be a positive integer")
+        if (
+            self.shortability_stale_threshold_ms is not None
+            and self.shortability_stale_threshold_ms <= 0
+        ):
+            raise ValueError(
+                "shortability_stale_threshold_ms must be positive"
+            )
         if self.expiry_utc is not None and self.expiry_utc.tzinfo is None:
             raise ValueError("expiry_utc must be timezone-aware")
 
@@ -89,6 +100,9 @@ def binding_payload(binding: RuntimeRegistryBinding) -> dict[str, object]:
         ),
         "next_contract": _clean(binding.next_contract),
         "shortability_provider_id": _clean(binding.shortability_provider_id),
+        "shortability_stale_threshold_ms": (
+            binding.shortability_stale_threshold_ms
+        ),
         "source_ref": _clean(binding.source_ref),
     }
 
@@ -114,6 +128,12 @@ def binding_from_payload(payload: dict[str, object]) -> RuntimeRegistryBinding:
     market_data_contract_id = (
         None if contract_id_raw is None else int(contract_id_raw)
     )
+    shortability_stale_raw = payload.get("shortability_stale_threshold_ms")
+    shortability_stale = (
+        None
+        if shortability_stale_raw is None
+        else int(shortability_stale_raw)
+    )
     return RuntimeRegistryBinding(
         asset_id=str(payload.get("asset_id") or ""),
         broker_symbol=_clean(payload.get("broker_symbol")),
@@ -127,6 +147,7 @@ def binding_from_payload(payload: dict[str, object]) -> RuntimeRegistryBinding:
         expiry_utc=expiry,
         next_contract=_clean(payload.get("next_contract")),
         shortability_provider_id=_clean(payload.get("shortability_provider_id")),
+        shortability_stale_threshold_ms=shortability_stale,
         source_ref=_clean(payload.get("source_ref")),
     )
 
@@ -137,6 +158,7 @@ def binding_blockers(
     as_of_utc: datetime | None = None,
     require_market_source_implementation: bool = False,
     require_calendar_provider_implementation: bool = False,
+    require_shortability_provider_implementation: bool = False,
 ) -> tuple[str, ...]:
     """Return exact missing/unsafe external binding facts for one seed asset."""
     asset_id = binding.asset_id.strip().lower()
@@ -188,8 +210,19 @@ def binding_blockers(
                 )
             )
 
-    if base.borrow_required and _clean(binding.shortability_provider_id) is None:
-        blockers.append("shortability_provider_missing")
+    if base.borrow_required and require_shortability_provider_implementation:
+        shortability_provider_id = _clean(binding.shortability_provider_id)
+        if shortability_provider_id is None:
+            blockers.append("shortability_provider_missing")
+        else:
+            blockers.extend(
+                shortability_provider_implementation_blockers(
+                    provider_id=shortability_provider_id,
+                    asset_id=asset_id,
+                )
+            )
+        if binding.shortability_stale_threshold_ms is None:
+            blockers.append("shortability_stale_threshold_missing")
 
     futures = base.futures_lifecycle is not None
     if futures:

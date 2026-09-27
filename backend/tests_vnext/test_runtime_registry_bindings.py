@@ -11,7 +11,10 @@ from aether_vnext.forward_paper_preflight import (
     preflight_forward_paper_campaign_from_book,
 )
 from aether_vnext.freeze import CONFIGURATION_HASH
-from aether_vnext.ibkr_webapi_market import IBKR_WEBAPI_MARKET_SOURCE_ID
+from aether_vnext.ibkr_webapi_market import (
+    IBKR_WEBAPI_MARKET_SOURCE_ID,
+    IBKR_WEBAPI_SHORTABILITY_PROVIDER_ID,
+)
 from aether_vnext.ninjatrader_market import NINJATRADER_MARKET_SOURCE_ID
 from aether_vnext.registry_runtime import (
     RuntimeRegistryBinding,
@@ -304,6 +307,7 @@ def test_ibkr_equity_binding_requires_reviewed_conid() -> None:
         calendar_market_id="US.NASDAQ",
         market_data_contract_id=None,
         shortability_provider_id="reviewed.locate",
+        shortability_stale_threshold_ms=1500,
         source_ref="reviewed-ibkr-binding",
     )
     blockers = binding_blockers(missing)
@@ -318,6 +322,7 @@ def test_ibkr_equity_binding_requires_reviewed_conid() -> None:
         calendar_market_id="US.NASDAQ",
         market_data_contract_id=4815747,
         shortability_provider_id="reviewed.locate",
+        shortability_stale_threshold_ms=1500,
         source_ref="reviewed-ibkr-binding",
     )
     assert "market_data_contract_id_missing" not in binding_blockers(bound)
@@ -335,6 +340,7 @@ def test_ibkr_equity_strict_source_gate_accepts_implemented_transport() -> None:
         calendar_market_id="US.NASDAQ",
         market_data_contract_id=76792991,
         shortability_provider_id="reviewed.locate",
+        shortability_stale_threshold_ms=1500,
         source_ref="reviewed-ibkr-binding",
     )
     blockers = binding_blockers(
@@ -343,3 +349,42 @@ def test_ibkr_equity_strict_source_gate_accepts_implemented_transport() -> None:
     )
     assert "primary_market_source_implementation_missing" not in blockers
     assert "primary_market_source_asset_unsupported" not in blockers
+
+
+def test_ibkr_shortability_strict_provider_gate_requires_implemented_source() -> None:
+    binding = RuntimeRegistryBinding(
+        asset_id="nvda",
+        broker_symbol="NVDA",
+        primary_market_source_id=IBKR_WEBAPI_MARKET_SOURCE_ID,
+        stale_threshold_ms=1500,
+        calendar_provider_id="tradinghours_v3",
+        calendar_market_id="US.NASDAQ",
+        market_data_contract_id=4815747,
+        shortability_provider_id=IBKR_WEBAPI_SHORTABILITY_PROVIDER_ID,
+        shortability_stale_threshold_ms=1500,
+        source_ref="reviewed-ibkr-binding",
+    )
+    blockers = binding_blockers(
+        binding,
+        require_shortability_provider_implementation=True,
+    )
+    assert "shortability_provider_implementation_missing" not in blockers
+    assert "shortability_provider_asset_unsupported" not in blockers
+    assert "shortability_stale_threshold_missing" not in blockers
+
+    unknown = RuntimeRegistryBinding(
+        asset_id="nvda",
+        broker_symbol="NVDA",
+        primary_market_source_id=IBKR_WEBAPI_MARKET_SOURCE_ID,
+        stale_threshold_ms=1500,
+        calendar_provider_id="tradinghours_v3",
+        calendar_market_id="US.NASDAQ",
+        market_data_contract_id=4815747,
+        shortability_provider_id="reviewed.locate",
+        shortability_stale_threshold_ms=1500,
+        source_ref="reviewed-ibkr-binding",
+    )
+    assert "shortability_provider_implementation_missing" in binding_blockers(
+        unknown,
+        require_shortability_provider_implementation=True,
+    )

@@ -50,6 +50,12 @@ def _binding(row: object) -> RuntimeRegistryBinding:
         if contract_id_raw in (None, "")
         else int(contract_id_raw)
     )
+    shortability_stale_raw = row.get("shortability_stale_threshold_ms")
+    shortability_stale = (
+        None
+        if shortability_stale_raw in (None, "")
+        else int(shortability_stale_raw)
+    )
     return RuntimeRegistryBinding(
         asset_id=str(row.get("asset_id") or ""),
         broker_symbol=row.get("broker_symbol"),
@@ -63,6 +69,7 @@ def _binding(row: object) -> RuntimeRegistryBinding:
         expiry_utc=expiry,
         next_contract=row.get("next_contract"),
         shortability_provider_id=row.get("shortability_provider_id"),
+        shortability_stale_threshold_ms=shortability_stale,
         source_ref=row.get("source_ref"),
     )
 
@@ -93,6 +100,7 @@ async def _main(
     require_complete: bool,
     require_implemented_source: bool,
     require_implemented_calendar: bool,
+    require_implemented_shortability: bool,
     output: str | None,
 ) -> int:
     payload = _load_payload(
@@ -117,6 +125,9 @@ async def _main(
                         require_calendar_provider_implementation=(
                             require_implemented_calendar
                         ),
+                        require_shortability_provider_implementation=(
+                            require_implemented_shortability
+                        ),
                     )
                     digest = store.upsert_runtime_registry_binding(
                         sync_conn,
@@ -140,6 +151,7 @@ async def _main(
         "configuration_hash": configuration_hash,
         "require_implemented_source": require_implemented_source,
         "require_implemented_calendar": require_implemented_calendar,
+        "require_implemented_shortability": require_implemented_shortability,
         "binding_count": len(report_rows),
         "complete_binding_count": sum(
             1 for row in report_rows if row["complete"]
@@ -177,6 +189,14 @@ if __name__ == "__main__":
         action="store_true",
         help="fail non-24x7 bindings whose calendar provider lacks vNext code",
     )
+    parser.add_argument(
+        "--require-implemented-shortability",
+        action="store_true",
+        help=(
+            "fail borrow-required equity bindings whose shortability provider "
+            "lacks vNext implementation"
+        ),
+    )
     parser.add_argument("--output")
     args = parser.parse_args()
     raise SystemExit(
@@ -187,6 +207,9 @@ if __name__ == "__main__":
                 require_complete=args.require_complete,
                 require_implemented_source=args.require_implemented_source,
                 require_implemented_calendar=args.require_implemented_calendar,
+                require_implemented_shortability=(
+                    args.require_implemented_shortability
+                ),
                 output=args.output,
             )
         )

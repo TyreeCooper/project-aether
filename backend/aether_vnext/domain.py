@@ -165,6 +165,7 @@ class OrderIntent:
     submit_timeout_at: datetime | None = None
     observation_id_at_reserve: str | None = None
     observation_id_at_fill: str | None = None
+    shortability_evidence_id: str | None = None
     trade_id: str | None = None
     version: int = 1
 

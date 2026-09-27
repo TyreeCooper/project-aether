@@ -226,6 +226,7 @@ def preflight_forward_paper_campaign_from_book(
     as_of_utc: datetime | None = None,
     require_market_source_implementation: bool = False,
     require_calendar_provider_implementation: bool = False,
+    require_shortability_provider_implementation: bool = False,
 ) -> ForwardPaperPreflightResult:
     """Inspect whether the current vNext book can start a C9.1 campaign."""
     if not str(campaign_id).strip():
@@ -284,6 +285,7 @@ def preflight_forward_paper_campaign_from_book(
                 route_blockers.append("exit_contract_missing")
 
         asset_id: str | None = None
+        side: str | None = None
         if spec is not None:
             try:
                 asset_id, horizon, side = parse_route_id(request.route_id)
@@ -333,6 +335,10 @@ def preflight_forward_paper_campaign_from_book(
                         ),
                         require_calendar_provider_implementation=(
                             require_calendar_provider_implementation
+                        ),
+                        require_shortability_provider_implementation=(
+                            require_shortability_provider_implementation
+                            and side == "short"
                         ),
                     )
                     route_blockers.extend(runtime_blockers)
@@ -502,6 +508,7 @@ def preflight_canonical_forward_paper_campaign_from_book(
         as_of_utc=as_of_utc,
         require_market_source_implementation=True,
         require_calendar_provider_implementation=True,
+        require_shortability_provider_implementation=True,
     )
 
 def route_baselines_from_preflight(

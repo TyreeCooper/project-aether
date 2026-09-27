@@ -32,6 +32,7 @@ def test_book_of_record_has_required_tables() -> None:
         "product_registry_state",
         "market_observations",
         "market_ingress_attempts",
+        "shortability_evidence",
         "policy_snapshots",
         "governor_state",
         "risk_admission_guard",
@@ -357,6 +358,7 @@ def test_phase5_execution_reservation_columns_are_in_current_schema() -> None:
         "acknowledged_at",
         "filled_at",
         "submit_timeout_at",
+        "shortability_evidence_id",
         "idempotency_key",
         "observation_id_at_reserve",
         "observation_id_at_fill",
@@ -378,11 +380,11 @@ def test_phase5_execution_reservation_columns_are_in_current_schema() -> None:
     assert "fill_market_observation_id" not in columns
 
 
-def test_runtime_schema_facade_is_pinned_to_revision_0023() -> None:
+def test_runtime_schema_facade_is_pinned_to_revision_0024() -> None:
     _, store = _engine_and_store()
     backend = Path(__file__).resolve().parents[1]
     facade = (backend / "aether_vnext" / "schema.py").read_text(encoding="utf-8")
-    assert "schema_v0023" in facade
+    assert "schema_v0024" in facade
 
     campaign_migration = (
         backend
@@ -449,6 +451,36 @@ def test_runtime_schema_facade_is_pinned_to_revision_0023() -> None:
         "rejection_reasons",
         "created_at_utc",
     } <= set(ingress.c.keys())
+
+
+    shortability_migration = (
+        backend
+        / "alembic"
+        / "versions"
+        / "0024_aether_vnext_shortability_evidence.py"
+    ).read_text(encoding="utf-8")
+    assert 'revision: str = "0024"' in shortability_migration
+    assert 'down_revision: Union[str, None] = "0023"' in shortability_migration
+    assert "shortability_evidence" in shortability_migration
+    assert "trg_shortability_evidence_immutable" in shortability_migration
+
+    shortability = store.tables["shortability_evidence"]
+    assert {
+        "evidence_id",
+        "asset_id",
+        "configuration_hash",
+        "runtime_registry_binding_hash",
+        "provider_id",
+        "market_data_contract_id",
+        "shortable_shares",
+        "fee_rate_raw",
+        "shortable_raw",
+        "market_data_availability",
+        "provider_updated_at_utc",
+        "received_at_utc",
+        "adapter_version",
+        "created_at_utc",
+    } <= set(shortability.c.keys())
 
 
 def test_phase6_atomic_risk_admission_schema_is_explicit() -> None:

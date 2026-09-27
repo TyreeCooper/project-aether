@@ -193,6 +193,7 @@ jobs:
             --manifest-json "$AETHER_VNEXT_RUNTIME_BINDINGS_JSON"
             --require-complete
             --require-implemented-calendar
+            --require-implemented-shortability
             --output aether-vnext-runtime-bindings.json
           )
           if [ "${{ steps.request.outputs.action }}" != "initialize_calendar_probe" ]; then

@@ -99,6 +99,10 @@ from aether_vnext.playbooks import (
     playbook,
 )
 from aether_vnext.seed_truth import ASSET_BROKER_ACCOUNT
+from aether_vnext.shortability import (
+    ShortabilityEvidence,
+    evaluate_shortability,
+)
 from aether_vnext.sniper import SniperDecision, signal_key_for_setup
 
 
@@ -478,6 +482,118 @@ class VNextStore:
             if loaded is not None:
                 out.append(loaded)
         return tuple(out)
+
+    def record_shortability_evidence(
+        self,
+        conn: Connection,
+        evidence: ShortabilityEvidence,
+        *,
+        configuration_hash: str,
+        runtime_registry_binding_hash: str,
+        created_at_utc: datetime,
+    ) -> None:
+        """Append immutable provider-derived shortability evidence."""
+        if created_at_utc.tzinfo is None:
+            raise ValueError("created_at_utc must be timezone-aware")
+        if not str(configuration_hash).strip():
+            raise ValueError("configuration_hash is required")
+        if not str(runtime_registry_binding_hash).strip():
+            raise ValueError("runtime_registry_binding_hash is required")
+
+        runtime = self.load_runtime_registry_binding(
+            conn,
+            asset_id=evidence.asset_id,
+        )
+        if runtime is None:
+            raise KeyError(
+                f"runtime registry binding missing: {evidence.asset_id}"
+            )
+        if runtime["configuration_hash"] != str(configuration_hash):
+            raise ValueError(
+                "shortability configuration_hash does not match runtime binding"
+            )
+        if runtime["binding_hash"] != str(runtime_registry_binding_hash):
+            raise ValueError(
+                "shortability runtime binding hash does not match current binding"
+            )
+        binding = runtime["binding"]
+        if str(binding.shortability_provider_id or "").strip() != evidence.provider_id:
+            raise ValueError("shortability provider identity mismatch")
+        if binding.market_data_contract_id != evidence.market_data_contract_id:
+            raise ValueError("shortability contract identity mismatch")
+
+        conn.execute(
+            self.tables["shortability_evidence"].insert().values(
+                evidence_id=evidence.evidence_id,
+                asset_id=evidence.asset_id,
+                configuration_hash=str(configuration_hash),
+                runtime_registry_binding_hash=str(
+                    runtime_registry_binding_hash
+                ),
+                provider_id=evidence.provider_id,
+                market_data_contract_id=evidence.market_data_contract_id,
+                shortable_shares=evidence.shortable_shares,
+                fee_rate_raw=evidence.fee_rate_raw,
+                shortable_raw=evidence.shortable_raw,
+                market_data_availability=evidence.market_data_availability,
+                provider_updated_at_utc=evidence.provider_updated_at_utc,
+                received_at_utc=evidence.received_at_utc,
+                adapter_version=evidence.adapter_version,
+                created_at_utc=created_at_utc,
+            )
+        )
+
+    def latest_shortability_evidence(
+        self,
+        conn: Connection,
+        *,
+        asset_id: str,
+        configuration_hash: str,
+        runtime_registry_binding_hash: str,
+    ) -> ShortabilityEvidence | None:
+        """Load newest immutable borrow evidence for the exact current binding."""
+        table = self.tables["shortability_evidence"]
+        row = conn.execute(
+            sa.select(table)
+            .where(
+                sa.and_(
+                    table.c.asset_id == str(asset_id).strip().lower(),
+                    table.c.configuration_hash == str(configuration_hash),
+                    table.c.runtime_registry_binding_hash
+                    == str(runtime_registry_binding_hash),
+                )
+            )
+            .order_by(
+                table.c.received_at_utc.desc(),
+                table.c.evidence_id.desc(),
+            )
+            .limit(1)
+        ).mappings().first()
+        if row is None:
+            return None
+        return ShortabilityEvidence(
+            evidence_id=str(row["evidence_id"]),
+            asset_id=str(row["asset_id"]),
+            provider_id=str(row["provider_id"]),
+            market_data_contract_id=int(row["market_data_contract_id"]),
+            shortable_shares=float(row["shortable_shares"]),
+            fee_rate_raw=(
+                None
+                if row["fee_rate_raw"] is None
+                else str(row["fee_rate_raw"])
+            ),
+            shortable_raw=(
+                None
+                if row["shortable_raw"] is None
+                else str(row["shortable_raw"])
+            ),
+            market_data_availability=str(row["market_data_availability"]),
+            provider_updated_at_utc=_stored_utc(
+                row["provider_updated_at_utc"]
+            ),
+            received_at_utc=_stored_utc(row["received_at_utc"]),
+            adapter_version=str(row["adapter_version"]),
+        )
 
     def record_market_observation(
         self,
@@ -2648,6 +2764,7 @@ class VNextStore:
             submit_timeout_at=_stored_utc(row["submit_timeout_at"]),
             observation_id_at_reserve=row["observation_id_at_reserve"],
             observation_id_at_fill=row["observation_id_at_fill"],
+            shortability_evidence_id=row["shortability_evidence_id"],
             trade_id=row["trade_id"],
             version=int(row["version"]),
         )
@@ -3064,6 +3181,8 @@ class VNextStore:
                         "READY ticket playbook Risk hitch drift"
                     )
 
+        shortability_evidence_id: str | None = None
+
         # Let the existing Phase-A contract own canonical rejection behavior
         # when the ticket cannot be risk-evaluated as a valid READY candidate.
         preflight_valid = (
@@ -3128,6 +3247,7 @@ class VNextStore:
                 event_id=event_id,
                 actor=actor,
                 intent_kind="OPEN",
+                shortability_evidence_id=shortability_evidence_id,
             )
 
         governor_block = self.governor_block_for_admission(
@@ -3148,6 +3268,57 @@ class VNextStore:
                 market_observation_id=market_observation_id,
                 governor_scope_key=str(governor_block["scope_key"]),
             )
+
+        product = registry_row(asset_id)
+        if str(side).strip().lower() == "short" and product.borrow_required:
+            runtime_binding = self.load_runtime_registry_binding(
+                conn,
+                asset_id=asset_id,
+            )
+            shortability_decision = None
+            if (
+                runtime_binding is not None
+                and runtime_binding["configuration_hash"] == configuration_hash
+            ):
+                binding = runtime_binding["binding"]
+                provider_id = str(
+                    binding.shortability_provider_id or ""
+                ).strip()
+                contract_id = binding.market_data_contract_id
+                max_age_ms = binding.shortability_stale_threshold_ms
+                if (
+                    provider_id
+                    and contract_id is not None
+                    and max_age_ms is not None
+                ):
+                    evidence = self.latest_shortability_evidence(
+                        conn,
+                        asset_id=asset_id,
+                        configuration_hash=configuration_hash,
+                        runtime_registry_binding_hash=str(
+                            runtime_binding["binding_hash"]
+                        ),
+                    )
+                    shortability_decision = evaluate_shortability(
+                        evidence,
+                        expected_asset_id=asset_id,
+                        expected_provider_id=provider_id,
+                        expected_contract_id=int(contract_id),
+                        requested_shares=float(qty),
+                        as_of_utc=created_at_utc,
+                        max_age_ms=int(max_age_ms),
+                    )
+            if shortability_decision is None or not shortability_decision.allowed:
+                return self.reject_ticket_pre_reserve(
+                    conn,
+                    ticket_id=ticket_id,
+                    reason_code="product_side_unsupported",
+                    at_utc=created_at_utc,
+                    event_id=event_id,
+                    actor=actor,
+                    market_observation_id=market_observation_id,
+                )
+            shortability_evidence_id = shortability_decision.evidence_id
 
         ticket_stop = float(ticket["stop_price"])
         if (
@@ -3321,6 +3492,7 @@ class VNextStore:
             event_id=event_id,
             actor=actor,
             intent_kind="OPEN",
+            shortability_evidence_id=shortability_evidence_id,
         )
         if not result.get("ok") or result.get("duplicate"):
             return result
@@ -3685,6 +3857,7 @@ class VNextStore:
         event_id: str,
         actor: str,
         intent_kind: str = "OPEN",
+        shortability_evidence_id: str | None = None,
     ) -> dict[str, Any]:
         """Atomically reserve one broker-local ledger and create RESERVED intent.
 
@@ -4000,6 +4173,7 @@ class VNextStore:
                 ready_spread_bps=ready_spread_bps,
                 hard_stop_price=hard_stop_price,
                 submit_timeout_at=submit_timeout_at,
+                shortability_evidence_id=shortability_evidence_id,
                 observation_id_at_fill=None,
                 trade_id=None,
                 version=1,
@@ -4046,6 +4220,7 @@ class VNextStore:
                 "idempotency_key": idempotency_key,
                 "signal_key": signal_key,
                 "position_key": position_key,
+                "shortability_evidence_id": shortability_evidence_id,
             },
         )
         return {

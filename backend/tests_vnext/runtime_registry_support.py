@@ -43,6 +43,9 @@ def make_runtime_binding(
         shortability_provider_id=(
             "test.shortability" if is_equity_borrow else None
         ),
+        shortability_stale_threshold_ms=(
+            1500 if is_equity_borrow else None
+        ),
         source_ref="test-fixture",
     )
 

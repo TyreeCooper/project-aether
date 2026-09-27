@@ -10,7 +10,10 @@ import pytest
 from aether_vnext.ibkr_webapi_market import (
     IBKR_CPGW_WEBSOCKET_URL,
     IBKR_MARKET_DATA_FIELDS,
+    IBKR_SHORTABILITY_FIELDS,
     IBKR_WEBAPI_MARKET_SOURCE_ID,
+    IBKR_WEBAPI_SHORTABILITY_PROVIDER_ID,
+    fetch_ibkr_shortability,
     fetch_ibkr_top_of_book,
     market_data_subscription,
 )
@@ -267,3 +270,105 @@ def test_contract_ids_must_be_unique_positive_integers() -> None:
                 connect_factory=lambda *args, **kwargs: None,
             )
         )
+
+
+def test_shortability_subscription_fields_are_exact_documented_tags() -> None:
+    assert IBKR_SHORTABILITY_FIELDS == ("7636", "7637", "7644", "6509")
+    encoded = market_data_subscription(
+        contract_id=265598,
+        fields=IBKR_SHORTABILITY_FIELDS,
+    )
+    assert encoded == (
+        'smd+265598+{"fields":["7636","7637","7644","6509"]}'
+    )
+
+
+@pytest.mark.asyncio
+async def test_shortability_stream_builds_realtime_provider_evidence() -> None:
+    socket, calls, factory = _connect(
+        [
+            {
+                "conid": 265598,
+                "6509": "RpB",
+                "7636": "12,500",
+                "_updated": 1_796_000_000_125,
+            },
+            {
+                "conid": 265598,
+                "7637": "0.42",
+                "7644": "Shortable",
+            },
+        ]
+    )
+
+    batch = await fetch_ibkr_shortability(
+        asset_contract_ids={"nvda": 265598},
+        session_token="session-cookie-token",
+        timeout_s=1.0,
+        connect_factory=factory,
+    )
+
+    assert calls[0][1]["additional_headers"] == {
+        "Cookie": "api=session-cookie-token"
+    }
+    assert socket.sent == [
+        'smd+265598+{"fields":["7636","7637","7644","6509"]}'
+    ]
+    assert len(batch.evidence) == 1
+    evidence = batch.evidence[0]
+    assert evidence.asset_id == "nvda"
+    assert evidence.provider_id == IBKR_WEBAPI_SHORTABILITY_PROVIDER_ID
+    assert evidence.market_data_contract_id == 265598
+    assert evidence.shortable_shares == 12_500
+    assert evidence.market_data_availability == "RpB"
+    assert evidence.provider_updated_at_utc == datetime.fromtimestamp(
+        1_796_000_000.125,
+        tz=UTC,
+    )
+
+
+@pytest.mark.asyncio
+async def test_shortability_delayed_or_frozen_data_fails_closed() -> None:
+    for availability in ("DpB", "ZpB", "YpB", "NpB"):
+        _, _, factory = _connect(
+            [
+                {
+                    "conid": 265598,
+                    "6509": availability,
+                    "7636": "1000",
+                }
+            ]
+        )
+        with pytest.raises(
+            RuntimeError,
+            match="ibkr_shortability_not_realtime",
+        ):
+            await fetch_ibkr_shortability(
+                asset_contract_ids={"nvda": 265598},
+                session_token="token",
+                timeout_s=1.0,
+                connect_factory=factory,
+            )
+
+
+@pytest.mark.asyncio
+async def test_shortability_zero_shares_is_valid_unavailable_evidence() -> None:
+    _, _, factory = _connect(
+        [
+            {
+                "conid": 265598,
+                "6509": "RpB",
+                "7636": "0",
+                "7637": "0.00",
+                "7644": "Not shortable",
+                "_updated": 1_796_000_000_125,
+            }
+        ]
+    )
+    batch = await fetch_ibkr_shortability(
+        asset_contract_ids={"nvda": 265598},
+        session_token="token",
+        timeout_s=1.0,
+        connect_factory=factory,
+    )
+    assert batch.evidence[0].shortable_shares == 0

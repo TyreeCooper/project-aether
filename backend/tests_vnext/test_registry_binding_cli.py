@@ -114,10 +114,12 @@ def test_manifest_parser_preserves_ninjatrader_contract_id() -> None:
     assert bindings[0].market_data_contract_id == 987654
 
 
-def test_cli_exposes_implemented_calendar_gate() -> None:
+def test_cli_exposes_implemented_calendar_and_shortability_gates() -> None:
     source = SCRIPT.read_text(encoding="utf-8")
     assert "--require-implemented-calendar" in source
     assert "require_calendar_provider_implementation" in source
+    assert "--require-implemented-shortability" in source
+    assert "require_shortability_provider_implementation" in source
 
 
 def test_manifest_parser_preserves_calendar_market_identity() -> None:
@@ -140,3 +142,27 @@ def test_manifest_parser_preserves_calendar_market_identity() -> None:
     _, _, bindings = module._parse_manifest(payload)
     assert bindings[0].calendar_provider_id == "tradinghours_v3"
     assert bindings[0].calendar_market_id == "US.NYSE"
+
+
+def test_manifest_parser_preserves_shortability_freshness_policy() -> None:
+    module = _module()
+    payload = {
+        "registry_version": "shortability-v1",
+        "configuration_hash": CONFIGURATION_HASH,
+        "bindings": [
+            {
+                "asset_id": "nvda",
+                "broker_symbol": "NVDA",
+                "primary_market_source_id": "ibkr_webapi_market_data",
+                "stale_threshold_ms": 1500,
+                "calendar_provider_id": "tradinghours_v3",
+                "calendar_market_id": "US.NASDAQ",
+                "market_data_contract_id": 4815747,
+                "shortability_provider_id": "ibkr_webapi_shortability",
+                "shortability_stale_threshold_ms": 2000,
+            }
+        ],
+    }
+    _, _, bindings = module._parse_manifest(payload)
+    assert bindings[0].shortability_provider_id == "ibkr_webapi_shortability"
+    assert bindings[0].shortability_stale_threshold_ms == 2000

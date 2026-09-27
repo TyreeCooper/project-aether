@@ -5,7 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from aether_vnext.ibkr_webapi_market import IBKR_WEBAPI_MARKET_SOURCE_ID
+from aether_vnext.ibkr_webapi_market import (
+    IBKR_WEBAPI_MARKET_SOURCE_ID,
+    IBKR_WEBAPI_SHORTABILITY_PROVIDER_ID,
+)
 from aether_vnext.registry_runtime import RuntimeRegistryBinding
 
 
@@ -40,7 +43,8 @@ def _row(asset_id: str, **overrides) -> dict:
             "tsla": 76792991,
             "pltr": 444857009,
         }[asset_id],
-        "shortability_provider_id": "reviewed.locate",
+        "shortability_provider_id": IBKR_WEBAPI_SHORTABILITY_PROVIDER_ID,
+        "shortability_stale_threshold_ms": 1500,
         "source_ref": "test",
     }
     values.update(overrides)
@@ -90,6 +94,18 @@ def test_probe_rejects_missing_or_wrong_runtime_identity() -> None:
             requested_assets=("nvda",),
         )
 
+    with pytest.raises(RuntimeError, match="shortability provider"):
+        module._selected_bindings(
+            (_row("nvda", shortability_provider_id="other.locate"),),
+            requested_assets=("nvda",),
+        )
+
+    with pytest.raises(RuntimeError, match="shortability stale threshold"):
+        module._selected_bindings(
+            (_row("nvda", shortability_stale_threshold_ms=None),),
+            requested_assets=("nvda",),
+        )
+
     with pytest.raises(RuntimeError, match="not TradingHours"):
         module._selected_bindings(
             (_row("nvda", calendar_provider_id="other.calendar"),),
@@ -121,6 +137,8 @@ def test_probe_is_market_data_only_and_credentials_are_external() -> None:
     assert "AETHER_VNEXT_IBKR_AUTH_MODE" in source
     assert "AETHER_VNEXT_IBKR_WEBSOCKET_URL" in source
     assert "AETHER_VNEXT_TRADINGHOURS_API_TOKEN" in source
+    assert "fetch_ibkr_shortability" in source
+    assert "record_shortability_evidence" in source
 
     prohibited = (
         "place_order",

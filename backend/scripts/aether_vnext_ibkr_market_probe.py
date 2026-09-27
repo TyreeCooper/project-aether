@@ -27,6 +27,8 @@ from aether_vnext.db_runtime import open_vnext_engine
 from aether_vnext.ibkr_webapi_market import (
     IBKR_CPGW_WEBSOCKET_URL,
     IBKR_WEBAPI_MARKET_SOURCE_ID,
+    IBKR_WEBAPI_SHORTABILITY_PROVIDER_ID,
+    fetch_ibkr_shortability,
     fetch_ibkr_top_of_book,
 )
 from aether_vnext.market_ingress import ingest_market_quotes
@@ -85,6 +87,17 @@ def _selected_bindings(
             raise RuntimeError(
                 f"{asset_id} reviewed IBKR conid is missing"
             )
+        if (
+            binding.shortability_provider_id
+            != IBKR_WEBAPI_SHORTABILITY_PROVIDER_ID
+        ):
+            raise RuntimeError(
+                f"{asset_id} shortability provider is not IBKR Web API"
+            )
+        if binding.shortability_stale_threshold_ms is None:
+            raise RuntimeError(
+                f"{asset_id} shortability stale threshold is missing"
+            )
         if binding.calendar_provider_id != TRADINGHOURS_CALENDAR_PROVIDER_ID:
             raise RuntimeError(
                 f"{asset_id} calendar provider is not TradingHours"
@@ -121,8 +134,11 @@ def _contract_map(rows: tuple[dict, ...]) -> dict[str, int]:
     }
 
 
-def _serialize(batch, ingress_results) -> dict[str, object]:
+def _serialize(batch, shortability_batch, ingress_results) -> dict[str, object]:
     by_asset = {row.asset_id: row for row in ingress_results}
+    shortability_by_asset = {
+        row.asset_id: row for row in shortability_batch.evidence
+    }
     return {
         "provider": "IBKR",
         "transport": "webapi_smd_websocket",
@@ -157,6 +173,35 @@ def _serialize(batch, ingress_results) -> dict[str, object]:
                 "rejection_reasons": list(
                     by_asset[quote.asset_id].rejection_reasons
                 ),
+                "shortability": {
+                    "evidence_id": shortability_by_asset[
+                        quote.asset_id
+                    ].evidence_id,
+                    "shortable_shares": shortability_by_asset[
+                        quote.asset_id
+                    ].shortable_shares,
+                    "fee_rate_raw": shortability_by_asset[
+                        quote.asset_id
+                    ].fee_rate_raw,
+                    "shortable_raw": shortability_by_asset[
+                        quote.asset_id
+                    ].shortable_raw,
+                    "market_data_availability": shortability_by_asset[
+                        quote.asset_id
+                    ].market_data_availability,
+                    "provider_updated_at_utc": (
+                        None
+                        if shortability_by_asset[
+                            quote.asset_id
+                        ].provider_updated_at_utc is None
+                        else shortability_by_asset[
+                            quote.asset_id
+                        ].provider_updated_at_utc.isoformat()
+                    ),
+                    "received_at_utc": shortability_by_asset[
+                        quote.asset_id
+                    ].received_at_utc.isoformat(),
+                },
             }
             for quote in batch.quotes
         ],
@@ -232,8 +277,17 @@ async def _main(
         )
         calendar_provider = TradingHoursCalendarProvider(calendar_snapshot)
 
+        contract_map = _contract_map(selected)
         batch = await fetch_ibkr_top_of_book(
-            asset_contract_ids=_contract_map(selected),
+            asset_contract_ids=contract_map,
+            session_token=session_token,
+            auth_mode=auth_mode,
+            websocket_url=websocket_url,
+            timeout_s=timeout_s,
+            allow_insecure_localhost_tls=allow_insecure,
+        )
+        shortability_batch = await fetch_ibkr_shortability(
+            asset_contract_ids=contract_map,
             session_token=session_token,
             auth_mode=auth_mode,
             websocket_url=websocket_url,
@@ -243,8 +297,25 @@ async def _main(
 
         ingress_results = []
         as_of_utc = datetime.now(timezone.utc)
+        selected_by_asset = {
+            row["binding"].asset_id.strip().lower(): row
+            for row in selected
+        }
         async with engine.begin() as connection:
             def persist(sync_conn):
+                for evidence in shortability_batch.evidence:
+                    runtime_row = selected_by_asset[evidence.asset_id]
+                    store.record_shortability_evidence(
+                        sync_conn,
+                        evidence,
+                        configuration_hash=str(
+                            runtime_row["configuration_hash"]
+                        ),
+                        runtime_registry_binding_hash=str(
+                            runtime_row["binding_hash"]
+                        ),
+                        created_at_utc=as_of_utc,
+                    )
                 for quote in batch.quotes:
                     ingress_results.append(
                         ingest_market_quotes(
@@ -259,7 +330,11 @@ async def _main(
                     )
             await connection.run_sync(persist)
 
-    payload = _serialize(batch, tuple(ingress_results))
+    payload = _serialize(
+        batch,
+        shortability_batch,
+        tuple(ingress_results),
+    )
     _emit(payload, output)
     if require_executable and not payload["all_executable"]:
         return 2
