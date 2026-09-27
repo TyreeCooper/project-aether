@@ -319,6 +319,36 @@ def test_dataset_snapshot_rejects_future_data_and_non_pit() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("backtest_run_id", " run-1 "),
+        ("experiment_id", 1),
+        ("run_type", " held_out "),
+        ("dataset_snapshot_id", ""),
+        ("playbook_id", " pb_fx_intraday_v1_2 "),
+        ("playbook_version", 1),
+        ("code_commit_sha", ""),
+        ("configuration_hash", " cfg-research-1 "),
+        ("cost_model_version", 1),
+        ("execution_model_version", ""),
+        ("status", " FAILED_EVIDENCE "),
+    ),
+)
+def test_backtest_run_requires_canonical_identity(
+    field: str,
+    value: object,
+) -> None:
+    base = _run()
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs[field] = value
+    with pytest.raises(ValueError, match=f"{field} must be canonical text"):
+        BacktestRun(**kwargs)
+
+
 def test_fold_result_rejects_random_shuffle_geometry() -> None:
     with pytest.raises(ValueError, match="chronological"):
         FoldResult(

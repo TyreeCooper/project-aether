@@ -194,8 +194,13 @@ class BacktestRun:
             "execution_model_version",
             "status",
         ):
-            if not str(getattr(self, name)).strip():
-                raise ValueError(f"{name} is required")
+            value = getattr(self, name)
+            if (
+                not isinstance(value, str)
+                or not value
+                or value != value.strip()
+            ):
+                raise ValueError(f"{name} must be canonical text")
         if self.started_at_utc.tzinfo is None:
             raise ValueError("started_at_utc must be timezone-aware")
         if self.finished_at_utc is not None:
