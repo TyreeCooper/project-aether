@@ -304,20 +304,22 @@ def forward_paper_ledger_blockers(
 
                 raw_heldout_trade_ids = source["immutable_trade_ids"]
                 heldout_trade_ids = (
-                    tuple(
-                        str(value).strip()
-                        for value in raw_heldout_trade_ids
-                    )
+                    tuple(raw_heldout_trade_ids)
                     if isinstance(raw_heldout_trade_ids, list)
                     else ()
                 )
                 heldout_n = source["n"]
                 heldout_sample_shape_ok = bool(
                     isinstance(raw_heldout_trade_ids, list)
+                    and all(
+                        isinstance(value, str)
+                        and bool(value)
+                        and value == value.strip()
+                        for value in raw_heldout_trade_ids
+                    )
                     and isinstance(heldout_n, int)
                     and not isinstance(heldout_n, bool)
                     and heldout_trade_ids
-                    and all(heldout_trade_ids)
                     and len(heldout_trade_ids)
                     == len(set(heldout_trade_ids))
                     and heldout_n == len(heldout_trade_ids)
@@ -651,17 +653,22 @@ def forward_paper_ledger_blockers(
 
         raw_trade_ids = window["immutable_trade_ids"]
         trade_ids = (
-            tuple(str(value).strip() for value in raw_trade_ids)
+            tuple(raw_trade_ids)
             if isinstance(raw_trade_ids, list)
             else ()
         )
         sample_n = window["n"]
         sample_shape_ok = bool(
             isinstance(raw_trade_ids, list)
+            and all(
+                isinstance(value, str)
+                and bool(value)
+                and value == value.strip()
+                for value in raw_trade_ids
+            )
             and isinstance(sample_n, int)
             and not isinstance(sample_n, bool)
             and trade_ids
-            and all(trade_ids)
             and len(trade_ids) == len(set(trade_ids))
             and sample_n == len(trade_ids)
         )

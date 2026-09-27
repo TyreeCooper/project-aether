@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import timedelta
 
+import pytest
 import sqlalchemy as sa
 
 import aether_vnext.forward_paper_health as forward_paper_health_module
@@ -759,7 +760,10 @@ def test_forward_paper_ledger_health_revalidates_current_playbook_source(
 
 
 
-def test_forward_paper_ledger_health_rejects_scalar_trade_id_payload() -> None:
+@pytest.mark.parametrize("malformed_trade_ids", ("x", [" x "]))
+def test_forward_paper_ledger_health_rejects_malformed_trade_id_payload(
+    malformed_trade_ids: object,
+) -> None:
     engine, store = _store()
     campaign_id = "burnin-health-scalar-trade-ids"
     window_id = "burnin-health-scalar-trade-ids-paper"
@@ -801,7 +805,7 @@ def test_forward_paper_ledger_health_rejects_scalar_trade_id_payload() -> None:
                 store.tables["evidence_windows"].c.evidence_window_id
                 == window_id
             )
-            .values(immutable_trade_ids="x")
+            .values(immutable_trade_ids=malformed_trade_ids)
         )
 
         blockers = forward_paper_ledger_blockers(
@@ -960,7 +964,10 @@ def test_forward_paper_ledger_health_rejects_scalar_dataset_asset_ids() -> None:
 
 
 
-def test_forward_paper_ledger_health_rejects_scalar_heldout_trade_ids() -> None:
+@pytest.mark.parametrize("malformed_trade_ids", ("x", [" x "]))
+def test_forward_paper_ledger_health_rejects_malformed_heldout_trade_ids(
+    malformed_trade_ids: object,
+) -> None:
     engine, store = _store()
     campaign_id = "burnin-health-scalar-heldout-trades"
     with engine.begin() as conn:
@@ -974,7 +981,7 @@ def test_forward_paper_ledger_health_rejects_scalar_heldout_trade_ids() -> None:
         conn.execute(
             evidence.update()
             .where(evidence.c.evidence_window_id == window_id)
-            .values(immutable_trade_ids="x")
+            .values(immutable_trade_ids=malformed_trade_ids)
         )
 
         blockers = forward_paper_ledger_blockers(
