@@ -1,4 +1,4 @@
-"""Read-only CLI for AETHER vNext forward-paper burn-in preflight."""
+"""Read-only canonical CLI for AETHER vNext forward-paper burn-in preflight."""
 from __future__ import annotations
 
 import argparse
@@ -8,35 +8,29 @@ from pathlib import Path
 
 from aether_vnext.db_runtime import open_vnext_engine
 from aether_vnext.forward_paper_preflight import (
-    ForwardPaperRouteRequest,
-    canonical_forward_paper_route_requests,
-    preflight_forward_paper_campaign_from_book,
+    canonical_forward_paper_manifest,
+    preflight_canonical_forward_paper_campaign_from_book,
 )
 from aether_vnext.store import VNextStore
 
 
-def _parse_routes(raw: str) -> tuple[ForwardPaperRouteRequest, ...]:
-    payload = json.loads(raw)
-    if not isinstance(payload, list) or not payload:
-        raise ValueError("routes JSON must be a non-empty list")
-    out: list[ForwardPaperRouteRequest] = []
-    for row in payload:
-        if not isinstance(row, dict):
-            raise ValueError("each route entry must be an object")
-        out.append(
-            ForwardPaperRouteRequest(
-                route_id=str(row.get("route_id") or ""),
-                playbook_id=str(row.get("playbook_id") or ""),
-            )
-        )
-    return tuple(out)
-
-
 def _serialize(result) -> dict[str, object]:
+    manifest = canonical_forward_paper_manifest()
     return {
         "campaign_id": result.campaign_id,
         "configuration_hash": result.configuration_hash,
         "policy_version": result.policy_version,
+        "canonical_coverage_route_count": manifest.coverage_route_count,
+        "canonical_executable_route_count": manifest.executable_route_count,
+        "canonical_excluded_route_count": manifest.excluded_route_count,
+        "canonical_exclusions": [
+            {
+                "route_id": row.request.route_id,
+                "playbook_id": row.request.playbook_id,
+                "reason": row.reason,
+            }
+            for row in manifest.exclusions
+        ],
         "requested_route_count": result.requested_route_count,
         "startable": result.startable,
         "baseline_snapshot_hash": result.baseline_snapshot_hash,
@@ -69,27 +63,15 @@ def _emit_report(payload: dict[str, object], output: str | None) -> None:
         path.write_text(rendered + "\n", encoding="utf-8")
 
 
-async def _main(
-    campaign_id: str,
-    routes_json: str | None,
-    canonical_routes: bool,
-    output: str | None,
-) -> int:
-    if canonical_routes:
-        routes = canonical_forward_paper_route_requests()
-    elif routes_json is not None:
-        routes = _parse_routes(routes_json)
-    else:
-        raise ValueError("choose --canonical-routes or --routes-json")
+async def _main(campaign_id: str, output: str | None) -> int:
     store = VNextStore(schema="aether_vnext")
     async with open_vnext_engine() as engine:
         async with engine.connect() as connection:
             result = await connection.run_sync(
-                lambda sync_conn: preflight_forward_paper_campaign_from_book(
+                lambda sync_conn: preflight_canonical_forward_paper_campaign_from_book(
                     sync_conn,
                     store,
                     campaign_id=campaign_id,
-                    requested_routes=routes,
                 )
             )
     payload = _serialize(result)
@@ -100,18 +82,6 @@ async def _main(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--campaign-id", required=True)
-    route_group = parser.add_mutually_exclusive_group(required=True)
-    route_group.add_argument("--routes-json")
-    route_group.add_argument("--canonical-routes", action="store_true")
     parser.add_argument("--output")
     args = parser.parse_args()
-    raise SystemExit(
-        asyncio.run(
-            _main(
-                args.campaign_id,
-                args.routes_json,
-                args.canonical_routes,
-                args.output,
-            )
-        )
-    )
+    raise SystemExit(asyncio.run(_main(args.campaign_id, args.output)))

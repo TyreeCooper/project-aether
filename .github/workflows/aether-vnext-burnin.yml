@@ -4,19 +4,16 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "initialize applies migrations/bootstrap; preflight is read-only"
+        description: "initialize applies migrations/bootstrap; start_campaign persists only after canonical preflight"
         required: true
         default: "preflight"
         type: choice
         options:
           - preflight
           - initialize_and_preflight
+          - start_campaign
       campaign_id:
         description: "Forward-paper campaign identity to inspect"
-        required: true
-        type: string
-      routes_json:
-        description: 'JSON list: [{"route_id":"eurusd:intraday:long","playbook_id":"pb_fx_intraday_v1_2"}]'
         required: true
         type: string
 
@@ -102,13 +99,11 @@ jobs:
         env:
           PYTHONPATH: .
           AETHER_BURNIN_CAMPAIGN_ID: ${{ inputs.campaign_id }}
-          AETHER_BURNIN_ROUTES_JSON: ${{ inputs.routes_json }}
         shell: bash
         run: |
           set +e
           python scripts/aether_vnext_burnin_preflight.py \
             --campaign-id "$AETHER_BURNIN_CAMPAIGN_ID" \
-            --routes-json "$AETHER_BURNIN_ROUTES_JSON" \
             --output aether-vnext-burnin-preflight.json
           status=$?
           echo "exit_code=$status" >> "$GITHUB_OUTPUT"
@@ -129,3 +124,24 @@ jobs:
         run: |
           echo "Burn-in preflight was not startable; inspect the uploaded JSON artifact."
           exit "${{ steps.preflight.outputs.exit_code }}"
+
+      - name: Start canonical forward-paper campaign
+        if: ${{ inputs.action == 'start_campaign' }}
+        env:
+          PYTHONPATH: .
+          AETHER_BURNIN_CAMPAIGN_ID: ${{ inputs.campaign_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/aether_vnext_burnin_start.py \
+            --campaign-id "$AETHER_BURNIN_CAMPAIGN_ID" \
+            --output aether-vnext-burnin-start.json
+
+      - name: Upload canonical campaign-start record
+        if: ${{ inputs.action == 'start_campaign' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-vnext-burnin-start-${{ github.run_id }}
+          path: backend/aether-vnext-burnin-start.json
+          if-no-files-found: error
+          retention-days: 30

@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import inspect
+
 import pytest
 import sqlalchemy as sa
 
 from aether_vnext.evidence import EvidenceWindow, SampleDomain
 from aether_vnext.forward_paper_start import (
     ForwardPaperRouteRequest,
+    _start_forward_paper_campaign_for_requests,
     start_forward_paper_campaign_from_book,
 )
 from aether_vnext.freeze import CONFIGURATION_HASH
@@ -17,6 +20,12 @@ from tests_vnext.held_out_support import record_provenanced_held_out
 
 UTC = timezone.utc
 T0 = datetime(2026, 9, 26, 23, 55, tzinfo=UTC)
+
+def test_operator_start_api_does_not_accept_caller_route_subset() -> None:
+    params = inspect.signature(start_forward_paper_campaign_from_book).parameters
+    assert "requested_routes" not in params
+
+
 
 
 def _window(
@@ -72,7 +81,7 @@ def test_start_freezes_all_current_held_out_windows_for_declared_route() -> None
         record_provenanced_held_out(conn, store, _window("heldout-1", offset_days=20))
         record_provenanced_held_out(conn, store, _window("heldout-2", offset_days=10))
 
-        result = start_forward_paper_campaign_from_book(
+        result = _start_forward_paper_campaign_for_requests(
             conn,
             store,
             campaign_id="burnin-001",
@@ -118,7 +127,7 @@ def test_baseline_hash_is_deterministic_across_request_order() -> None:
                     route_id="usdjpy:intraday:long",
                 ),
             )
-            result = start_forward_paper_campaign_from_book(
+            result = _start_forward_paper_campaign_for_requests(
                 conn,
                 store,
                 campaign_id="burnin-order-test",
@@ -144,7 +153,7 @@ def test_missing_declared_route_baseline_fails_before_campaign_persist() -> None
     with engine.begin() as conn:
         record_provenanced_held_out(conn, store, _window("eurusd-heldout"))
         with pytest.raises(RuntimeError, match="missing_current_held_out_baseline"):
-            start_forward_paper_campaign_from_book(
+            _start_forward_paper_campaign_for_requests(
                 conn,
                 store,
                 campaign_id="burnin-missing",
@@ -190,7 +199,7 @@ def test_other_configuration_evidence_cannot_satisfy_current_baseline() -> None:
             ),
         )
         with pytest.raises(RuntimeError, match="missing_current_held_out_baseline"):
-            start_forward_paper_campaign_from_book(
+            _start_forward_paper_campaign_for_requests(
                 conn,
                 store,
                 campaign_id="burnin-config-isolation",
@@ -209,7 +218,7 @@ def test_benched_playbook_is_not_burnin_eligible() -> None:
     engine, store = _store()
     with engine.begin() as conn:
         with pytest.raises(RuntimeError, match="playbook_not_burnin_eligible"):
-            start_forward_paper_campaign_from_book(
+            _start_forward_paper_campaign_for_requests(
                 conn,
                 store,
                 campaign_id="burnin-benched",
@@ -233,7 +242,7 @@ def test_duplicate_route_playbook_request_fails_before_persist() -> None:
     with engine.begin() as conn:
         record_provenanced_held_out(conn, store, _window("heldout-1"))
         with pytest.raises(RuntimeError, match="duplicate_route_playbook_request"):
-            start_forward_paper_campaign_from_book(
+            _start_forward_paper_campaign_for_requests(
                 conn,
                 store,
                 campaign_id="burnin-duplicate",

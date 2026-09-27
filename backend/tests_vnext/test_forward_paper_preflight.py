@@ -173,3 +173,21 @@ def test_preflight_reports_missing_canonical_policy_snapshot() -> None:
         )
     assert out.startable is False
     assert "canonical_policy_snapshot_missing" in out.blockers
+
+
+def test_preflight_rejects_scout_enabled_route_with_incomplete_exit_contract() -> None:
+    engine, store = _store()
+    with engine.begin() as conn:
+        out = preflight_forward_paper_campaign_from_book(
+            conn,
+            store,
+            campaign_id="preflight-incomplete-exit",
+            requested_routes=(
+                ForwardPaperRouteRequest(
+                    route_id="eth:daily_swing:long",
+                    playbook_id="pb_eth_rider_v1_2",
+                ),
+            ),
+        )
+    assert out.startable is False
+    assert out.route_results[0].blockers == ("exit_contract_incomplete",)

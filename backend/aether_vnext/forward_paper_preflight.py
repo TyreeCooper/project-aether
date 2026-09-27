@@ -21,6 +21,7 @@ from aether_vnext.freeze import (
     LIVE_BLOCKED,
     PAPER_ONLY,
 )
+from aether_vnext.playbook_exits import exit_rule
 from aether_vnext.playbooks import ordered_playbooks, playbook
 from aether_vnext.store import VNextStore
 
@@ -37,29 +38,96 @@ class ForwardPaperRouteRequest:
             raise ValueError("playbook_id is required")
 
 
-def canonical_forward_paper_route_requests() -> tuple[ForwardPaperRouteRequest, ...]:
-    """Return every currently burn-in-eligible route/playbook pair.
+@dataclass(frozen=True, slots=True)
+class ForwardPaperRouteExclusion:
+    request: ForwardPaperRouteRequest
+    reason: str
 
-    Eligibility is derived only from the frozen registry's scout_definition_enabled
-    gate, so BENCH and operationally disabled playbooks are excluded automatically.
+
+@dataclass(frozen=True, slots=True)
+class ForwardPaperManifest:
+    """Canonical WATCH coverage and the statically executable campaign subset."""
+
+    coverage_requests: tuple[ForwardPaperRouteRequest, ...]
+    executable_requests: tuple[ForwardPaperRouteRequest, ...]
+    exclusions: tuple[ForwardPaperRouteExclusion, ...]
+
+    @property
+    def coverage_route_count(self) -> int:
+        return len(self.coverage_requests)
+
+    @property
+    def executable_route_count(self) -> int:
+        return len(self.executable_requests)
+
+    @property
+    def excluded_route_count(self) -> int:
+        return len(self.exclusions)
+
+
+def canonical_forward_paper_manifest() -> ForwardPaperManifest:
+    """Build the no-cherry-pick campaign manifest from frozen source truth.
+
+    WATCH coverage includes every Scout-definition-enabled route/playbook pair.
+    Campaign execution additionally requires a source-complete ExitPlan contract.
+    Market-data/broker environment readiness is a separate external preflight layer;
+    this manifest does not invent those bindings.
     """
-    rows: list[ForwardPaperRouteRequest] = []
+    coverage: list[ForwardPaperRouteRequest] = []
+    executable: list[ForwardPaperRouteRequest] = []
+    exclusions: list[ForwardPaperRouteExclusion] = []
+
     for spec in ordered_playbooks():
         if not spec.scout_definition_enabled:
             continue
-        for asset_id, side, horizon in spec.route_tuples():
-            rows.append(
-                ForwardPaperRouteRequest(
-                    route_id=f"{asset_id}:{horizon}:{side}",
-                    playbook_id=spec.playbook_id,
-                )
+        try:
+            bound_exit = exit_rule(spec.playbook_id)
+            exit_complete = bound_exit.source_complete
+            exclusion_reason = (
+                bound_exit.unresolved_reason
+                or "exit_contract_incomplete"
             )
-    return tuple(
-        sorted(
-            rows,
-            key=lambda row: (row.route_id, row.playbook_id),
-        )
+        except KeyError:
+            exit_complete = False
+            exclusion_reason = "exit_contract_missing"
+
+        for asset_id, side, horizon in spec.route_tuples():
+            request = ForwardPaperRouteRequest(
+                route_id=f"{asset_id}:{horizon}:{side}",
+                playbook_id=spec.playbook_id,
+            )
+            coverage.append(request)
+            if exit_complete:
+                executable.append(request)
+            else:
+                exclusions.append(
+                    ForwardPaperRouteExclusion(
+                        request=request,
+                        reason=str(exclusion_reason),
+                    )
+                )
+
+    key = lambda row: (row.route_id, row.playbook_id)
+    exclusion_key = lambda row: (
+        row.request.route_id,
+        row.request.playbook_id,
     )
+    return ForwardPaperManifest(
+        coverage_requests=tuple(sorted(coverage, key=key)),
+        executable_requests=tuple(sorted(executable, key=key)),
+        exclusions=tuple(sorted(exclusions, key=exclusion_key)),
+    )
+
+
+def canonical_forward_paper_coverage_requests(
+) -> tuple[ForwardPaperRouteRequest, ...]:
+    """Return the complete WATCH-capable coverage universe."""
+    return canonical_forward_paper_manifest().coverage_requests
+
+
+def canonical_forward_paper_route_requests() -> tuple[ForwardPaperRouteRequest, ...]:
+    """Return the complete statically executable no-cherry-pick campaign universe."""
+    return canonical_forward_paper_manifest().executable_requests
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,6 +268,13 @@ def preflight_forward_paper_campaign_from_book(
 
         if spec is not None and not spec.scout_definition_enabled:
             route_blockers.append("playbook_not_burnin_eligible")
+
+        if spec is not None and spec.scout_definition_enabled:
+            try:
+                if not exit_rule(spec.playbook_id).source_complete:
+                    route_blockers.append("exit_contract_incomplete")
+            except KeyError:
+                route_blockers.append("exit_contract_missing")
 
         if spec is not None:
             try:
@@ -353,6 +428,21 @@ def preflight_forward_paper_campaign_from_book(
         blockers=tuple(dict.fromkeys(blockers)),
     )
 
+
+
+def preflight_canonical_forward_paper_campaign_from_book(
+    conn: Connection,
+    store: VNextStore,
+    *,
+    campaign_id: str,
+) -> ForwardPaperPreflightResult:
+    """Preflight the full canonical executable campaign universe only."""
+    return preflight_forward_paper_campaign_from_book(
+        conn,
+        store,
+        campaign_id=campaign_id,
+        requested_routes=canonical_forward_paper_route_requests(),
+    )
 
 def route_baselines_from_preflight(
     result: ForwardPaperPreflightResult,

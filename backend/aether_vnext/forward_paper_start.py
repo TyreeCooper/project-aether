@@ -13,6 +13,8 @@ from sqlalchemy.engine import Connection
 from aether_vnext.forward_paper import ForwardPaperCampaign, ForwardPaperRouteBaseline
 from aether_vnext.forward_paper_preflight import (
     ForwardPaperRouteRequest,
+    canonical_forward_paper_route_requests,
+    preflight_canonical_forward_paper_campaign_from_book,
     preflight_forward_paper_campaign_from_book,
     route_baselines_from_preflight,
 )
@@ -29,25 +31,15 @@ class ForwardPaperStartResult:
         return self.campaign.baseline_snapshot_hash
 
 
-def start_forward_paper_campaign_from_book(
+def _persist_forward_paper_campaign_from_preflight(
     conn: Connection,
     store: VNextStore,
     *,
     campaign_id: str,
-    requested_routes: tuple[ForwardPaperRouteRequest, ...],
+    preflight,
     started_at_utc: datetime,
     created_at_utc: datetime,
 ) -> ForwardPaperStartResult:
-    """Preflight then atomically persist one forward-paper campaign."""
-    if started_at_utc.tzinfo is None or created_at_utc.tzinfo is None:
-        raise ValueError("campaign timestamps must be timezone-aware")
-
-    preflight = preflight_forward_paper_campaign_from_book(
-        conn,
-        store,
-        campaign_id=campaign_id,
-        requested_routes=requested_routes,
-    )
     if not preflight.startable:
         route_detail = ";".join(
             f"{row.request.route_id}|{row.request.playbook_id}:"
@@ -78,3 +70,73 @@ def start_forward_paper_campaign_from_book(
         routes=routes,
     )
     return ForwardPaperStartResult(campaign=campaign, routes=routes)
+
+
+def _start_forward_paper_campaign_for_requests(
+    conn: Connection,
+    store: VNextStore,
+    *,
+    campaign_id: str,
+    requested_routes: tuple[ForwardPaperRouteRequest, ...],
+    started_at_utc: datetime,
+    created_at_utc: datetime,
+) -> ForwardPaperStartResult:
+    """Test/internal primitive for bounded route-contract validation.
+
+    Operator campaign creation must use start_forward_paper_campaign_from_book(),
+    which derives the canonical executable universe internally.
+    """
+    if started_at_utc.tzinfo is None or created_at_utc.tzinfo is None:
+        raise ValueError("campaign timestamps must be timezone-aware")
+    preflight = preflight_forward_paper_campaign_from_book(
+        conn,
+        store,
+        campaign_id=campaign_id,
+        requested_routes=requested_routes,
+    )
+    return _persist_forward_paper_campaign_from_preflight(
+        conn,
+        store,
+        campaign_id=campaign_id,
+        preflight=preflight,
+        started_at_utc=started_at_utc,
+        created_at_utc=created_at_utc,
+    )
+
+
+def start_forward_paper_campaign_from_book(
+    conn: Connection,
+    store: VNextStore,
+    *,
+    campaign_id: str,
+    started_at_utc: datetime,
+    created_at_utc: datetime,
+) -> ForwardPaperStartResult:
+    """Start Campaign #1 only from the full canonical executable universe.
+
+    Caller-supplied route subsets are intentionally not accepted. This enforces the
+    C9.1 no-cherry-pick boundary at the operator-facing write path.
+    """
+    if started_at_utc.tzinfo is None or created_at_utc.tzinfo is None:
+        raise ValueError("campaign timestamps must be timezone-aware")
+
+    expected = canonical_forward_paper_route_requests()
+    if not expected:
+        raise RuntimeError("canonical executable campaign universe is empty")
+
+    preflight = preflight_canonical_forward_paper_campaign_from_book(
+        conn,
+        store,
+        campaign_id=campaign_id,
+    )
+    if preflight.requested_route_count != len(expected):
+        raise RuntimeError("canonical preflight route-count drift")
+
+    return _persist_forward_paper_campaign_from_preflight(
+        conn,
+        store,
+        campaign_id=campaign_id,
+        preflight=preflight,
+        started_at_utc=started_at_utc,
+        created_at_utc=created_at_utc,
+    )

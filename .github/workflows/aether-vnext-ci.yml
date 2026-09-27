@@ -142,7 +142,6 @@ jobs:
           campaign_id="preflight-${GITHUB_SHA}"
           python scripts/aether_vnext_burnin_preflight.py \
             --campaign-id "$campaign_id" \
-            --canonical-routes \
             --output aether-vnext-burnin-preflight.json
           status=$?
           echo "exit_code=$status" >> "$GITHUB_OUTPUT"

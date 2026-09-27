@@ -37,12 +37,10 @@ def test_preflight_report_writer_persists_exact_json(tmp_path: Path) -> None:
     assert json.loads(output.read_text(encoding="utf-8")) == payload
 
 
-def test_routes_parser_requires_non_empty_object_list() -> None:
+def test_operator_preflight_is_canonical_only() -> None:
     module = _module()
-    routes = module._parse_routes(
-        '[{"route_id":"eurusd:intraday:long",'
-        '"playbook_id":"pb_fx_intraday_v1_2"}]'
-    )
-    assert len(routes) == 1
-    assert routes[0].route_id == "eurusd:intraday:long"
-    assert routes[0].playbook_id == "pb_fx_intraday_v1_2"
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert not hasattr(module, "_parse_routes")
+    assert "--routes-json" not in source
+    assert "preflight_canonical_forward_paper_campaign_from_book" in source
+    assert "canonical_forward_paper_manifest" in source
