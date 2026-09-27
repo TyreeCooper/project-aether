@@ -23,6 +23,10 @@ from aether_vnext.ninjatrader_market import (
     NINJATRADER_DEMO_TRANSPORT_ID,
     NINJATRADER_MARKET_SOURCE_ID,
 )
+from aether_vnext.tastyfx_fix_market import (
+    TASTYFX_FIX_MARKET_SOURCE_ID,
+    TASTYFX_FIX_SUPPORTED_ASSETS,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,13 +70,30 @@ IMPLEMENTED_MARKET_SOURCES: Final = MappingProxyType(
     }
 )
 
+PENDING_MARKET_SOURCES: Final = MappingProxyType(
+    {
+        TASTYFX_FIX_MARKET_SOURCE_ID: MarketSourceCapability(
+            source_id=TASTYFX_FIX_MARKET_SOURCE_ID,
+            transport_id="fix50sp2_session_provider_spec_pending",
+            parser_version="fix50sp2_market_snapshot_bbo_v1",
+            supported_assets=TASTYFX_FIX_SUPPORTED_ASSETS,
+            public_market_data=False,
+            implemented=False,
+        )
+    }
+)
+
 
 def market_source_capability(
     source_id: str | None,
 ) -> MarketSourceCapability | None:
     if source_id is None:
         return None
-    return IMPLEMENTED_MARKET_SOURCES.get(str(source_id).strip())
+    source = str(source_id).strip()
+    return (
+        IMPLEMENTED_MARKET_SOURCES.get(source)
+        or PENDING_MARKET_SOURCES.get(source)
+    )
 
 
 def market_source_implementation_blockers(
@@ -93,7 +114,15 @@ def market_source_implementation_blockers(
         )
 
     capability = market_source_capability(source)
-    if capability is None or not capability.implemented:
+    if capability is None:
+        return (
+            f"{normalized_role}_market_source_implementation_missing",
+        )
+    if not capability.implemented:
+        if source == TASTYFX_FIX_MARKET_SOURCE_ID:
+            return (
+                f"{normalized_role}_market_source_provider_spec_pending",
+            )
         return (
             f"{normalized_role}_market_source_implementation_missing",
         )

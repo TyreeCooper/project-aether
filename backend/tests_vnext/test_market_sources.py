@@ -4,9 +4,11 @@ from aether_vnext.ibkr_webapi_market import IBKR_WEBAPI_MARKET_SOURCE_ID
 from aether_vnext.ninjatrader_market import NINJATRADER_MARKET_SOURCE_ID
 from aether_vnext.market_sources import (
     IMPLEMENTED_MARKET_SOURCES,
+    PENDING_MARKET_SOURCES,
     market_source_capability,
     market_source_implementation_blockers,
 )
+from aether_vnext.tastyfx_fix_market import TASTYFX_FIX_MARKET_SOURCE_ID
 from aether_vnext.registry_runtime import (
     RuntimeRegistryBinding,
     binding_blockers,
@@ -111,3 +113,30 @@ def test_ninjatrader_implemented_source_is_futures_only() -> None:
         asset_id="nvda",
         role="primary",
     ) == ("primary_market_source_asset_unsupported",)
+
+
+def test_tastyfx_fix_source_is_known_but_not_operational_without_private_spec() -> None:
+    assert set(PENDING_MARKET_SOURCES) == {TASTYFX_FIX_MARKET_SOURCE_ID}
+    capability = market_source_capability(TASTYFX_FIX_MARKET_SOURCE_ID)
+    assert capability is not None
+    assert capability.implemented is False
+    assert capability.supported_assets == frozenset({"eurusd", "usdjpy"})
+
+    assert market_source_implementation_blockers(
+        source_id=TASTYFX_FIX_MARKET_SOURCE_ID,
+        asset_id="eurusd",
+        role="primary",
+    ) == ("primary_market_source_provider_spec_pending",)
+
+    binding = RuntimeRegistryBinding(
+        asset_id="eurusd",
+        broker_symbol="EUR/USD",
+        primary_market_source_id=TASTYFX_FIX_MARKET_SOURCE_ID,
+        stale_threshold_ms=1500,
+        calendar_provider_id=None,
+        source_ref="tastyfx-public-fix-boundary",
+    )
+    assert binding_blockers(
+        binding,
+        require_market_source_implementation=True,
+    ) == ("primary_market_source_provider_spec_pending",)
