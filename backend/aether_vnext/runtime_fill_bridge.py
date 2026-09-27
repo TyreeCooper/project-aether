@@ -179,9 +179,9 @@ def fill_runtime_submitted_open(
     setup_id = str(ticket.lineage.setup_id or "").strip()
     if not setup_id:
         raise RuntimeError("SUBMITTED OPEN intent missing setup identity")
-    exit_plan_id = str(intent.exit_plan_id or "").strip()
-    if not exit_plan_id or exit_plan_id != str(ticket.exit_plan_id or ""):
-        raise RuntimeError("SUBMITTED OPEN intent ExitPlan drift")
+    exit_plan_id = str(ticket.exit_plan_id or "").strip()
+    if not exit_plan_id:
+        raise RuntimeError("SUBMITTED OPEN intent ticket missing ExitPlan")
 
     initial_stop_risk = stop_risk_usd(
         bound_row,
