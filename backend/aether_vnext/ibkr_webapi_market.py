@@ -341,12 +341,6 @@ def _shortability_from_state(
     if received_at_utc.tzinfo is None:
         raise ValueError("received_at_utc must be timezone-aware")
 
-    if any(
-        field not in state
-        for field in ("7636", "7637", "7644", "6509")
-    ):
-        return None
-
     availability = str(state.get("6509") or "").strip()
     if not availability:
         return None
@@ -354,6 +348,12 @@ def _shortability_from_state(
         raise RuntimeError(
             "ibkr_shortability_not_realtime:" + availability
         )
+
+    if any(
+        field not in state
+        for field in ("7636", "7637", "7644", "6509")
+    ):
+        return None
 
     shares = _parse_nonnegative_number(state.get("7636"))
     if shares is None:
