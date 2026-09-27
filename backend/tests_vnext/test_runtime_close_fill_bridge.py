@@ -74,7 +74,7 @@ def test_runtime_close_fill_finalizes_open_trade_to_durable_flat() -> None:
                 store.tables["active_positions"]
             )
         ).scalar_one()
-        open_count = conn.execute(
+        retained_open_history_count = conn.execute(
             sa.select(sa.func.count()).select_from(
                 store.tables["open_trades"]
             )
@@ -99,7 +99,9 @@ def test_runtime_close_fill_finalizes_open_trade_to_durable_flat() -> None:
     assert closed["fees_usd"] > 0
     assert closed["total_cost_usd"] >= closed["fees_usd"]
     assert active_count == 0
-    assert open_count == 0
+    # OpenTrade is retained as immutable trade history; active_positions owns
+    # current occupancy and closed_trades owns the terminal realized record.
+    assert retained_open_history_count == 1
     assert after["cash_reserved_usd"] == pytest.approx(0.0)
     assert after["margin_used_usd"] == pytest.approx(0.0)
     assert after["realized_pnl_usd"] == pytest.approx(
