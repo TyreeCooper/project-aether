@@ -208,6 +208,28 @@ def test_campaign_contract_hard_locks_c91_safety_invariants() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("campaign_id", " fp-001 "),
+        ("configuration_hash", 1),
+        ("policy_version", " policy-fp "),
+        ("baseline_snapshot_hash", ""),
+    ),
+)
+def test_campaign_requires_canonical_scalar_identity(
+    field: str,
+    value: object,
+) -> None:
+    kwargs = {
+        name: getattr(_campaign(), name)
+        for name in _campaign().__dataclass_fields__
+    }
+    kwargs[field] = value
+    with pytest.raises(ValueError, match=f"{field} must be canonical text"):
+        ForwardPaperCampaign(**kwargs)
+
+
 def test_campaign_baseline_requires_held_out_same_family_evidence() -> None:
     engine, store = _store()
     with engine.begin() as conn:

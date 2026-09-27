@@ -40,8 +40,13 @@ class ForwardPaperCampaign:
             "policy_version",
             "baseline_snapshot_hash",
         ):
-            if not str(getattr(self, name)).strip():
-                raise ValueError(f"{name} is required")
+            value = getattr(self, name)
+            if (
+                not isinstance(value, str)
+                or not value
+                or value != value.strip()
+            ):
+                raise ValueError(f"{name} must be canonical text")
         for name in ("started_at_utc", "created_at_utc"):
             if getattr(self, name).tzinfo is None:
                 raise ValueError(f"{name} must be timezone-aware")
