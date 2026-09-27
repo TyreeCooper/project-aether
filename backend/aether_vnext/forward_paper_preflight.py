@@ -23,6 +23,7 @@ from aether_vnext.freeze import (
 )
 from aether_vnext.playbook_exits import exit_rule
 from aether_vnext.playbooks import ordered_playbooks, playbook
+from aether_vnext.registry_runtime import binding_blockers
 from aether_vnext.store import VNextStore
 
 
@@ -138,6 +139,7 @@ class ForwardPaperRoutePreflight:
     held_out_window_ids: tuple[str, ...]
     held_out_window_count: int
     independent_held_out_n: int
+    runtime_registry_binding_hash: str | None
     route_baseline_hash: str | None
     campaign_route_id: str | None
     blockers: tuple[str, ...]
@@ -182,6 +184,7 @@ def _route_baseline_hash(
     playbook_id: str,
     playbook_version: str,
     configuration_hash: str,
+    runtime_registry_binding_hash: str,
     rows: tuple[dict[str, object], ...],
 ) -> str:
     return _canonical_hash(
@@ -190,6 +193,7 @@ def _route_baseline_hash(
             "playbook_id": playbook_id,
             "playbook_version": playbook_version,
             "configuration_hash": configuration_hash,
+            "runtime_registry_binding_hash": runtime_registry_binding_hash,
             "held_out_windows": [
                 {
                     "evidence_window_id": str(row["evidence_window_id"]),
@@ -219,6 +223,7 @@ def preflight_forward_paper_campaign_from_book(
     *,
     campaign_id: str,
     requested_routes: tuple[ForwardPaperRouteRequest, ...],
+    as_of_utc: datetime | None = None,
 ) -> ForwardPaperPreflightResult:
     """Inspect whether the current vNext book can start a C9.1 campaign."""
     if not str(campaign_id).strip():
@@ -276,6 +281,7 @@ def preflight_forward_paper_campaign_from_book(
             except KeyError:
                 route_blockers.append("exit_contract_missing")
 
+        asset_id: str | None = None
         if spec is not None:
             try:
                 asset_id, horizon, side = parse_route_id(request.route_id)
@@ -288,6 +294,8 @@ def preflight_forward_paper_campaign_from_book(
             except ValueError:
                 route_blockers.append("invalid_route_id")
 
+        contract_blockers = tuple(route_blockers)
+        runtime_registry_binding_hash: str | None = None
         rows: tuple[dict[str, object], ...] = ()
         route_hash: str | None = None
         campaign_route_id: str | None = None
@@ -296,8 +304,34 @@ def preflight_forward_paper_campaign_from_book(
         if (
             spec is not None
             and policy_version is not None
-            and not route_blockers
+            and asset_id is not None
+            and not contract_blockers
         ):
+            runtime_binding = store.load_runtime_registry_binding(
+                conn,
+                asset_id=asset_id,
+            )
+            if runtime_binding is None:
+                route_blockers.append("runtime_product_binding_missing")
+            else:
+                if (
+                    runtime_binding["configuration_hash"]
+                    != CONFIGURATION_HASH
+                ):
+                    route_blockers.append(
+                        "runtime_product_binding_configuration_mismatch"
+                    )
+                else:
+                    binding = runtime_binding["binding"]
+                    runtime_blockers = binding_blockers(
+                        binding,
+                        as_of_utc=as_of_utc,
+                    )
+                    route_blockers.extend(runtime_blockers)
+                    if not runtime_blockers:
+                        runtime_registry_binding_hash = str(
+                            runtime_binding["binding_hash"]
+                        )
             family_filter = sa.and_(
                 evidence.c.route_id == request.route_id,
                 evidence.c.playbook_id == request.playbook_id,
@@ -359,34 +393,47 @@ def preflight_forward_paper_campaign_from_book(
                         window for window in windows if window is not None
                     )
                     independent_count = independent_n(concrete)
-                    route_hash = _route_baseline_hash(
-                        route_id=request.route_id,
-                        playbook_id=request.playbook_id,
-                        playbook_version=spec.version,
-                        configuration_hash=CONFIGURATION_HASH,
-                        rows=rows,
-                    )
-                    campaign_route_id = _canonical_hash(
-                        {
-                            "campaign_id": campaign_id,
-                            "route_id": request.route_id,
-                            "playbook_id": request.playbook_id,
-                            "playbook_version": spec.version,
-                            "configuration_hash": CONFIGURATION_HASH,
-                        }
-                    )
-                    baseline_payload.append(
-                        {
-                            "campaign_route_id": campaign_route_id,
-                            "route_id": request.route_id,
-                            "playbook_id": request.playbook_id,
-                            "playbook_version": spec.version,
-                            "historical_validation_window_ids": [
-                                str(row["evidence_window_id"]) for row in rows
-                            ],
-                            "historical_metrics_snapshot_hash": route_hash,
-                        }
-                    )
+                    if runtime_registry_binding_hash is not None:
+                        route_hash = _route_baseline_hash(
+                            route_id=request.route_id,
+                            playbook_id=request.playbook_id,
+                            playbook_version=spec.version,
+                            configuration_hash=CONFIGURATION_HASH,
+                            runtime_registry_binding_hash=(
+                                runtime_registry_binding_hash
+                            ),
+                            rows=rows,
+                        )
+                    if route_hash is not None:
+                        campaign_route_id = _canonical_hash(
+                            {
+                                "campaign_id": campaign_id,
+                                "route_id": request.route_id,
+                                "playbook_id": request.playbook_id,
+                                "playbook_version": spec.version,
+                                "configuration_hash": CONFIGURATION_HASH,
+                                "runtime_registry_binding_hash": (
+                                    runtime_registry_binding_hash
+                                ),
+                            }
+                        )
+                        if not route_blockers:
+                            baseline_payload.append(
+                                {
+                                    "campaign_route_id": campaign_route_id,
+                                    "route_id": request.route_id,
+                                    "playbook_id": request.playbook_id,
+                                    "playbook_version": spec.version,
+                                    "runtime_registry_binding_hash": (
+                                        runtime_registry_binding_hash
+                                    ),
+                                    "historical_validation_window_ids": [
+                                        str(row["evidence_window_id"])
+                                        for row in rows
+                                    ],
+                                    "historical_metrics_snapshot_hash": route_hash,
+                                }
+                            )
 
         route_results.append(
             ForwardPaperRoutePreflight(
@@ -398,6 +445,7 @@ def preflight_forward_paper_campaign_from_book(
                 ),
                 held_out_window_count=len(rows),
                 independent_held_out_n=independent_count,
+                runtime_registry_binding_hash=runtime_registry_binding_hash,
                 route_baseline_hash=route_hash,
                 campaign_route_id=campaign_route_id,
                 blockers=tuple(dict.fromkeys(route_blockers)),
@@ -435,6 +483,7 @@ def preflight_canonical_forward_paper_campaign_from_book(
     store: VNextStore,
     *,
     campaign_id: str,
+    as_of_utc: datetime | None = None,
 ) -> ForwardPaperPreflightResult:
     """Preflight the full canonical executable campaign universe only."""
     return preflight_forward_paper_campaign_from_book(
@@ -442,6 +491,7 @@ def preflight_canonical_forward_paper_campaign_from_book(
         store,
         campaign_id=campaign_id,
         requested_routes=canonical_forward_paper_route_requests(),
+        as_of_utc=as_of_utc,
     )
 
 def route_baselines_from_preflight(
@@ -453,6 +503,7 @@ def route_baselines_from_preflight(
     for row in result.route_results:
         if (
             row.playbook_version is None
+            or row.runtime_registry_binding_hash is None
             or row.route_baseline_hash is None
             or row.campaign_route_id is None
         ):
@@ -465,6 +516,9 @@ def route_baselines_from_preflight(
                 playbook_id=row.request.playbook_id,
                 playbook_version=row.playbook_version,
                 configuration_hash=result.configuration_hash,
+                runtime_registry_binding_hash=(
+                    row.runtime_registry_binding_hash
+                ),
                 historical_validation_window_ids=row.held_out_window_ids,
                 historical_metrics_snapshot_hash=row.route_baseline_hash,
             )

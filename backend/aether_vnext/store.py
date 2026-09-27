@@ -50,6 +50,12 @@ from aether_vnext.evidence import (
 from aether_vnext.decay import DecayAssessment, DecayCohort, assess_decay
 from aether_vnext.freeze import EvidenceState
 from aether_vnext.registry import ProductType, registry_row
+from aether_vnext.registry_runtime import (
+    RuntimeRegistryBinding,
+    binding_from_payload,
+    binding_hash,
+    binding_payload,
+)
 from aether_vnext.reservations import reservation_requirement
 from aether_vnext.risk import (
     BookRiskPosition,
@@ -353,6 +359,104 @@ class VNextStore:
             )
         )
         return True
+
+    def upsert_runtime_registry_binding(
+        self,
+        conn: Connection,
+        binding: RuntimeRegistryBinding,
+        *,
+        registry_version: str,
+        configuration_hash: str,
+        updated_at_utc: datetime,
+    ) -> str:
+        """Persist reviewed external Product Registry binding truth.
+
+        The static registry remains the source of frozen economics. This current-state
+        projection stores only external/time-varying binding facts. Partial bindings
+        may be persisted so preflight can report exact blockers; they cannot make a
+        campaign startable until the binding is complete.
+        """
+        if not str(registry_version).strip():
+            raise ValueError("registry_version is required")
+        if not str(configuration_hash).strip():
+            raise ValueError("configuration_hash is required")
+        if updated_at_utc.tzinfo is None:
+            raise ValueError("updated_at_utc must be timezone-aware")
+
+        base = registry_row(binding.asset_id)
+        policies = self.tables["policy_snapshots"]
+        policy = conn.execute(
+            sa.select(policies.c.configuration_hash).where(
+                policies.c.configuration_hash == configuration_hash
+            )
+        ).first()
+        if policy is None:
+            raise KeyError(
+                f"unknown configuration_hash: {configuration_hash}"
+            )
+
+        payload = binding_payload(binding)
+        digest = binding_hash(binding)
+        payload["binding_hash"] = digest
+
+        table = self.tables["product_registry_state"]
+        values = {
+            "asset_id": base.asset_id,
+            "registry_version": str(registry_version),
+            "configuration_hash": str(configuration_hash),
+            "lifecycle_state": base.lifecycle_state.value,
+            "payload": payload,
+            "updated_at_utc": updated_at_utc,
+        }
+        existing = conn.execute(
+            sa.select(table.c.asset_id).where(
+                table.c.asset_id == base.asset_id
+            )
+        ).first()
+        if existing is None:
+            conn.execute(table.insert().values(**values))
+        else:
+            conn.execute(
+                table.update()
+                .where(table.c.asset_id == base.asset_id)
+                .values(**values)
+            )
+        return digest
+
+    def load_runtime_registry_binding(
+        self,
+        conn: Connection,
+        *,
+        asset_id: str,
+    ) -> dict[str, Any] | None:
+        table = self.tables["product_registry_state"]
+        row = conn.execute(
+            sa.select(table).where(
+                table.c.asset_id == str(asset_id).strip().lower()
+            )
+        ).mappings().first()
+        if row is None:
+            return None
+        payload = dict(row["payload"] or {})
+        binding = binding_from_payload(payload)
+        digest = str(payload.get("binding_hash") or "")
+        expected = binding_hash(binding)
+        if not digest:
+            raise RuntimeError(
+                f"runtime registry binding hash missing: {asset_id}"
+            )
+        if digest != expected:
+            raise RuntimeError(
+                f"runtime registry binding hash mismatch: {asset_id}"
+            )
+        return {
+            "binding": binding,
+            "binding_hash": digest,
+            "registry_version": str(row["registry_version"]),
+            "configuration_hash": str(row["configuration_hash"]),
+            "lifecycle_state": str(row["lifecycle_state"]),
+            "updated_at_utc": _stored_utc(row["updated_at_utc"]),
+        }
 
     def record_market_observation(
         self,
@@ -1416,6 +1520,29 @@ class VNextStore:
             if side not in spec.allowed_sides:
                 raise ValueError("campaign route side not allowed by playbook")
 
+            runtime_binding = self.load_runtime_registry_binding(
+                conn,
+                asset_id=asset_id,
+            )
+            if runtime_binding is None:
+                raise ValueError(
+                    "campaign route lacks runtime Product Registry binding"
+                )
+            if (
+                runtime_binding["configuration_hash"]
+                != route.configuration_hash
+            ):
+                raise ValueError(
+                    "campaign route runtime registry configuration mismatch"
+                )
+            if (
+                runtime_binding["binding_hash"]
+                != route.runtime_registry_binding_hash
+            ):
+                raise ValueError(
+                    "campaign route runtime registry binding hash mismatch"
+                )
+
             for window_id in route.historical_validation_window_ids:
                 baseline = self.load_evidence_window(
                     conn,
@@ -1482,6 +1609,9 @@ class VNextStore:
                     playbook_id=route.playbook_id,
                     playbook_version=route.playbook_version,
                     configuration_hash=route.configuration_hash,
+                    runtime_registry_binding_hash=(
+                        route.runtime_registry_binding_hash
+                    ),
                     historical_validation_window_ids=list(
                         route.historical_validation_window_ids
                     ),

@@ -1,0 +1,160 @@
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+
+import sqlalchemy as sa
+
+from aether_vnext.evidence import EvidenceWindow, SampleDomain
+from aether_vnext.forward_paper_preflight import (
+    ForwardPaperRouteRequest,
+    preflight_forward_paper_campaign_from_book,
+)
+from aether_vnext.freeze import CONFIGURATION_HASH
+from aether_vnext.registry_runtime import (
+    RuntimeRegistryBinding,
+    binding_blockers,
+    binding_hash,
+    materialize_bound_registry_row,
+)
+from aether_vnext.store import VNextStore
+from tests_vnext.held_out_support import record_provenanced_held_out
+from tests_vnext.runtime_registry_support import test_runtime_binding
+
+
+UTC = timezone.utc
+T0 = datetime(2026, 9, 27, 1, 15, tzinfo=UTC)
+
+
+def _store(config: str = CONFIGURATION_HASH) -> tuple[sa.Engine, VNextStore]:
+    engine = sa.create_engine("sqlite+pysqlite:///:memory:", future=True)
+    store = VNextStore(schema=None)
+    with engine.begin() as conn:
+        store.create_all_for_test(conn)
+        conn.execute(
+            store.tables["policy_snapshots"].insert().values(
+                configuration_hash=config,
+                policy_version="runtime-binding-policy",
+                effective_at_utc=T0 - timedelta(days=30),
+                changed_by="test",
+                change_reason="runtime binding",
+                payload={},
+                created_at_utc=T0 - timedelta(days=30),
+            )
+        )
+    return engine, store
+
+
+def test_runtime_binding_round_trip_is_hash_verified() -> None:
+    engine, store = _store()
+    binding = test_runtime_binding("eurusd", now=T0)
+
+    with engine.begin() as conn:
+        digest = store.upsert_runtime_registry_binding(
+            conn,
+            binding,
+            registry_version="registry-runtime-test-v1",
+            configuration_hash=CONFIGURATION_HASH,
+            updated_at_utc=T0,
+        )
+        loaded = store.load_runtime_registry_binding(
+            conn,
+            asset_id="eurusd",
+        )
+
+    assert loaded is not None
+    assert loaded["binding"] == binding
+    assert loaded["binding_hash"] == digest == binding_hash(binding)
+    assert loaded["configuration_hash"] == CONFIGURATION_HASH
+
+
+def test_incomplete_binding_persists_but_remains_fail_closed() -> None:
+    engine, store = _store()
+    binding = RuntimeRegistryBinding(
+        asset_id="btc",
+        broker_symbol="XBTUSD",
+        primary_market_source_id="kraken_public",
+        stale_threshold_ms=None,
+        calendar_provider_id=None,
+        source_ref="test-incomplete",
+    )
+    assert binding_blockers(binding) == ("stale_threshold_missing",)
+
+    with engine.begin() as conn:
+        store.upsert_runtime_registry_binding(
+            conn,
+            binding,
+            registry_version="registry-runtime-test-v1",
+            configuration_hash=CONFIGURATION_HASH,
+            updated_at_utc=T0,
+        )
+        loaded = store.load_runtime_registry_binding(conn, asset_id="btc")
+
+    assert loaded is not None
+    assert loaded["binding"] == binding
+
+
+def test_complete_binding_materializes_market_ready_product_truth() -> None:
+    binding = test_runtime_binding("eurusd", now=T0)
+    row = materialize_bound_registry_row(binding, as_of_utc=T0)
+
+    assert row.asset_id == "eurusd"
+    assert row.market_data_ready() is True
+    assert row.broker_symbol == "EUR/USD"
+    assert row.primary_market_source_id == "test.market.eurusd"
+    assert row.stale_threshold_ms == 1500
+
+
+def test_futures_binding_refuses_contract_inside_roll_cutoff() -> None:
+    binding = RuntimeRegistryBinding(
+        asset_id="mes",
+        broker_symbol="MESTEST1",
+        primary_market_source_id="test.market.mes",
+        stale_threshold_ms=1500,
+        calendar_provider_id="test.calendar",
+        current_contract="MESTEST1",
+        expiry_utc=T0 + timedelta(hours=47),
+        next_contract="MESTEST2",
+        source_ref="test-roll",
+    )
+    assert "futures_contract_in_roll_cutoff" in binding_blockers(
+        binding,
+        as_of_utc=T0,
+    )
+
+
+def test_forward_preflight_rejects_unbound_runtime_product_even_with_real_heldout_chain() -> None:
+    engine, store = _store()
+    window = EvidenceWindow(
+        evidence_window_id="heldout-runtime-gate",
+        route_id="eurusd:intraday:long",
+        playbook_id="pb_fx_intraday_v1_2",
+        playbook_version="1.2",
+        policy_version="runtime-binding-policy",
+        configuration_hash=CONFIGURATION_HASH,
+        sample_domain=SampleDomain.HELD_OUT,
+        first_timestamp_utc=T0 - timedelta(days=10),
+        last_timestamp_utc=T0 - timedelta(days=9),
+        n=1,
+        immutable_trade_ids=("hist-runtime-1",),
+        metrics_snapshot_hash="metrics-runtime-1",
+        created_at_utc=T0 - timedelta(days=1),
+    )
+
+    with engine.begin() as conn:
+        record_provenanced_held_out(conn, store, window)
+        out = preflight_forward_paper_campaign_from_book(
+            conn,
+            store,
+            campaign_id="runtime-binding-gate",
+            requested_routes=(
+                ForwardPaperRouteRequest(
+                    route_id="eurusd:intraday:long",
+                    playbook_id="pb_fx_intraday_v1_2",
+                ),
+            ),
+            as_of_utc=T0,
+        )
+
+    assert out.startable is False
+    assert out.route_results[0].held_out_window_count == 1
+    assert "runtime_product_binding_missing" in out.route_results[0].blockers

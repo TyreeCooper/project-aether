@@ -54,6 +54,7 @@ jobs:
       AETHER_VNEXT_ENVIRONMENT: burnin
       AETHER_VNEXT_DATABASE_URL: ${{ secrets.AETHER_VNEXT_BURNIN_DATABASE_URL }}
       AETHER_VNEXT_AZURE_POSTGRESQL_CONNECTIONSTRING: ${{ secrets.AETHER_VNEXT_BURNIN_POSTGRESQL_CONNECTIONSTRING }}
+      AETHER_VNEXT_RUNTIME_BINDINGS_JSON: ${{ secrets.AETHER_VNEXT_RUNTIME_BINDINGS_JSON }}
 
     steps:
       - name: Resolve authorized burn-in request
@@ -165,6 +166,31 @@ jobs:
         env:
           PYTHONPATH: .
         run: python scripts/aether_vnext_bootstrap_policy.py
+
+      - name: Apply reviewed runtime Product Registry bindings
+        if: ${{ steps.request.outputs.action == 'initialize_and_preflight' }}
+        env:
+          PYTHONPATH: .
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${AETHER_VNEXT_RUNTIME_BINDINGS_JSON:-}" ]; then
+            echo "AETHER_VNEXT_RUNTIME_BINDINGS_JSON is required for real burn-in initialization."
+            exit 2
+          fi
+          python scripts/aether_vnext_registry_bindings.py \
+            --manifest-json "$AETHER_VNEXT_RUNTIME_BINDINGS_JSON" \
+            --require-complete \
+            --output aether-vnext-runtime-bindings.json
+
+      - name: Upload runtime Product Registry binding report
+        if: ${{ always() && steps.request.outputs.action == 'initialize_and_preflight' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-vnext-runtime-bindings-${{ github.run_id }}
+          path: backend/aether-vnext-runtime-bindings.json
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: Run canonical read-only burn-in preflight
         id: preflight

@@ -377,10 +377,11 @@ def test_phase5_execution_reservation_columns_are_in_current_schema() -> None:
     assert "fill_market_observation_id" not in columns
 
 
-def test_runtime_schema_facade_is_pinned_to_revision_0021() -> None:
+def test_runtime_schema_facade_is_pinned_to_revision_0022() -> None:
+    _, store = _engine_and_store()
     backend = Path(__file__).resolve().parents[1]
     facade = (backend / "aether_vnext" / "schema.py").read_text(encoding="utf-8")
-    assert "schema_v0021" in facade
+    assert "schema_v0022" in facade
 
     campaign_migration = (
         backend
@@ -405,6 +406,20 @@ def test_runtime_schema_facade_is_pinned_to_revision_0021() -> None:
     assert "fold_result_ids" in provenance_migration
     assert "trg_held_out_evidence_provenance_immutable" in provenance_migration
     assert "reject_immutable_mutation" in provenance_migration
+
+    registry_binding_migration = (
+        backend
+        / "alembic"
+        / "versions"
+        / "0022_aether_vnext_campaign_registry_binding.py"
+    ).read_text(encoding="utf-8")
+    assert 'revision: str = "0022"' in registry_binding_migration
+    assert 'down_revision: Union[str, None] = "0021"' in registry_binding_migration
+    assert "runtime_registry_binding_hash" in registry_binding_migration
+    assert "forward_paper_campaign_routes" in registry_binding_migration
+
+    campaign_routes = store.tables["forward_paper_campaign_routes"]
+    assert "runtime_registry_binding_hash" in campaign_routes.c
 
 
 def test_phase6_atomic_risk_admission_schema_is_explicit() -> None:

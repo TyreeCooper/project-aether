@@ -33,6 +33,9 @@ def _serialize(result) -> dict[str, object]:
                 "route_id": row.route_id,
                 "playbook_id": row.playbook_id,
                 "playbook_version": row.playbook_version,
+                "runtime_registry_binding_hash": (
+                    row.runtime_registry_binding_hash
+                ),
                 "historical_validation_window_ids": list(
                     row.historical_validation_window_ids
                 ),

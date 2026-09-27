@@ -25,6 +25,9 @@ def test_burnin_dispatch_is_same_repo_label_gated_and_environment_protected() ->
     assert "Verify checked-out commit identity" in source
     assert "AETHER_VNEXT_BURNIN_DATABASE_URL" in source
     assert "AETHER_VNEXT_BURNIN_POSTGRESQL_CONNECTIONSTRING" in source
+    assert "AETHER_VNEXT_RUNTIME_BINDINGS_JSON" in source
+    assert "aether_vnext_registry_bindings.py" in source
+    assert "--require-complete" in source
 
     assert "routes_json" not in source
     assert "--routes-json" not in source

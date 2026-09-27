@@ -16,6 +16,7 @@ from aether_vnext.forward_paper_start import (
 from aether_vnext.freeze import CONFIGURATION_HASH
 from aether_vnext.store import VNextStore
 from tests_vnext.held_out_support import record_provenanced_held_out
+from tests_vnext.runtime_registry_support import record_test_runtime_binding
 
 
 UTC = timezone.utc
@@ -72,6 +73,14 @@ def _store() -> tuple[sa.Engine, VNextStore]:
                 created_at_utc=T0 - timedelta(days=30),
             )
         )
+        for asset_id in ("eurusd", "usdjpy"):
+            record_test_runtime_binding(
+                conn,
+                store,
+                asset_id=asset_id,
+                configuration_hash=CONFIGURATION_HASH,
+                now=T0,
+            )
     return engine, store
 
 

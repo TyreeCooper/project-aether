@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 
@@ -45,6 +46,9 @@ def _serialize(result) -> dict[str, object]:
                 "held_out_window_ids": list(row.held_out_window_ids),
                 "held_out_window_count": row.held_out_window_count,
                 "independent_held_out_n": row.independent_held_out_n,
+                "runtime_registry_binding_hash": (
+                    row.runtime_registry_binding_hash
+                ),
                 "route_baseline_hash": row.route_baseline_hash,
                 "campaign_route_id": row.campaign_route_id,
                 "blockers": list(row.blockers),
@@ -65,6 +69,7 @@ def _emit_report(payload: dict[str, object], output: str | None) -> None:
 
 async def _main(campaign_id: str, output: str | None) -> int:
     store = VNextStore(schema="aether_vnext")
+    as_of_utc = datetime.now(timezone.utc)
     async with open_vnext_engine() as engine:
         async with engine.connect() as connection:
             result = await connection.run_sync(
@@ -72,6 +77,7 @@ async def _main(campaign_id: str, output: str | None) -> int:
                     sync_conn,
                     store,
                     campaign_id=campaign_id,
+                    as_of_utc=as_of_utc,
                 )
             )
     payload = _serialize(result)

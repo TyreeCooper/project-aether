@@ -75,6 +75,7 @@ class ForwardPaperRouteBaseline:
     playbook_id: str
     playbook_version: str
     configuration_hash: str
+    runtime_registry_binding_hash: str
     historical_validation_window_ids: tuple[str, ...]
     historical_metrics_snapshot_hash: str
 
@@ -86,6 +87,7 @@ class ForwardPaperRouteBaseline:
             "playbook_id",
             "playbook_version",
             "configuration_hash",
+            "runtime_registry_binding_hash",
             "historical_metrics_snapshot_hash",
         ):
             if not str(getattr(self, name)).strip():

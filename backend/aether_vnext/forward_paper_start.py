@@ -93,6 +93,7 @@ def _start_forward_paper_campaign_for_requests(
         store,
         campaign_id=campaign_id,
         requested_routes=requested_routes,
+        as_of_utc=started_at_utc,
     )
     return _persist_forward_paper_campaign_from_preflight(
         conn,
@@ -128,6 +129,7 @@ def start_forward_paper_campaign_from_book(
         conn,
         store,
         campaign_id=campaign_id,
+        as_of_utc=started_at_utc,
     )
     if preflight.requested_route_count != len(expected):
         raise RuntimeError("canonical preflight route-count drift")

@@ -12,6 +12,10 @@ from aether_vnext.forward_paper import (
 )
 from aether_vnext.store import VNextStore
 from tests_vnext.held_out_support import record_provenanced_held_out
+from tests_vnext.runtime_registry_support import (
+    record_test_runtime_binding,
+    test_runtime_binding_hash,
+)
 
 
 UTC = timezone.utc
@@ -61,6 +65,10 @@ def _route() -> ForwardPaperRouteBaseline:
         playbook_id="pb_fx_intraday_v1_2",
         playbook_version="1.2",
         configuration_hash="cfg-fp",
+        runtime_registry_binding_hash=test_runtime_binding_hash(
+            "eurusd",
+            now=T0,
+        ),
         historical_validation_window_ids=("heldout-1",),
         historical_metrics_snapshot_hash="historical-metrics-1",
     )
@@ -81,6 +89,13 @@ def _store() -> tuple[sa.Engine, VNextStore]:
                 payload={},
                 created_at_utc=T0,
             )
+        )
+        record_test_runtime_binding(
+            conn,
+            store,
+            asset_id="eurusd",
+            configuration_hash="cfg-fp",
+            now=T0,
         )
         record_provenanced_held_out(conn, store, _window(
                 window_id="heldout-1",
@@ -193,6 +208,10 @@ def test_campaign_route_freezes_playbook_route_and_configuration_identity() -> N
         playbook_id="pb_fx_intraday_v1_2",
         playbook_version="1.2",
         configuration_hash="cfg-fp",
+        runtime_registry_binding_hash=test_runtime_binding_hash(
+            "eurusd",
+            now=T0,
+        ),
         historical_validation_window_ids=("heldout-1",),
         historical_metrics_snapshot_hash="historical-metrics-1",
     )
