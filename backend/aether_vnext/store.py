@@ -2625,12 +2625,24 @@ class VNextStore:
             raise ValueError(
                 "research provenance persistence requires held_out sample_domain"
             )
-        run_id = str(backtest_run_id).strip()
-        if not run_id:
-            raise ValueError("backtest_run_id is required")
-        fold_ids = tuple(str(value).strip() for value in fold_result_ids)
-        if not fold_ids or any(not value for value in fold_ids):
-            raise ValueError("fold_result_ids must contain nonblank IDs")
+        if (
+            not isinstance(backtest_run_id, str)
+            or not backtest_run_id
+            or backtest_run_id != backtest_run_id.strip()
+        ):
+            raise ValueError("backtest_run_id must be canonical text")
+        run_id = backtest_run_id
+        fold_ids = tuple(fold_result_ids)
+        if (
+            not fold_ids
+            or any(
+                not isinstance(value, str)
+                or not value
+                or value != value.strip()
+                for value in fold_ids
+            )
+        ):
+            raise ValueError("fold_result_ids must contain canonical IDs")
         if len(fold_ids) != len(set(fold_ids)):
             raise ValueError("duplicate fold_result_id in held_out provenance")
 

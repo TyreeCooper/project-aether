@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
 import sqlalchemy as sa
 
 from aether_vnext.evidence import EvidenceWindow, SampleDomain
@@ -73,6 +74,44 @@ def test_provenanced_held_out_window_binds_research_run_dataset_and_fold() -> No
     assert row["fold_result_ids"] == ["fold:heldout-provenance-1"]
     assert row["provenance_hash"] == provenance_hash
     assert len(provenance_hash) == 64
+
+
+@pytest.mark.parametrize(
+    ("backtest_run_id", "fold_result_ids", "message"),
+    (
+        (
+            " run:heldout-provenance-1 ",
+            ("fold:heldout-provenance-1",),
+            "backtest_run_id must be canonical text",
+        ),
+        (
+            "run:heldout-provenance-1",
+            (" fold:heldout-provenance-1 ",),
+            "fold_result_ids must contain canonical IDs",
+        ),
+        (
+            "run:heldout-provenance-1",
+            (1,),
+            "fold_result_ids must contain canonical IDs",
+        ),
+    ),
+)
+def test_held_out_persistence_requires_canonical_provenance_ids(
+    backtest_run_id: object,
+    fold_result_ids: tuple[object, ...],
+    message: str,
+) -> None:
+    engine, store = _store()
+    window = _window()
+    with engine.begin() as conn:
+        record_provenanced_held_out(conn, store, window)
+        with pytest.raises(ValueError, match=message):
+            store.record_held_out_evidence_window(
+                conn,
+                window,
+                backtest_run_id=backtest_run_id,
+                fold_result_ids=fold_result_ids,
+            )
 
 
 def test_generic_held_out_row_is_not_research_provenance() -> None:
