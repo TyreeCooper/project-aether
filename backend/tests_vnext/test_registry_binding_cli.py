@@ -112,3 +112,9 @@ def test_manifest_parser_preserves_ninjatrader_contract_id() -> None:
     }
     _, _, bindings = module._parse_manifest(payload)
     assert bindings[0].market_data_contract_id == 987654
+
+
+def test_cli_exposes_implemented_calendar_gate() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert "--require-implemented-calendar" in source
+    assert "require_calendar_provider_implementation" in source

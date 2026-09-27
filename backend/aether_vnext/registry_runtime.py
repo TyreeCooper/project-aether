@@ -15,6 +15,9 @@ from datetime import datetime, timedelta
 import hashlib
 import json
 
+from aether_vnext.calendar_sources import (
+    calendar_provider_implementation_blockers,
+)
 from aether_vnext.market_sources import market_source_implementation_blockers
 from aether_vnext.ninjatrader_market import NINJATRADER_MARKET_SOURCE_ID
 from aether_vnext.registry import (
@@ -128,6 +131,7 @@ def binding_blockers(
     *,
     as_of_utc: datetime | None = None,
     require_market_source_implementation: bool = False,
+    require_calendar_provider_implementation: bool = False,
 ) -> tuple[str, ...]:
     """Return exact missing/unsafe external binding facts for one seed asset."""
     asset_id = binding.asset_id.strip().lower()
@@ -167,8 +171,16 @@ def binding_blockers(
         blockers.append("stale_threshold_missing")
 
     if base.calendar_id != "crypto_24x7":
-        if _clean(binding.calendar_provider_id) is None:
+        calendar_provider_id = _clean(binding.calendar_provider_id)
+        if calendar_provider_id is None:
             blockers.append("calendar_provider_missing")
+        elif require_calendar_provider_implementation:
+            blockers.extend(
+                calendar_provider_implementation_blockers(
+                    calendar_id=base.calendar_id,
+                    provider_id=calendar_provider_id,
+                )
+            )
 
     if base.borrow_required and _clean(binding.shortability_provider_id) is None:
         blockers.append("shortability_provider_missing")

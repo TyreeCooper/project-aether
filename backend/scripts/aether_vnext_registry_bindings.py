@@ -91,6 +91,7 @@ async def _main(
     manifest_file: str | None,
     require_complete: bool,
     require_implemented_source: bool,
+    require_implemented_calendar: bool,
     output: str | None,
 ) -> int:
     payload = _load_payload(
@@ -111,6 +112,9 @@ async def _main(
                         as_of_utc=now,
                         require_market_source_implementation=(
                             require_implemented_source
+                        ),
+                        require_calendar_provider_implementation=(
+                            require_implemented_calendar
                         ),
                     )
                     digest = store.upsert_runtime_registry_binding(
@@ -134,6 +138,7 @@ async def _main(
         "registry_version": registry_version,
         "configuration_hash": configuration_hash,
         "require_implemented_source": require_implemented_source,
+        "require_implemented_calendar": require_implemented_calendar,
         "binding_count": len(report_rows),
         "complete_binding_count": sum(
             1 for row in report_rows if row["complete"]
@@ -166,6 +171,11 @@ if __name__ == "__main__":
         action="store_true",
         help="fail bindings whose reviewed source lacks a vNext implementation",
     )
+    parser.add_argument(
+        "--require-implemented-calendar",
+        action="store_true",
+        help="fail non-24x7 bindings whose calendar provider lacks vNext code",
+    )
     parser.add_argument("--output")
     args = parser.parse_args()
     raise SystemExit(
@@ -175,6 +185,7 @@ if __name__ == "__main__":
                 manifest_file=args.manifest_file,
                 require_complete=args.require_complete,
                 require_implemented_source=args.require_implemented_source,
+                require_implemented_calendar=args.require_implemented_calendar,
                 output=args.output,
             )
         )

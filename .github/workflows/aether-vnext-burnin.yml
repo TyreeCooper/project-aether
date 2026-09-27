@@ -187,6 +187,7 @@ jobs:
             --manifest-json "$AETHER_VNEXT_RUNTIME_BINDINGS_JSON" \
             --require-complete \
             --require-implemented-source \
+            --require-implemented-calendar \
             --output aether-vnext-runtime-bindings.json
 
       - name: Upload runtime Product Registry binding report

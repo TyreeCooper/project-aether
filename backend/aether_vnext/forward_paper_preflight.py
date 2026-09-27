@@ -225,6 +225,7 @@ def preflight_forward_paper_campaign_from_book(
     requested_routes: tuple[ForwardPaperRouteRequest, ...],
     as_of_utc: datetime | None = None,
     require_market_source_implementation: bool = False,
+    require_calendar_provider_implementation: bool = False,
 ) -> ForwardPaperPreflightResult:
     """Inspect whether the current vNext book can start a C9.1 campaign."""
     if not str(campaign_id).strip():
@@ -329,6 +330,9 @@ def preflight_forward_paper_campaign_from_book(
                         as_of_utc=as_of_utc,
                         require_market_source_implementation=(
                             require_market_source_implementation
+                        ),
+                        require_calendar_provider_implementation=(
+                            require_calendar_provider_implementation
                         ),
                     )
                     route_blockers.extend(runtime_blockers)
@@ -497,6 +501,7 @@ def preflight_canonical_forward_paper_campaign_from_book(
         requested_routes=canonical_forward_paper_route_requests(),
         as_of_utc=as_of_utc,
         require_market_source_implementation=True,
+        require_calendar_provider_implementation=True,
     )
 
 def route_baselines_from_preflight(
