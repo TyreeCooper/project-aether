@@ -41,6 +41,23 @@ def _start_campaign(conn, store, *, campaign_id: str):
     )
 
 
+@pytest.mark.parametrize("campaign_id", (" burnin-health-clean ", 1, ""))
+def test_forward_paper_ledger_health_requires_canonical_campaign_id(
+    campaign_id: object,
+) -> None:
+    engine, store = _store()
+    with engine.begin() as conn:
+        with pytest.raises(
+            ValueError,
+            match="campaign_id must be canonical text",
+        ):
+            forward_paper_ledger_blockers(
+                conn,
+                store=store,
+                campaign_id=campaign_id,
+            )
+
+
 def test_forward_paper_ledger_health_accepts_intact_campaign() -> None:
     engine, store = _store()
     with engine.begin() as conn:

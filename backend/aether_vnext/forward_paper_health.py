@@ -32,9 +32,13 @@ def forward_paper_ledger_blockers(
     campaign_id: str,
 ) -> tuple[str, ...]:
     """Return deterministic blockers for persisted burn-in ledger drift."""
-    campaign_key = str(campaign_id).strip()
-    if not campaign_key:
-        raise ValueError("campaign_id is required")
+    if (
+        not isinstance(campaign_id, str)
+        or not campaign_id
+        or campaign_id != campaign_id.strip()
+    ):
+        raise ValueError("campaign_id must be canonical text")
+    campaign_key = campaign_id
 
     campaigns = store.tables["forward_paper_campaigns"]
     campaign = conn.execute(
