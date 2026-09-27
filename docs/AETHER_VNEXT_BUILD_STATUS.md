@@ -505,9 +505,12 @@ Implemented after Phase 9:
 - no fallback to legacy DATABASE_URL or AZURE_POSTGRESQL_CONNECTIONSTRING;
 - async Alembic support for PostgreSQL/asyncpg;
 - canonical policy snapshot bootstrap only; no trade/evidence/capital seeding;
-- pre-merge manual bridge through the existing AETHER vNext CI workflow;
-- full canonical scout_definition_enabled route/playbook preflight, with no
-  hand-selected subset;
+- same-repository PR-label burn-in bridge through the dedicated burn-in workflow;
+- exact PR head SHA checkout plus environment-secret approval boundary;
+- canonical WATCH coverage manifest separated from the statically executable
+  campaign universe, with source-incomplete exclusions retained visibly;
+- canonical executable-universe preflight/start only; operator-supplied route
+  subsets are not accepted;
 - durable JSON preflight artifacts on both startable and non-startable runs;
 - read-only target-database isolation guard that refuses known legacy Aether public
   tables before any vNext migration is applied.
@@ -523,17 +526,38 @@ Burn-in control-plane implementation commits:
 - pre-merge canonical dispatch bridge: `4e79016fc519b93de60b558aa0cc87f0dad0c840`;
 - legacy target-database rejection: `a8a554985107aad2b352bea13ea987a9d15a9ad2`.
 
-Latest verified CI:
-- AETHER vNext CI #397: SUCCESS;
-- repository CI #706: SUCCESS.
+Latest verified CI before trusted-dispatch hardening:
+- AETHER vNext CI #400: SUCCESS;
+- repository CI #709: SUCCESS.
 
 External gate before campaign #1:
 - provision or identify a dedicated non-production PostgreSQL database for vNext;
 - create/configure GitHub Environment `aether-vnext-burnin`;
 - configure exactly one dedicated vNext database connection path;
-- manually dispatch AETHER vNext CI against `aether-vnext-swapout`;
+- configure environment protection/review for `aether-vnext-burnin` before any
+  secret-bearing run;
+- on PR #12, apply label `aether-vnext-burnin-preflight-approved` to run the
+  same-repository/head-SHA-gated initialization + canonical preflight bridge;
 - inspect the uploaded canonical preflight JSON;
-- only if `startable=true` may campaign #1 be created.
+- only after `startable=true`, apply label `aether-vnext-burnin-start-approved`
+  to re-preflight and atomically create campaign #1.
 
 AETH-VN-020 tracks this external environment dependency. It blocks real burn-in
 execution but does not change PAPER ONLY / LIVE HARD BLOCKED.
+
+
+### Burn-in hardening correction — provenance, canonical execution, trusted dispatch
+
+The earlier statement that repository-side burn-in was fully closed was too broad.
+Three gaps were subsequently corrected:
+
+- schema 0021 binds HELD_OUT campaign baselines to immutable BacktestRun,
+  ResearchDatasetSnapshot, and FoldResult provenance;
+- canonical WATCH coverage remains visible, while Campaign #1 derives only the
+  source-complete executable subset and does not accept a caller-selected subset;
+- pre-merge secret-bearing burn-in is triggered only by explicit approval labels on
+  the same-repository `aether-vnext-swapout` PR head and remains subject to the
+  `aether-vnext-burnin` environment boundary.
+
+These controls do not create historical evidence, market-data bindings, broker
+readiness, or profitability. Real preflight and Campaign #1 remain externally gated.

@@ -632,10 +632,9 @@ deploy the legacy `aether-prod-api` runtime. There is currently no verified dedi
 vNext PostgreSQL burn-in book or configured GitHub Environment
 `aether-vnext-burnin`.
 
-The available GitHub integration can modify repository code and inspect/rerun existing
-Actions runs, but cannot create GitHub Environments, write environment secrets, or
-dispatch a new workflow run. No Azure infrastructure connector is available in this
-session.
+The repository now contains a pre-merge PR-label dispatch path, but the external
+GitHub Environment and its secrets/protection rules are still not configured by code.
+No Azure infrastructure connector is available in this session.
 
 ### Control
 
@@ -644,10 +643,17 @@ Repository-side controls are complete:
 - legacy production DB variable names are ignored;
 - the configured target is scanned for known legacy Aether public tables before
   migrations and fails closed if they are found;
-- the pre-merge manual bridge runs through the existing AETHER vNext CI workflow;
-- the bridge preflights the complete canonical burn-in-eligible route/playbook
-  universe and uploads a machine-readable report;
-- campaign creation remains blocked until real preflight returns `startable=true`.
+- contract CI is secret-free; the dedicated burn-in workflow owns secret-bearing work;
+- pre-merge burn-in requires a same-repository PR, exact head branch
+  `aether-vnext-swapout`, an explicit approval label, exact head-SHA checkout, and the
+  `aether-vnext-burnin` environment boundary;
+- WATCH coverage and executable campaign routes are separated. Source-incomplete
+  playbooks remain visible in the manifest but cannot enter Campaign #1;
+- operator preflight/start paths derive the canonical executable universe internally;
+  arbitrary route subsets are not accepted;
+- HELD_OUT baselines used by Campaign #1 require immutable research provenance;
+- campaign creation remains blocked until real canonical preflight returns
+  `startable=true`.
 
 No production database, legacy evidence, synthetic held-out evidence, or fake campaign
 state may be used to close this issue.
