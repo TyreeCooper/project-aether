@@ -231,6 +231,29 @@ def test_profitability_evidence_reload_rejects_noncanonical_identity() -> None:
             )
 
 
+def test_review_card_reload_rejects_noncanonical_identity() -> None:
+    engine, store = _store()
+    with engine.begin() as conn:
+        store.record_profitability_review(
+            conn,
+            evidence=_evidence(),
+            review_card=_card(),
+            gate_input=_gate_input(),
+        )
+        table = store.tables["review_cards"]
+        conn.execute(
+            table.update()
+            .where(table.c.review_card_id == "review-1")
+            .values(route_id=" eurusd:intraday:long ")
+        )
+
+        with pytest.raises(ValueError, match="route_id must be canonical text"):
+            store.load_review_card(
+                conn,
+                review_card_id="review-1",
+            )
+
+
 def test_second_review_updates_projection_but_preserves_prior_evidence_and_card() -> None:
     engine, store = _store()
     with engine.begin() as conn:

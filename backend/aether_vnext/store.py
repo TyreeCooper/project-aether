@@ -3251,16 +3251,16 @@ class VNextStore:
         if row is None:
             return None
         return ReviewCard(
-            review_card_id=str(row["review_card_id"]),
-            route_id=str(row["route_id"]),
-            playbook_id=str(row["playbook_id"]),
-            playbook_version=str(row["playbook_version"]),
+            review_card_id=row["review_card_id"],
+            route_id=row["route_id"],
+            playbook_id=row["playbook_id"],
+            playbook_version=row["playbook_version"],
             as_of_utc=_stored_utc(row["as_of_utc"]),
-            evidence_state=str(row["evidence_state"]),
+            evidence_state=row["evidence_state"],
             evidence_id=row["evidence_id"],
-            decision_reason=str(row["decision_reason"]),
-            reviewer=str(row["reviewer"]),
-            configuration_hash=str(row["configuration_hash"]),
+            decision_reason=row["decision_reason"],
+            reviewer=row["reviewer"],
+            configuration_hash=row["configuration_hash"],
         )
 
     def load_order_intent(
