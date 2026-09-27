@@ -460,18 +460,80 @@ pileups are cancelled automatically and both workflows have a 10-minute timeout.
 
 ## Next build target
 
-Forward-paper burn-in + cutover readiness.
+Real non-production vNext burn-in environment + canonical preflight.
 
 Immediate gates:
-- run natural PAPER setups with forced strategy entries OFF;
+- satisfy AETH-VN-020 by configuring a dedicated non-production vNext PostgreSQL book
+  and GitHub Environment `aether-vnext-burnin`;
+- dispatch the existing AETHER vNext CI workflow against `aether-vnext-swapout`;
+- require the target-database isolation guard to pass before migrations;
+- initialize only schema 0001–0020 plus the canonical policy snapshot;
+- inspect the uploaded full-universe burn-in preflight artifact;
+- if any route is missing held-out evidence, fill only that real evidence gap;
+- start campaign #1 only after the canonical preflight returns `startable=true`;
+- then run natural PAPER setups with forced strategy entries OFF;
 - accumulate clean paper-forward/OOS evidence without mixing execution-validation,
   historical/in-sample, or future-live domains;
-- exercise the P11 profitability-readiness assessment against real Firm snapshots;
+- exercise P11 against real Firm snapshots;
 - keep profitability_ready=false until approved sustained-operation and OOS/trusted-route
   sufficiency policies are actually satisfied;
-- resolve or explicitly continue to contain AETH-VN-009/010/012–018;
-- complete operator UI integration against the read-only P10 projection;
 - preserve PAPER ONLY / LIVE HARD BLOCKED throughout burn-in.
 
 Only after those evidence/cutover gates pass may the project evaluate a separate,
 explicitly authorized live-readiness phase. Phase 9 does not grant live authority.
+
+
+### Forward-paper burn-in control plane — REPOSITORY SIDE COMPLETE
+
+Status distinction:
+- repository-side burn-in controls are implemented and CI-verified;
+- no real vNext burn-in database/environment has been configured yet;
+- no real canonical burn-in preflight has been executed against a deployed vNext book;
+- campaign #1 has NOT started;
+- empirical profitability readiness remains unproven.
+
+Implemented after Phase 9:
+- schema revision 0020 immutable forward-paper campaign, route-baseline, and
+  campaign-window ledger;
+- campaign-aware paper_forward EvidenceWindow persistence only;
+- canonical ClosedTrade -> DecisionLineage -> Setup verification for paper-forward
+  evidence;
+- current held-out baseline freezing with deterministic route/campaign hashes;
+- read-only campaign preflight with exact blocker codes and independent held-out n;
+- campaign start consumes the same preflight result used by the operator/control plane;
+- dedicated vNext-only PostgreSQL configuration namespace using AETHER_VNEXT_*;
+- no fallback to legacy DATABASE_URL or AZURE_POSTGRESQL_CONNECTIONSTRING;
+- async Alembic support for PostgreSQL/asyncpg;
+- canonical policy snapshot bootstrap only; no trade/evidence/capital seeding;
+- pre-merge manual bridge through the existing AETHER vNext CI workflow;
+- full canonical scout_definition_enabled route/playbook preflight, with no
+  hand-selected subset;
+- durable JSON preflight artifacts on both startable and non-startable runs;
+- read-only target-database isolation guard that refuses known legacy Aether public
+  tables before any vNext migration is applied.
+
+Burn-in control-plane implementation commits:
+- campaign ledger / schema 0020: `a7b864080753295e97f6da28c4e7d7eb4718e7fe`;
+- evidence-domain test correction: `a86fdbc91aaaefe65f38c88fa4b6fad801dc047b`;
+- canonical held-out campaign start: `f1470084320c628823b6d9ad687810dbf0af4505`;
+- read-only canonical preflight: `2b171c93db75fd5bd9dea7542e5cc720afa5033d`;
+- preflight diagnostic test alignment: `b842af49bcef8ec62f2ea12759839adca687c273`;
+- isolated non-production DB control plane: `ebf319fee487724a36063ab542a89d56cc62271c`;
+- durable preflight artifacts: `17076f0849a09b73f9b21db479390e350784bf1a`;
+- pre-merge canonical dispatch bridge: `4e79016fc519b93de60b558aa0cc87f0dad0c840`;
+- legacy target-database rejection: `a8a554985107aad2b352bea13ea987a9d15a9ad2`.
+
+Latest verified CI:
+- AETHER vNext CI #397: SUCCESS;
+- repository CI #706: SUCCESS.
+
+External gate before campaign #1:
+- provision or identify a dedicated non-production PostgreSQL database for vNext;
+- create/configure GitHub Environment `aether-vnext-burnin`;
+- configure exactly one dedicated vNext database connection path;
+- manually dispatch AETHER vNext CI against `aether-vnext-swapout`;
+- inspect the uploaded canonical preflight JSON;
+- only if `startable=true` may campaign #1 be created.
+
+AETH-VN-020 tracks this external environment dependency. It blocks real burn-in
+execution but does not change PAPER ONLY / LIVE HARD BLOCKED.

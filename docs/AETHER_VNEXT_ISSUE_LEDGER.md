@@ -615,3 +615,41 @@ requires a frozen campaign route, held-out historical baseline, matching
 configuration/playbook lineage, and canonical ClosedTrade evidence.
 
 **AETH-VN-019 status:** CONTAINED.
+
+
+## AETH-VN-020 — Real vNext burn-in environment is not yet provisioned/configured
+
+**Class:** external infrastructure / evidence-environment dependency  
+**Discovered:** forward-paper burn-in deployment handoff  
+**Status:** OPEN / EXTERNAL SETUP REQUIRED  
+**Blocks repository-side implementation:** NO  
+**Blocks real canonical burn-in preflight and campaign #1:** YES
+
+### Facts
+
+The vNext replacement branch remains a draft PR and production `main` continues to
+deploy the legacy `aether-prod-api` runtime. There is currently no verified dedicated
+vNext PostgreSQL burn-in book or configured GitHub Environment
+`aether-vnext-burnin`.
+
+The available GitHub integration can modify repository code and inspect/rerun existing
+Actions runs, but cannot create GitHub Environments, write environment secrets, or
+dispatch a new workflow run. No Azure infrastructure connector is available in this
+session.
+
+### Control
+
+Repository-side controls are complete:
+- vNext uses only dedicated `AETHER_VNEXT_*` database configuration;
+- legacy production DB variable names are ignored;
+- the configured target is scanned for known legacy Aether public tables before
+  migrations and fails closed if they are found;
+- the pre-merge manual bridge runs through the existing AETHER vNext CI workflow;
+- the bridge preflights the complete canonical burn-in-eligible route/playbook
+  universe and uploads a machine-readable report;
+- campaign creation remains blocked until real preflight returns `startable=true`.
+
+No production database, legacy evidence, synthetic held-out evidence, or fake campaign
+state may be used to close this issue.
+
+**AETH-VN-020 status:** OPEN / EXTERNAL SETUP REQUIRED.
