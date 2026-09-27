@@ -172,7 +172,7 @@ def test_runtime_clerk_bridge_persists_cost_rejection_without_exit_plan() -> Non
             store,
             ticket_id="ticket-runtime-clerk",
             current_observation=obs,
-            first_target_price=1.10021,
+            first_target_price=1.10076,
             atr=None,
             locate_ok=False,
             exit_plan=None,
