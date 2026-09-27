@@ -92,14 +92,20 @@ class ForwardPaperRouteBaseline:
         ):
             if not str(getattr(self, name)).strip():
                 raise ValueError(f"{name} is required")
-        window_ids = tuple(
-            str(value).strip()
-            for value in self.historical_validation_window_ids
-        )
-        if not window_ids or any(not value for value in window_ids):
-            raise ValueError(
-                "historical_validation_window_ids must contain nonblank IDs"
+        raw_window_ids = self.historical_validation_window_ids
+        if (
+            not raw_window_ids
+            or any(
+                not isinstance(value, str)
+                or not value
+                or value != value.strip()
+                for value in raw_window_ids
             )
+        ):
+            raise ValueError(
+                "historical_validation_window_ids must contain canonical IDs"
+            )
+        window_ids = tuple(raw_window_ids)
         if len(window_ids) != len(set(window_ids)):
             raise ValueError(
                 "historical_validation_window_ids cannot contain duplicates"

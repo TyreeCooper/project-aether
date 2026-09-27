@@ -87,7 +87,15 @@ def _load_existing_start_result(
     ).mappings()
     def _route_from_row(route) -> ForwardPaperRouteBaseline:
         raw_window_ids = route["historical_validation_window_ids"]
-        if not isinstance(raw_window_ids, list):
+        if (
+            not isinstance(raw_window_ids, list)
+            or any(
+                not isinstance(value, str)
+                or not value
+                or value != value.strip()
+                for value in raw_window_ids
+            )
+        ):
             raise RuntimeError(
                 "existing forward-paper campaign route baseline JSON invalid"
             )
@@ -101,9 +109,7 @@ def _load_existing_start_result(
             runtime_registry_binding_hash=str(
                 route["runtime_registry_binding_hash"]
             ),
-            historical_validation_window_ids=tuple(
-                str(value) for value in raw_window_ids
-            ),
+            historical_validation_window_ids=tuple(raw_window_ids),
             historical_metrics_snapshot_hash=str(
                 route["historical_metrics_snapshot_hash"]
             ),

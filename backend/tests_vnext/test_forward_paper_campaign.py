@@ -1108,3 +1108,29 @@ def test_campaign_route_baseline_rejects_trim_equivalent_window_ids() -> None:
             historical_validation_window_ids=("heldout-1", " heldout-1 "),
             historical_metrics_snapshot_hash=base.historical_metrics_snapshot_hash,
         )
+
+
+
+@pytest.mark.parametrize(
+    "invalid_ids",
+    (
+        (" heldout-1 ",),
+        (1,),
+    ),
+)
+def test_campaign_route_baseline_requires_canonical_historical_ids(
+    invalid_ids: tuple[object, ...],
+) -> None:
+    base = _route()
+    with pytest.raises(ValueError, match="must contain canonical IDs"):
+        ForwardPaperRouteBaseline(
+            campaign_route_id=base.campaign_route_id,
+            campaign_id=base.campaign_id,
+            route_id=base.route_id,
+            playbook_id=base.playbook_id,
+            playbook_version=base.playbook_version,
+            configuration_hash=base.configuration_hash,
+            runtime_registry_binding_hash=base.runtime_registry_binding_hash,
+            historical_validation_window_ids=invalid_ids,  # type: ignore[arg-type]
+            historical_metrics_snapshot_hash=base.historical_metrics_snapshot_hash,
+        )

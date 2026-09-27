@@ -130,9 +130,17 @@ def forward_paper_ledger_blockers(
             )
         try:
             raw_window_ids = row["historical_validation_window_ids"]
-            if not isinstance(raw_window_ids, list):
+            if (
+                not isinstance(raw_window_ids, list)
+                or any(
+                    not isinstance(value, str)
+                    or not value
+                    or value != value.strip()
+                    for value in raw_window_ids
+                )
+            ):
                 raise ValueError(
-                    "historical_validation_window_ids must be a JSON list"
+                    "historical_validation_window_ids must contain canonical IDs"
                 )
             route_baseline = ForwardPaperRouteBaseline(
                 campaign_route_id=route_id,
@@ -144,9 +152,7 @@ def forward_paper_ledger_blockers(
                 runtime_registry_binding_hash=str(
                     row["runtime_registry_binding_hash"]
                 ),
-                historical_validation_window_ids=tuple(
-                    str(value) for value in raw_window_ids
-                ),
+                historical_validation_window_ids=tuple(raw_window_ids),
                 historical_metrics_snapshot_hash=str(
                     row["historical_metrics_snapshot_hash"]
                 ),
