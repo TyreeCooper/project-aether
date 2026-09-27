@@ -26,7 +26,7 @@ from aether_vnext.playbook_exits import exit_rule
 from aether_vnext.playbooks import ordered_playbooks, playbook
 from aether_vnext.registry_runtime import binding_blockers
 from aether_vnext.runtime_book_health import runtime_book_blockers
-from aether_vnext.store import VNextStore
+from aether_vnext.store import VNextStore, canonical_payload_hash
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,6 +168,10 @@ class ForwardPaperPreflightResult:
                 or "held_out_baseline_lacks_research_provenance" in row.blockers
             )
         )
+
+
+def _stored_utc(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
 
 def _canonical_hash(payload: object) -> str:
@@ -347,6 +351,7 @@ def preflight_forward_paper_campaign_from_book(
     provenance = store.tables["held_out_evidence_provenance"]
     runs = store.tables["backtest_runs"]
     datasets = store.tables["research_dataset_snapshots"]
+    folds = store.tables["fold_results"]
 
     for request in sorted(
         requested_routes,
@@ -576,6 +581,117 @@ def preflight_forward_paper_campaign_from_book(
                     route_blockers.append(
                         "held_out_provenance_dataset_invalid"
                     )
+
+                fold_provenance_ok = provenance_shape_ok
+                if provenance_shape_ok:
+                    for row in rows:
+                        fold_ids = tuple(
+                            str(value).strip()
+                            for value in row["fold_result_ids"]
+                        )
+                        selected = tuple(
+                            dict(fold)
+                            for fold in conn.execute(
+                                sa.select(folds).where(
+                                    folds.c.fold_result_id.in_(fold_ids)
+                                )
+                            ).mappings()
+                        )
+                        if (
+                            len(selected) != len(fold_ids)
+                            or any(
+                                str(fold["backtest_run_id"])
+                                != str(row["backtest_run_id"]).strip()
+                                for fold in selected
+                            )
+                        ):
+                            fold_provenance_ok = False
+                            break
+                        ordered = tuple(
+                            sorted(
+                                selected,
+                                key=lambda fold: (
+                                    _stored_utc(fold["test_start_utc"]),
+                                    _stored_utc(fold["test_end_utc"]),
+                                    str(fold["fold_result_id"]),
+                                ),
+                            )
+                        )
+                        overlaps = any(
+                            _stored_utc(current["test_start_utc"])
+                            <= _stored_utc(prior["test_end_utc"])
+                            for prior, current in zip(
+                                ordered,
+                                ordered[1:],
+                            )
+                        )
+                        first_test_at = min(
+                            _stored_utc(fold["test_start_utc"])
+                            for fold in ordered
+                        )
+                        last_test_at = max(
+                            _stored_utc(fold["test_end_utc"])
+                            for fold in ordered
+                        )
+                        if (
+                            overlaps
+                            or _stored_utc(row["first_timestamp_utc"])
+                            < first_test_at
+                            or _stored_utc(row["last_timestamp_utc"])
+                            > last_test_at
+                        ):
+                            fold_provenance_ok = False
+                            break
+                if not fold_provenance_ok:
+                    route_blockers.append(
+                        "held_out_provenance_fold_invalid"
+                    )
+
+                provenance_hash_ok = provenance_shape_ok
+                if provenance_shape_ok:
+                    for row in rows:
+                        raw_trade_ids = row["immutable_trade_ids"]
+                        if not isinstance(raw_trade_ids, list):
+                            provenance_hash_ok = False
+                            break
+                        expected_provenance_hash = canonical_payload_hash(
+                            {
+                                "backtest_run_id": str(
+                                    row["backtest_run_id"]
+                                ).strip(),
+                                "dataset_snapshot_id": str(
+                                    row["dataset_snapshot_id"]
+                                ).strip(),
+                                "fold_result_ids": sorted(
+                                    str(value).strip()
+                                    for value in row["fold_result_ids"]
+                                ),
+                                "route_id": str(row["route_id"]),
+                                "playbook_id": str(row["playbook_id"]),
+                                "playbook_version": str(
+                                    row["playbook_version"]
+                                ),
+                                "configuration_hash": str(
+                                    row["configuration_hash"]
+                                ),
+                                "immutable_trade_ids": sorted(
+                                    str(value).strip()
+                                    for value in raw_trade_ids
+                                ),
+                                "metrics_snapshot_hash": str(
+                                    row["metrics_snapshot_hash"]
+                                ),
+                            }
+                        )
+                        if expected_provenance_hash != str(
+                            row["provenance_hash"]
+                        ):
+                            provenance_hash_ok = False
+                            break
+                if not provenance_hash_ok:
+                    route_blockers.append(
+                        "held_out_provenance_hash_invalid"
+                    )
                 try:
                     windows = tuple(
                         store.load_evidence_window(
@@ -599,6 +715,8 @@ def preflight_forward_paper_campaign_from_book(
                         and provenance_shape_ok
                         and run_provenance_ok
                         and dataset_provenance_ok
+                        and fold_provenance_ok
+                        and provenance_hash_ok
                     ):
                         route_hash = _route_baseline_hash(
                             route_id=request.route_id,

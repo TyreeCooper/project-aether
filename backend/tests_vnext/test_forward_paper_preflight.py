@@ -365,3 +365,75 @@ def test_preflight_revalidates_heldout_dataset() -> None:
         out.route_results[0].blockers
     )
     assert out.route_results[0].route_baseline_hash is None
+
+
+
+def test_preflight_revalidates_heldout_fold_chain() -> None:
+    engine, store = _store()
+    with engine.begin() as conn:
+        record_provenanced_held_out(
+            conn,
+            store,
+            _window("fold-drift"),
+        )
+        provenance = store.tables["held_out_evidence_provenance"]
+        conn.execute(
+            provenance.update()
+            .where(provenance.c.evidence_window_id == "fold-drift")
+            .values(fold_result_ids=["missing-fold"])
+        )
+
+        out = preflight_forward_paper_campaign_from_book(
+            conn,
+            store,
+            campaign_id="preflight-fold-drift",
+            requested_routes=(
+                ForwardPaperRouteRequest(
+                    route_id="eurusd:intraday:long",
+                    playbook_id="pb_fx_intraday_v1_2",
+                ),
+            ),
+        )
+
+    assert out.startable is False
+    assert "held_out_provenance_fold_invalid" in (
+        out.route_results[0].blockers
+    )
+    assert out.route_results[0].route_baseline_hash is None
+
+
+def test_preflight_recomputes_heldout_provenance_hash() -> None:
+    engine, store = _store()
+    with engine.begin() as conn:
+        record_provenanced_held_out(
+            conn,
+            store,
+            _window("provenance-hash-drift"),
+        )
+        provenance = store.tables["held_out_evidence_provenance"]
+        conn.execute(
+            provenance.update()
+            .where(
+                provenance.c.evidence_window_id
+                == "provenance-hash-drift"
+            )
+            .values(provenance_hash="tampered-provenance-hash")
+        )
+
+        out = preflight_forward_paper_campaign_from_book(
+            conn,
+            store,
+            campaign_id="preflight-provenance-hash-drift",
+            requested_routes=(
+                ForwardPaperRouteRequest(
+                    route_id="eurusd:intraday:long",
+                    playbook_id="pb_fx_intraday_v1_2",
+                ),
+            ),
+        )
+
+    assert out.startable is False
+    assert "held_out_provenance_hash_invalid" in (
+        out.route_results[0].blockers
+    )
+    assert out.route_results[0].route_baseline_hash is None
