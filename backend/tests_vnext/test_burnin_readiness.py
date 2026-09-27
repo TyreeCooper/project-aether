@@ -109,5 +109,8 @@ def test_blocker_classification_keeps_exact_external_and_safety_boundaries() -> 
     assert blocker_class(
         "canonical_policy_snapshot_missing"
     ) == "environment_initialization"
+    assert blocker_class(
+        "canonical_policy_snapshot_invalid"
+    ) == "environment_initialization"
     assert blocker_class("live_not_blocked") == "safety_invariant"
     assert blocker_class("unknown_future_blocker") == "internal_contract"

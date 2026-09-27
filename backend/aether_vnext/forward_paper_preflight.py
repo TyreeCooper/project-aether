@@ -348,9 +348,19 @@ def preflight_forward_paper_campaign_from_book(
             policies.c.configuration_hash == CONFIGURATION_HASH
         )
     ).mappings().first()
-    policy_version = str(policy["policy_version"]) if policy is not None else None
+    policy_version: str | None = None
     if policy is None:
         blockers.append("canonical_policy_snapshot_missing")
+    else:
+        raw_policy_version = policy["policy_version"]
+        if (
+            not isinstance(raw_policy_version, str)
+            or not raw_policy_version
+            or raw_policy_version != raw_policy_version.strip()
+        ):
+            blockers.append("canonical_policy_snapshot_invalid")
+        else:
+            policy_version = raw_policy_version
 
     seen: set[tuple[str, str]] = set()
     route_results: list[ForwardPaperRoutePreflight] = []

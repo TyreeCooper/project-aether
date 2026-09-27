@@ -50,6 +50,7 @@ def blocker_class(code: str) -> str:
 
     if value in {
         "canonical_policy_snapshot_missing",
+        "canonical_policy_snapshot_invalid",
         "runtime_product_binding_missing",
         "runtime_product_binding_configuration_mismatch",
     }:
