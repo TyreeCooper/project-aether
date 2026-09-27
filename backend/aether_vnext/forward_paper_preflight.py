@@ -262,6 +262,26 @@ def _route_baseline_hash(
     )
 
 
+def forward_paper_route_baseline_hash(
+    *,
+    route_id: str,
+    playbook_id: str,
+    playbook_version: str,
+    configuration_hash: str,
+    runtime_registry_binding_hash: str,
+    rows: tuple[dict[str, object], ...],
+) -> str:
+    """Public canonical hash for one frozen forward-paper route baseline."""
+    return _route_baseline_hash(
+        route_id=route_id,
+        playbook_id=playbook_id,
+        playbook_version=playbook_version,
+        configuration_hash=configuration_hash,
+        runtime_registry_binding_hash=runtime_registry_binding_hash,
+        rows=rows,
+    )
+
+
 def preflight_forward_paper_campaign_from_book(
     conn: Connection,
     store: VNextStore,

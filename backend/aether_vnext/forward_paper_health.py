@@ -9,6 +9,7 @@ from sqlalchemy.engine import Connection
 from aether_vnext.forward_paper import ForwardPaperRouteBaseline
 from aether_vnext.forward_paper_preflight import (
     forward_paper_baseline_snapshot_hash,
+    forward_paper_route_baseline_hash,
 )
 from aether_vnext.store import VNextStore
 
@@ -51,6 +52,9 @@ def forward_paper_ledger_blockers(
     if not route_rows:
         return ("forward_paper_ledger:campaign_has_no_routes",)
 
+    evidence = store.tables["evidence_windows"]
+    provenance = store.tables["held_out_evidence_provenance"]
+
     routes: list[ForwardPaperRouteBaseline] = []
     route_by_id: dict[str, dict[str, object]] = {}
     for row in route_rows:
@@ -61,28 +65,111 @@ def forward_paper_ledger_blockers(
                 f"forward_paper_ledger:route_configuration_mismatch:{route_id}"
             )
         try:
-            routes.append(
-                ForwardPaperRouteBaseline(
-                    campaign_route_id=route_id,
-                    campaign_id=str(row["campaign_id"]),
-                    route_id=str(row["route_id"]),
-                    playbook_id=str(row["playbook_id"]),
-                    playbook_version=str(row["playbook_version"]),
-                    configuration_hash=str(row["configuration_hash"]),
-                    runtime_registry_binding_hash=str(
-                        row["runtime_registry_binding_hash"]
-                    ),
-                    historical_validation_window_ids=tuple(
-                        str(value)
-                        for value in (
-                            row["historical_validation_window_ids"] or ()
-                        )
-                    ),
-                    historical_metrics_snapshot_hash=str(
-                        row["historical_metrics_snapshot_hash"]
-                    ),
-                )
+            route_baseline = ForwardPaperRouteBaseline(
+                campaign_route_id=route_id,
+                campaign_id=str(row["campaign_id"]),
+                route_id=str(row["route_id"]),
+                playbook_id=str(row["playbook_id"]),
+                playbook_version=str(row["playbook_version"]),
+                configuration_hash=str(row["configuration_hash"]),
+                runtime_registry_binding_hash=str(
+                    row["runtime_registry_binding_hash"]
+                ),
+                historical_validation_window_ids=tuple(
+                    str(value)
+                    for value in (
+                        row["historical_validation_window_ids"] or ()
+                    )
+                ),
+                historical_metrics_snapshot_hash=str(
+                    row["historical_metrics_snapshot_hash"]
+                ),
             )
+            routes.append(route_baseline)
+
+            source_rows: list[dict[str, object]] = []
+            source_complete = True
+            for window_id in route_baseline.historical_validation_window_ids:
+                source = conn.execute(
+                    sa.select(evidence).where(
+                        evidence.c.evidence_window_id == window_id
+                    )
+                ).mappings().first()
+                if source is None:
+                    blockers.append(
+                        "forward_paper_ledger:missing_historical_baseline:"
+                        f"{route_id}:{window_id}"
+                    )
+                    source_complete = False
+                    continue
+
+                prov = conn.execute(
+                    sa.select(provenance).where(
+                        provenance.c.evidence_window_id == window_id
+                    )
+                ).mappings().first()
+                if prov is None:
+                    blockers.append(
+                        "forward_paper_ledger:"
+                        "historical_baseline_provenance_missing:"
+                        f"{route_id}:{window_id}"
+                    )
+                    source_complete = False
+                    continue
+
+                if (
+                    str(source["sample_domain"]) != "held_out"
+                    or str(source["route_id"]) != route_baseline.route_id
+                    or str(source["playbook_id"]) != route_baseline.playbook_id
+                    or str(source["playbook_version"])
+                    != route_baseline.playbook_version
+                    or str(source["configuration_hash"])
+                    != route_baseline.configuration_hash
+                    or str(source["policy_version"])
+                    != str(campaign["policy_version"])
+                ):
+                    blockers.append(
+                        "forward_paper_ledger:"
+                        "historical_baseline_family_mismatch:"
+                        f"{route_id}:{window_id}"
+                    )
+                    source_complete = False
+
+                merged = dict(source)
+                merged.update(
+                    {
+                        "backtest_run_id": prov["backtest_run_id"],
+                        "dataset_snapshot_id": prov["dataset_snapshot_id"],
+                        "fold_result_ids": prov["fold_result_ids"],
+                        "provenance_hash": prov["provenance_hash"],
+                    }
+                )
+                source_rows.append(merged)
+
+            if (
+                source_complete
+                and len(source_rows)
+                == len(route_baseline.historical_validation_window_ids)
+            ):
+                source_hash = forward_paper_route_baseline_hash(
+                    route_id=route_baseline.route_id,
+                    playbook_id=route_baseline.playbook_id,
+                    playbook_version=route_baseline.playbook_version,
+                    configuration_hash=route_baseline.configuration_hash,
+                    runtime_registry_binding_hash=(
+                        route_baseline.runtime_registry_binding_hash
+                    ),
+                    rows=tuple(source_rows),
+                )
+                if (
+                    source_hash
+                    != route_baseline.historical_metrics_snapshot_hash
+                ):
+                    blockers.append(
+                        "forward_paper_ledger:"
+                        "historical_baseline_hash_mismatch:"
+                        f"{route_id}"
+                    )
         except (TypeError, ValueError):
             blockers.append(
                 f"forward_paper_ledger:invalid_route_baseline:{route_id}"
@@ -100,7 +187,6 @@ def forward_paper_ledger_blockers(
             )
 
     links = store.tables["forward_paper_campaign_windows"]
-    evidence = store.tables["evidence_windows"]
     closed = store.tables["closed_trades"]
     lineage = store.tables["decision_lineage"]
     setups = store.tables["setups"]

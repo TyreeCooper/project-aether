@@ -167,3 +167,34 @@ def test_forward_paper_ledger_health_revalidates_immutable_trade_lineage() -> No
         "burnin-health-lineage-paper:missing-canonical-closed-trade",
     )
     assert blocker_class(blockers[0]) == "empirical_evidence"
+
+
+
+def test_forward_paper_ledger_health_recomputes_historical_baseline_hash() -> None:
+    engine, store = _store()
+    campaign_id = "burnin-health-heldout-drift"
+    with engine.begin() as conn:
+        result = _start_campaign(
+            conn,
+            store,
+            campaign_id=campaign_id,
+        )
+        window_id = result.routes[0].historical_validation_window_ids[0]
+        evidence = store.tables["evidence_windows"]
+        conn.execute(
+            evidence.update()
+            .where(evidence.c.evidence_window_id == window_id)
+            .values(metrics_snapshot_hash="tampered-heldout-metrics")
+        )
+
+        blockers = forward_paper_ledger_blockers(
+            conn,
+            store=store,
+            campaign_id=campaign_id,
+        )
+
+    assert blockers == (
+        "forward_paper_ledger:historical_baseline_hash_mismatch:"
+        + result.routes[0].campaign_route_id,
+    )
+    assert blocker_class(blockers[0]) == "empirical_evidence"
