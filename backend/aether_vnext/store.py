@@ -5158,14 +5158,17 @@ class VNextStore:
         capture_efficiency: float | None,
         event_id: str,
         actor: str = "Portfolio",
+        carry_usd: float = 0.0,
     ) -> dict[str, Any]:
         """Atomically commit CLOSE FILLED -> FLAT and release the OPEN reservation."""
         if filled_qty <= 0 or exit_price <= 0:
             raise ValueError("filled quantity and exit price must be positive")
-        if total_cost_usd < 0 or fees_usd < 0:
-            raise ValueError("costs and fees cannot be negative")
-        if fees_usd > total_cost_usd + 1e-9:
-            raise ValueError("fees_usd cannot exceed total_cost_usd")
+        if total_cost_usd < 0 or fees_usd < 0 or carry_usd < 0:
+            raise ValueError("costs, fees, and carry cannot be negative")
+        if fees_usd + carry_usd > total_cost_usd + 1e-9:
+            raise ValueError(
+                "fees_usd + carry_usd cannot exceed total_cost_usd"
+            )
 
         intents = self.tables["order_intents"]
         trades = self.tables["open_trades"]
@@ -5366,6 +5369,9 @@ class VNextStore:
                 fees_accrued_usd=(
                     float(ledger["fees_accrued_usd"]) + float(fees_usd)
                 ),
+                carry_accrued_usd=(
+                    float(ledger["carry_accrued_usd"]) + float(carry_usd)
+                ),
                 settled_cash_usd=post_cash,
                 row_version=int(ledger["row_version"]) + 1,
             )
@@ -5420,6 +5426,7 @@ class VNextStore:
                 "net_pnl_usd": net_pnl_usd,
                 "total_cost_usd": total_cost_usd,
                 "fees_usd": fees_usd,
+                "carry_usd": carry_usd,
                 "released_cash_usd": reserve_cash,
                 "released_margin_usd": reserve_margin,
                 "signal_remains_consumed": True,
