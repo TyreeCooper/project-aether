@@ -45,6 +45,7 @@ def test_book_of_record_has_required_tables() -> None:
         "active_positions",
         "closed_trades",
         "evidence_windows",
+        "held_out_evidence_provenance",
         "profitability_evidence",
         "decay_review_requests",
         "research_hypotheses",
@@ -376,24 +377,34 @@ def test_phase5_execution_reservation_columns_are_in_current_schema() -> None:
     assert "fill_market_observation_id" not in columns
 
 
-def test_runtime_schema_facade_is_pinned_to_revision_0020() -> None:
+def test_runtime_schema_facade_is_pinned_to_revision_0021() -> None:
     backend = Path(__file__).resolve().parents[1]
     facade = (backend / "aether_vnext" / "schema.py").read_text(encoding="utf-8")
-    assert "schema_v0020" in facade
-    migration = (
+    assert "schema_v0021" in facade
+
+    campaign_migration = (
         backend
         / "alembic"
         / "versions"
         / "0020_aether_vnext_forward_paper_campaign.py"
     ).read_text(encoding="utf-8")
-    assert 'revision: str = "0020"' in migration
-    assert 'down_revision: Union[str, None] = "0019"' in migration
-    assert "forward_paper_campaigns" in migration
-    assert "forward_paper_campaign_routes" in migration
-    assert "forward_paper_campaign_windows" in migration
-    assert "ck_forward_campaign_forced_entry_off" in migration
-    assert "ck_forward_campaign_c91_invariants" in migration
-    assert "reject_immutable_mutation" in migration
+    assert 'revision: str = "0020"' in campaign_migration
+    assert "forward_paper_campaigns" in campaign_migration
+    assert "ck_forward_campaign_c91_invariants" in campaign_migration
+
+    provenance_migration = (
+        backend
+        / "alembic"
+        / "versions"
+        / "0021_aether_vnext_held_out_provenance.py"
+    ).read_text(encoding="utf-8")
+    assert 'revision: str = "0021"' in provenance_migration
+    assert 'down_revision: Union[str, None] = "0020"' in provenance_migration
+    assert "held_out_evidence_provenance" in provenance_migration
+    assert "backtest_run_id" in provenance_migration
+    assert "fold_result_ids" in provenance_migration
+    assert "trg_held_out_evidence_provenance_immutable" in provenance_migration
+    assert "reject_immutable_mutation" in provenance_migration
 
 
 def test_phase6_atomic_risk_admission_schema_is_explicit() -> None:

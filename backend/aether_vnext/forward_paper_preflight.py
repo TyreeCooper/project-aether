@@ -91,7 +91,10 @@ class ForwardPaperPreflightResult:
         return tuple(
             row.request.route_id
             for row in self.route_results
-            if "missing_current_held_out_baseline" in row.blockers
+            if (
+                "missing_current_held_out_baseline" in row.blockers
+                or "held_out_baseline_lacks_research_provenance" in row.blockers
+            )
         )
 
 
@@ -129,6 +132,12 @@ def _route_baseline_hash(
                     "immutable_trade_ids": list(
                         row["immutable_trade_ids"] or []
                     ),
+                    "research_provenance": {
+                        "backtest_run_id": str(row["backtest_run_id"]),
+                        "dataset_snapshot_id": str(row["dataset_snapshot_id"]),
+                        "fold_result_ids": list(row["fold_result_ids"] or []),
+                        "provenance_hash": str(row["provenance_hash"]),
+                    },
                 }
                 for row in rows
             ],
@@ -171,6 +180,7 @@ def preflight_forward_paper_campaign_from_book(
     route_results: list[ForwardPaperRoutePreflight] = []
     baseline_payload: list[dict[str, object]] = []
     evidence = store.tables["evidence_windows"]
+    provenance = store.tables["held_out_evidence_provenance"]
 
     for request in sorted(
         requested_routes,
@@ -213,21 +223,32 @@ def preflight_forward_paper_campaign_from_book(
             and policy_version is not None
             and not route_blockers
         ):
+            family_filter = sa.and_(
+                evidence.c.route_id == request.route_id,
+                evidence.c.playbook_id == request.playbook_id,
+                evidence.c.playbook_version == spec.version,
+                evidence.c.configuration_hash == CONFIGURATION_HASH,
+                evidence.c.policy_version == policy_version,
+                evidence.c.sample_domain == SampleDomain.HELD_OUT.value,
+            )
             rows = tuple(
                 dict(row)
                 for row in conn.execute(
-                    sa.select(evidence)
-                    .where(
-                        sa.and_(
-                            evidence.c.route_id == request.route_id,
-                            evidence.c.playbook_id == request.playbook_id,
-                            evidence.c.playbook_version == spec.version,
-                            evidence.c.configuration_hash == CONFIGURATION_HASH,
-                            evidence.c.policy_version == policy_version,
-                            evidence.c.sample_domain
-                            == SampleDomain.HELD_OUT.value,
-                        )
+                    sa.select(
+                        evidence,
+                        provenance.c.backtest_run_id.label("backtest_run_id"),
+                        provenance.c.dataset_snapshot_id.label(
+                            "dataset_snapshot_id"
+                        ),
+                        provenance.c.fold_result_ids.label("fold_result_ids"),
+                        provenance.c.provenance_hash.label("provenance_hash"),
                     )
+                    .join(
+                        provenance,
+                        provenance.c.evidence_window_id
+                        == evidence.c.evidence_window_id,
+                    )
+                    .where(family_filter)
                     .order_by(
                         evidence.c.first_timestamp_utc.asc(),
                         evidence.c.last_timestamp_utc.asc(),
@@ -236,7 +257,18 @@ def preflight_forward_paper_campaign_from_book(
                 ).mappings()
             )
             if not rows:
-                route_blockers.append("missing_current_held_out_baseline")
+                unproven_count = int(
+                    conn.execute(
+                        sa.select(sa.func.count())
+                        .select_from(evidence)
+                        .where(family_filter)
+                    ).scalar_one()
+                )
+                route_blockers.append(
+                    "held_out_baseline_lacks_research_provenance"
+                    if unproven_count > 0
+                    else "missing_current_held_out_baseline"
+                )
             else:
                 windows = tuple(
                     store.load_evidence_window(

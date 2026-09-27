@@ -12,6 +12,7 @@ from aether_vnext.forward_paper_start import (
 )
 from aether_vnext.freeze import CONFIGURATION_HASH
 from aether_vnext.store import VNextStore
+from tests_vnext.held_out_support import record_provenanced_held_out
 
 
 UTC = timezone.utc
@@ -68,8 +69,8 @@ def _store() -> tuple[sa.Engine, VNextStore]:
 def test_start_freezes_all_current_held_out_windows_for_declared_route() -> None:
     engine, store = _store()
     with engine.begin() as conn:
-        store.record_evidence_window(conn, _window("heldout-1", offset_days=20))
-        store.record_evidence_window(conn, _window("heldout-2", offset_days=10))
+        record_provenanced_held_out(conn, store, _window("heldout-1", offset_days=20))
+        record_provenanced_held_out(conn, store, _window("heldout-2", offset_days=10))
 
         result = start_forward_paper_campaign_from_book(
             conn,
@@ -111,10 +112,8 @@ def test_baseline_hash_is_deterministic_across_request_order() -> None:
     def build(order: tuple[ForwardPaperRouteRequest, ...]) -> str:
         engine, store = _store()
         with engine.begin() as conn:
-            store.record_evidence_window(conn, _window("eurusd-heldout"))
-            store.record_evidence_window(
-                conn,
-                _window(
+            record_provenanced_held_out(conn, store, _window("eurusd-heldout"))
+            record_provenanced_held_out(conn, store, _window(
                     "usdjpy-heldout",
                     route_id="usdjpy:intraday:long",
                 ),
@@ -143,7 +142,7 @@ def test_baseline_hash_is_deterministic_across_request_order() -> None:
 def test_missing_declared_route_baseline_fails_before_campaign_persist() -> None:
     engine, store = _store()
     with engine.begin() as conn:
-        store.record_evidence_window(conn, _window("eurusd-heldout"))
+        record_provenanced_held_out(conn, store, _window("eurusd-heldout"))
         with pytest.raises(RuntimeError, match="missing_current_held_out_baseline"):
             start_forward_paper_campaign_from_book(
                 conn,
@@ -184,9 +183,7 @@ def test_other_configuration_evidence_cannot_satisfy_current_baseline() -> None:
                 created_at_utc=T0 - timedelta(days=30),
             )
         )
-        store.record_evidence_window(
-            conn,
-            _window(
+        record_provenanced_held_out(conn, store, _window(
                 "other-heldout",
                 configuration_hash="other-config",
                 policy_version="other-policy",
@@ -234,7 +231,7 @@ def test_duplicate_route_playbook_request_fails_before_persist() -> None:
         playbook_id="pb_fx_intraday_v1_2",
     )
     with engine.begin() as conn:
-        store.record_evidence_window(conn, _window("heldout-1"))
+        record_provenanced_held_out(conn, store, _window("heldout-1"))
         with pytest.raises(RuntimeError, match="duplicate_route_playbook_request"):
             start_forward_paper_campaign_from_book(
                 conn,

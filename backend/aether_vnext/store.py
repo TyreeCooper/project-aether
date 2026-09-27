@@ -1429,6 +1429,18 @@ class VNextStore:
                     raise ValueError(
                         "forward-paper historical baseline must be held_out"
                     )
+                provenance = conn.execute(
+                    sa.select(
+                        self.tables["held_out_evidence_provenance"]
+                    ).where(
+                        self.tables["held_out_evidence_provenance"].c.evidence_window_id
+                        == window_id
+                    )
+                ).mappings().first()
+                if provenance is None:
+                    raise ValueError(
+                        "forward-paper held_out baseline lacks research provenance"
+                    )
                 if (
                     baseline.route_id != route.route_id
                     or baseline.playbook_id != route.playbook_id
@@ -1683,13 +1695,161 @@ class VNextStore:
             )
         )
 
+    def record_held_out_evidence_window(
+        self,
+        conn: Connection,
+        window: EvidenceWindow,
+        *,
+        backtest_run_id: str,
+        fold_result_ids: tuple[str, ...],
+    ) -> str:
+        """Persist HELD_OUT evidence only with immutable research provenance.
+
+        BacktestRun and FoldResult are the source-frozen F-006 research ledger.
+        This method binds an EvidenceWindow to that ledger before the window can
+        be used as a forward-paper historical baseline.
+        """
+        if window.sample_domain is not SampleDomain.HELD_OUT:
+            raise ValueError(
+                "research provenance persistence requires held_out sample_domain"
+            )
+        run_id = str(backtest_run_id).strip()
+        if not run_id:
+            raise ValueError("backtest_run_id is required")
+        fold_ids = tuple(str(value).strip() for value in fold_result_ids)
+        if not fold_ids or any(not value for value in fold_ids):
+            raise ValueError("fold_result_ids must contain nonblank IDs")
+        if len(fold_ids) != len(set(fold_ids)):
+            raise ValueError("duplicate fold_result_id in held_out provenance")
+
+        runs = self.tables["backtest_runs"]
+        run = conn.execute(
+            sa.select(runs).where(runs.c.backtest_run_id == run_id)
+        ).mappings().first()
+        if run is None:
+            raise KeyError(f"unknown backtest_run_id: {run_id}")
+        if str(run["run_type"]).strip().lower() != "held_out":
+            raise ValueError("held_out evidence requires a held_out BacktestRun")
+        if run["finished_at_utc"] is None:
+            raise ValueError("held_out BacktestRun must be finished")
+        if str(run["playbook_id"]) != window.playbook_id:
+            raise ValueError("held_out BacktestRun playbook_id mismatch")
+        if str(run["playbook_version"]) != window.playbook_version:
+            raise ValueError("held_out BacktestRun playbook_version mismatch")
+        if str(run["configuration_hash"]) != window.configuration_hash:
+            raise ValueError("held_out BacktestRun configuration_hash mismatch")
+
+        datasets = self.tables["research_dataset_snapshots"]
+        dataset = conn.execute(
+            sa.select(datasets).where(
+                datasets.c.dataset_snapshot_id == run["dataset_snapshot_id"]
+            )
+        ).mappings().first()
+        if dataset is None:
+            raise KeyError("held_out BacktestRun dataset snapshot is missing")
+        if not bool(dataset["pit"]):
+            raise ValueError("held_out research dataset must be PIT")
+
+        asset_id, horizon, side = parse_route_id(window.route_id)
+        spec = playbook(window.playbook_id)
+        if asset_id not in spec.allowed_assets:
+            raise ValueError("held_out route asset not allowed by playbook")
+        if horizon != spec.horizon:
+            raise ValueError("held_out route horizon mismatch")
+        if side not in spec.allowed_sides:
+            raise ValueError("held_out route side not allowed by playbook")
+        if asset_id not in {
+            str(value).strip().lower()
+            for value in (dataset["asset_ids"] or [])
+        }:
+            raise ValueError("held_out route asset absent from research dataset")
+
+        folds = self.tables["fold_results"]
+        selected = tuple(
+            dict(row)
+            for row in conn.execute(
+                sa.select(folds).where(
+                    folds.c.fold_result_id.in_(fold_ids)
+                )
+            ).mappings()
+        )
+        if len(selected) != len(fold_ids):
+            raise KeyError("one or more held_out fold_result_ids are unknown")
+        for row in selected:
+            if str(row["backtest_run_id"]) != run_id:
+                raise ValueError(
+                    "held_out fold_result_id belongs to a different BacktestRun"
+                )
+
+        ordered = tuple(
+            sorted(
+                selected,
+                key=lambda row: (
+                    _stored_utc(row["test_start_utc"]),
+                    _stored_utc(row["test_end_utc"]),
+                    str(row["fold_result_id"]),
+                ),
+            )
+        )
+        for prior, current in zip(ordered, ordered[1:]):
+            if _stored_utc(current["test_start_utc"]) <= _stored_utc(
+                prior["test_end_utc"]
+            ):
+                raise ValueError(
+                    "held_out fold test windows must not overlap"
+                )
+
+        first_test_at = min(
+            _stored_utc(row["test_start_utc"]) for row in ordered
+        )
+        last_test_at = max(
+            _stored_utc(row["test_end_utc"]) for row in ordered
+        )
+        if (
+            window.first_timestamp_utc < first_test_at
+            or window.last_timestamp_utc > last_test_at
+        ):
+            raise ValueError(
+                "held_out EvidenceWindow must be contained in selected fold test span"
+            )
+
+        provenance_hash = canonical_payload_hash(
+            {
+                "backtest_run_id": run_id,
+                "dataset_snapshot_id": str(run["dataset_snapshot_id"]),
+                "fold_result_ids": sorted(fold_ids),
+                "route_id": window.route_id,
+                "playbook_id": window.playbook_id,
+                "playbook_version": window.playbook_version,
+                "configuration_hash": window.configuration_hash,
+                "immutable_trade_ids": sorted(window.immutable_trade_ids),
+                "metrics_snapshot_hash": window.metrics_snapshot_hash,
+            }
+        )
+
+        self._record_evidence_window_row(conn, window)
+        conn.execute(
+            self.tables["held_out_evidence_provenance"].insert().values(
+                evidence_window_id=window.evidence_window_id,
+                backtest_run_id=run_id,
+                dataset_snapshot_id=str(run["dataset_snapshot_id"]),
+                fold_result_ids=list(fold_ids),
+                provenance_hash=provenance_hash,
+                created_at_utc=window.created_at_utc,
+            )
+        )
+        return provenance_hash
+
     def record_evidence_window(
         self,
         conn: Connection,
         window: EvidenceWindow,
     ) -> None:
-        """Append non-forward evidence.
+        """Append generic non-forward evidence.
 
+        HELD_OUT rows written through this generic path are diagnostic only and
+        cannot satisfy forward-paper burn-in. Use
+        record_held_out_evidence_window() to bind research provenance.
         Paper-forward evidence must use record_forward_paper_evidence_window()
         so C9.1 campaign identity and no-cherry-pick linkage are atomic.
         """

@@ -11,6 +11,7 @@ from aether_vnext.forward_paper import (
     ForwardPaperRouteBaseline,
 )
 from aether_vnext.store import VNextStore
+from tests_vnext.held_out_support import record_provenanced_held_out
 
 
 UTC = timezone.utc
@@ -81,9 +82,7 @@ def _store() -> tuple[sa.Engine, VNextStore]:
                 created_at_utc=T0,
             )
         )
-        store.record_evidence_window(
-            conn,
-            _window(
+        record_provenanced_held_out(conn, store, _window(
                 window_id="heldout-1",
                 domain=SampleDomain.HELD_OUT,
                 trade_ids=("hist-1",),

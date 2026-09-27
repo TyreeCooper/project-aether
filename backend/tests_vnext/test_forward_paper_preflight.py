@@ -11,6 +11,7 @@ from aether_vnext.forward_paper_preflight import (
 )
 from aether_vnext.freeze import CONFIGURATION_HASH
 from aether_vnext.store import VNextStore
+from tests_vnext.held_out_support import record_provenanced_held_out
 
 
 UTC = timezone.utc
@@ -64,13 +65,9 @@ def _window(
 def test_preflight_is_read_only_and_reports_exact_coverage() -> None:
     engine, store = _store()
     with engine.begin() as conn:
-        store.record_evidence_window(
-            conn,
-            _window("w1", trade_ids=("trade-1", "trade-2")),
+        record_provenanced_held_out(conn, store, _window("w1", trade_ids=("trade-1", "trade-2")),
         )
-        store.record_evidence_window(
-            conn,
-            _window(
+        record_provenanced_held_out(conn, store, _window(
                 "w2",
                 trade_ids=("trade-2", "trade-3"),
                 offset_days=5,
