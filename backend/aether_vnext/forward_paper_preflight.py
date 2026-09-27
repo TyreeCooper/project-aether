@@ -346,6 +346,7 @@ def preflight_forward_paper_campaign_from_book(
     evidence = store.tables["evidence_windows"]
     provenance = store.tables["held_out_evidence_provenance"]
     runs = store.tables["backtest_runs"]
+    datasets = store.tables["research_dataset_snapshots"]
 
     for request in sorted(
         requested_routes,
@@ -538,6 +539,43 @@ def preflight_forward_paper_campaign_from_book(
                     route_blockers.append(
                         "held_out_provenance_run_invalid"
                     )
+
+                dataset_provenance_ok = provenance_shape_ok
+                if provenance_shape_ok:
+                    for row in rows:
+                        dataset = conn.execute(
+                            sa.select(datasets).where(
+                                datasets.c.dataset_snapshot_id
+                                == str(row["dataset_snapshot_id"]).strip()
+                            )
+                        ).mappings().first()
+                        if dataset is None:
+                            dataset_provenance_ok = False
+                            break
+                        raw_asset_ids = dataset["asset_ids"]
+                        dataset_asset_ids = (
+                            tuple(
+                                str(value).strip().lower()
+                                for value in raw_asset_ids
+                            )
+                            if isinstance(raw_asset_ids, list)
+                            else ()
+                        )
+                        if (
+                            not bool(dataset["pit"])
+                            or not isinstance(raw_asset_ids, list)
+                            or not dataset_asset_ids
+                            or any(not value for value in dataset_asset_ids)
+                            or len(dataset_asset_ids)
+                            != len(set(dataset_asset_ids))
+                            or asset_id not in set(dataset_asset_ids)
+                        ):
+                            dataset_provenance_ok = False
+                            break
+                if not dataset_provenance_ok:
+                    route_blockers.append(
+                        "held_out_provenance_dataset_invalid"
+                    )
                 try:
                     windows = tuple(
                         store.load_evidence_window(
@@ -560,6 +598,7 @@ def preflight_forward_paper_campaign_from_book(
                         runtime_registry_binding_hash is not None
                         and provenance_shape_ok
                         and run_provenance_ok
+                        and dataset_provenance_ok
                     ):
                         route_hash = _route_baseline_hash(
                             route_id=request.route_id,

@@ -321,3 +321,47 @@ def test_preflight_revalidates_heldout_backtest_run() -> None:
         out.route_results[0].blockers
     )
     assert out.route_results[0].route_baseline_hash is None
+
+
+
+def test_preflight_revalidates_heldout_dataset() -> None:
+    engine, store = _store()
+    with engine.begin() as conn:
+        record_provenanced_held_out(
+            conn,
+            store,
+            _window("dataset-drift"),
+        )
+        provenance = conn.execute(
+            sa.select(store.tables["held_out_evidence_provenance"]).where(
+                store.tables["held_out_evidence_provenance"].c.evidence_window_id
+                == "dataset-drift"
+            )
+        ).mappings().one()
+        datasets = store.tables["research_dataset_snapshots"]
+        conn.execute(
+            datasets.update()
+            .where(
+                datasets.c.dataset_snapshot_id
+                == provenance["dataset_snapshot_id"]
+            )
+            .values(asset_ids=["usdjpy"])
+        )
+
+        out = preflight_forward_paper_campaign_from_book(
+            conn,
+            store,
+            campaign_id="preflight-dataset-drift",
+            requested_routes=(
+                ForwardPaperRouteRequest(
+                    route_id="eurusd:intraday:long",
+                    playbook_id="pb_fx_intraday_v1_2",
+                ),
+            ),
+        )
+
+    assert out.startable is False
+    assert "held_out_provenance_dataset_invalid" in (
+        out.route_results[0].blockers
+    )
+    assert out.route_results[0].route_baseline_hash is None

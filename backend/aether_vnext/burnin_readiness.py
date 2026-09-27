@@ -107,6 +107,7 @@ def blocker_class(code: str) -> str:
         "held_out_baseline_lacks_research_provenance",
         "held_out_baseline_provenance_invalid",
         "held_out_provenance_run_invalid",
+        "held_out_provenance_dataset_invalid",
         "held_out_window_reload_failed",
     }:
         return "empirical_evidence"
