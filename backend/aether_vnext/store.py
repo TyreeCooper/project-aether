@@ -2229,6 +2229,8 @@ class VNextStore:
 
         links = self.tables["forward_paper_campaign_windows"]
         evidence = self.tables["evidence_windows"]
+        route_table = self.tables["forward_paper_campaign_routes"]
+
         def _replay_state() -> bool | None:
             existing_link = conn.execute(
                 sa.select(links).where(
@@ -2246,9 +2248,20 @@ class VNextStore:
             if existing_link is None and existing_window is None:
                 return None
 
+            expected_route = None
+            if existing_link is not None:
+                expected_route = conn.execute(
+                    sa.select(route_table).where(
+                        route_table.c.campaign_route_id == campaign_route_id
+                    )
+                ).mappings().first()
+
             exact_link = bool(
                 existing_link is not None
+                and expected_route is not None
                 and str(existing_link["campaign_window_id"]) == campaign_window_id
+                and str(existing_link["campaign_id"])
+                == str(expected_route["campaign_id"])
                 and str(existing_link["campaign_route_id"]) == campaign_route_id
                 and str(existing_link["evidence_window_id"])
                 == window.evidence_window_id
@@ -2286,7 +2299,6 @@ class VNextStore:
             )
         exact_replay = replay_state is True
 
-        route_table = self.tables["forward_paper_campaign_routes"]
         route = conn.execute(
             sa.select(route_table).where(
                 route_table.c.campaign_route_id == campaign_route_id
