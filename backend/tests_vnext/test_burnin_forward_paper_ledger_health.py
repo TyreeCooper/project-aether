@@ -118,3 +118,52 @@ def test_forward_paper_ledger_health_detects_window_family_drift() -> None:
         "burnin-health-window-paper",
     )
     assert blocker_class(blockers[0]) == "empirical_evidence"
+
+
+
+def test_forward_paper_ledger_health_revalidates_immutable_trade_lineage() -> None:
+    engine, store = _store()
+    with engine.begin() as conn:
+        result = _start_campaign(
+            conn,
+            store,
+            campaign_id="burnin-health-lineage",
+        )
+        route = result.routes[0]
+        window = EvidenceWindow(
+            evidence_window_id="burnin-health-lineage-paper",
+            route_id=route.route_id,
+            playbook_id=route.playbook_id,
+            playbook_version=route.playbook_version,
+            policy_version=result.campaign.policy_version,
+            configuration_hash=result.campaign.configuration_hash,
+            sample_domain=SampleDomain.PAPER_FORWARD,
+            first_timestamp_utc=T0 + timedelta(hours=1),
+            last_timestamp_utc=T0 + timedelta(hours=2),
+            n=1,
+            immutable_trade_ids=("missing-canonical-closed-trade",),
+            metrics_snapshot_hash="burnin-health-lineage-metrics",
+            created_at_utc=T0 + timedelta(hours=3),
+        )
+        store._record_evidence_window_row(conn, window)
+        conn.execute(
+            store.tables["forward_paper_campaign_windows"].insert().values(
+                campaign_window_id="burnin-health-lineage-link",
+                campaign_id=result.campaign.campaign_id,
+                campaign_route_id=route.campaign_route_id,
+                evidence_window_id=window.evidence_window_id,
+                linked_at_utc=T0 + timedelta(hours=3),
+            )
+        )
+
+        blockers = forward_paper_ledger_blockers(
+            conn,
+            store=store,
+            campaign_id="burnin-health-lineage",
+        )
+
+    assert blockers == (
+        "forward_paper_ledger:missing_closed_trade_lineage:"
+        "burnin-health-lineage-paper:missing-canonical-closed-trade",
+    )
+    assert blocker_class(blockers[0]) == "empirical_evidence"

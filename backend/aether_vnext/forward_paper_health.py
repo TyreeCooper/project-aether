@@ -101,6 +101,9 @@ def forward_paper_ledger_blockers(
 
     links = store.tables["forward_paper_campaign_windows"]
     evidence = store.tables["evidence_windows"]
+    closed = store.tables["closed_trades"]
+    lineage = store.tables["decision_lineage"]
+    setups = store.tables["setups"]
     link_rows = tuple(
         conn.execute(
             sa.select(links)
@@ -136,26 +139,103 @@ def forward_paper_ledger_blockers(
                 f"forward_paper_ledger:missing_evidence_window:{window_id}"
             )
             continue
-        if str(window["sample_domain"]) != "paper_forward":
+        sample_domain_ok = str(window["sample_domain"]) == "paper_forward"
+        if not sample_domain_ok:
             blockers.append(
                 f"forward_paper_ledger:window_not_paper_forward:{window_id}"
             )
-        if (
+
+        family_ok = not (
             str(window["route_id"]) != str(route["route_id"])
             or str(window["playbook_id"]) != str(route["playbook_id"])
             or str(window["playbook_version"]) != str(route["playbook_version"])
             or str(window["configuration_hash"])
             != str(route["configuration_hash"])
             or str(window["policy_version"]) != str(campaign["policy_version"])
-        ):
+        )
+        if not family_ok:
             blockers.append(
                 f"forward_paper_ledger:window_family_mismatch:{window_id}"
             )
-        if _stored_utc(window["first_timestamp_utc"]) < _stored_utc(
-            campaign["started_at_utc"]
-        ):
+
+        starts_in_campaign = _stored_utc(
+            window["first_timestamp_utc"]
+        ) >= _stored_utc(campaign["started_at_utc"])
+        if not starts_in_campaign:
             blockers.append(
                 f"forward_paper_ledger:window_predates_campaign:{window_id}"
             )
+
+        trade_ids = tuple(
+            str(value).strip()
+            for value in (window["immutable_trade_ids"] or ())
+        )
+        sample_shape_ok = bool(
+            trade_ids
+            and all(trade_ids)
+            and len(trade_ids) == len(set(trade_ids))
+            and int(window["n"]) == len(trade_ids)
+        )
+        if not sample_shape_ok:
+            blockers.append(
+                f"forward_paper_ledger:window_trade_sample_invalid:{window_id}"
+            )
+
+        if (
+            sample_domain_ok
+            and family_ok
+            and starts_in_campaign
+            and sample_shape_ok
+        ):
+            for trade_id in trade_ids:
+                trade = conn.execute(
+                    sa.select(
+                        closed.c.trade_id,
+                        closed.c.route_id,
+                        closed.c.configuration_hash,
+                        lineage.c.playbook_id.label("lineage_playbook_id"),
+                        lineage.c.playbook_version.label(
+                            "lineage_playbook_version"
+                        ),
+                        setups.c.trigger_bar_close_exchange_ts,
+                    )
+                    .select_from(
+                        closed.join(
+                            lineage,
+                            closed.c.firm_event_id
+                            == lineage.c.firm_event_id,
+                        ).join(
+                            setups,
+                            lineage.c.setup_id == setups.c.setup_id,
+                        )
+                    )
+                    .where(closed.c.trade_id == trade_id)
+                ).mappings().first()
+                if trade is None:
+                    blockers.append(
+                        "forward_paper_ledger:missing_closed_trade_lineage:"
+                        f"{window_id}:{trade_id}"
+                    )
+                    continue
+                if (
+                    str(trade["route_id"]) != str(route["route_id"])
+                    or str(trade["configuration_hash"])
+                    != str(route["configuration_hash"])
+                    or str(trade["lineage_playbook_id"])
+                    != str(route["playbook_id"])
+                    or str(trade["lineage_playbook_version"])
+                    != str(route["playbook_version"])
+                ):
+                    blockers.append(
+                        "forward_paper_ledger:trade_lineage_mismatch:"
+                        f"{window_id}:{trade_id}"
+                    )
+                if _stored_utc(
+                    trade["trigger_bar_close_exchange_ts"]
+                ) < _stored_utc(campaign["started_at_utc"]):
+                    blockers.append(
+                        "forward_paper_ledger:trade_setup_predates_campaign:"
+                        f"{window_id}:{trade_id}"
+                    )
 
     return tuple(dict.fromkeys(blockers))
