@@ -2266,8 +2266,17 @@ class VNextStore:
                 and str(existing_link["evidence_window_id"])
                 == window.evidence_window_id
             )
+            stored_trade_ids = (
+                existing_window["immutable_trade_ids"]
+                if existing_window is not None
+                else None
+            )
+            stored_n = existing_window["n"] if existing_window is not None else None
             exact_window = bool(
                 existing_window is not None
+                and isinstance(stored_trade_ids, list)
+                and isinstance(stored_n, int)
+                and not isinstance(stored_n, bool)
                 and str(existing_window["route_id"]) == window.route_id
                 and str(existing_window["playbook_id"]) == window.playbook_id
                 and str(existing_window["playbook_version"])
@@ -2282,8 +2291,8 @@ class VNextStore:
                 == window.first_timestamp_utc
                 and _stored_utc(existing_window["last_timestamp_utc"])
                 == window.last_timestamp_utc
-                and int(existing_window["n"]) == window.n
-                and tuple(existing_window["immutable_trade_ids"] or ())
+                and stored_n == window.n
+                and tuple(str(value).strip() for value in stored_trade_ids)
                 == window.immutable_trade_ids
                 and str(existing_window["metrics_snapshot_hash"])
                 == window.metrics_snapshot_hash

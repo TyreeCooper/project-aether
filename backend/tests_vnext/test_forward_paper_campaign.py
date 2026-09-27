@@ -979,3 +979,93 @@ def test_paper_forward_window_rejects_lineage_trade_id_drift() -> None:
         ).scalar_one()
 
     assert link_count == 0
+
+
+
+def test_paper_forward_exact_replay_rejects_scalar_persisted_trade_ids() -> None:
+    engine, store = _store()
+    window = _window(
+        window_id="paper-replay-scalar-trades",
+        domain=SampleDomain.PAPER_FORWARD,
+        trade_ids=("x",),
+    )
+    route = _route()
+
+    with engine.begin() as conn:
+        store.record_forward_paper_campaign(conn, _campaign(), routes=(route,))
+        _record_closed_trade_lineage(conn, store, trade_id="x")
+        store._record_evidence_window_row(conn, window)
+        conn.execute(
+            store.tables["forward_paper_campaign_windows"].insert().values(
+                campaign_window_id="fp-window-replay-scalar-trades",
+                campaign_id="fp-001",
+                campaign_route_id=route.campaign_route_id,
+                evidence_window_id=window.evidence_window_id,
+                linked_at_utc=T0 + timedelta(hours=2),
+            )
+        )
+        conn.execute(
+            store.tables["evidence_windows"].update()
+            .where(
+                store.tables["evidence_windows"].c.evidence_window_id
+                == window.evidence_window_id
+            )
+            .values(immutable_trade_ids="x")
+        )
+
+        with pytest.raises(ValueError, match="replay identity mismatch"):
+            store.record_forward_paper_evidence_window(
+                conn,
+                campaign_window_id="fp-window-replay-scalar-trades",
+                campaign_route_id=route.campaign_route_id,
+                window=window,
+                linked_at_utc=T0 + timedelta(hours=3),
+            )
+
+
+def test_paper_forward_exact_replay_rejects_non_integer_persisted_n() -> None:
+    engine, store = _store()
+    window = _window(
+        window_id="paper-replay-invalid-n",
+        domain=SampleDomain.PAPER_FORWARD,
+        trade_ids=("trade-replay-invalid-n",),
+    )
+    route = _route()
+
+    with engine.begin() as conn:
+        store.record_forward_paper_campaign(conn, _campaign(), routes=(route,))
+        _record_closed_trade_lineage(
+            conn,
+            store,
+            trade_id="trade-replay-invalid-n",
+        )
+        store._record_evidence_window_row(conn, window)
+        conn.execute(
+            store.tables["forward_paper_campaign_windows"].insert().values(
+                campaign_window_id="fp-window-replay-invalid-n",
+                campaign_id="fp-001",
+                campaign_route_id=route.campaign_route_id,
+                evidence_window_id=window.evidence_window_id,
+                linked_at_utc=T0 + timedelta(hours=2),
+            )
+        )
+        conn.execute(sa.text("PRAGMA ignore_check_constraints = ON"))
+        try:
+            conn.execute(
+                sa.text(
+                    "UPDATE evidence_windows "
+                    "SET n = 'not-an-integer' "
+                    "WHERE evidence_window_id = :window_id"
+                ),
+                {"window_id": window.evidence_window_id},
+            )
+            with pytest.raises(ValueError, match="replay identity mismatch"):
+                store.record_forward_paper_evidence_window(
+                    conn,
+                    campaign_window_id="fp-window-replay-invalid-n",
+                    campaign_route_id=route.campaign_route_id,
+                    window=window,
+                    linked_at_utc=T0 + timedelta(hours=3),
+                )
+        finally:
+            conn.execute(sa.text("PRAGMA ignore_check_constraints = OFF"))
