@@ -112,8 +112,12 @@ class EvidenceWindow:
             "metrics_snapshot_hash": self.metrics_snapshot_hash,
         }
         for name, value in required.items():
-            if not str(value).strip():
-                raise ValueError(f"{name} is required")
+            if (
+                not isinstance(value, str)
+                or not value
+                or value != value.strip()
+            ):
+                raise ValueError(f"{name} must be canonical text")
         for name, value in (
             ("first_timestamp_utc", self.first_timestamp_utc),
             ("last_timestamp_utc", self.last_timestamp_utc),

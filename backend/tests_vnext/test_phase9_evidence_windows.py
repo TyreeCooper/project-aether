@@ -59,6 +59,32 @@ def test_exact_five_sample_domains_are_frozen() -> None:
     ]
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("evidence_window_id", " window-1 "),
+        ("route_id", 1),
+        ("playbook_id", " pb_fx_intraday_v1_2 "),
+        ("playbook_version", ""),
+        ("policy_version", " policy-9c "),
+        ("configuration_hash", 1),
+        ("metrics_snapshot_hash", " metrics-window-1 "),
+    ),
+)
+def test_window_requires_canonical_scalar_identity(
+    field: str,
+    value: object,
+) -> None:
+    base = _window()
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs[field] = value
+    with pytest.raises(ValueError, match=f"{field} must be canonical text"):
+        EvidenceWindow(**kwargs)
+
+
 def test_window_rejects_duplicate_trade_ids_and_n_mismatch() -> None:
     with pytest.raises(ValueError, match="duplicate"):
         _window(trade_ids=("trade-1", "trade-1"))
