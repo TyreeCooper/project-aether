@@ -40,6 +40,18 @@ def _stored_utc(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
 
+def _canonical_persisted_text(value: object, *, field: str) -> str:
+    if (
+        not isinstance(value, str)
+        or not value
+        or value != value.strip()
+    ):
+        raise RuntimeError(
+            f"existing forward-paper persisted {field} must be canonical text"
+        )
+    return value
+
+
 def _load_existing_start_result(
     conn: Connection,
     store: VNextStore,
@@ -54,10 +66,22 @@ def _load_existing_start_result(
         return None
 
     campaign = ForwardPaperCampaign(
-        campaign_id=str(row["campaign_id"]),
-        configuration_hash=str(row["configuration_hash"]),
-        policy_version=str(row["policy_version"]),
-        baseline_snapshot_hash=str(row["baseline_snapshot_hash"]),
+        campaign_id=_canonical_persisted_text(
+            row["campaign_id"],
+            field="campaign_id",
+        ),
+        configuration_hash=_canonical_persisted_text(
+            row["configuration_hash"],
+            field="configuration_hash",
+        ),
+        policy_version=_canonical_persisted_text(
+            row["policy_version"],
+            field="policy_version",
+        ),
+        baseline_snapshot_hash=_canonical_persisted_text(
+            row["baseline_snapshot_hash"],
+            field="baseline_snapshot_hash",
+        ),
         started_at_utc=_stored_utc(row["started_at_utc"]),
         created_at_utc=_stored_utc(row["created_at_utc"]),
         forced_entry_enabled=bool(row["forced_entry_enabled"]),
@@ -100,18 +124,38 @@ def _load_existing_start_result(
                 "existing forward-paper campaign route baseline JSON invalid"
             )
         return ForwardPaperRouteBaseline(
-            campaign_route_id=str(route["campaign_route_id"]),
-            campaign_id=str(route["campaign_id"]),
-            route_id=str(route["route_id"]),
-            playbook_id=str(route["playbook_id"]),
-            playbook_version=str(route["playbook_version"]),
-            configuration_hash=str(route["configuration_hash"]),
-            runtime_registry_binding_hash=str(
-                route["runtime_registry_binding_hash"]
+            campaign_route_id=_canonical_persisted_text(
+                route["campaign_route_id"],
+                field="campaign_route_id",
+            ),
+            campaign_id=_canonical_persisted_text(
+                route["campaign_id"],
+                field="route_campaign_id",
+            ),
+            route_id=_canonical_persisted_text(
+                route["route_id"],
+                field="route_id",
+            ),
+            playbook_id=_canonical_persisted_text(
+                route["playbook_id"],
+                field="playbook_id",
+            ),
+            playbook_version=_canonical_persisted_text(
+                route["playbook_version"],
+                field="playbook_version",
+            ),
+            configuration_hash=_canonical_persisted_text(
+                route["configuration_hash"],
+                field="route_configuration_hash",
+            ),
+            runtime_registry_binding_hash=_canonical_persisted_text(
+                route["runtime_registry_binding_hash"],
+                field="runtime_registry_binding_hash",
             ),
             historical_validation_window_ids=tuple(raw_window_ids),
-            historical_metrics_snapshot_hash=str(
-                route["historical_metrics_snapshot_hash"]
+            historical_metrics_snapshot_hash=_canonical_persisted_text(
+                route["historical_metrics_snapshot_hash"],
+                field="historical_metrics_snapshot_hash",
             ),
         )
 

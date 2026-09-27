@@ -619,6 +619,51 @@ def test_campaign_start_retry_fails_closed_on_unhealthy_evidence_ledger() -> Non
 
 
 
+def test_existing_campaign_replay_rejects_noncanonical_scalar_identity() -> None:
+    engine, store = _store()
+    campaign_id = "burnin-existing-route-identity-drift"
+    request = ForwardPaperRouteRequest(
+        route_id="eurusd:intraday:long",
+        playbook_id="pb_fx_intraday_v1_2",
+    )
+    with engine.begin() as conn:
+        record_provenanced_held_out(
+            conn,
+            store,
+            _window("heldout-existing-route-identity"),
+        )
+        result = _start_forward_paper_campaign_for_requests(
+            conn,
+            store,
+            campaign_id=campaign_id,
+            requested_routes=(request,),
+            started_at_utc=T0,
+            created_at_utc=T0,
+        )
+        routes = store.tables["forward_paper_campaign_routes"]
+        conn.execute(
+            routes.update()
+            .where(
+                routes.c.campaign_route_id
+                == result.routes[0].campaign_route_id
+            )
+            .values(playbook_id=" pb_fx_intraday_v1_2 ")
+        )
+
+        with pytest.raises(
+            RuntimeError,
+            match="persisted playbook_id must be canonical text",
+        ):
+            _start_forward_paper_campaign_for_requests(
+                conn,
+                store,
+                campaign_id=campaign_id,
+                requested_routes=(request,),
+                started_at_utc=T0,
+                created_at_utc=T0,
+            )
+
+
 def test_existing_campaign_replay_rejects_scalar_historical_window_ids() -> None:
     engine, store = _store()
     campaign_id = "burnin-existing-route-json-drift"
