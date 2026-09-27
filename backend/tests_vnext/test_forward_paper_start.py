@@ -540,3 +540,79 @@ def test_concurrent_start_collision_fails_closed_on_different_baseline() -> None
 
     assert campaign_count == 1
     assert route_count == 1
+
+
+
+def test_campaign_start_retry_fails_closed_on_unhealthy_evidence_ledger() -> None:
+    engine, store = _store()
+    request = ForwardPaperRouteRequest(
+        route_id="eurusd:intraday:long",
+        playbook_id="pb_fx_intraday_v1_2",
+    )
+    with engine.begin() as conn:
+        record_provenanced_held_out(
+            conn,
+            store,
+            _window("ledger-health-heldout"),
+        )
+        first = _start_forward_paper_campaign_for_requests(
+            conn,
+            store,
+            campaign_id="burnin-ledger-health",
+            requested_routes=(request,),
+            started_at_utc=T0,
+            created_at_utc=T0,
+        )
+        route = first.routes[0]
+        bad_window = EvidenceWindow(
+            evidence_window_id="burnin-ledger-health-paper",
+            route_id="usdjpy:intraday:long",
+            playbook_id=route.playbook_id,
+            playbook_version=route.playbook_version,
+            policy_version=first.campaign.policy_version,
+            configuration_hash=first.campaign.configuration_hash,
+            sample_domain=SampleDomain.PAPER_FORWARD,
+            first_timestamp_utc=T0 + timedelta(hours=1),
+            last_timestamp_utc=T0 + timedelta(hours=2),
+            n=1,
+            immutable_trade_ids=("burnin-ledger-health-trade",),
+            metrics_snapshot_hash="burnin-ledger-health-metrics",
+            created_at_utc=T0 + timedelta(hours=3),
+        )
+        store._record_evidence_window_row(conn, bad_window)
+        conn.execute(
+            store.tables["forward_paper_campaign_windows"].insert().values(
+                campaign_window_id="burnin-ledger-health-link",
+                campaign_id=first.campaign.campaign_id,
+                campaign_route_id=route.campaign_route_id,
+                evidence_window_id=bad_window.evidence_window_id,
+                linked_at_utc=T0 + timedelta(hours=3),
+            )
+        )
+
+        with pytest.raises(
+            RuntimeError,
+            match="existing forward-paper campaign ledger unhealthy",
+        ):
+            _start_forward_paper_campaign_for_requests(
+                conn,
+                store,
+                campaign_id="burnin-ledger-health",
+                requested_routes=(request,),
+                started_at_utc=T0 + timedelta(minutes=5),
+                created_at_utc=T0 + timedelta(minutes=5),
+            )
+
+        campaign_count = conn.execute(
+            sa.select(sa.func.count()).select_from(
+                store.tables["forward_paper_campaigns"]
+            )
+        ).scalar_one()
+        route_count = conn.execute(
+            sa.select(sa.func.count()).select_from(
+                store.tables["forward_paper_campaign_routes"]
+            )
+        ).scalar_one()
+
+    assert campaign_count == 1
+    assert route_count == 1

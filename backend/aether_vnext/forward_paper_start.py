@@ -13,6 +13,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.exc import IntegrityError
 
 from aether_vnext.forward_paper import ForwardPaperCampaign, ForwardPaperRouteBaseline
+from aether_vnext.forward_paper_health import forward_paper_ledger_blockers
 from aether_vnext.freeze import CONFIGURATION_HASH
 from aether_vnext.forward_paper_preflight import (
     ForwardPaperRouteRequest,
@@ -111,6 +112,8 @@ def _load_existing_start_result(
 
 
 def _reuse_existing_campaign(
+    conn: Connection,
+    store: VNextStore,
     existing: ForwardPaperStartResult,
     *,
     requested_routes: tuple[ForwardPaperRouteRequest, ...],
@@ -159,6 +162,17 @@ def _reuse_existing_campaign(
     ):
         raise RuntimeError(
             "concurrent campaign start baseline mismatch"
+        )
+
+    ledger_blockers = forward_paper_ledger_blockers(
+        conn,
+        store=store,
+        campaign_id=existing.campaign.campaign_id,
+    )
+    if ledger_blockers:
+        raise RuntimeError(
+            "existing forward-paper campaign ledger unhealthy: "
+            + ",".join(ledger_blockers)
         )
     return existing
 
@@ -219,6 +233,8 @@ def _persist_forward_paper_campaign_from_preflight(
             for route in routes
         )
         return _reuse_existing_campaign(
+            conn,
+            store,
             existing,
             requested_routes=requested_routes,
             expected_baseline_snapshot_hash=(
@@ -251,6 +267,8 @@ def _start_forward_paper_campaign_for_requests(
     )
     if existing is not None:
         return _reuse_existing_campaign(
+            conn,
+            store,
             existing,
             requested_routes=requested_routes,
         )
@@ -298,6 +316,8 @@ def start_forward_paper_campaign_from_book(
     )
     if existing is not None:
         return _reuse_existing_campaign(
+            conn,
+            store,
             existing,
             requested_routes=expected,
         )
