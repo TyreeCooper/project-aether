@@ -18,6 +18,7 @@ import sqlalchemy as sa
 from aether_vnext.burnin_readiness import (
     build_burnin_readiness,
     readiness_payload,
+    runtime_book_blockers,
 )
 from aether_vnext.db_isolation import inspect_database_isolation
 from aether_vnext.db_runtime import open_vnext_engine
@@ -91,6 +92,15 @@ async def _main(
                             sync_conn,
                             store,
                             campaign_id=campaign_id,
+                            as_of_utc=as_of_utc,
+                        )
+                    )
+                )
+                extra_blockers.extend(
+                    await connection.run_sync(
+                        lambda sync_conn: runtime_book_blockers(
+                            sync_conn,
+                            store=store,
                             as_of_utc=as_of_utc,
                         )
                     )

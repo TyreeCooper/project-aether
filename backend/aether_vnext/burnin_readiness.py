@@ -9,11 +9,15 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Iterable
+
+from sqlalchemy.engine import Connection
 
 from aether_vnext.db_isolation import DatabaseIsolationResult
 from aether_vnext.forward_paper_preflight import ForwardPaperPreflightResult
 from aether_vnext.registry import SEED_REGISTRY
+from aether_vnext.store import VNextStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +60,13 @@ def blocker_class(code: str) -> str:
         return "environment_initialization"
 
     if (
+        value == "stale_order_intents_present"
+        or value.startswith("risk_admission_reconciliation:")
+    ):
+        return "runtime_reconciliation"
+
+
+    if (
         "provider_spec_pending" in value
         or value.startswith("tastyfx_fix_")
     ):
@@ -91,6 +102,25 @@ def blocker_class(code: str) -> str:
         return "source_authority"
 
     return "internal_contract"
+
+
+def runtime_book_blockers(
+    conn: Connection,
+    *,
+    store: VNextStore,
+    as_of_utc: datetime,
+) -> tuple[str, ...]:
+    """Return fail-closed runtime book blockers for burn-in readiness."""
+    if as_of_utc.tzinfo is None:
+        raise ValueError("as_of_utc must be timezone-aware")
+
+    blockers = [
+        f"risk_admission_reconciliation:{issue}"
+        for issue in store.risk_admission_reconciliation_issues(conn)
+    ]
+    if store.stale_order_intent_ids(conn, at_utc=as_of_utc):
+        blockers.append("stale_order_intents_present")
+    return tuple(blockers)
 
 
 def _route_blockers(
