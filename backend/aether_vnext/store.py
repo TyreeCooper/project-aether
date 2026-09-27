@@ -2226,6 +2226,59 @@ class VNextStore:
                 "campaign evidence window must use paper_forward sample_domain"
             )
 
+        links = self.tables["forward_paper_campaign_windows"]
+        evidence = self.tables["evidence_windows"]
+        existing_link = conn.execute(
+            sa.select(links).where(
+                sa.or_(
+                    links.c.campaign_window_id == campaign_window_id,
+                    links.c.evidence_window_id == window.evidence_window_id,
+                )
+            )
+        ).mappings().first()
+        if existing_link is not None:
+            existing_window = conn.execute(
+                sa.select(evidence).where(
+                    evidence.c.evidence_window_id
+                    == existing_link["evidence_window_id"]
+                )
+            ).mappings().first()
+            exact_link = (
+                str(existing_link["campaign_window_id"]) == campaign_window_id
+                and str(existing_link["campaign_route_id"]) == campaign_route_id
+                and str(existing_link["evidence_window_id"])
+                == window.evidence_window_id
+            )
+            exact_window = bool(
+                existing_window is not None
+                and str(existing_window["route_id"]) == window.route_id
+                and str(existing_window["playbook_id"]) == window.playbook_id
+                and str(existing_window["playbook_version"])
+                == window.playbook_version
+                and str(existing_window["policy_version"])
+                == window.policy_version
+                and str(existing_window["configuration_hash"])
+                == window.configuration_hash
+                and str(existing_window["sample_domain"])
+                == window.sample_domain.value
+                and _stored_utc(existing_window["first_timestamp_utc"])
+                == window.first_timestamp_utc
+                and _stored_utc(existing_window["last_timestamp_utc"])
+                == window.last_timestamp_utc
+                and int(existing_window["n"]) == window.n
+                and tuple(existing_window["immutable_trade_ids"] or ())
+                == window.immutable_trade_ids
+                and str(existing_window["metrics_snapshot_hash"])
+                == window.metrics_snapshot_hash
+                and _stored_utc(existing_window["created_at_utc"])
+                == window.created_at_utc
+            )
+            if exact_link and exact_window:
+                return
+            raise ValueError(
+                "forward-paper evidence replay identity mismatch"
+            )
+
         route_table = self.tables["forward_paper_campaign_routes"]
         route = conn.execute(
             sa.select(route_table).where(

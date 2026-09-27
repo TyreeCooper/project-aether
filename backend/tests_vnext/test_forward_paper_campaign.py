@@ -222,3 +222,133 @@ def test_campaign_route_freezes_playbook_route_and_configuration_identity() -> N
                 _campaign(),
                 routes=(bad,),
             )
+
+
+
+def test_paper_forward_window_exact_replay_is_idempotent() -> None:
+    engine, store = _store()
+    window = _window(
+        window_id="paper-replay-1",
+        domain=SampleDomain.PAPER_FORWARD,
+        trade_ids=("trade-replay-1",),
+    )
+    route = _route()
+
+    with engine.begin() as conn:
+        store.record_forward_paper_campaign(
+            conn,
+            _campaign(),
+            routes=(route,),
+        )
+        store._record_evidence_window_row(conn, window)
+        conn.execute(
+            store.tables["forward_paper_campaign_windows"].insert().values(
+                campaign_window_id="fp-window-replay-1",
+                campaign_id="fp-001",
+                campaign_route_id=route.campaign_route_id,
+                evidence_window_id=window.evidence_window_id,
+                linked_at_utc=T0 + timedelta(hours=2),
+            )
+        )
+
+        store.record_forward_paper_evidence_window(
+            conn,
+            campaign_window_id="fp-window-replay-1",
+            campaign_route_id=route.campaign_route_id,
+            window=window,
+            linked_at_utc=T0 + timedelta(hours=3),
+        )
+
+        evidence_count = conn.execute(
+            sa.select(sa.func.count()).select_from(
+                store.tables["evidence_windows"]
+            ).where(
+                store.tables["evidence_windows"].c.evidence_window_id
+                == window.evidence_window_id
+            )
+        ).scalar_one()
+        link_count = conn.execute(
+            sa.select(sa.func.count()).select_from(
+                store.tables["forward_paper_campaign_windows"]
+            ).where(
+                store.tables["forward_paper_campaign_windows"].c.evidence_window_id
+                == window.evidence_window_id
+            )
+        ).scalar_one()
+
+    assert evidence_count == 1
+    assert link_count == 1
+
+
+def test_paper_forward_window_replay_fails_closed_on_identity_drift() -> None:
+    engine, store = _store()
+    window = _window(
+        window_id="paper-replay-drift",
+        domain=SampleDomain.PAPER_FORWARD,
+        trade_ids=("trade-replay-drift",),
+    )
+    route = _route()
+
+    with engine.begin() as conn:
+        store.record_forward_paper_campaign(
+            conn,
+            _campaign(),
+            routes=(route,),
+        )
+        store._record_evidence_window_row(conn, window)
+        conn.execute(
+            store.tables["forward_paper_campaign_windows"].insert().values(
+                campaign_window_id="fp-window-replay-drift",
+                campaign_id="fp-001",
+                campaign_route_id=route.campaign_route_id,
+                evidence_window_id=window.evidence_window_id,
+                linked_at_utc=T0 + timedelta(hours=2),
+            )
+        )
+
+        drifted = EvidenceWindow(
+            evidence_window_id=window.evidence_window_id,
+            route_id=window.route_id,
+            playbook_id=window.playbook_id,
+            playbook_version=window.playbook_version,
+            policy_version=window.policy_version,
+            configuration_hash=window.configuration_hash,
+            sample_domain=window.sample_domain,
+            first_timestamp_utc=window.first_timestamp_utc,
+            last_timestamp_utc=window.last_timestamp_utc,
+            n=window.n,
+            immutable_trade_ids=window.immutable_trade_ids,
+            metrics_snapshot_hash="tampered-paper-metrics",
+            created_at_utc=window.created_at_utc,
+        )
+        with pytest.raises(
+            ValueError,
+            match="replay identity mismatch",
+        ):
+            store.record_forward_paper_evidence_window(
+                conn,
+                campaign_window_id="fp-window-replay-drift",
+                campaign_route_id=route.campaign_route_id,
+                window=drifted,
+                linked_at_utc=T0 + timedelta(hours=3),
+            )
+
+        evidence_count = conn.execute(
+            sa.select(sa.func.count()).select_from(
+                store.tables["evidence_windows"]
+            ).where(
+                store.tables["evidence_windows"].c.evidence_window_id
+                == window.evidence_window_id
+            )
+        ).scalar_one()
+        link_count = conn.execute(
+            sa.select(sa.func.count()).select_from(
+                store.tables["forward_paper_campaign_windows"]
+            ).where(
+                store.tables["forward_paper_campaign_windows"].c.evidence_window_id
+                == window.evidence_window_id
+            )
+        ).scalar_one()
+
+    assert evidence_count == 1
+    assert link_count == 1
