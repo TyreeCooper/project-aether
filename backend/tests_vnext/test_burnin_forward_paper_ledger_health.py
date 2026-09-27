@@ -193,11 +193,19 @@ def test_forward_paper_ledger_health_recomputes_historical_baseline_hash() -> No
             campaign_id=campaign_id,
         )
 
-    assert blockers == (
-        "forward_paper_ledger:historical_baseline_hash_mismatch:"
-        + result.routes[0].campaign_route_id,
+    provenance_blocker = (
+        "forward_paper_ledger:historical_provenance_hash_mismatch:"
+        + result.routes[0].campaign_route_id
+        + ":"
+        + window_id
     )
-    assert blocker_class(blockers[0]) == "empirical_evidence"
+    baseline_blocker = (
+        "forward_paper_ledger:historical_baseline_hash_mismatch:"
+        + result.routes[0].campaign_route_id
+    )
+    assert blockers == (provenance_blocker, baseline_blocker)
+    assert blocker_class(provenance_blocker) == "empirical_evidence"
+    assert blocker_class(baseline_blocker) == "empirical_evidence"
 
 
 

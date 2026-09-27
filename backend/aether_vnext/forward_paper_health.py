@@ -91,7 +91,7 @@ def forward_paper_ledger_blockers(
             routes.append(route_baseline)
 
             source_rows: list[dict[str, object]] = []
-            source_complete = True
+            hash_inputs_complete = True
             for window_id in route_baseline.historical_validation_window_ids:
                 source = conn.execute(
                     sa.select(evidence).where(
@@ -103,7 +103,7 @@ def forward_paper_ledger_blockers(
                         "forward_paper_ledger:missing_historical_baseline:"
                         f"{route_id}:{window_id}"
                     )
-                    source_complete = False
+                    hash_inputs_complete = False
                     continue
 
                 prov = conn.execute(
@@ -117,7 +117,7 @@ def forward_paper_ledger_blockers(
                         "historical_baseline_provenance_missing:"
                         f"{route_id}:{window_id}"
                     )
-                    source_complete = False
+                    hash_inputs_complete = False
                     continue
 
                 if (
@@ -136,8 +136,6 @@ def forward_paper_ledger_blockers(
                         "historical_baseline_family_mismatch:"
                         f"{route_id}:{window_id}"
                     )
-                    source_complete = False
-
                 run_id = str(prov["backtest_run_id"])
                 dataset_id = str(prov["dataset_snapshot_id"])
                 fold_ids = tuple(
@@ -155,7 +153,6 @@ def forward_paper_ledger_blockers(
                         "historical_provenance_run_missing:"
                         f"{route_id}:{window_id}"
                     )
-                    source_complete = False
                 elif (
                     str(run["run_type"]).strip().lower() != "held_out"
                     or run["finished_at_utc"] is None
@@ -172,8 +169,6 @@ def forward_paper_ledger_blockers(
                         "historical_provenance_run_mismatch:"
                         f"{route_id}:{window_id}"
                     )
-                    source_complete = False
-
                 dataset = conn.execute(
                     sa.select(datasets).where(
                         datasets.c.dataset_snapshot_id == dataset_id
@@ -186,7 +181,6 @@ def forward_paper_ledger_blockers(
                         "historical_provenance_dataset_missing:"
                         f"{route_id}:{window_id}"
                     )
-                    source_complete = False
                 elif (
                     not bool(dataset["pit"])
                     or asset_id not in {
@@ -225,7 +219,6 @@ def forward_paper_ledger_blockers(
                         "historical_provenance_fold_mismatch:"
                         f"{route_id}:{window_id}"
                     )
-                    source_complete = False
                 else:
                     ordered = tuple(
                         sorted(
@@ -265,8 +258,6 @@ def forward_paper_ledger_blockers(
                             "historical_provenance_fold_window_mismatch:"
                             f"{route_id}:{window_id}"
                         )
-                        source_complete = False
-
                 expected_provenance_hash = canonical_payload_hash(
                     {
                         "backtest_run_id": run_id,
@@ -295,8 +286,6 @@ def forward_paper_ledger_blockers(
                         "historical_provenance_hash_mismatch:"
                         f"{route_id}:{window_id}"
                     )
-                    source_complete = False
-
                 merged = dict(source)
                 merged.update(
                     {
@@ -309,7 +298,7 @@ def forward_paper_ledger_blockers(
                 source_rows.append(merged)
 
             if (
-                source_complete
+                hash_inputs_complete
                 and len(source_rows)
                 == len(route_baseline.historical_validation_window_ids)
             ):
