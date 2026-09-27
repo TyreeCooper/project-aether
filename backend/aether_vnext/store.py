@@ -2275,6 +2275,12 @@ class VNextStore:
             exact_window = bool(
                 existing_window is not None
                 and isinstance(stored_trade_ids, list)
+                and all(
+                    isinstance(value, str)
+                    and bool(value)
+                    and value == value.strip()
+                    for value in stored_trade_ids
+                )
                 and isinstance(stored_n, int)
                 and not isinstance(stored_n, bool)
                 and str(existing_window["route_id"]) == window.route_id
@@ -2292,8 +2298,7 @@ class VNextStore:
                 and _stored_utc(existing_window["last_timestamp_utc"])
                 == window.last_timestamp_utc
                 and stored_n == window.n
-                and tuple(str(value).strip() for value in stored_trade_ids)
-                == window.immutable_trade_ids
+                and tuple(stored_trade_ids) == window.immutable_trade_ids
                 and str(existing_window["metrics_snapshot_hash"])
                 == window.metrics_snapshot_hash
                 and _stored_utc(existing_window["created_at_utc"])
@@ -2782,9 +2787,17 @@ class VNextStore:
             return None
         raw_trade_ids = row["immutable_trade_ids"]
         raw_n = row["n"]
-        if not isinstance(raw_trade_ids, list):
+        if (
+            not isinstance(raw_trade_ids, list)
+            or any(
+                not isinstance(value, str)
+                or not value
+                or value != value.strip()
+                for value in raw_trade_ids
+            )
+        ):
             raise ValueError(
-                "persisted EvidenceWindow immutable_trade_ids must be a JSON list"
+                "persisted EvidenceWindow immutable_trade_ids must contain canonical IDs"
             )
         if not isinstance(raw_n, int) or isinstance(raw_n, bool):
             raise ValueError("persisted EvidenceWindow n must be an integer")
@@ -2799,9 +2812,7 @@ class VNextStore:
             first_timestamp_utc=_stored_utc(row["first_timestamp_utc"]),
             last_timestamp_utc=_stored_utc(row["last_timestamp_utc"]),
             n=raw_n,
-            immutable_trade_ids=tuple(
-                str(value) for value in raw_trade_ids
-            ),
+            immutable_trade_ids=tuple(raw_trade_ids),
             metrics_snapshot_hash=str(row["metrics_snapshot_hash"]),
             created_at_utc=_stored_utc(row["created_at_utc"]),
         )

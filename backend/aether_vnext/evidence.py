@@ -125,9 +125,18 @@ class EvidenceWindow:
             raise ValueError("EvidenceWindow timestamps are reversed")
         if not isinstance(self.immutable_trade_ids, tuple):
             raise ValueError("immutable_trade_ids must be an immutable tuple")
-        ids = tuple(str(value).strip() for value in self.immutable_trade_ids)
-        if not ids or any(not value for value in ids):
-            raise ValueError("immutable_trade_ids must contain nonblank IDs")
+        raw_ids = self.immutable_trade_ids
+        if (
+            not raw_ids
+            or any(
+                not isinstance(value, str)
+                or not value
+                or value != value.strip()
+                for value in raw_ids
+            )
+        ):
+            raise ValueError("immutable_trade_ids must contain canonical IDs")
+        ids = tuple(raw_ids)
         if len(ids) != len(set(ids)):
             raise ValueError("duplicate immutable_trade_id in EvidenceWindow")
         if not isinstance(self.n, int) or isinstance(self.n, bool):

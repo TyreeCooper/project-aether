@@ -270,3 +270,64 @@ def test_window_rejects_mutable_or_scalar_trade_id_containers(
     kwargs["immutable_trade_ids"] = invalid_ids
     with pytest.raises(ValueError, match="must be an immutable tuple"):
         EvidenceWindow(**kwargs)
+
+
+
+@pytest.mark.parametrize(
+    "invalid_ids",
+    (
+        (" trade-1 ",),
+        (1,),
+    ),
+)
+def test_window_requires_canonical_trade_ids(
+    invalid_ids: tuple[object, ...],
+) -> None:
+    base = _window(trade_ids=("trade-1",))
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs["immutable_trade_ids"] = invalid_ids
+    with pytest.raises(ValueError, match="must contain canonical IDs"):
+        EvidenceWindow(**kwargs)
+
+
+def test_store_reload_rejects_noncanonical_trade_ids() -> None:
+    engine = sa.create_engine(
+        "sqlite+pysqlite:///:memory:",
+        future=True,
+    )
+    store = VNextStore(schema=None)
+    with engine.begin() as conn:
+        store.create_all_for_test(conn)
+        conn.execute(
+            store.tables["policy_snapshots"].insert().values(
+                configuration_hash="cfg-9c",
+                policy_version="policy-9c",
+                effective_at_utc=T0,
+                changed_by="test",
+                change_reason="phase9c",
+                payload={},
+                created_at_utc=T0,
+            )
+        )
+        window = _window(
+            window_id="canonical-trade-id-reload",
+            trade_ids=("trade-1",),
+        )
+        store.record_evidence_window(conn, window)
+        conn.execute(
+            store.tables["evidence_windows"].update()
+            .where(
+                store.tables["evidence_windows"].c.evidence_window_id
+                == window.evidence_window_id
+            )
+            .values(immutable_trade_ids=[" trade-1 "])
+        )
+
+        with pytest.raises(ValueError, match="must contain canonical IDs"):
+            store.load_evidence_window(
+                conn,
+                evidence_window_id=window.evidence_window_id,
+            )
