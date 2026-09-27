@@ -9,6 +9,7 @@ from pathlib import Path
 from aether_vnext.db_runtime import open_vnext_engine
 from aether_vnext.forward_paper_preflight import (
     ForwardPaperRouteRequest,
+    canonical_forward_paper_route_requests,
     preflight_forward_paper_campaign_from_book,
 )
 from aether_vnext.store import VNextStore
@@ -70,10 +71,16 @@ def _emit_report(payload: dict[str, object], output: str | None) -> None:
 
 async def _main(
     campaign_id: str,
-    routes_json: str,
+    routes_json: str | None,
+    canonical_routes: bool,
     output: str | None,
 ) -> int:
-    routes = _parse_routes(routes_json)
+    if canonical_routes:
+        routes = canonical_forward_paper_route_requests()
+    elif routes_json is not None:
+        routes = _parse_routes(routes_json)
+    else:
+        raise ValueError("choose --canonical-routes or --routes-json")
     store = VNextStore(schema="aether_vnext")
     async with open_vnext_engine() as engine:
         async with engine.connect() as connection:
@@ -93,7 +100,9 @@ async def _main(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--campaign-id", required=True)
-    parser.add_argument("--routes-json", required=True)
+    route_group = parser.add_mutually_exclusive_group(required=True)
+    route_group.add_argument("--routes-json")
+    route_group.add_argument("--canonical-routes", action="store_true")
     parser.add_argument("--output")
     args = parser.parse_args()
     raise SystemExit(
@@ -101,6 +110,7 @@ if __name__ == "__main__":
             _main(
                 args.campaign_id,
                 args.routes_json,
+                args.canonical_routes,
                 args.output,
             )
         )

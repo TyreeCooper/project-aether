@@ -55,3 +55,23 @@ workflow propagates the nonzero status only after artifact upload, so a failed
 preflight remains inspectable instead of becoming an opaque red job.
 
 Artifact retention is 30 days.
+
+
+## Pre-merge dispatch bridge
+
+GitHub manual dispatch requires the workflow file to exist on the default branch.
+The standalone `.github/workflows/aether-vnext-burnin.yml` therefore remains the
+post-merge control-plane definition, but it is not the pre-merge launch path.
+
+Before merge, manually dispatch the already-established **AETHER vNext CI** workflow
+and select branch `aether-vnext-swapout`. Its branch version contains a
+`burnin-preflight-manual` job that:
+
+1. waits for the isolated vNext contract tests;
+2. refuses `main`;
+3. initializes only the dedicated vNext schema and canonical policy snapshot;
+4. derives the complete canonical `scout_definition_enabled` route/playbook universe;
+5. runs read-only burn-in preflight across that entire universe;
+6. uploads the JSON result before propagating a non-startable status.
+
+No hand-selected route list is accepted by this bridge.

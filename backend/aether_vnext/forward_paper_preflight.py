@@ -21,7 +21,7 @@ from aether_vnext.freeze import (
     LIVE_BLOCKED,
     PAPER_ONLY,
 )
-from aether_vnext.playbooks import playbook
+from aether_vnext.playbooks import ordered_playbooks, playbook
 from aether_vnext.store import VNextStore
 
 
@@ -35,6 +35,31 @@ class ForwardPaperRouteRequest:
             raise ValueError("route_id is required")
         if not str(self.playbook_id).strip():
             raise ValueError("playbook_id is required")
+
+
+def canonical_forward_paper_route_requests() -> tuple[ForwardPaperRouteRequest, ...]:
+    """Return every currently burn-in-eligible route/playbook pair.
+
+    Eligibility is derived only from the frozen registry's scout_definition_enabled
+    gate, so BENCH and operationally disabled playbooks are excluded automatically.
+    """
+    rows: list[ForwardPaperRouteRequest] = []
+    for spec in ordered_playbooks():
+        if not spec.scout_definition_enabled:
+            continue
+        for asset_id, side, horizon in spec.route_tuples():
+            rows.append(
+                ForwardPaperRouteRequest(
+                    route_id=f"{asset_id}:{horizon}:{side}",
+                    playbook_id=spec.playbook_id,
+                )
+            )
+    return tuple(
+        sorted(
+            rows,
+            key=lambda row: (row.route_id, row.playbook_id),
+        )
+    )
 
 
 @dataclass(frozen=True, slots=True)
