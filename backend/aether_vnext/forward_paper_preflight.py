@@ -5,7 +5,7 @@ be used by start_forward_paper_campaign_from_book(). It performs no writes.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 import hashlib
 import json
@@ -21,6 +21,7 @@ from aether_vnext.freeze import (
     LIVE_BLOCKED,
     PAPER_ONLY,
 )
+from aether_vnext.indicator_authority import indicator_authority_blockers
 from aether_vnext.playbook_exits import exit_rule
 from aether_vnext.playbooks import ordered_playbooks, playbook
 from aether_vnext.registry_runtime import binding_blockers
@@ -504,7 +505,7 @@ def preflight_canonical_forward_paper_campaign_from_book(
     as_of_utc: datetime | None = None,
 ) -> ForwardPaperPreflightResult:
     """Preflight the full canonical executable campaign universe only."""
-    return preflight_forward_paper_campaign_from_book(
+    result = preflight_forward_paper_campaign_from_book(
         conn,
         store,
         campaign_id=campaign_id,
@@ -514,6 +515,25 @@ def preflight_canonical_forward_paper_campaign_from_book(
         require_market_print_implementation=True,
         require_calendar_provider_implementation=True,
         require_shortability_provider_implementation=True,
+    )
+    indicator_blockers = indicator_authority_blockers(
+        (
+            "ema",
+            "atr",
+            "realized_vol",
+            "prior_closed_bar_range",
+        )
+    )
+    if not indicator_blockers:
+        return result
+
+    return replace(
+        result,
+        startable=False,
+        baseline_snapshot_hash=None,
+        blockers=tuple(
+            dict.fromkeys((*result.blockers, *indicator_blockers))
+        ),
     )
 
 def route_baselines_from_preflight(
