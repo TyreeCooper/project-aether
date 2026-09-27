@@ -245,6 +245,56 @@ def test_parameter_variants_require_distinct_experiment_ids() -> None:
             )
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("dataset_snapshot_id", " ds-1 "),
+        ("data_version", 1),
+        ("source_registry_version", ""),
+        ("product_registry_version", " products-v1 "),
+        ("calendar_version", 1),
+        ("missing_data_policy", " fail_closed "),
+        ("content_hash", ""),
+    ),
+)
+def test_dataset_snapshot_requires_canonical_scalar_identity(
+    field: str,
+    value: object,
+) -> None:
+    base = _snapshot()
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs[field] = value
+    with pytest.raises(ValueError, match=f"{field} must be canonical text"):
+        ResearchDatasetSnapshot(**kwargs)
+
+
+@pytest.mark.parametrize(
+    ("asset_ids", "message"),
+    (
+        (["eurusd"], "asset_ids must be a nonempty immutable tuple"),
+        ((" EURUSD ",), "asset_ids must contain canonical asset IDs"),
+        (("EURUSD",), "asset_ids must contain canonical asset IDs"),
+        ((1,), "asset_ids must contain canonical asset IDs"),
+        (("eurusd", "eurusd"), "asset_ids cannot contain duplicates"),
+    ),
+)
+def test_dataset_snapshot_requires_canonical_asset_ids(
+    asset_ids: object,
+    message: str,
+) -> None:
+    base = _snapshot()
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs["asset_ids"] = asset_ids
+    with pytest.raises(ValueError, match=message):
+        ResearchDatasetSnapshot(**kwargs)
+
+
 def test_dataset_snapshot_rejects_future_data_and_non_pit() -> None:
     base = _snapshot()
     with pytest.raises(ValueError, match="PIT"):

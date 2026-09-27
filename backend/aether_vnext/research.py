@@ -120,6 +120,22 @@ class ResearchDatasetSnapshot:
         if self.pit is not True:
             raise ValueError("ResearchDatasetSnapshot requires PIT=true")
         for name in (
+            "dataset_snapshot_id",
+            "data_version",
+            "source_registry_version",
+            "product_registry_version",
+            "calendar_version",
+            "missing_data_policy",
+            "content_hash",
+        ):
+            value = getattr(self, name)
+            if (
+                not isinstance(value, str)
+                or not value
+                or value != value.strip()
+            ):
+                raise ValueError(f"{name} must be canonical text")
+        for name in (
             "created_at_utc",
             "as_of_utc",
             "start_at_utc",
@@ -131,8 +147,18 @@ class ResearchDatasetSnapshot:
             raise ValueError("dataset start_at_utc cannot follow end_at_utc")
         if self.end_at_utc > self.as_of_utc:
             raise ValueError("dataset cannot contain information after as_of_utc")
-        if not self.asset_ids:
-            raise ValueError("asset_ids cannot be empty")
+        if not isinstance(self.asset_ids, tuple) or not self.asset_ids:
+            raise ValueError("asset_ids must be a nonempty immutable tuple")
+        if any(
+            not isinstance(value, str)
+            or not value
+            or value != value.strip()
+            or value != value.lower()
+            for value in self.asset_ids
+        ):
+            raise ValueError("asset_ids must contain canonical asset IDs")
+        if len(self.asset_ids) != len(set(self.asset_ids)):
+            raise ValueError("asset_ids cannot contain duplicates")
 
 
 @dataclass(frozen=True, slots=True)
