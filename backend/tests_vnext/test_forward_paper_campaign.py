@@ -472,3 +472,50 @@ def test_paper_forward_orphan_evidence_row_fails_closed() -> None:
 
     assert evidence_count == 1
     assert link_count == 0
+
+
+
+def test_paper_forward_window_link_timestamp_cannot_precede_evidence() -> None:
+    engine, store = _store()
+    with engine.begin() as conn:
+        store.record_forward_paper_campaign(
+            conn,
+            _campaign(),
+            routes=(_route(),),
+        )
+        window = _window(
+            window_id="paper-link-time",
+            domain=SampleDomain.PAPER_FORWARD,
+            trade_ids=("trade-link-time",),
+        )
+        with pytest.raises(
+            ValueError,
+            match="link cannot predate window end",
+        ):
+            store.record_forward_paper_evidence_window(
+                conn,
+                campaign_window_id="fp-window-link-time",
+                campaign_route_id=_route().campaign_route_id,
+                window=window,
+                linked_at_utc=T0 + timedelta(minutes=30),
+            )
+
+        evidence_count = conn.execute(
+            sa.select(sa.func.count()).select_from(
+                store.tables["evidence_windows"]
+            ).where(
+                store.tables["evidence_windows"].c.evidence_window_id
+                == window.evidence_window_id
+            )
+        ).scalar_one()
+        link_count = conn.execute(
+            sa.select(sa.func.count()).select_from(
+                store.tables["forward_paper_campaign_windows"]
+            ).where(
+                store.tables["forward_paper_campaign_windows"].c.campaign_window_id
+                == "fp-window-link-time"
+            )
+        ).scalar_one()
+
+    assert evidence_count == 0
+    assert link_count == 0

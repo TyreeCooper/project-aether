@@ -2312,9 +2312,22 @@ class VNextStore:
             raise ValueError(
                 "paper-forward evidence does not match frozen campaign route"
             )
-        if window.first_timestamp_utc < _stored_utc(campaign["started_at_utc"]):
+        campaign_started_at = _stored_utc(campaign["started_at_utc"])
+        if window.first_timestamp_utc < campaign_started_at:
             raise ValueError(
                 "paper-forward evidence cannot predate campaign start"
+            )
+        if linked_at_utc < campaign_started_at:
+            raise ValueError(
+                "paper-forward evidence link cannot predate campaign start"
+            )
+        if linked_at_utc < window.last_timestamp_utc:
+            raise ValueError(
+                "paper-forward evidence link cannot predate window end"
+            )
+        if linked_at_utc < window.created_at_utc:
+            raise ValueError(
+                "paper-forward evidence link cannot predate evidence creation"
             )
         if exact_replay:
             return

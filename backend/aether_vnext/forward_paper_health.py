@@ -399,6 +399,21 @@ def forward_paper_ledger_blockers(
                 f"forward_paper_ledger:missing_evidence_window:{window_id}"
             )
             continue
+
+        linked_at = _stored_utc(link["linked_at_utc"])
+        if linked_at < _stored_utc(campaign["started_at_utc"]):
+            blockers.append(
+                f"forward_paper_ledger:link_predates_campaign:{window_id}"
+            )
+        if linked_at < _stored_utc(window["last_timestamp_utc"]):
+            blockers.append(
+                f"forward_paper_ledger:link_predates_window_end:{window_id}"
+            )
+        if linked_at < _stored_utc(window["created_at_utc"]):
+            blockers.append(
+                f"forward_paper_ledger:link_predates_evidence_creation:{window_id}"
+            )
+
         sample_domain_ok = str(window["sample_domain"]) == "paper_forward"
         if not sample_domain_ok:
             blockers.append(
