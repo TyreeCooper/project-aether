@@ -231,6 +231,14 @@ class FoldResult:
     failure_reasons: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
+        for name in ("fold_result_id", "backtest_run_id"):
+            value = getattr(self, name)
+            if (
+                not isinstance(value, str)
+                or not value
+                or value != value.strip()
+            ):
+                raise ValueError(f"{name} must be canonical text")
         if not (
             self.train_start_utc <= self.train_end_utc
             < self.test_start_utc <= self.test_end_utc

@@ -349,6 +349,29 @@ def test_backtest_run_requires_canonical_identity(
         BacktestRun(**kwargs)
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("fold_result_id", " fold-1 "),
+        ("fold_result_id", 1),
+        ("backtest_run_id", ""),
+        ("backtest_run_id", " run-1 "),
+    ),
+)
+def test_fold_result_requires_canonical_identity(
+    field: str,
+    value: object,
+) -> None:
+    base = _fold()
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs[field] = value
+    with pytest.raises(ValueError, match=f"{field} must be canonical text"):
+        FoldResult(**kwargs)
+
+
 def test_fold_result_rejects_random_shuffle_geometry() -> None:
     with pytest.raises(ValueError, match="chronological"):
         FoldResult(
