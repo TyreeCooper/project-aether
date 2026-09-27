@@ -107,6 +107,81 @@ def _store() -> tuple[sa.Engine, VNextStore]:
     return engine, store
 
 
+
+
+def _record_closed_trade_lineage(
+    conn,
+    store,
+    *,
+    trade_id: str,
+    closed_policy_version: str = "policy-fp",
+    lineage_policy_version: str = "policy-fp",
+    setup_policy_version: str = "policy-fp",
+) -> None:
+    firm_event_id = f"firm:{trade_id}"
+    setup_id = f"setup:{trade_id}"
+    conn.execute(
+        store.tables["decision_lineage"].insert().values(
+            firm_event_id=firm_event_id,
+            setup_id=setup_id,
+            trade_id=trade_id,
+            asset_id="eurusd",
+            route_id="eurusd:intraday:long",
+            playbook_id="pb_fx_intraday_v1_2",
+            playbook_version="1.2",
+            policy_version=lineage_policy_version,
+            configuration_hash="cfg-fp",
+            created_at_utc=T0 + timedelta(minutes=1),
+            row_version=1,
+        )
+    )
+    conn.execute(
+        store.tables["setups"].insert().values(
+            setup_id=setup_id,
+            firm_event_id=firm_event_id,
+            asset_id="eurusd",
+            route_id="eurusd:intraday:long",
+            state="FIRE",
+            side="long",
+            horizon="intraday",
+            playbook_id="pb_fx_intraday_v1_2",
+            playbook_version="1.2",
+            risk_cluster_id="fx",
+            asset_risk_hitches=[],
+            trigger_bar_close_exchange_ts=T0 + timedelta(minutes=1),
+            exit_contract_complete=True,
+            intel_pack={},
+            policy_version=setup_policy_version,
+            configuration_hash="cfg-fp",
+            market_observation_id=f"obs:{trade_id}",
+            created_at_utc=T0 + timedelta(minutes=1),
+        )
+    )
+    conn.execute(
+        store.tables["closed_trades"].insert().values(
+            trade_id=trade_id,
+            firm_event_id=firm_event_id,
+            route_id="eurusd:intraday:long",
+            asset_id="eurusd",
+            position_key="eurusd:intraday",
+            side="long",
+            quantity=1.0,
+            avg_entry_price=1.1,
+            exit_price=1.2,
+            closed_at_utc=T0 + timedelta(hours=1),
+            gross_pnl_usd=1.0,
+            net_pnl_usd=0.9,
+            total_cost_usd=0.1,
+            fees_usd=0.1,
+            duration_s=60.0,
+            exit_reason="structure",
+            regime_tags=[],
+            policy_version=closed_policy_version,
+            configuration_hash="cfg-fp",
+            market_observation_id=f"obs:{trade_id}",
+        )
+    )
+
 def test_campaign_contract_hard_locks_c91_safety_invariants() -> None:
     assert _campaign().forced_entry_enabled is False
     with pytest.raises(ValueError, match="forced entry OFF"):
@@ -579,3 +654,49 @@ def test_paper_forward_exact_replay_rejects_cross_campaign_link_owner() -> None:
 
     assert evidence_count == 1
     assert link_count == 1
+
+
+
+def test_paper_forward_window_rejects_closed_trade_policy_drift() -> None:
+    engine, store = _store()
+    with engine.begin() as conn:
+        store.record_forward_paper_campaign(
+            conn,
+            _campaign(),
+            routes=(_route(),),
+        )
+        _record_closed_trade_lineage(
+            conn,
+            store,
+            trade_id="trade-policy-drift",
+            closed_policy_version="old-policy",
+        )
+        window = _window(
+            window_id="paper-policy-drift",
+            domain=SampleDomain.PAPER_FORWARD,
+            trade_ids=("trade-policy-drift",),
+            first_at=T0 + timedelta(minutes=1),
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="ClosedTrade policy mismatch",
+        ):
+            store.record_forward_paper_evidence_window(
+                conn,
+                campaign_window_id="fp-window-policy-drift",
+                campaign_route_id=_route().campaign_route_id,
+                window=window,
+                linked_at_utc=T0 + timedelta(hours=4),
+            )
+
+        link_count = conn.execute(
+            sa.select(sa.func.count()).select_from(
+                store.tables["forward_paper_campaign_windows"]
+            ).where(
+                store.tables["forward_paper_campaign_windows"].c.campaign_window_id
+                == "fp-window-policy-drift"
+            )
+        ).scalar_one()
+
+    assert link_count == 0

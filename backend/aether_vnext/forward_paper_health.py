@@ -467,10 +467,27 @@ def forward_paper_ledger_blockers(
                     sa.select(
                         closed.c.trade_id,
                         closed.c.route_id,
+                        closed.c.policy_version.label("closed_policy_version"),
                         closed.c.configuration_hash,
+                        lineage.c.route_id.label("lineage_route_id"),
+                        lineage.c.policy_version.label(
+                            "lineage_policy_version"
+                        ),
+                        lineage.c.configuration_hash.label(
+                            "lineage_configuration_hash"
+                        ),
                         lineage.c.playbook_id.label("lineage_playbook_id"),
                         lineage.c.playbook_version.label(
                             "lineage_playbook_version"
+                        ),
+                        setups.c.route_id.label("setup_route_id"),
+                        setups.c.policy_version.label("setup_policy_version"),
+                        setups.c.configuration_hash.label(
+                            "setup_configuration_hash"
+                        ),
+                        setups.c.playbook_id.label("setup_playbook_id"),
+                        setups.c.playbook_version.label(
+                            "setup_playbook_version"
                         ),
                         setups.c.trigger_bar_close_exchange_ts,
                     )
@@ -494,11 +511,29 @@ def forward_paper_ledger_blockers(
                     continue
                 if (
                     str(trade["route_id"]) != str(route["route_id"])
+                    or str(trade["closed_policy_version"])
+                    != str(campaign["policy_version"])
                     or str(trade["configuration_hash"])
+                    != str(route["configuration_hash"])
+                    or str(trade["lineage_route_id"])
+                    != str(route["route_id"])
+                    or str(trade["lineage_policy_version"])
+                    != str(campaign["policy_version"])
+                    or str(trade["lineage_configuration_hash"])
                     != str(route["configuration_hash"])
                     or str(trade["lineage_playbook_id"])
                     != str(route["playbook_id"])
                     or str(trade["lineage_playbook_version"])
+                    != str(route["playbook_version"])
+                    or str(trade["setup_route_id"])
+                    != str(route["route_id"])
+                    or str(trade["setup_policy_version"])
+                    != str(campaign["policy_version"])
+                    or str(trade["setup_configuration_hash"])
+                    != str(route["configuration_hash"])
+                    or str(trade["setup_playbook_id"])
+                    != str(route["playbook_id"])
+                    or str(trade["setup_playbook_version"])
                     != str(route["playbook_version"])
                 ):
                     blockers.append(

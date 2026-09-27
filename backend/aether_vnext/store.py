@@ -2353,11 +2353,24 @@ class VNextStore:
                 sa.select(
                     closed.c.trade_id,
                     closed.c.route_id,
+                    closed.c.policy_version.label("closed_policy_version"),
                     closed.c.configuration_hash,
                     closed.c.firm_event_id,
+                    lineage.c.route_id.label("lineage_route_id"),
+                    lineage.c.policy_version.label("lineage_policy_version"),
+                    lineage.c.configuration_hash.label(
+                        "lineage_configuration_hash"
+                    ),
                     lineage.c.playbook_id.label("lineage_playbook_id"),
                     lineage.c.playbook_version.label("lineage_playbook_version"),
                     lineage.c.setup_id,
+                    setups.c.route_id.label("setup_route_id"),
+                    setups.c.policy_version.label("setup_policy_version"),
+                    setups.c.configuration_hash.label(
+                        "setup_configuration_hash"
+                    ),
+                    setups.c.playbook_id.label("setup_playbook_id"),
+                    setups.c.playbook_version.label("setup_playbook_version"),
                     setups.c.trigger_bar_close_exchange_ts,
                 )
                 .select_from(
@@ -2377,12 +2390,32 @@ class VNextStore:
                 )
             if str(row["route_id"]) != window.route_id:
                 raise ValueError("paper-forward ClosedTrade route mismatch")
+            if str(row["closed_policy_version"]) != window.policy_version:
+                raise ValueError("paper-forward ClosedTrade policy mismatch")
             if str(row["configuration_hash"]) != window.configuration_hash:
                 raise ValueError("paper-forward ClosedTrade configuration mismatch")
+            if (
+                str(row["lineage_route_id"]) != window.route_id
+                or str(row["lineage_policy_version"]) != window.policy_version
+                or str(row["lineage_configuration_hash"])
+                != window.configuration_hash
+            ):
+                raise ValueError("paper-forward DecisionLineage identity mismatch")
             if str(row["lineage_playbook_id"]) != window.playbook_id:
-                raise ValueError("paper-forward ClosedTrade playbook mismatch")
+                raise ValueError("paper-forward DecisionLineage playbook mismatch")
             if str(row["lineage_playbook_version"]) != window.playbook_version:
-                raise ValueError("paper-forward ClosedTrade playbook version mismatch")
+                raise ValueError(
+                    "paper-forward DecisionLineage playbook version mismatch"
+                )
+            if (
+                str(row["setup_route_id"]) != window.route_id
+                or str(row["setup_policy_version"]) != window.policy_version
+                or str(row["setup_configuration_hash"])
+                != window.configuration_hash
+                or str(row["setup_playbook_id"]) != window.playbook_id
+                or str(row["setup_playbook_version"]) != window.playbook_version
+            ):
+                raise ValueError("paper-forward Setup identity mismatch")
             trigger_ts = _stored_utc(row["trigger_bar_close_exchange_ts"])
             if trigger_ts < _stored_utc(campaign["started_at_utc"]):
                 raise ValueError("paper-forward Setup predates campaign start")

@@ -12,6 +12,7 @@ from aether_vnext.forward_paper_start import (
     _start_forward_paper_campaign_for_requests,
 )
 from tests_vnext.held_out_support import record_provenanced_held_out
+from tests_vnext.test_forward_paper_campaign import _record_closed_trade_lineage
 from tests_vnext.test_forward_paper_start import T0, _store, _window
 
 
@@ -386,4 +387,64 @@ def test_forward_paper_ledger_health_detects_cross_campaign_route_link_both_side
     )
     assert expected in first_blockers
     assert expected in second_blockers
+    assert blocker_class(expected) == "empirical_evidence"
+
+
+
+def test_forward_paper_ledger_health_detects_persisted_policy_lineage_drift() -> None:
+    engine, store = _store()
+    campaign_id = "burnin-health-policy-lineage"
+    with engine.begin() as conn:
+        result = _start_campaign(
+            conn,
+            store,
+            campaign_id=campaign_id,
+        )
+        trade_id = "trade-health-policy-lineage"
+        _record_closed_trade_lineage(
+            conn,
+            store,
+            trade_id=trade_id,
+            lineage_policy_version="old-policy",
+        )
+        route = result.routes[0]
+        window = EvidenceWindow(
+            evidence_window_id="burnin-health-policy-lineage-paper",
+            route_id=route.route_id,
+            playbook_id=route.playbook_id,
+            playbook_version=route.playbook_version,
+            policy_version=result.campaign.policy_version,
+            configuration_hash=result.campaign.configuration_hash,
+            sample_domain=SampleDomain.PAPER_FORWARD,
+            first_timestamp_utc=T0 + timedelta(minutes=1),
+            last_timestamp_utc=T0 + timedelta(hours=1),
+            n=1,
+            immutable_trade_ids=(trade_id,),
+            metrics_snapshot_hash="burnin-health-policy-lineage-metrics",
+            created_at_utc=T0 + timedelta(hours=2),
+        )
+        store._record_evidence_window_row(conn, window)
+        conn.execute(
+            store.tables["forward_paper_campaign_windows"].insert().values(
+                campaign_window_id="burnin-health-policy-lineage-link",
+                campaign_id=result.campaign.campaign_id,
+                campaign_route_id=route.campaign_route_id,
+                evidence_window_id=window.evidence_window_id,
+                linked_at_utc=T0 + timedelta(hours=3),
+            )
+        )
+
+        blockers = forward_paper_ledger_blockers(
+            conn,
+            store=store,
+            campaign_id=campaign_id,
+        )
+
+    expected = (
+        "forward_paper_ledger:trade_lineage_mismatch:"
+        + window.evidence_window_id
+        + ":"
+        + trade_id
+    )
+    assert expected in blockers
     assert blocker_class(expected) == "empirical_evidence"
