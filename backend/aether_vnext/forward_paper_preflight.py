@@ -180,6 +180,49 @@ def _canonical_hash(payload: object) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def forward_paper_baseline_snapshot_hash(
+    *,
+    configuration_hash: str,
+    policy_version: str,
+    routes: tuple[ForwardPaperRouteBaseline, ...],
+) -> str:
+    """Hash one frozen campaign baseline using the canonical C9.1 payload."""
+    ordered = tuple(
+        sorted(
+            routes,
+            key=lambda row: (
+                row.route_id,
+                row.playbook_id,
+                row.campaign_route_id,
+            ),
+        )
+    )
+    return _canonical_hash(
+        {
+            "configuration_hash": configuration_hash,
+            "policy_version": policy_version,
+            "routes": [
+                {
+                    "campaign_route_id": row.campaign_route_id,
+                    "route_id": row.route_id,
+                    "playbook_id": row.playbook_id,
+                    "playbook_version": row.playbook_version,
+                    "runtime_registry_binding_hash": (
+                        row.runtime_registry_binding_hash
+                    ),
+                    "historical_validation_window_ids": list(
+                        row.historical_validation_window_ids
+                    ),
+                    "historical_metrics_snapshot_hash": (
+                        row.historical_metrics_snapshot_hash
+                    ),
+                }
+                for row in ordered
+            ],
+        }
+    )
+
+
 def _route_baseline_hash(
     *,
     route_id: str,
@@ -477,12 +520,31 @@ def preflight_forward_paper_campaign_from_book(
 
     baseline_snapshot_hash: str | None = None
     if not blockers and policy_version is not None:
-        baseline_snapshot_hash = _canonical_hash(
-            {
-                "configuration_hash": CONFIGURATION_HASH,
-                "policy_version": policy_version,
-                "routes": baseline_payload,
-            }
+        baseline_routes = tuple(
+            ForwardPaperRouteBaseline(
+                campaign_route_id=str(row["campaign_route_id"]),
+                campaign_id=campaign_id,
+                route_id=str(row["route_id"]),
+                playbook_id=str(row["playbook_id"]),
+                playbook_version=str(row["playbook_version"]),
+                configuration_hash=CONFIGURATION_HASH,
+                runtime_registry_binding_hash=str(
+                    row["runtime_registry_binding_hash"]
+                ),
+                historical_validation_window_ids=tuple(
+                    str(value)
+                    for value in row["historical_validation_window_ids"]
+                ),
+                historical_metrics_snapshot_hash=str(
+                    row["historical_metrics_snapshot_hash"]
+                ),
+            )
+            for row in baseline_payload
+        )
+        baseline_snapshot_hash = forward_paper_baseline_snapshot_hash(
+            configuration_hash=CONFIGURATION_HASH,
+            policy_version=policy_version,
+            routes=baseline_routes,
         )
 
     return ForwardPaperPreflightResult(

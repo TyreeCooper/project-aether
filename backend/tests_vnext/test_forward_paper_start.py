@@ -360,3 +360,60 @@ def test_campaign_id_reuse_refuses_different_route_universe() -> None:
 
     assert campaign_count == 1
     assert route_count == 1
+
+
+
+def test_campaign_start_retry_fails_closed_on_persisted_baseline_drift() -> None:
+    engine, store = _store()
+    request = ForwardPaperRouteRequest(
+        route_id="eurusd:intraday:long",
+        playbook_id="pb_fx_intraday_v1_2",
+    )
+    with engine.begin() as conn:
+        record_provenanced_held_out(
+            conn,
+            store,
+            _window("drift-heldout"),
+        )
+        _start_forward_paper_campaign_for_requests(
+            conn,
+            store,
+            campaign_id="burnin-drift",
+            requested_routes=(request,),
+            started_at_utc=T0,
+            created_at_utc=T0,
+        )
+
+        routes = store.tables["forward_paper_campaign_routes"]
+        conn.execute(
+            routes.update()
+            .where(routes.c.campaign_id == "burnin-drift")
+            .values(
+                historical_metrics_snapshot_hash="tampered-baseline-hash"
+            )
+        )
+
+        with pytest.raises(
+            RuntimeError,
+            match="baseline integrity mismatch",
+        ):
+            _start_forward_paper_campaign_for_requests(
+                conn,
+                store,
+                campaign_id="burnin-drift",
+                requested_routes=(request,),
+                started_at_utc=T0 + timedelta(minutes=5),
+                created_at_utc=T0 + timedelta(minutes=5),
+            )
+
+        campaign_count = conn.execute(
+            sa.select(sa.func.count()).select_from(
+                store.tables["forward_paper_campaigns"]
+            )
+        ).scalar_one()
+        route_count = conn.execute(
+            sa.select(sa.func.count()).select_from(routes)
+        ).scalar_one()
+
+    assert campaign_count == 1
+    assert route_count == 1

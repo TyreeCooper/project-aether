@@ -19,6 +19,7 @@ from aether_vnext.forward_paper_preflight import (
     preflight_canonical_forward_paper_campaign_from_book,
     preflight_forward_paper_campaign_from_book,
     route_baselines_from_preflight,
+    forward_paper_baseline_snapshot_hash,
 )
 from aether_vnext.store import VNextStore
 
@@ -129,6 +130,25 @@ def _reuse_existing_campaign(
     if persisted != requested:
         raise RuntimeError(
             "campaign_id already belongs to a different route universe"
+        )
+
+    if any(
+        route.campaign_id != existing.campaign.campaign_id
+        or route.configuration_hash != existing.campaign.configuration_hash
+        for route in existing.routes
+    ):
+        raise RuntimeError(
+            "existing forward-paper campaign route identity drift"
+        )
+
+    persisted_hash = forward_paper_baseline_snapshot_hash(
+        configuration_hash=existing.campaign.configuration_hash,
+        policy_version=existing.campaign.policy_version,
+        routes=existing.routes,
+    )
+    if persisted_hash != existing.campaign.baseline_snapshot_hash:
+        raise RuntimeError(
+            "existing forward-paper campaign baseline integrity mismatch"
         )
     return existing
 
