@@ -14,7 +14,7 @@ from aether_vnext.store import VNextStore
 from tests_vnext.held_out_support import record_provenanced_held_out
 from tests_vnext.runtime_registry_support import (
     record_test_runtime_binding,
-    test_runtime_binding_hash,
+    runtime_binding_hash,
 )
 
 
@@ -65,7 +65,7 @@ def _route() -> ForwardPaperRouteBaseline:
         playbook_id="pb_fx_intraday_v1_2",
         playbook_version="1.2",
         configuration_hash="cfg-fp",
-        runtime_registry_binding_hash=test_runtime_binding_hash(
+        runtime_registry_binding_hash=runtime_binding_hash(
             "eurusd",
             now=T0,
         ),
@@ -208,7 +208,7 @@ def test_campaign_route_freezes_playbook_route_and_configuration_identity() -> N
         playbook_id="pb_fx_intraday_v1_2",
         playbook_version="1.2",
         configuration_hash="cfg-fp",
-        runtime_registry_binding_hash=test_runtime_binding_hash(
+        runtime_registry_binding_hash=runtime_binding_hash(
             "eurusd",
             now=T0,
         ),

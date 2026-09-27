@@ -7,7 +7,7 @@ from aether_vnext.registry import registry_row
 from aether_vnext.registry_runtime import RuntimeRegistryBinding, binding_hash
 
 
-def test_runtime_binding(
+def make_runtime_binding(
     asset_id: str,
     *,
     now: datetime,
@@ -53,7 +53,7 @@ def record_test_runtime_binding(
     now: datetime,
     registry_version: str = "test-runtime-registry-v1",
 ) -> str:
-    binding = test_runtime_binding(asset_id, now=now)
+    binding = make_runtime_binding(asset_id, now=now)
     return store.upsert_runtime_registry_binding(
         conn,
         binding,
@@ -63,5 +63,5 @@ def record_test_runtime_binding(
     )
 
 
-def test_runtime_binding_hash(asset_id: str, *, now: datetime) -> str:
-    return binding_hash(test_runtime_binding(asset_id, now=now))
+def runtime_binding_hash(asset_id: str, *, now: datetime) -> str:
+    return binding_hash(make_runtime_binding(asset_id, now=now))

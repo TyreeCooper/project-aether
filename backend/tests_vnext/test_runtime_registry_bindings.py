@@ -18,7 +18,7 @@ from aether_vnext.registry_runtime import (
 )
 from aether_vnext.store import VNextStore
 from tests_vnext.held_out_support import record_provenanced_held_out
-from tests_vnext.runtime_registry_support import test_runtime_binding
+from tests_vnext.runtime_registry_support import make_runtime_binding
 
 
 UTC = timezone.utc
@@ -46,7 +46,7 @@ def _store(config: str = CONFIGURATION_HASH) -> tuple[sa.Engine, VNextStore]:
 
 def test_runtime_binding_round_trip_is_hash_verified() -> None:
     engine, store = _store()
-    binding = test_runtime_binding("eurusd", now=T0)
+    binding = make_runtime_binding("eurusd", now=T0)
 
     with engine.begin() as conn:
         digest = store.upsert_runtime_registry_binding(
@@ -94,7 +94,7 @@ def test_incomplete_binding_persists_but_remains_fail_closed() -> None:
 
 
 def test_complete_binding_materializes_market_ready_product_truth() -> None:
-    binding = test_runtime_binding("eurusd", now=T0)
+    binding = make_runtime_binding("eurusd", now=T0)
     row = materialize_bound_registry_row(binding, as_of_utc=T0)
 
     assert row.asset_id == "eurusd"
