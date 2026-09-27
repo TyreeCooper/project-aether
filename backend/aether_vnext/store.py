@@ -2383,7 +2383,9 @@ class VNextStore:
                     closed.c.policy_version.label("closed_policy_version"),
                     closed.c.configuration_hash,
                     closed.c.closed_at_utc,
-                    closed.c.firm_event_id,
+                    closed.c.firm_event_id.label("closed_firm_event_id"),
+                    lineage.c.firm_event_id.label("lineage_firm_event_id"),
+                    lineage.c.trade_id.label("lineage_trade_id"),
                     lineage.c.route_id.label("lineage_route_id"),
                     lineage.c.policy_version.label("lineage_policy_version"),
                     lineage.c.configuration_hash.label(
@@ -2392,6 +2394,7 @@ class VNextStore:
                     lineage.c.playbook_id.label("lineage_playbook_id"),
                     lineage.c.playbook_version.label("lineage_playbook_version"),
                     lineage.c.setup_id,
+                    setups.c.firm_event_id.label("setup_firm_event_id"),
                     setups.c.route_id.label("setup_route_id"),
                     setups.c.policy_version.label("setup_policy_version"),
                     setups.c.configuration_hash.label(
@@ -2422,6 +2425,14 @@ class VNextStore:
                 raise ValueError("paper-forward ClosedTrade policy mismatch")
             if str(row["configuration_hash"]) != window.configuration_hash:
                 raise ValueError("paper-forward ClosedTrade configuration mismatch")
+            if (
+                str(row["lineage_firm_event_id"])
+                != str(row["closed_firm_event_id"])
+                or str(row["lineage_trade_id"]) != trade_id
+                or str(row["setup_firm_event_id"])
+                != str(row["closed_firm_event_id"])
+            ):
+                raise ValueError("paper-forward lineage key mismatch")
             if (
                 str(row["lineage_route_id"]) != window.route_id
                 or str(row["lineage_policy_version"]) != window.policy_version

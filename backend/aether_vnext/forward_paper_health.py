@@ -506,6 +506,11 @@ def forward_paper_ledger_blockers(
                         closed.c.policy_version.label("closed_policy_version"),
                         closed.c.configuration_hash,
                         closed.c.closed_at_utc,
+                        closed.c.firm_event_id.label("closed_firm_event_id"),
+                        lineage.c.firm_event_id.label(
+                            "lineage_firm_event_id"
+                        ),
+                        lineage.c.trade_id.label("lineage_trade_id"),
                         lineage.c.route_id.label("lineage_route_id"),
                         lineage.c.policy_version.label(
                             "lineage_policy_version"
@@ -516,6 +521,9 @@ def forward_paper_ledger_blockers(
                         lineage.c.playbook_id.label("lineage_playbook_id"),
                         lineage.c.playbook_version.label(
                             "lineage_playbook_version"
+                        ),
+                        setups.c.firm_event_id.label(
+                            "setup_firm_event_id"
                         ),
                         setups.c.route_id.label("setup_route_id"),
                         setups.c.policy_version.label("setup_policy_version"),
@@ -552,6 +560,11 @@ def forward_paper_ledger_blockers(
                     != str(campaign["policy_version"])
                     or str(trade["configuration_hash"])
                     != str(route["configuration_hash"])
+                    or str(trade["lineage_firm_event_id"])
+                    != str(trade["closed_firm_event_id"])
+                    or str(trade["lineage_trade_id"]) != trade_id
+                    or str(trade["setup_firm_event_id"])
+                    != str(trade["closed_firm_event_id"])
                     or str(trade["lineage_route_id"])
                     != str(route["route_id"])
                     or str(trade["lineage_policy_version"])

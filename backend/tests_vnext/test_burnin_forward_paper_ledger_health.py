@@ -550,3 +550,70 @@ def test_forward_paper_ledger_health_detects_runtime_binding_drift() -> None:
     )
     assert expected in blockers
     assert blocker_class(expected) == "external_runtime_configuration"
+
+
+
+def test_forward_paper_ledger_health_detects_lineage_key_drift() -> None:
+    engine, store = _store()
+    campaign_id = "burnin-health-lineage-key-drift"
+    trade_id = "trade-health-lineage-key-drift"
+    with engine.begin() as conn:
+        result = _start_campaign(
+            conn,
+            store,
+            campaign_id=campaign_id,
+        )
+        _record_closed_trade_lineage(
+            conn,
+            store,
+            trade_id=trade_id,
+        )
+        conn.execute(
+            store.tables["decision_lineage"].update()
+            .where(
+                store.tables["decision_lineage"].c.firm_event_id
+                == f"firm:{trade_id}"
+            )
+            .values(trade_id="different-trade")
+        )
+        route = result.routes[0]
+        window = EvidenceWindow(
+            evidence_window_id="burnin-health-lineage-key-paper",
+            route_id=route.route_id,
+            playbook_id=route.playbook_id,
+            playbook_version=route.playbook_version,
+            policy_version=result.campaign.policy_version,
+            configuration_hash=result.campaign.configuration_hash,
+            sample_domain=SampleDomain.PAPER_FORWARD,
+            first_timestamp_utc=T0 + timedelta(minutes=1),
+            last_timestamp_utc=T0 + timedelta(hours=1),
+            n=1,
+            immutable_trade_ids=(trade_id,),
+            metrics_snapshot_hash="burnin-health-lineage-key-metrics",
+            created_at_utc=T0 + timedelta(hours=2),
+        )
+        store._record_evidence_window_row(conn, window)
+        conn.execute(
+            store.tables["forward_paper_campaign_windows"].insert().values(
+                campaign_window_id="burnin-health-lineage-key-link",
+                campaign_id=result.campaign.campaign_id,
+                campaign_route_id=route.campaign_route_id,
+                evidence_window_id=window.evidence_window_id,
+                linked_at_utc=T0 + timedelta(hours=3),
+            )
+        )
+
+        blockers = forward_paper_ledger_blockers(
+            conn,
+            store=store,
+            campaign_id=campaign_id,
+        )
+
+    expected = (
+        "forward_paper_ledger:trade_lineage_mismatch:"
+        + window.evidence_window_id
+        + ":"
+        + trade_id
+    )
+    assert expected in blockers
+    assert blocker_class(expected) == "empirical_evidence"

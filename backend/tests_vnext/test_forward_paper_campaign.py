@@ -925,3 +925,57 @@ def test_paper_forward_window_rejects_runtime_binding_drift() -> None:
         ).scalar_one()
 
     assert link_count == 0
+
+
+
+def test_paper_forward_window_rejects_lineage_trade_id_drift() -> None:
+    engine, store = _store()
+    trade_id = "trade-lineage-key-drift"
+    with engine.begin() as conn:
+        store.record_forward_paper_campaign(
+            conn,
+            _campaign(),
+            routes=(_route(),),
+        )
+        _record_closed_trade_lineage(
+            conn,
+            store,
+            trade_id=trade_id,
+        )
+        conn.execute(
+            store.tables["decision_lineage"].update()
+            .where(
+                store.tables["decision_lineage"].c.firm_event_id
+                == f"firm:{trade_id}"
+            )
+            .values(trade_id="different-trade")
+        )
+        window = _window(
+            window_id="paper-lineage-key-drift",
+            domain=SampleDomain.PAPER_FORWARD,
+            trade_ids=(trade_id,),
+            first_at=T0 + timedelta(minutes=1),
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="lineage key mismatch",
+        ):
+            store.record_forward_paper_evidence_window(
+                conn,
+                campaign_window_id="fp-window-lineage-key-drift",
+                campaign_route_id=_route().campaign_route_id,
+                window=window,
+                linked_at_utc=T0 + timedelta(hours=3),
+            )
+
+        link_count = conn.execute(
+            sa.select(sa.func.count()).select_from(
+                store.tables["forward_paper_campaign_windows"]
+            ).where(
+                store.tables["forward_paper_campaign_windows"].c.campaign_window_id
+                == "fp-window-lineage-key-drift"
+            )
+        ).scalar_one()
+
+    assert link_count == 0
