@@ -71,8 +71,13 @@ class EconomicPath:
             "configuration_hash",
             "playbook_version",
         ):
-            if not str(getattr(self, name)).strip():
-                raise ValueError(f"{name} is required")
+            value = getattr(self, name)
+            if (
+                not isinstance(value, str)
+                or not value
+                or value != value.strip()
+            ):
+                raise ValueError(f"{name} must be canonical text")
         if self.first_timestamp_utc.tzinfo is None:
             raise ValueError("first_timestamp_utc must be timezone-aware")
         if self.last_timestamp_utc.tzinfo is None:

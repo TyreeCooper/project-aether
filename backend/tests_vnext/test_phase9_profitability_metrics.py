@@ -141,6 +141,25 @@ def test_zero_trade_baseline_is_valid_for_always_flat() -> None:
         ("last_timestamp_utc", T0 + timedelta(days=8)),
     ),
 )
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("dataset_snapshot_id", " dataset-1 "),
+        ("data_version", 1),
+        ("fill_model_version", ""),
+        ("fee_schedule_version", " fees-v1 "),
+        ("configuration_hash", 1),
+        ("playbook_version", " 1.2 "),
+    ),
+)
+def test_economic_path_requires_canonical_identity(
+    field: str,
+    value: object,
+) -> None:
+    with pytest.raises(ValueError, match=f"{field} must be canonical text"):
+        _path(**{field: value})
+
+
 def test_candidate_and_baseline_must_share_exact_economic_path(
     field: str,
     mutated: object,
