@@ -259,3 +259,104 @@ def test_duplicate_route_playbook_request_fails_before_persist() -> None:
                 started_at_utc=T0,
                 created_at_utc=T0,
             )
+
+
+
+def test_campaign_start_retry_reuses_frozen_campaign_without_duplicate_rows() -> None:
+    engine, store = _store()
+    request = ForwardPaperRouteRequest(
+        route_id="eurusd:intraday:long",
+        playbook_id="pb_fx_intraday_v1_2",
+    )
+    with engine.begin() as conn:
+        record_provenanced_held_out(
+            conn,
+            store,
+            _window("retry-heldout"),
+        )
+        first = _start_forward_paper_campaign_for_requests(
+            conn,
+            store,
+            campaign_id="burnin-retry",
+            requested_routes=(request,),
+            started_at_utc=T0,
+            created_at_utc=T0,
+        )
+        second = _start_forward_paper_campaign_for_requests(
+            conn,
+            store,
+            campaign_id="burnin-retry",
+            requested_routes=(request,),
+            started_at_utc=T0 + timedelta(minutes=5),
+            created_at_utc=T0 + timedelta(minutes=5),
+        )
+
+        campaign_count = conn.execute(
+            sa.select(sa.func.count()).select_from(
+                store.tables["forward_paper_campaigns"]
+            )
+        ).scalar_one()
+        route_count = conn.execute(
+            sa.select(sa.func.count()).select_from(
+                store.tables["forward_paper_campaign_routes"]
+            )
+        ).scalar_one()
+
+    assert second == first
+    assert second.campaign.started_at_utc == T0
+    assert second.campaign.created_at_utc == T0
+    assert campaign_count == 1
+    assert route_count == 1
+
+
+def test_campaign_id_reuse_refuses_different_route_universe() -> None:
+    engine, store = _store()
+    eurusd = ForwardPaperRouteRequest(
+        route_id="eurusd:intraday:long",
+        playbook_id="pb_fx_intraday_v1_2",
+    )
+    usdjpy = ForwardPaperRouteRequest(
+        route_id="usdjpy:intraday:long",
+        playbook_id="pb_fx_intraday_v1_2",
+    )
+    with engine.begin() as conn:
+        record_provenanced_held_out(
+            conn,
+            store,
+            _window("reuse-eurusd"),
+        )
+        _start_forward_paper_campaign_for_requests(
+            conn,
+            store,
+            campaign_id="burnin-route-reuse",
+            requested_routes=(eurusd,),
+            started_at_utc=T0,
+            created_at_utc=T0,
+        )
+
+        with pytest.raises(
+            RuntimeError,
+            match="different route universe",
+        ):
+            _start_forward_paper_campaign_for_requests(
+                conn,
+                store,
+                campaign_id="burnin-route-reuse",
+                requested_routes=(usdjpy,),
+                started_at_utc=T0 + timedelta(minutes=5),
+                created_at_utc=T0 + timedelta(minutes=5),
+            )
+
+        campaign_count = conn.execute(
+            sa.select(sa.func.count()).select_from(
+                store.tables["forward_paper_campaigns"]
+            )
+        ).scalar_one()
+        route_count = conn.execute(
+            sa.select(sa.func.count()).select_from(
+                store.tables["forward_paper_campaign_routes"]
+            )
+        ).scalar_one()
+
+    assert campaign_count == 1
+    assert route_count == 1
