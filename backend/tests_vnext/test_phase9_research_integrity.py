@@ -6,11 +6,12 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 
-from aether_vnext.freeze import ResearchState
+from aether_vnext.freeze import EvidenceState, ResearchState
 from aether_vnext.research import (
     BacktestRun,
     FoldResult,
     HypothesisCard,
+    PromotionRecord,
     ResearchDatasetSnapshot,
     ResearchExperiment,
 )
@@ -410,3 +411,67 @@ def test_failed_and_retired_experiments_remain_queryable() -> None:
     assert len(rows) == 1
     assert rows[0]["experiment_id"] == "exp-failed"
     assert rows[0]["research_state"] == "RETIRED"
+
+def _promotion() -> PromotionRecord:
+    return PromotionRecord(
+        promotion_id="promotion-1",
+        route_id="eurusd:intraday:long",
+        playbook_version="1.2",
+        from_evidence_state=EvidenceState.CANDIDATE,
+        to_evidence_state=EvidenceState.KEEP_PROBATION,
+        review_card_id="review-1",
+        evidence_window_id="window-1",
+        reviewer="Review",
+        approver="Risk",
+        decided_at_utc=T0,
+        decision_reason="source-bound evidence gate passed",
+        configuration_hash="cfg-research-1",
+        n_reset=False,
+        supersedes=None,
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    (
+        ("promotion_id", " promotion-1 ", "promotion_id must be canonical text"),
+        ("route_id", 1, "route_id must be canonical text"),
+        ("playbook_version", "", "playbook_version must be canonical text"),
+        ("review_card_id", " review-1 ", "review_card_id must be canonical text"),
+        ("evidence_window_id", 1, "evidence_window_id must be canonical text"),
+        ("reviewer", "", "reviewer must be canonical text"),
+        ("approver", " Risk ", "approver must be canonical text"),
+        ("decision_reason", 1, "decision_reason must be canonical text"),
+        ("configuration_hash", "", "configuration_hash must be canonical text"),
+        (
+            "supersedes",
+            " promotion-0 ",
+            "supersedes must be canonical text when present",
+        ),
+    ),
+)
+def test_promotion_record_requires_canonical_identity(
+    field: str,
+    value: object,
+    message: str,
+) -> None:
+    base = _promotion()
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs[field] = value
+    with pytest.raises(ValueError, match=message):
+        PromotionRecord(**kwargs)
+
+
+def test_promotion_record_requires_timezone_aware_decision_time() -> None:
+    base = _promotion()
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs["decided_at_utc"] = T0.replace(tzinfo=None)
+    with pytest.raises(ValueError, match="decided_at_utc must be timezone-aware"):
+        PromotionRecord(**kwargs)
+

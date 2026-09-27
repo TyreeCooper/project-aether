@@ -286,3 +286,31 @@ class PromotionRecord:
     configuration_hash: str
     n_reset: bool
     supersedes: str | None
+
+    def __post_init__(self) -> None:
+        for name in (
+            "promotion_id",
+            "route_id",
+            "playbook_version",
+            "review_card_id",
+            "evidence_window_id",
+            "reviewer",
+            "approver",
+            "decision_reason",
+            "configuration_hash",
+        ):
+            value = getattr(self, name)
+            if (
+                not isinstance(value, str)
+                or not value
+                or value != value.strip()
+            ):
+                raise ValueError(f"{name} must be canonical text")
+        if self.supersedes is not None and (
+            not isinstance(self.supersedes, str)
+            or not self.supersedes
+            or self.supersedes != self.supersedes.strip()
+        ):
+            raise ValueError("supersedes must be canonical text when present")
+        if self.decided_at_utc.tzinfo is None:
+            raise ValueError("decided_at_utc must be timezone-aware")
