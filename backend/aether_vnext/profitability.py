@@ -28,8 +28,12 @@ class EconomicTrade:
     capture_efficiency: float | None = None
 
     def __post_init__(self) -> None:
-        if not self.trade_id:
-            raise ValueError("trade_id is required")
+        if (
+            not isinstance(self.trade_id, str)
+            or not self.trade_id
+            or self.trade_id != self.trade_id.strip()
+        ):
+            raise ValueError("trade_id must be canonical text")
         for name, value in (
             ("gross_pnl_usd", self.gross_pnl_usd),
             ("base_cost_usd", self.base_cost_usd),

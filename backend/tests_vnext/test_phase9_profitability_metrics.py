@@ -58,6 +58,19 @@ def _trades() -> tuple[EconomicTrade, ...]:
     )
 
 
+@pytest.mark.parametrize("trade_id", (" trade-1 ", 1, ""))
+def test_economic_trade_requires_canonical_identity(
+    trade_id: object,
+) -> None:
+    with pytest.raises(ValueError, match="trade_id must be canonical text"):
+        EconomicTrade(
+            trade_id=trade_id,
+            gross_pnl_usd=1.0,
+            base_cost_usd=0.0,
+            duration_s=1.0,
+        )
+
+
 def test_base_plus25_plus50_cost_stress_uses_same_gross_outcomes() -> None:
     profile = cost_stress_profile(_trades())
 
