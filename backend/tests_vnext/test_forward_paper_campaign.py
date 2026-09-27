@@ -1094,6 +1094,33 @@ def test_paper_forward_exact_replay_rejects_non_integer_persisted_n() -> None:
 
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("campaign_route_id", " route-1 "),
+        ("campaign_id", 1),
+        ("route_id", " eurusd:intraday:long "),
+        ("playbook_id", ""),
+        ("playbook_version", " 1.2 "),
+        ("configuration_hash", " cfg-fp "),
+        ("runtime_registry_binding_hash", 1),
+        ("historical_metrics_snapshot_hash", " metrics "),
+    ),
+)
+def test_campaign_route_baseline_requires_canonical_scalar_identity(
+    field: str,
+    value: object,
+) -> None:
+    base = _route()
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs[field] = value
+    with pytest.raises(ValueError, match=f"{field} must be canonical text"):
+        ForwardPaperRouteBaseline(**kwargs)
+
+
 def test_campaign_route_baseline_rejects_blank_historical_window_ids() -> None:
     base = _route()
     with pytest.raises(

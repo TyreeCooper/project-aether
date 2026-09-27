@@ -95,8 +95,13 @@ class ForwardPaperRouteBaseline:
             "runtime_registry_binding_hash",
             "historical_metrics_snapshot_hash",
         ):
-            if not str(getattr(self, name)).strip():
-                raise ValueError(f"{name} is required")
+            value = getattr(self, name)
+            if (
+                not isinstance(value, str)
+                or not value
+                or value != value.strip()
+            ):
+                raise ValueError(f"{name} must be canonical text")
         raw_window_ids = self.historical_validation_window_ids
         if (
             not raw_window_ids
