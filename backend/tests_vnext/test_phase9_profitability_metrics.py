@@ -128,20 +128,6 @@ def test_zero_trade_baseline_is_valid_for_always_flat() -> None:
 
 
 @pytest.mark.parametrize(
-    "field,mutated",
-    (
-        ("dataset_snapshot_id", "dataset-2"),
-        ("data_version", "bars-v2"),
-        ("fill_model_version", "fill-v2"),
-        ("fee_schedule_version", "fees-v2"),
-        ("configuration_hash", "cfg-other"),
-        ("playbook_version", "9.9"),
-        ("sample_domain", SampleDomain.PAPER_FORWARD),
-        ("first_timestamp_utc", T0 + timedelta(seconds=1)),
-        ("last_timestamp_utc", T0 + timedelta(days=8)),
-    ),
-)
-@pytest.mark.parametrize(
     ("field", "value"),
     (
         ("dataset_snapshot_id", " dataset-1 "),
@@ -160,6 +146,20 @@ def test_economic_path_requires_canonical_identity(
         _path(**{field: value})
 
 
+@pytest.mark.parametrize(
+    "field,mutated",
+    (
+        ("dataset_snapshot_id", "dataset-2"),
+        ("data_version", "bars-v2"),
+        ("fill_model_version", "fill-v2"),
+        ("fee_schedule_version", "fees-v2"),
+        ("configuration_hash", "cfg-other"),
+        ("playbook_version", "9.9"),
+        ("sample_domain", SampleDomain.PAPER_FORWARD),
+        ("first_timestamp_utc", T0 + timedelta(seconds=1)),
+        ("last_timestamp_utc", T0 + timedelta(days=8)),
+    ),
+)
 def test_candidate_and_baseline_must_share_exact_economic_path(
     field: str,
     mutated: object,
