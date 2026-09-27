@@ -22,6 +22,7 @@ import websockets
 
 from aether_vnext.market_data import RawQuote
 from aether_vnext.ninjatrader_market import (
+    NINJATRADER_DEMO_ADAPTER_VERSION,
     NINJATRADER_HEARTBEAT_REPLY,
     NINJATRADER_MARKET_SOURCE_ID,
     authorize_market_data_request,
@@ -39,7 +40,6 @@ from aether_vnext.registry_runtime import (
 
 
 _HOST_RE = re.compile(r"^[A-Za-z0-9.-]+$")
-_ADAPTER_VERSION = "ninjatrader_md_demo_quote_v1:contract_id_locked"
 _FUTURES_ASSETS = frozenset({"mes", "mnq", "mgc", "mcl", "us10y"})
 
 
@@ -327,7 +327,7 @@ async def fetch_ninjatrader_demo_quote(
                         mark=(bid + ask) / 2.0,
                         exchange_ts=exchange_ts,
                         received_ts=received_at,
-                        adapter_version=_ADAPTER_VERSION,
+                        adapter_version=NINJATRADER_DEMO_ADAPTER_VERSION,
                     )
                     return NinjaTraderDemoQuoteSample(
                         asset_id=asset_id,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from aether_vnext.ibkr_webapi_market import IBKR_WEBAPI_MARKET_SOURCE_ID
+from aether_vnext.ninjatrader_market import NINJATRADER_MARKET_SOURCE_ID
 from aether_vnext.market_sources import (
     IMPLEMENTED_MARKET_SOURCES,
     market_source_capability,
@@ -16,6 +17,7 @@ def test_implemented_market_sources_are_explicit_and_asset_scoped() -> None:
     assert set(IMPLEMENTED_MARKET_SOURCES) == {
         "kraken_public",
         IBKR_WEBAPI_MARKET_SOURCE_ID,
+        NINJATRADER_MARKET_SOURCE_ID,
     }
     capability = market_source_capability("kraken_public")
     assert capability is not None
@@ -30,6 +32,15 @@ def test_implemented_market_sources_are_explicit_and_asset_scoped() -> None:
     assert ibkr.public_market_data is False
     assert ibkr.transport_id == "ibkr_webapi_smd_websocket"
     assert ibkr.supported_assets == frozenset({"nvda", "tsla", "pltr"})
+
+    ninja = market_source_capability(NINJATRADER_MARKET_SOURCE_ID)
+    assert ninja is not None
+    assert ninja.implemented is True
+    assert ninja.public_market_data is False
+    assert ninja.transport_id == "ninjatrader_demo_market_websocket"
+    assert ninja.supported_assets == frozenset(
+        {"mes", "mnq", "mgc", "mcl", "us10y"}
+    )
 
 
 def test_unknown_reviewed_source_is_not_mistaken_for_implemented_code() -> None:
@@ -85,5 +96,18 @@ def test_ibkr_market_source_is_equity_only() -> None:
     assert market_source_implementation_blockers(
         source_id=IBKR_WEBAPI_MARKET_SOURCE_ID,
         asset_id="eurusd",
+        role="primary",
+    ) == ("primary_market_source_asset_unsupported",)
+
+
+def test_ninjatrader_implemented_source_is_futures_only() -> None:
+    assert market_source_implementation_blockers(
+        source_id=NINJATRADER_MARKET_SOURCE_ID,
+        asset_id="mes",
+        role="primary",
+    ) == ()
+    assert market_source_implementation_blockers(
+        source_id=NINJATRADER_MARKET_SOURCE_ID,
+        asset_id="nvda",
         role="primary",
     ) == ("primary_market_source_asset_unsupported",)

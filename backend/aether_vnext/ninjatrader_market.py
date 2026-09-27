@@ -19,6 +19,10 @@ from typing import Any
 
 NINJATRADER_HEARTBEAT_REPLY = "[]"
 NINJATRADER_MARKET_SOURCE_ID = "ninjatrader_market_data"
+NINJATRADER_DEMO_TRANSPORT_ID = "ninjatrader_demo_market_websocket"
+NINJATRADER_DEMO_ADAPTER_VERSION = (
+    "ninjatrader_md_demo_quote_v1:contract_id_locked"
+)
 
 
 @dataclass(frozen=True, slots=True)

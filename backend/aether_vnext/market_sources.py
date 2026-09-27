@@ -18,6 +18,11 @@ from aether_vnext.ibkr_webapi_market import (
     IBKR_WEBAPI_MARKET_SOURCE_ID,
     IBKR_WEBAPI_TRANSPORT_ID,
 )
+from aether_vnext.ninjatrader_market import (
+    NINJATRADER_DEMO_ADAPTER_VERSION,
+    NINJATRADER_DEMO_TRANSPORT_ID,
+    NINJATRADER_MARKET_SOURCE_ID,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +52,15 @@ IMPLEMENTED_MARKET_SOURCES: Final = MappingProxyType(
             transport_id=IBKR_WEBAPI_TRANSPORT_ID,
             parser_version=IBKR_WEBAPI_ADAPTER_VERSION,
             supported_assets=frozenset({"nvda", "tsla", "pltr"}),
+            public_market_data=False,
+        ),
+        NINJATRADER_MARKET_SOURCE_ID: MarketSourceCapability(
+            source_id=NINJATRADER_MARKET_SOURCE_ID,
+            transport_id=NINJATRADER_DEMO_TRANSPORT_ID,
+            parser_version=NINJATRADER_DEMO_ADAPTER_VERSION,
+            supported_assets=frozenset(
+                {"mes", "mnq", "mgc", "mcl", "us10y"}
+            ),
             public_market_data=False,
         ),
     }
