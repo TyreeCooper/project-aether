@@ -6,7 +6,7 @@ be used by start_forward_paper_campaign_from_book(). It performs no writes.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 import json
 
@@ -25,6 +25,7 @@ from aether_vnext.indicator_authority import indicator_authority_blockers
 from aether_vnext.playbook_exits import exit_rule
 from aether_vnext.playbooks import ordered_playbooks, playbook
 from aether_vnext.registry_runtime import binding_blockers
+from aether_vnext.runtime_book_health import runtime_book_blockers
 from aether_vnext.store import VNextStore
 
 
@@ -505,12 +506,13 @@ def preflight_canonical_forward_paper_campaign_from_book(
     as_of_utc: datetime | None = None,
 ) -> ForwardPaperPreflightResult:
     """Preflight the full canonical executable campaign universe only."""
+    effective_as_of = as_of_utc or datetime.now(timezone.utc)
     result = preflight_forward_paper_campaign_from_book(
         conn,
         store,
         campaign_id=campaign_id,
         requested_routes=canonical_forward_paper_route_requests(),
-        as_of_utc=as_of_utc,
+        as_of_utc=effective_as_of,
         require_market_source_implementation=True,
         require_market_print_implementation=True,
         require_calendar_provider_implementation=True,
@@ -524,7 +526,13 @@ def preflight_canonical_forward_paper_campaign_from_book(
             "prior_closed_bar_range",
         )
     )
-    if not indicator_blockers:
+    book_blockers = runtime_book_blockers(
+        conn,
+        store=store,
+        as_of_utc=effective_as_of,
+    )
+    additional_blockers = (*indicator_blockers, *book_blockers)
+    if not additional_blockers:
         return result
 
     return replace(
@@ -532,7 +540,7 @@ def preflight_canonical_forward_paper_campaign_from_book(
         startable=False,
         baseline_snapshot_hash=None,
         blockers=tuple(
-            dict.fromkeys((*result.blockers, *indicator_blockers))
+            dict.fromkeys((*result.blockers, *additional_blockers))
         ),
     )
 
