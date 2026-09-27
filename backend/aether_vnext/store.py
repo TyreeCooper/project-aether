@@ -2355,6 +2355,7 @@ class VNextStore:
                     closed.c.route_id,
                     closed.c.policy_version.label("closed_policy_version"),
                     closed.c.configuration_hash,
+                    closed.c.closed_at_utc,
                     closed.c.firm_event_id,
                     lineage.c.route_id.label("lineage_route_id"),
                     lineage.c.policy_version.label("lineage_policy_version"),
@@ -2417,8 +2418,17 @@ class VNextStore:
             ):
                 raise ValueError("paper-forward Setup identity mismatch")
             trigger_ts = _stored_utc(row["trigger_bar_close_exchange_ts"])
+            closed_at = _stored_utc(row["closed_at_utc"])
             if trigger_ts < _stored_utc(campaign["started_at_utc"]):
                 raise ValueError("paper-forward Setup predates campaign start")
+            if closed_at < trigger_ts:
+                raise ValueError(
+                    "paper-forward ClosedTrade closes before Setup trigger"
+                )
+            if closed_at > window.created_at_utc:
+                raise ValueError(
+                    "paper-forward evidence predates ClosedTrade close"
+                )
 
         try:
             with conn.begin_nested():

@@ -700,3 +700,104 @@ def test_paper_forward_window_rejects_closed_trade_policy_drift() -> None:
         ).scalar_one()
 
     assert link_count == 0
+
+
+
+def test_paper_forward_window_rejects_trade_closed_before_setup() -> None:
+    engine, store = _store()
+    trade_id = "trade-close-before-setup"
+    with engine.begin() as conn:
+        store.record_forward_paper_campaign(
+            conn,
+            _campaign(),
+            routes=(_route(),),
+        )
+        _record_closed_trade_lineage(
+            conn,
+            store,
+            trade_id=trade_id,
+        )
+        conn.execute(
+            store.tables["closed_trades"].update()
+            .where(store.tables["closed_trades"].c.trade_id == trade_id)
+            .values(closed_at_utc=T0)
+        )
+        window = _window(
+            window_id="paper-close-before-setup",
+            domain=SampleDomain.PAPER_FORWARD,
+            trade_ids=(trade_id,),
+            first_at=T0 + timedelta(minutes=1),
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="closes before Setup trigger",
+        ):
+            store.record_forward_paper_evidence_window(
+                conn,
+                campaign_window_id="fp-window-close-before-setup",
+                campaign_route_id=_route().campaign_route_id,
+                window=window,
+                linked_at_utc=T0 + timedelta(hours=4),
+            )
+
+        link_count = conn.execute(
+            sa.select(sa.func.count()).select_from(
+                store.tables["forward_paper_campaign_windows"]
+            ).where(
+                store.tables["forward_paper_campaign_windows"].c.campaign_window_id
+                == "fp-window-close-before-setup"
+            )
+        ).scalar_one()
+
+    assert link_count == 0
+
+
+def test_paper_forward_window_rejects_evidence_created_before_trade_close() -> None:
+    engine, store = _store()
+    trade_id = "trade-close-after-evidence"
+    with engine.begin() as conn:
+        store.record_forward_paper_campaign(
+            conn,
+            _campaign(),
+            routes=(_route(),),
+        )
+        _record_closed_trade_lineage(
+            conn,
+            store,
+            trade_id=trade_id,
+        )
+        conn.execute(
+            store.tables["closed_trades"].update()
+            .where(store.tables["closed_trades"].c.trade_id == trade_id)
+            .values(closed_at_utc=T0 + timedelta(hours=3))
+        )
+        window = _window(
+            window_id="paper-evidence-before-close",
+            domain=SampleDomain.PAPER_FORWARD,
+            trade_ids=(trade_id,),
+            first_at=T0 + timedelta(minutes=1),
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="evidence predates ClosedTrade close",
+        ):
+            store.record_forward_paper_evidence_window(
+                conn,
+                campaign_window_id="fp-window-evidence-before-close",
+                campaign_route_id=_route().campaign_route_id,
+                window=window,
+                linked_at_utc=T0 + timedelta(hours=4),
+            )
+
+        link_count = conn.execute(
+            sa.select(sa.func.count()).select_from(
+                store.tables["forward_paper_campaign_windows"]
+            ).where(
+                store.tables["forward_paper_campaign_windows"].c.campaign_window_id
+                == "fp-window-evidence-before-close"
+            )
+        ).scalar_one()
+
+    assert link_count == 0

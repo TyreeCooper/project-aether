@@ -469,6 +469,7 @@ def forward_paper_ledger_blockers(
                         closed.c.route_id,
                         closed.c.policy_version.label("closed_policy_version"),
                         closed.c.configuration_hash,
+                        closed.c.closed_at_utc,
                         lineage.c.route_id.label("lineage_route_id"),
                         lineage.c.policy_version.label(
                             "lineage_policy_version"
@@ -540,11 +541,23 @@ def forward_paper_ledger_blockers(
                         "forward_paper_ledger:trade_lineage_mismatch:"
                         f"{window_id}:{trade_id}"
                     )
-                if _stored_utc(
+                trigger_ts = _stored_utc(
                     trade["trigger_bar_close_exchange_ts"]
-                ) < _stored_utc(campaign["started_at_utc"]):
+                )
+                closed_at = _stored_utc(trade["closed_at_utc"])
+                if trigger_ts < _stored_utc(campaign["started_at_utc"]):
                     blockers.append(
                         "forward_paper_ledger:trade_setup_predates_campaign:"
+                        f"{window_id}:{trade_id}"
+                    )
+                if closed_at < trigger_ts:
+                    blockers.append(
+                        "forward_paper_ledger:trade_closes_before_setup:"
+                        f"{window_id}:{trade_id}"
+                    )
+                if closed_at > _stored_utc(window["created_at_utc"]):
+                    blockers.append(
+                        "forward_paper_ledger:evidence_predates_trade_close:"
                         f"{window_id}:{trade_id}"
                     )
 
