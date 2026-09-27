@@ -336,9 +336,20 @@ def forward_paper_ledger_blockers(
                 dataset_id = str(prov["dataset_snapshot_id"])
                 raw_fold_ids = prov["fold_result_ids"]
                 fold_ids = (
-                    tuple(str(value).strip() for value in raw_fold_ids)
+                    tuple(raw_fold_ids)
                     if isinstance(raw_fold_ids, list)
                     else ()
+                )
+                fold_ids_canonical = bool(
+                    isinstance(raw_fold_ids, list)
+                    and fold_ids
+                    and all(
+                        isinstance(value, str)
+                        and bool(value)
+                        and value == value.strip()
+                        for value in raw_fold_ids
+                    )
+                    and len(fold_ids) == len(set(fold_ids))
                 )
                 run = conn.execute(
                     sa.select(runs).where(
@@ -414,10 +425,7 @@ def forward_paper_ledger_blockers(
                     ).mappings()
                 ) if fold_ids else ()
                 fold_set_valid = bool(
-                    isinstance(raw_fold_ids, list)
-                    and fold_ids
-                    and all(fold_ids)
-                    and len(fold_ids) == len(set(fold_ids))
+                    fold_ids_canonical
                     and len(selected) == len(fold_ids)
                     and all(
                         str(row["backtest_run_id"]) == run_id
