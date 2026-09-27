@@ -256,6 +256,46 @@ def test_forward_paper_ledger_health_revalidates_research_provenance_chain() -> 
     assert blocker_class(expected) == "empirical_evidence"
 
 
+def test_forward_paper_ledger_health_rejects_noncanonical_provenance_identity() -> None:
+    engine, store = _store()
+    campaign_id = "burnin-health-provenance-identity"
+    with engine.begin() as conn:
+        result = _start_campaign(
+            conn,
+            store,
+            campaign_id=campaign_id,
+        )
+        window_id = result.routes[0].historical_validation_window_ids[0]
+        provenance = store.tables["held_out_evidence_provenance"]
+        row = conn.execute(
+            sa.select(provenance).where(
+                provenance.c.evidence_window_id == window_id
+            )
+        ).mappings().one()
+        conn.execute(
+            provenance.update()
+            .where(provenance.c.evidence_window_id == window_id)
+            .values(
+                backtest_run_id=f" {row['backtest_run_id']} ",
+            )
+        )
+
+        blockers = forward_paper_ledger_blockers(
+            conn,
+            store=store,
+            campaign_id=campaign_id,
+        )
+
+    expected = (
+        "forward_paper_ledger:historical_provenance_identity_invalid:"
+        + result.routes[0].campaign_route_id
+        + ":"
+        + window_id
+    )
+    assert expected in blockers
+    assert blocker_class(expected) == "empirical_evidence"
+
+
 def test_forward_paper_ledger_health_recomputes_provenance_hash() -> None:
     engine, store = _store()
     campaign_id = "burnin-health-provenance-hash"

@@ -332,8 +332,29 @@ def forward_paper_ledger_blockers(
                     )
                     hash_inputs_complete = False
 
-                run_id = str(prov["backtest_run_id"])
-                dataset_id = str(prov["dataset_snapshot_id"])
+                raw_run_id = prov["backtest_run_id"]
+                raw_dataset_id = prov["dataset_snapshot_id"]
+                raw_provenance_hash = prov["provenance_hash"]
+                provenance_identity_ok = bool(
+                    isinstance(raw_run_id, str)
+                    and bool(raw_run_id)
+                    and raw_run_id == raw_run_id.strip()
+                    and isinstance(raw_dataset_id, str)
+                    and bool(raw_dataset_id)
+                    and raw_dataset_id == raw_dataset_id.strip()
+                    and isinstance(raw_provenance_hash, str)
+                    and bool(raw_provenance_hash)
+                    and raw_provenance_hash == raw_provenance_hash.strip()
+                )
+                if not provenance_identity_ok:
+                    blockers.append(
+                        "forward_paper_ledger:"
+                        "historical_provenance_identity_invalid:"
+                        f"{route_id}:{window_id}"
+                    )
+                    hash_inputs_complete = False
+                run_id = raw_run_id if provenance_identity_ok else ""
+                dataset_id = raw_dataset_id if provenance_identity_ok else ""
                 raw_fold_ids = prov["fold_result_ids"]
                 fold_ids = (
                     tuple(raw_fold_ids)
@@ -502,7 +523,10 @@ def forward_paper_ledger_blockers(
                             ),
                         }
                     )
-                    if expected_provenance_hash != str(prov["provenance_hash"]):
+                    if (
+                        not provenance_identity_ok
+                        or expected_provenance_hash != raw_provenance_hash
+                    ):
                         blockers.append(
                             "forward_paper_ledger:"
                             "historical_provenance_hash_mismatch:"
