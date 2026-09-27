@@ -650,3 +650,66 @@ def test_forward_paper_ledger_health_rederives_campaign_route_id() -> None:
     )
     assert expected in blockers
     assert blocker_class(expected) == "empirical_evidence"
+
+
+
+def test_forward_paper_ledger_health_revalidates_campaign_safety_root() -> None:
+    engine, store = _store()
+    campaign_id = "burnin-health-campaign-safety-drift"
+    with engine.begin() as conn:
+        _start_campaign(
+            conn,
+            store,
+            campaign_id=campaign_id,
+        )
+        conn.execute(sa.text("PRAGMA ignore_check_constraints = ON"))
+        try:
+            conn.execute(
+                store.tables["forward_paper_campaigns"].update()
+                .where(
+                    store.tables["forward_paper_campaigns"].c.campaign_id
+                    == campaign_id
+                )
+                .values(live_blocked=False)
+            )
+
+            blockers = forward_paper_ledger_blockers(
+                conn,
+                store=store,
+                campaign_id=campaign_id,
+            )
+        finally:
+            conn.execute(sa.text("PRAGMA ignore_check_constraints = OFF"))
+
+    expected = "forward_paper_ledger:campaign_safety_invariant_mismatch"
+    assert expected in blockers
+    assert blocker_class(expected) == "safety_invariant"
+
+
+def test_forward_paper_ledger_health_revalidates_campaign_policy_root() -> None:
+    engine, store = _store()
+    campaign_id = "burnin-health-campaign-policy-drift"
+    with engine.begin() as conn:
+        _start_campaign(
+            conn,
+            store,
+            campaign_id=campaign_id,
+        )
+        conn.execute(
+            store.tables["forward_paper_campaigns"].update()
+            .where(
+                store.tables["forward_paper_campaigns"].c.campaign_id
+                == campaign_id
+            )
+            .values(policy_version="tampered-policy-version")
+        )
+
+        blockers = forward_paper_ledger_blockers(
+            conn,
+            store=store,
+            campaign_id=campaign_id,
+        )
+
+    expected = "forward_paper_ledger:campaign_policy_snapshot_mismatch"
+    assert expected in blockers
+    assert blocker_class(expected) == "environment_initialization"

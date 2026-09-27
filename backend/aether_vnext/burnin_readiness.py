@@ -84,6 +84,15 @@ def blocker_class(code: str) -> str:
     }:
         return "external_runtime_configuration"
 
+    if value == "forward_paper_ledger:campaign_safety_invariant_mismatch":
+        return "safety_invariant"
+
+    if value in {
+        "forward_paper_ledger:campaign_policy_snapshot_missing",
+        "forward_paper_ledger:campaign_policy_snapshot_mismatch",
+    }:
+        return "environment_initialization"
+
     if value.startswith("forward_paper_ledger:runtime_binding_"):
         return "external_runtime_configuration"
 

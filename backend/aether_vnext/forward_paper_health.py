@@ -6,7 +6,11 @@ from datetime import datetime, timezone
 import sqlalchemy as sa
 from sqlalchemy.engine import Connection
 
-from aether_vnext.forward_paper import ForwardPaperRouteBaseline, parse_route_id
+from aether_vnext.forward_paper import (
+    ForwardPaperCampaign,
+    ForwardPaperRouteBaseline,
+    parse_route_id,
+)
 from aether_vnext.forward_paper_preflight import (
     forward_paper_baseline_snapshot_hash,
     forward_paper_campaign_route_id,
@@ -38,6 +42,59 @@ def forward_paper_ledger_blockers(
         return ()
 
     blockers: list[str] = []
+    try:
+        ForwardPaperCampaign(
+            campaign_id=str(campaign["campaign_id"]),
+            configuration_hash=str(campaign["configuration_hash"]),
+            policy_version=str(campaign["policy_version"]),
+            baseline_snapshot_hash=str(campaign["baseline_snapshot_hash"]),
+            started_at_utc=_stored_utc(campaign["started_at_utc"]),
+            created_at_utc=_stored_utc(campaign["created_at_utc"]),
+            forced_entry_enabled=bool(campaign["forced_entry_enabled"]),
+            natural_setup_only=bool(campaign["natural_setup_only"]),
+            real_market_time_required=bool(
+                campaign["real_market_time_required"]
+            ),
+            pit_inputs_required=bool(campaign["pit_inputs_required"]),
+            modeled_cost_capture_required=bool(
+                campaign["modeled_cost_capture_required"]
+            ),
+            observed_cost_capture_required=bool(
+                campaign["observed_cost_capture_required"]
+            ),
+            route_pnl_accounting_required=bool(
+                campaign["route_pnl_accounting_required"]
+            ),
+            disposition_accounting_required=bool(
+                campaign["disposition_accounting_required"]
+            ),
+            no_cherry_pick=bool(campaign["no_cherry_pick"]),
+            historical_comparison_separate=bool(
+                campaign["historical_comparison_separate"]
+            ),
+            live_blocked=bool(campaign["live_blocked"]),
+        )
+    except (TypeError, ValueError):
+        blockers.append(
+            "forward_paper_ledger:campaign_safety_invariant_mismatch"
+        )
+
+    policies = store.tables["policy_snapshots"]
+    policy = conn.execute(
+        sa.select(policies).where(
+            policies.c.configuration_hash
+            == str(campaign["configuration_hash"])
+        )
+    ).mappings().first()
+    if policy is None:
+        blockers.append(
+            "forward_paper_ledger:campaign_policy_snapshot_missing"
+        )
+    elif str(policy["policy_version"]) != str(campaign["policy_version"]):
+        blockers.append(
+            "forward_paper_ledger:campaign_policy_snapshot_mismatch"
+        )
+
     route_table = store.tables["forward_paper_campaign_routes"]
     route_rows = tuple(
         conn.execute(
