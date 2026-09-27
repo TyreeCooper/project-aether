@@ -1076,7 +1076,7 @@ def test_campaign_route_baseline_rejects_blank_historical_window_ids() -> None:
     base = _route()
     with pytest.raises(
         ValueError,
-        match="historical_validation_window_ids must contain nonblank IDs",
+        match="historical_validation_window_ids must contain canonical IDs",
     ):
         ForwardPaperRouteBaseline(
             campaign_route_id=base.campaign_route_id,
@@ -1095,7 +1095,7 @@ def test_campaign_route_baseline_rejects_trim_equivalent_window_ids() -> None:
     base = _route()
     with pytest.raises(
         ValueError,
-        match="historical_validation_window_ids cannot contain duplicates",
+        match="historical_validation_window_ids must contain canonical IDs",
     ):
         ForwardPaperRouteBaseline(
             campaign_route_id=base.campaign_route_id,
