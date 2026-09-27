@@ -105,6 +105,7 @@ def blocker_class(code: str) -> str:
     if value in {
         "missing_current_held_out_baseline",
         "held_out_baseline_lacks_research_provenance",
+        "held_out_baseline_provenance_invalid",
         "held_out_window_reload_failed",
     }:
         return "empirical_evidence"

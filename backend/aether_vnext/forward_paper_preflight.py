@@ -484,6 +484,29 @@ def preflight_forward_paper_campaign_from_book(
                     else "missing_current_held_out_baseline"
                 )
             else:
+                provenance_shape_ok = all(
+                    isinstance(row["fold_result_ids"], list)
+                    and bool(row["fold_result_ids"])
+                    and all(
+                        str(value).strip()
+                        for value in row["fold_result_ids"]
+                    )
+                    and len(row["fold_result_ids"])
+                    == len(
+                        {
+                            str(value).strip()
+                            for value in row["fold_result_ids"]
+                        }
+                    )
+                    and bool(str(row["backtest_run_id"]).strip())
+                    and bool(str(row["dataset_snapshot_id"]).strip())
+                    and bool(str(row["provenance_hash"]).strip())
+                    for row in rows
+                )
+                if not provenance_shape_ok:
+                    route_blockers.append(
+                        "held_out_baseline_provenance_invalid"
+                    )
                 try:
                     windows = tuple(
                         store.load_evidence_window(
@@ -502,7 +525,10 @@ def preflight_forward_paper_campaign_from_book(
                         window for window in windows if window is not None
                     )
                     independent_count = independent_n(concrete)
-                    if runtime_registry_binding_hash is not None:
+                    if (
+                        runtime_registry_binding_hash is not None
+                        and provenance_shape_ok
+                    ):
                         route_hash = _route_baseline_hash(
                             route_id=request.route_id,
                             playbook_id=request.playbook_id,
