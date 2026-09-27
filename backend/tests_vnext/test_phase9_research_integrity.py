@@ -127,6 +127,30 @@ def _store() -> tuple[sa.Engine, VNextStore]:
     return engine, store
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("hypothesis_id", " hyp-1 "),
+        ("hypothesis_text", 1),
+        ("economic_rationale", " rationale "),
+        ("mechanism_class", ""),
+        ("horizon", " intraday "),
+    ),
+)
+def test_hypothesis_card_requires_canonical_scalar_identity(
+    field: str,
+    value: object,
+) -> None:
+    base = _card()
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs[field] = value
+    with pytest.raises(ValueError, match=f"{field} must be canonical text"):
+        HypothesisCard(**kwargs)
+
+
 def test_research_ledger_retains_failed_candidate_and_reproducibility_lineage() -> None:
     engine, store = _store()
     with engine.begin() as conn:

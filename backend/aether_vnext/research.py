@@ -34,8 +34,12 @@ class HypothesisCard:
             "horizon": self.horizon,
         }
         for name, value in required.items():
-            if not str(value).strip():
-                raise ValueError(f"{name} is required")
+            if (
+                not isinstance(value, str)
+                or not value
+                or value != value.strip()
+            ):
+                raise ValueError(f"{name} must be canonical text")
         if self.created_at_utc.tzinfo is None:
             raise ValueError("created_at_utc must be timezone-aware")
         if not self.eligible_assets:
