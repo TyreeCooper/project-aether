@@ -305,6 +305,36 @@ def test_review_persistence_does_not_mutate_broker_money_state() -> None:
     assert after == before
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("evidence_id", " evidence-1 "),
+        ("route_id", 1),
+        ("playbook_id", " pb_fx_intraday_v1_2 "),
+        ("playbook_version", ""),
+        ("policy_version", " policy-9a "),
+        ("configuration_hash", 1),
+        ("data_version", ""),
+        ("fill_model_version", " paper-fill-v1 "),
+        ("fee_schedule_version", 1),
+        ("verdict", ""),
+        ("reviewer", " Review "),
+    ),
+)
+def test_profitability_evidence_requires_canonical_identity(
+    field: str,
+    value: object,
+) -> None:
+    base = _evidence()
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs[field] = value
+    with pytest.raises(ValueError, match=f"{field} must be canonical text"):
+        ProfitabilityEvidence(**kwargs)
+
+
 def test_evidence_validates_core_shape() -> None:
     with pytest.raises(ValueError, match="n_trades"):
         _evidence(n_trades=-1)

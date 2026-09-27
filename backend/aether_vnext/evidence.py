@@ -63,8 +63,12 @@ class ProfitabilityEvidence:
             "reviewer": self.reviewer,
         }
         for name, value in required_text.items():
-            if not str(value).strip():
-                raise ValueError(f"{name} is required")
+            if (
+                not isinstance(value, str)
+                or not value
+                or value != value.strip()
+            ):
+                raise ValueError(f"{name} must be canonical text")
         if self.as_of_utc.tzinfo is None:
             raise ValueError("as_of_utc must be timezone-aware")
         if int(self.n_trades) < 0:
