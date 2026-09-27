@@ -17,6 +17,7 @@ from typing import Any, Mapping
 import sqlalchemy as sa
 from sqlalchemy.engine import Connection
 
+from aether_vnext.clerk import ClerkDecision
 from aether_vnext.domain import (
     CalendarState,
     Lineage,
@@ -41,6 +42,7 @@ from aether_vnext.equity import (
     sleeve_equity_projection,
 )
 from aether_vnext.execution import entry_fill_price
+from aether_vnext.exit_plan import ExitPlan
 from aether_vnext.evidence import (
     CostSensitivity,
     EvidenceWindow,
@@ -1497,6 +1499,324 @@ class VNextStore:
             "asset_risk_hitches_usd": dict(
                 result.asset_risk_hitches_usd
             ),
+        }
+
+    def record_exit_plan(
+        self,
+        conn: Connection,
+        plan: ExitPlan,
+        *,
+        created_at_utc: datetime,
+    ) -> str:
+        """Persist one immutable typed ExitPlan and return its payload hash."""
+        if created_at_utc.tzinfo is None:
+            raise ValueError("created_at_utc must be timezone-aware")
+        if not str(plan.exit_plan_id).strip():
+            raise ValueError("exit_plan_id is required")
+        if not str(plan.version).strip():
+            raise ValueError("ExitPlan version is required")
+        if (
+            plan.hard_stop_price is not None
+            and float(plan.hard_stop_price) <= 0
+        ):
+            raise ValueError("ExitPlan hard_stop_price must be positive")
+        if (
+            plan.time_stop_deadline_utc is not None
+            and plan.time_stop_deadline_utc.tzinfo is None
+        ):
+            raise ValueError(
+                "ExitPlan time_stop_deadline_utc must be timezone-aware"
+            )
+        if not plan.trailing_policy.never_loosen:
+            raise ValueError("ExitPlan trailing policy may never loosen")
+        for name, value in (
+            ("session_close_policy", plan.session_close_policy),
+            ("stale_mark_policy", plan.stale_mark_policy),
+            ("governor_halt_behavior", plan.governor_halt_behavior),
+            ("created_from_playbook_version", plan.created_from_playbook_version),
+        ):
+            if not str(value).strip():
+                raise ValueError(f"ExitPlan {name} is required")
+
+        trailing_payload = {
+            "enabled": plan.trailing_policy.enabled,
+            "start_condition": plan.trailing_policy.start_condition,
+            "ratchet_rule": plan.trailing_policy.ratchet_rule,
+            "never_loosen": plan.trailing_policy.never_loosen,
+        }
+        profit_take_payload = {
+            "enabled": plan.profit_take_policy.enabled,
+            "rule_id": plan.profit_take_policy.rule_id,
+        }
+        hash_payload = {
+            "exit_plan_id": plan.exit_plan_id,
+            "version": plan.version,
+            "hard_stop_price": plan.hard_stop_price,
+            "structure_rule_id": plan.structure_rule_id,
+            "time_stop_deadline_utc": (
+                None
+                if plan.time_stop_deadline_utc is None
+                else plan.time_stop_deadline_utc.isoformat()
+            ),
+            "trailing_policy": trailing_payload,
+            "profit_take_policy": profit_take_payload,
+            "session_close_policy": plan.session_close_policy,
+            "stale_mark_policy": plan.stale_mark_policy,
+            "governor_halt_behavior": plan.governor_halt_behavior,
+            "created_from_playbook_version": (
+                plan.created_from_playbook_version
+            ),
+        }
+        digest = canonical_payload_hash(hash_payload)
+        table = self.tables["exit_plans"]
+        existing = conn.execute(
+            sa.select(table).where(
+                table.c.exit_plan_id == plan.exit_plan_id
+            )
+        ).mappings().first()
+        if existing is not None:
+            if str(existing["payload_hash"]) != digest:
+                raise RuntimeError(
+                    "immutable ExitPlan identity already has different payload"
+                )
+            return digest
+
+        conn.execute(
+            table.insert().values(
+                exit_plan_id=plan.exit_plan_id,
+                version=plan.version,
+                hard_stop_price=plan.hard_stop_price,
+                structure_rule_id=plan.structure_rule_id,
+                time_stop_deadline_utc=plan.time_stop_deadline_utc,
+                trailing_policy=trailing_payload,
+                profit_take_policy=profit_take_payload,
+                session_close_policy=plan.session_close_policy,
+                stale_mark_policy=plan.stale_mark_policy,
+                governor_halt_behavior=plan.governor_halt_behavior,
+                created_from_playbook_version=(
+                    plan.created_from_playbook_version
+                ),
+                payload_hash=digest,
+                created_at_utc=created_at_utc,
+            )
+        )
+        return digest
+
+    def apply_clerk_decision(
+        self,
+        conn: Connection,
+        *,
+        ticket_id: str,
+        decision: ClerkDecision,
+        market_observation_id: str,
+        exit_plan: ExitPlan | None,
+        created_at_utc: datetime,
+        event_id: str,
+        actor: str = "Clerk",
+    ) -> dict[str, Any]:
+        """Persist Clerk SIZE -> READY/REJECTED without changing Risk quantity."""
+        if created_at_utc.tzinfo is None:
+            raise ValueError("created_at_utc must be timezone-aware")
+
+        tickets = self.tables["tickets"]
+        lineage_table = self.tables["decision_lineage"]
+        observations = self.tables["market_observations"]
+
+        ticket = conn.execute(
+            sa.select(tickets)
+            .where(tickets.c.ticket_id == ticket_id)
+            .with_for_update()
+        ).mappings().first()
+        if ticket is None:
+            raise KeyError(f"unknown ticket: {ticket_id}")
+        if str(ticket["state"]) != TicketState.SIZE.value:
+            raise ValueError("Clerk persistence requires SIZE ticket")
+        if ticket["quantity"] is None or float(ticket["quantity"]) <= 0:
+            raise RuntimeError("SIZE ticket missing Risk quantity")
+
+        quantity = float(ticket["quantity"])
+        lineage = conn.execute(
+            sa.select(lineage_table)
+            .where(
+                lineage_table.c.firm_event_id == ticket["firm_event_id"]
+            )
+            .with_for_update()
+        ).mappings().first()
+        if lineage is None:
+            raise RuntimeError("SIZE ticket missing decision lineage")
+
+        observation = conn.execute(
+            sa.select(observations).where(
+                observations.c.observation_id == market_observation_id
+            )
+        ).mappings().first()
+        if observation is None:
+            raise KeyError(
+                f"unknown market observation: {market_observation_id}"
+            )
+        if str(observation["asset_id"]) != str(ticket["asset_id"]):
+            raise ValueError("Clerk market observation asset mismatch")
+
+        modeled_cost_pct = decision.modeled_round_trip_cost_pct
+
+        if decision.ready:
+            if decision.reject_code is not None:
+                raise ValueError("READY Clerk decision cannot carry reject_code")
+            if decision.costs is None or modeled_cost_pct is None:
+                raise ValueError("READY Clerk decision requires modeled costs")
+            if float(modeled_cost_pct) < 0:
+                raise ValueError(
+                    "modeled_round_trip_cost_pct cannot be negative"
+                )
+            if exit_plan is None:
+                raise ValueError("READY Clerk decision requires ExitPlan")
+            if (
+                exit_plan.hard_stop_price is None
+                or ticket["stop_price"] is None
+                or abs(
+                    float(exit_plan.hard_stop_price)
+                    - float(ticket["stop_price"])
+                )
+                > 1e-12
+            ):
+                raise ValueError(
+                    "ExitPlan hard stop must match Risk/Sniper ticket stop"
+                )
+            playbook_version = str(lineage["playbook_version"] or "").strip()
+            if not playbook_version:
+                raise RuntimeError("SIZE ticket missing playbook_version")
+            if exit_plan.created_from_playbook_version != playbook_version:
+                raise ValueError(
+                    "ExitPlan created_from_playbook_version mismatch"
+                )
+
+            plan_hash = self.record_exit_plan(
+                conn,
+                exit_plan,
+                created_at_utc=created_at_utc,
+            )
+            conn.execute(
+                tickets.update()
+                .where(tickets.c.ticket_id == ticket_id)
+                .values(
+                    state=TicketState.READY.value,
+                    modeled_round_trip_cost_pct=float(modeled_cost_pct),
+                    exit_plan_id=exit_plan.exit_plan_id,
+                    reject_code=None,
+                    market_observation_id=market_observation_id,
+                    first_killed_by=None,
+                    first_kill_reason=None,
+                )
+            )
+            conn.execute(
+                lineage_table.update()
+                .where(
+                    lineage_table.c.firm_event_id
+                    == ticket["firm_event_id"]
+                )
+                .values(
+                    market_observation_id=market_observation_id,
+                    row_version=lineage_table.c.row_version + 1,
+                )
+            )
+            self.append_event(
+                conn,
+                event_id=event_id,
+                aggregate_type="ticket",
+                aggregate_id=ticket_id,
+                prior_state=TicketState.SIZE.value,
+                new_state=TicketState.READY.value,
+                seat="Clerk",
+                reason_code="clerk.ready",
+                policy_version=str(ticket["policy_version"]),
+                configuration_hash=str(ticket["configuration_hash"]),
+                market_observation_id=market_observation_id,
+                actor=actor,
+                created_at_utc=created_at_utc,
+                payload={
+                    "quantity": quantity,
+                    "opportunity_pct": decision.opportunity_pct,
+                    "cost_hurdle_pct": decision.cost_hurdle_pct,
+                    "modeled_round_trip_cost_pct": modeled_cost_pct,
+                    "exit_plan_id": exit_plan.exit_plan_id,
+                    "exit_plan_payload_hash": plan_hash,
+                },
+            )
+            return {
+                "ok": True,
+                "state": TicketState.READY.value,
+                "ticket_id": ticket_id,
+                "quantity": quantity,
+                "modeled_round_trip_cost_pct": float(modeled_cost_pct),
+                "exit_plan_id": exit_plan.exit_plan_id,
+                "exit_plan_payload_hash": plan_hash,
+            }
+
+        if exit_plan is not None:
+            raise ValueError(
+                "REJECTED Clerk decision must not persist an ExitPlan"
+            )
+        reject_code = str(decision.reject_code or "").strip()
+        if not reject_code:
+            raise ValueError("REJECTED Clerk decision requires reject_code")
+
+        conn.execute(
+            tickets.update()
+            .where(tickets.c.ticket_id == ticket_id)
+            .values(
+                state=TicketState.REJECTED.value,
+                modeled_round_trip_cost_pct=(
+                    None
+                    if modeled_cost_pct is None
+                    else float(modeled_cost_pct)
+                ),
+                exit_plan_id=None,
+                reject_code=reject_code,
+                market_observation_id=market_observation_id,
+                first_killed_by="Clerk",
+                first_kill_reason=reject_code,
+            )
+        )
+        conn.execute(
+            lineage_table.update()
+            .where(
+                lineage_table.c.firm_event_id == ticket["firm_event_id"]
+            )
+            .values(
+                market_observation_id=market_observation_id,
+                first_killed_by="Clerk",
+                first_kill_reason=reject_code,
+                row_version=lineage_table.c.row_version + 1,
+            )
+        )
+        self.append_event(
+            conn,
+            event_id=event_id,
+            aggregate_type="ticket",
+            aggregate_id=ticket_id,
+            prior_state=TicketState.SIZE.value,
+            new_state=TicketState.REJECTED.value,
+            seat="Clerk",
+            reason_code=reject_code,
+            policy_version=str(ticket["policy_version"]),
+            configuration_hash=str(ticket["configuration_hash"]),
+            market_observation_id=market_observation_id,
+            actor=actor,
+            created_at_utc=created_at_utc,
+            payload={
+                "quantity": quantity,
+                "opportunity_pct": decision.opportunity_pct,
+                "cost_hurdle_pct": decision.cost_hurdle_pct,
+                "modeled_round_trip_cost_pct": modeled_cost_pct,
+            },
+        )
+        return {
+            "ok": False,
+            "state": TicketState.REJECTED.value,
+            "ticket_id": ticket_id,
+            "quantity": quantity,
+            "reject_code": reject_code,
+            "modeled_round_trip_cost_pct": modeled_cost_pct,
         }
 
     def record_research_hypothesis(
