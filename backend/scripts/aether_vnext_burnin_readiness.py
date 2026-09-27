@@ -21,6 +21,9 @@ from aether_vnext.burnin_readiness import (
 )
 from aether_vnext.db_isolation import inspect_database_isolation
 from aether_vnext.db_runtime import open_vnext_engine
+from aether_vnext.forward_paper_health import (
+    forward_paper_ledger_blockers,
+)
 from aether_vnext.forward_paper_preflight import (
     preflight_canonical_forward_paper_campaign_from_book,
 )
@@ -92,6 +95,15 @@ async def _main(
                             store,
                             campaign_id=campaign_id,
                             as_of_utc=as_of_utc,
+                        )
+                    )
+                )
+                extra_blockers.extend(
+                    await connection.run_sync(
+                        lambda sync_conn: forward_paper_ledger_blockers(
+                            sync_conn,
+                            store=store,
+                            campaign_id=campaign_id,
                         )
                     )
                 )

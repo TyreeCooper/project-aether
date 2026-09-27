@@ -84,6 +84,9 @@ def blocker_class(code: str) -> str:
     }:
         return "external_runtime_configuration"
 
+    if value.startswith("forward_paper_ledger:"):
+        return "empirical_evidence"
+
     if value in {
         "missing_current_held_out_baseline",
         "held_out_baseline_lacks_research_provenance",

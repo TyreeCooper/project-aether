@@ -1,0 +1,161 @@
+"""Read-only integrity checks for a persisted forward-paper campaign ledger."""
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+import sqlalchemy as sa
+from sqlalchemy.engine import Connection
+
+from aether_vnext.forward_paper import ForwardPaperRouteBaseline
+from aether_vnext.forward_paper_preflight import (
+    forward_paper_baseline_snapshot_hash,
+)
+from aether_vnext.store import VNextStore
+
+
+def _stored_utc(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+
+
+def forward_paper_ledger_blockers(
+    conn: Connection,
+    *,
+    store: VNextStore,
+    campaign_id: str,
+) -> tuple[str, ...]:
+    """Return deterministic blockers for persisted burn-in ledger drift."""
+    campaign_key = str(campaign_id).strip()
+    if not campaign_key:
+        raise ValueError("campaign_id is required")
+
+    campaigns = store.tables["forward_paper_campaigns"]
+    campaign = conn.execute(
+        sa.select(campaigns).where(campaigns.c.campaign_id == campaign_key)
+    ).mappings().first()
+    if campaign is None:
+        return ()
+
+    blockers: list[str] = []
+    route_table = store.tables["forward_paper_campaign_routes"]
+    route_rows = tuple(
+        conn.execute(
+            sa.select(route_table)
+            .where(route_table.c.campaign_id == campaign_key)
+            .order_by(
+                route_table.c.route_id.asc(),
+                route_table.c.playbook_id.asc(),
+                route_table.c.campaign_route_id.asc(),
+            )
+        ).mappings()
+    )
+    if not route_rows:
+        return ("forward_paper_ledger:campaign_has_no_routes",)
+
+    routes: list[ForwardPaperRouteBaseline] = []
+    route_by_id: dict[str, dict[str, object]] = {}
+    for row in route_rows:
+        route_id = str(row["campaign_route_id"])
+        route_by_id[route_id] = dict(row)
+        if str(row["configuration_hash"]) != str(campaign["configuration_hash"]):
+            blockers.append(
+                f"forward_paper_ledger:route_configuration_mismatch:{route_id}"
+            )
+        try:
+            routes.append(
+                ForwardPaperRouteBaseline(
+                    campaign_route_id=route_id,
+                    campaign_id=str(row["campaign_id"]),
+                    route_id=str(row["route_id"]),
+                    playbook_id=str(row["playbook_id"]),
+                    playbook_version=str(row["playbook_version"]),
+                    configuration_hash=str(row["configuration_hash"]),
+                    runtime_registry_binding_hash=str(
+                        row["runtime_registry_binding_hash"]
+                    ),
+                    historical_validation_window_ids=tuple(
+                        str(value)
+                        for value in (
+                            row["historical_validation_window_ids"] or ()
+                        )
+                    ),
+                    historical_metrics_snapshot_hash=str(
+                        row["historical_metrics_snapshot_hash"]
+                    ),
+                )
+            )
+        except (TypeError, ValueError):
+            blockers.append(
+                f"forward_paper_ledger:invalid_route_baseline:{route_id}"
+            )
+
+    if len(routes) == len(route_rows):
+        persisted_hash = forward_paper_baseline_snapshot_hash(
+            configuration_hash=str(campaign["configuration_hash"]),
+            policy_version=str(campaign["policy_version"]),
+            routes=tuple(routes),
+        )
+        if persisted_hash != str(campaign["baseline_snapshot_hash"]):
+            blockers.append(
+                "forward_paper_ledger:baseline_snapshot_mismatch"
+            )
+
+    links = store.tables["forward_paper_campaign_windows"]
+    evidence = store.tables["evidence_windows"]
+    link_rows = tuple(
+        conn.execute(
+            sa.select(links)
+            .where(links.c.campaign_id == campaign_key)
+            .order_by(links.c.campaign_window_id.asc())
+        ).mappings()
+    )
+    for link in link_rows:
+        campaign_window_id = str(link["campaign_window_id"])
+        campaign_route_id = str(link["campaign_route_id"])
+        route = route_by_id.get(campaign_route_id)
+        if route is None:
+            blockers.append(
+                "forward_paper_ledger:missing_campaign_route:"
+                f"{campaign_window_id}"
+            )
+            continue
+        if str(route["campaign_id"]) != campaign_key:
+            blockers.append(
+                "forward_paper_ledger:cross_campaign_route_link:"
+                f"{campaign_window_id}"
+            )
+            continue
+
+        window_id = str(link["evidence_window_id"])
+        window = conn.execute(
+            sa.select(evidence).where(
+                evidence.c.evidence_window_id == window_id
+            )
+        ).mappings().first()
+        if window is None:
+            blockers.append(
+                f"forward_paper_ledger:missing_evidence_window:{window_id}"
+            )
+            continue
+        if str(window["sample_domain"]) != "paper_forward":
+            blockers.append(
+                f"forward_paper_ledger:window_not_paper_forward:{window_id}"
+            )
+        if (
+            str(window["route_id"]) != str(route["route_id"])
+            or str(window["playbook_id"]) != str(route["playbook_id"])
+            or str(window["playbook_version"]) != str(route["playbook_version"])
+            or str(window["configuration_hash"])
+            != str(route["configuration_hash"])
+            or str(window["policy_version"]) != str(campaign["policy_version"])
+        ):
+            blockers.append(
+                f"forward_paper_ledger:window_family_mismatch:{window_id}"
+            )
+        if _stored_utc(window["first_timestamp_utc"]) < _stored_utc(
+            campaign["started_at_utc"]
+        ):
+            blockers.append(
+                f"forward_paper_ledger:window_predates_campaign:{window_id}"
+            )
+
+    return tuple(dict.fromkeys(blockers))
