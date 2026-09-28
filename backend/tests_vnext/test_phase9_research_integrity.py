@@ -185,6 +185,26 @@ def test_backtest_run_rejects_experiment_lineage_drift(
             store.record_backtest_run(conn, BacktestRun(**kwargs))
 
 
+def test_backtest_run_requires_canonical_playbook_version() -> None:
+    engine, store = _store()
+    base = _run()
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs["playbook_version"] = "9.9"
+
+    with engine.begin() as conn:
+        store.record_research_hypothesis(conn, _card())
+        store.record_research_dataset_snapshot(conn, _snapshot())
+        store.record_research_experiment(conn, _experiment())
+        with pytest.raises(
+            ValueError,
+            match="playbook_version does not match canonical playbook",
+        ):
+            store.record_backtest_run(conn, BacktestRun(**kwargs))
+
+
 @pytest.mark.parametrize(
     "run_type",
     tuple(sorted(EVIDENCE_BEARING_RUN_TYPES)),

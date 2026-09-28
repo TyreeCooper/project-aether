@@ -1956,6 +1956,12 @@ class VNextStore:
                 + ",".join(mismatches)
             )
 
+        spec = playbook(run.playbook_id)
+        if spec.version != run.playbook_version:
+            raise ValueError(
+                "backtest run playbook_version does not match canonical playbook"
+            )
+
         if run.run_type in EVIDENCE_BEARING_RUN_TYPES:
             if str(experiment["research_state"]) != ResearchState.FROZEN.value:
                 raise ValueError(
