@@ -24,7 +24,7 @@ def _empty_book() -> tuple[sa.Engine, VNextStore]:
     return engine, store
 
 
-def test_canonical_preflight_surfaces_unbound_indicator_conventions() -> None:
+def test_canonical_preflight_accepts_bound_indicator_conventions() -> None:
     engine, store = _empty_book()
     with engine.begin() as conn:
         result = preflight_canonical_forward_paper_campaign_from_book(
@@ -34,11 +34,14 @@ def test_canonical_preflight_surfaces_unbound_indicator_conventions() -> None:
             as_of_utc=T0,
         )
 
+    # The empty book still fails for unrelated canonical prerequisites, but
+    # Indicator Convention v1 must no longer contribute any blocker.
     assert result.startable is False
     assert result.baseline_snapshot_hash is None
-    assert "ema_calculation_convention_unbound" in result.blockers
-    assert "atr_calculation_convention_unbound" in result.blockers
-    assert "realized_vol_calculation_convention_unbound" in result.blockers
+    assert "canonical_policy_snapshot_missing" in result.blockers
+    assert "ema_calculation_convention_unbound" not in result.blockers
+    assert "atr_calculation_convention_unbound" not in result.blockers
+    assert "realized_vol_calculation_convention_unbound" not in result.blockers
 
 
 def test_generic_diagnostic_preflight_does_not_force_canonical_indicator_gate() -> None:
