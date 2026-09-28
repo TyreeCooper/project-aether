@@ -216,9 +216,15 @@ def build_research_regime_ready_features(
 
     prior_range: PriorClosedBarRange | None = None
     if prior_range_lookback is not None:
-        lookback = int(prior_range_lookback)
-        if lookback <= 0:
-            raise ValueError("prior_range_lookback must be positive")
+        if (
+            not isinstance(prior_range_lookback, int)
+            or isinstance(prior_range_lookback, bool)
+            or prior_range_lookback <= 0
+        ):
+            raise ValueError(
+                "prior_range_lookback must be a positive integer"
+            )
+        lookback = prior_range_lookback
         prior_range = prior_closed_bar_range(
             rows,
             lookback_bars=lookback,
