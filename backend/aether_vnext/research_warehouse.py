@@ -90,12 +90,18 @@ class ResearchBarRecord:
                 "research bar cannot be available before bucket close"
             )
 
+        raw_values = {
+            "open": self.open,
+            "high": self.high,
+            "low": self.low,
+            "close": self.close,
+            "volume": self.volume,
+        }
+        if any(isinstance(value, bool) for value in raw_values.values()):
+            raise ValueError("research bar prices/volume must be numeric, not boolean")
         values = {
-            "open": float(self.open),
-            "high": float(self.high),
-            "low": float(self.low),
-            "close": float(self.close),
-            "volume": float(self.volume),
+            name: float(value)
+            for name, value in raw_values.items()
         }
         if any(not math.isfinite(value) for value in values.values()):
             raise ValueError("research bar prices/volume must be finite")
