@@ -473,6 +473,64 @@ def test_research_ledger_retains_failed_candidate_and_reproducibility_lineage() 
     assert len(annotations) == 1
 
 
+def test_research_annotation_requires_existing_hypothesis_and_chronology() -> None:
+    engine, store = _store()
+    with engine.begin() as conn:
+        with pytest.raises(
+            KeyError,
+            match="unknown research hypothesis",
+        ):
+            store.append_research_hypothesis_annotation(
+                conn,
+                annotation_id="annotation-1",
+                hypothesis_id="hyp-1",
+                annotation="later note",
+                created_at_utc=T0,
+            )
+
+    engine, store = _store()
+    with engine.begin() as conn:
+        store.record_research_hypothesis(conn, _card())
+        with pytest.raises(
+            ValueError,
+            match="annotation cannot precede hypothesis creation",
+        ):
+            store.append_research_hypothesis_annotation(
+                conn,
+                annotation_id="annotation-early",
+                hypothesis_id="hyp-1",
+                annotation="impossible early note",
+                created_at_utc=T0 - timedelta(seconds=1),
+            )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("annotation_id", 1),
+        ("hypothesis_id", " hyp-1 "),
+        ("annotation", " note "),
+    ),
+)
+def test_research_annotation_requires_canonical_identity(
+    field: str,
+    value: object,
+) -> None:
+    engine, store = _store()
+    kwargs = {
+        "annotation_id": "annotation-1",
+        "hypothesis_id": "hyp-1",
+        "annotation": "later note",
+        "created_at_utc": T0,
+    }
+    kwargs[field] = value
+
+    with engine.begin() as conn:
+        store.record_research_hypothesis(conn, _card())
+        with pytest.raises(ValueError, match=f"{field} must be canonical text"):
+            store.append_research_hypothesis_annotation(conn, **kwargs)
+
+
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     (
