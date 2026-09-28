@@ -109,6 +109,11 @@ class ResearchRegimeReadyFeatures:
             > 1e-15
         ):
             raise ValueError("research RV14 calculations disagree")
+        expected_band = volatility_band(self.volatility.percentile)
+        if self.volatility_band is not expected_band:
+            raise ValueError(
+                "research volatility band disagrees with percentile"
+            )
 
 
 def _feature_bar(row: ResearchBarRecord) -> ResearchFeatureBar:
