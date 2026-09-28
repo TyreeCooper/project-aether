@@ -449,6 +449,46 @@ def test_research_experiment_requires_canonical_identity(
         ResearchExperiment(**kwargs)
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    (
+        (
+            "research_state",
+            ResearchState.FROZEN.value,
+            "research_state must be a ResearchState",
+        ),
+        (
+            "parameter_spec",
+            (),
+            "parameter_spec must be a dict",
+        ),
+        (
+            "parent_experiment_id",
+            "exp-1",
+            "parent_experiment_id cannot self-reference experiment_id",
+        ),
+        (
+            "supersedes_experiment_id",
+            "exp-1",
+            "supersedes_experiment_id cannot self-reference experiment_id",
+        ),
+    ),
+)
+def test_research_experiment_requires_typed_nonself_lineage(
+    field: str,
+    value: object,
+    message: str,
+) -> None:
+    base = _experiment()
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs[field] = value
+    with pytest.raises(ValueError, match=message):
+        ResearchExperiment(**kwargs)
+
+
 def test_frozen_research_experiment_requires_freeze_timestamp() -> None:
     base = _experiment()
     kwargs = {
