@@ -154,6 +154,8 @@ def test_family_a_replay_uses_bound_features_and_explicit_daily_dependency() -> 
         side="long",
         features=features,
         extras=FamilyAReplayExtras(
+            trend_ema20=110.0,
+            trend_ema50=100.0,
             btc_daily_close=105.0,
             btc_daily_ema50=100.0,
         ),
@@ -169,12 +171,24 @@ def test_family_a_replay_does_not_invent_missing_cross_timeframe_dependency() ->
         close=101.0,
         percentile=50.0,
     )
+    with pytest.raises(ValueError, match="trend_ema20"):
+        evaluate_replay_family_a(
+            spec,
+            asset_id="btc",
+            side="long",
+            features=features,
+        )
+
     with pytest.raises(ValueError, match="btc_daily_close"):
         evaluate_replay_family_a(
             spec,
             asset_id="btc",
             side="long",
             features=features,
+            extras=FamilyAReplayExtras(
+                trend_ema20=110.0,
+                trend_ema50=100.0,
+            ),
         )
 
 
@@ -216,6 +230,10 @@ def test_family_c_replay_uses_explicit_playbook_correct_prior_range() -> None:
         asset_id="eurusd",
         side="long",
         features=features,
+        extras=FamilyCReplayExtras(
+            slope_ema20_current=100.0,
+            slope_ema20_previous=100.0,
+        ),
     )
     assert out.watch_eligible is True
 
@@ -261,3 +279,33 @@ def test_adapter_refuses_wrong_trigger_interval() -> None:
             side="long",
             features=features,
         )
+
+
+
+def test_family_a_fx_intraday_requires_explicit_one_hour_slope() -> None:
+    spec = playbook("pb_fx_intraday_v1_2")
+    features = _features(
+        asset_id="eurusd",
+        interval=timedelta(minutes=15),
+        close=101.0,
+        percentile=50.0,
+    )
+    with pytest.raises(ValueError, match="slope_ema20_current"):
+        evaluate_replay_family_a(
+            spec,
+            asset_id="eurusd",
+            side="long",
+            features=features,
+        )
+
+    out = evaluate_replay_family_a(
+        spec,
+        asset_id="eurusd",
+        side="long",
+        features=features,
+        extras=FamilyAReplayExtras(
+            slope_ema20_current=101.0,
+            slope_ema20_previous=100.0,
+        ),
+    )
+    assert out.watch_eligible is True

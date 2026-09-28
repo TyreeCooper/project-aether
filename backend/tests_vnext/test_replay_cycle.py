@@ -144,6 +144,10 @@ def test_replay_cycle_delegates_family_a_precedence() -> None:
                 ReplayFamilyARequest(
                     playbook_id="pb_fx_intraday_v1_2",
                     side="long",
+                    extras=FamilyAReplayExtras(
+                        slope_ema20_current=1.1005,
+                        slope_ema20_previous=1.1000,
+                    ),
                 ),
             ),
             family_b=(
@@ -190,6 +194,10 @@ def test_replay_cycle_selects_family_b_when_a_is_false() -> None:
                 ReplayFamilyARequest(
                     playbook_id="pb_idx_intraday_v1_2",
                     side="long",
+                    extras=FamilyAReplayExtras(
+                        trend_ema20=99.0,
+                        trend_ema50=100.0,
+                    ),
                 ),
             ),
             family_b=(
@@ -231,6 +239,10 @@ def test_replay_cycle_can_select_family_c_only_after_a_and_b_fail() -> None:
                 ReplayFamilyCRequest(
                     playbook_id="pb_fx_range_v1_3",
                     side="long",
+                    extras=FamilyCReplayExtras(
+                        slope_ema20_current=1.0990,
+                        slope_ema20_previous=1.0990,
+                    ),
                 ),
             ),
         )

@@ -4,9 +4,11 @@ This module does not duplicate or reinterpret strategy rules. It only translates
 RegimeReadyReplayFeatures snapshot plus explicitly supplied unresolved PIT facts into
 the existing Family evaluator context objects.
 
-Any input that cannot be derived from the same trigger-interval feature snapshot
-remains explicit and caller-supplied. That includes BTC daily dependencies, Family-B
-failed-break event state, equity locate state, and equity Family-C nonconfirmation.
+Any input whose source-bound timeframe/reference differs from the trigger-interval
+snapshot remains explicit and caller-supplied. That includes higher-timeframe EMA
+state, BTC daily dependencies, Family-B failed-break event state, equity locate state,
+and equity Family-C nonconfirmation. The adapter never substitutes trigger-interval
+EMA values for a higher-timeframe rule.
 """
 from __future__ import annotations
 
@@ -33,6 +35,10 @@ from aether_vnext.replay_features import RegimeReadyReplayFeatures
 
 @dataclass(frozen=True, slots=True)
 class FamilyAReplayExtras:
+    trend_ema20: float | None = None
+    trend_ema50: float | None = None
+    slope_ema20_current: float | None = None
+    slope_ema20_previous: float | None = None
     btc_daily_close: float | None = None
     btc_daily_ema50: float | None = None
     btc_parent_watch_or_open_long: bool | None = None
@@ -51,6 +57,8 @@ class FamilyBReplayState:
 
 @dataclass(frozen=True, slots=True)
 class FamilyCReplayExtras:
+    slope_ema20_current: float | None = None
+    slope_ema20_previous: float | None = None
     trend_not_confirming: bool | None = None
 
 
@@ -95,10 +103,10 @@ def evaluate_replay_family_a(
         volatility_percentile=features.volatility.percentile,
         reference_high=(None if prior is None else prior.high),
         reference_low=(None if prior is None else prior.low),
-        trend_ema20=features.numerical.ema20_current,
-        trend_ema50=features.numerical.ema50_current,
-        slope_ema20_current=features.numerical.ema20_current,
-        slope_ema20_previous=features.numerical.ema20_previous,
+        trend_ema20=extra.trend_ema20,
+        trend_ema50=extra.trend_ema50,
+        slope_ema20_current=extra.slope_ema20_current,
+        slope_ema20_previous=extra.slope_ema20_previous,
         btc_daily_close=extra.btc_daily_close,
         btc_daily_ema50=extra.btc_daily_ema50,
         btc_parent_watch_or_open_long=extra.btc_parent_watch_or_open_long,
@@ -177,8 +185,8 @@ def evaluate_replay_family_c(
             volatility_percentile=features.volatility.percentile,
             prior_range_high=prior.high,
             prior_range_low=prior.low,
-            slope_ema20_current=features.numerical.ema20_current,
-            slope_ema20_previous=features.numerical.ema20_previous,
+            slope_ema20_current=extra.slope_ema20_current,
+            slope_ema20_previous=extra.slope_ema20_previous,
             trend_not_confirming=extra.trend_not_confirming,
         ),
     )
