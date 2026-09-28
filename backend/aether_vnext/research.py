@@ -61,8 +61,33 @@ class HypothesisCard:
                 raise ValueError(f"{name} must be canonical text")
         if self.created_at_utc.tzinfo is None:
             raise ValueError("created_at_utc must be timezone-aware")
+        if not isinstance(self.status, ResearchState):
+            raise ValueError("status must be a ResearchState")
+        for name in (
+            "eligible_assets",
+            "allowed_sides",
+            "expected_regimes",
+            "falsification_conditions",
+            "required_data",
+            "benchmark_ids",
+            "annotations",
+        ):
+            values = getattr(self, name)
+            if not isinstance(values, tuple):
+                raise ValueError(f"{name} must be an immutable tuple")
+            if any(
+                not isinstance(value, str)
+                or not value
+                or value != value.strip()
+                for value in values
+            ):
+                raise ValueError(f"{name} must contain canonical text")
+            if len(values) != len(set(values)):
+                raise ValueError(f"{name} cannot contain duplicates")
         if not self.eligible_assets:
             raise ValueError("eligible_assets cannot be empty")
+        if any(value != value.lower() for value in self.eligible_assets):
+            raise ValueError("eligible_assets must contain canonical asset IDs")
         if not self.allowed_sides:
             raise ValueError("allowed_sides cannot be empty")
         if not self.benchmark_ids:
