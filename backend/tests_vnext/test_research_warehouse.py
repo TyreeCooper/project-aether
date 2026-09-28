@@ -226,6 +226,18 @@ def test_bar_interval_requires_exact_positive_integer(interval: object) -> None:
         parse_research_bar_manifest(payload)
 
 
+@pytest.mark.parametrize("field", ("open", "high", "low", "close", "volume"))
+def test_bar_ohlcv_rejects_boolean_values(field: str) -> None:
+    payload = _payload()
+    payload["bars"][0][field] = True
+
+    with pytest.raises(
+        ValueError,
+        match="prices/volume must be numeric, not boolean",
+    ):
+        parse_research_bar_manifest(payload)
+
+
 def test_bar_bucket_duration_must_match_declared_interval() -> None:
     payload = _payload()
     payload["bars"][0]["interval_seconds"] = 1800
