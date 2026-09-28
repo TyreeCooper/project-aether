@@ -646,10 +646,10 @@ those statements conflict with this checkpoint.
 
 - branch: `aether-vnext-swapout`;
 - PR #12: OPEN, DRAFT, mergeable;
-- verified head: `ef77fbeba826941e55853d1984a44ef930b6b010`;
-- head commit: `feat(vnext-research): parse Kraken historical OHLCVT`;
-- AETHER vNext CI #533: SUCCESS;
-- repository CI #842: SUCCESS;
+- verified head: `499b496459223867eff20c49b46dac8b8a100c29`;
+- head commit: `fix(vnext-burnin): gate artifacts on producer steps`;
+- AETHER vNext CI #535: SUCCESS;
+- repository CI #844: SUCCESS;
 - production `main` remains outside this vNext replacement work;
 - PAPER ONLY / LIVE HARD BLOCKED remains unchanged.
 
@@ -663,10 +663,29 @@ isolation passed, and the legacy-table scan returned none. The approved initiali
 run applied the then-current vNext migrations and bootstrapped the canonical policy
 snapshot.
 
-Repository schema revision 0025 was added later by the PIT research warehouse commit.
-Therefore revision 0025 is present and CI-verified in the branch but must not be
-described as already applied to the external burn-in database until a subsequent
-approved migration run verifies it.
+Burn-in Control Plane run #4 verified the external database at the reconciled
+branch head and successfully applied migration `0024 -> 0025` before stopping at
+the separately tracked runtime-binding gate. The canonical policy snapshot was also
+confirmed present. External burn-in database schema revision 0025 is therefore
+verified applied.
+
+### Latest protected burn-in execution
+
+Burn-in Control Plane run #4 executed against the reconciled branch head. Verified
+results:
+
+- database isolation: PASS;
+- legacy Aether public-table scan: PASS / none found;
+- schema migration `0024 -> 0025`: SUCCESS;
+- canonical policy snapshot: present;
+- runtime Product Registry binding step: FAIL-CLOSED because
+  `AETHER_VNEXT_RUNTIME_BINDINGS_JSON` is not configured;
+- canonical preflight: not executed because initialization stopped at the binding gate;
+- Campaign #1: not started.
+
+The subsequent workflow hardening commit gates artifact publication on the producing
+step outcome so skipped upstream work cannot create a second misleading missing-
+artifact failure.
 
 ### Current open external/runtime gates
 
