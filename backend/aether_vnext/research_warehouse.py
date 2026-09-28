@@ -339,14 +339,13 @@ def parse_research_bar_manifest(
             raise ValueError("bar entries must be JSON objects")
         asset_id = _text(raw_bar.get("asset_id"), "asset_id")
         interval_raw = raw_bar.get("interval_seconds")
-        if isinstance(interval_raw, bool):
+        if (
+            not isinstance(interval_raw, int)
+            or isinstance(interval_raw, bool)
+            or interval_raw <= 0
+        ):
             raise ValueError("interval_seconds must be a positive integer")
-        try:
-            interval_seconds = int(interval_raw)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(
-                "interval_seconds must be a positive integer"
-            ) from exc
+        interval_seconds = interval_raw
         opened = _utc(raw_bar.get("bucket_open_utc"), "bucket_open_utc")
         closed = _utc(raw_bar.get("bucket_close_utc"), "bucket_close_utc")
         available = _utc(
