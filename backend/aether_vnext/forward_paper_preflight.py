@@ -638,6 +638,38 @@ def preflight_forward_paper_campaign_from_book(
                         ):
                             fold_provenance_ok = False
                             break
+                        dataset = conn.execute(
+                            sa.select(datasets).where(
+                                datasets.c.dataset_snapshot_id
+                                == row["dataset_snapshot_id"]
+                            )
+                        ).mappings().first()
+                        if dataset is None:
+                            fold_provenance_ok = False
+                            break
+                        if any(
+                            not isinstance(fold["n"], int)
+                            or isinstance(fold["n"], bool)
+                            or int(fold["n"]) < 0
+                            for fold in selected
+                        ):
+                            fold_provenance_ok = False
+                            break
+                        if sum(int(fold["n"]) for fold in selected) != int(
+                            row["n"]
+                        ):
+                            fold_provenance_ok = False
+                            break
+                        if any(
+                            _stored_utc(fold["train_start_utc"])
+                            < _stored_utc(dataset["start_at_utc"])
+                            or _stored_utc(fold["test_end_utc"])
+                            > _stored_utc(dataset["end_at_utc"])
+                            for fold in selected
+                        ):
+                            fold_provenance_ok = False
+                            break
+
                         ordered = tuple(
                             sorted(
                                 selected,
