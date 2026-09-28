@@ -214,6 +214,17 @@ def test_duplicate_asset_interval_bucket_is_rejected() -> None:
         parse_research_bar_manifest(payload)
 
 
+def test_bar_bucket_duration_must_match_declared_interval() -> None:
+    payload = _payload()
+    payload["bars"][0]["interval_seconds"] = 1800
+
+    with pytest.raises(
+        ValueError,
+        match="bucket duration must equal interval_seconds",
+    ):
+        parse_research_bar_manifest(payload)
+
+
 def test_bar_cannot_be_available_before_close() -> None:
     payload = _payload()
     payload["bars"][0]["available_at_utc"] = (
