@@ -12,6 +12,9 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from aether_vnext.bars import Bar
+from aether_vnext.playbook_trend_features import (
+    PlaybookTrendFeatureSnapshot,
+)
 from aether_vnext.playbooks import playbook
 from aether_vnext.replay_family_adapter import (
     FamilyAReplayExtras,
@@ -26,6 +29,9 @@ from aether_vnext.replay_failed_break import (
     reconstruct_family_b_state,
 )
 from aether_vnext.replay_features import RegimeReadyReplayFeatures
+from aether_vnext.replay_trend_adapter import (
+    family_a_extras_from_trend_snapshot,
+)
 from aether_vnext.runtime_cycle import (
     ClosedBarCycleInput,
     ClosedBarCycleResult,
@@ -38,6 +44,21 @@ class ReplayFamilyARequest:
     playbook_id: str
     side: str
     extras: FamilyAReplayExtras | None = None
+    trend: PlaybookTrendFeatureSnapshot | None = None
+
+    def __post_init__(self) -> None:
+        if self.trend is None or self.extras is None:
+            return
+        manual_trend = (
+            self.extras.trend_ema20,
+            self.extras.trend_ema50,
+            self.extras.slope_ema20_current,
+            self.extras.slope_ema20_previous,
+        )
+        if any(value is not None for value in manual_trend):
+            raise ValueError(
+                "reviewed trend snapshot cannot be combined with manual trend fields"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,16 +129,36 @@ def evaluate_replay_closed_bar(
     cycle: ReplayClosedBarInput,
 ) -> ClosedBarCycleResult:
     """Evaluate one PIT closed-bar cycle through the frozen family precedence."""
-    a = tuple(
-        evaluate_replay_family_a(
-            playbook(row.playbook_id),
-            asset_id=cycle.asset_id,
-            side=row.side,
-            features=cycle.features,
-            extras=row.extras,
+    a_rows = []
+    for row in cycle.family_a:
+        spec = playbook(row.playbook_id)
+        extras = row.extras
+        if row.trend is not None:
+            dependency = row.extras or FamilyAReplayExtras()
+            extras = family_a_extras_from_trend_snapshot(
+                spec,
+                asset_id=cycle.asset_id,
+                features=cycle.features,
+                trend=row.trend,
+                btc_daily_close=dependency.btc_daily_close,
+                btc_daily_ema50=dependency.btc_daily_ema50,
+                btc_parent_watch_or_open_long=(
+                    dependency.btc_parent_watch_or_open_long
+                ),
+                btc_parent_market_regime_eligible=(
+                    dependency.btc_parent_market_regime_eligible
+                ),
+            )
+        a_rows.append(
+            evaluate_replay_family_a(
+                spec,
+                asset_id=cycle.asset_id,
+                side=row.side,
+                features=cycle.features,
+                extras=extras,
+            )
         )
-        for row in cycle.family_a
-    )
+    a = tuple(a_rows)
 
     b_rows = []
     for row in cycle.family_b:
