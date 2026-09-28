@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from aether_vnext.freeze import EvidenceState, ResearchState
 from aether_vnext.research import (
     ALPHA_FACTORY_RUN_TYPES,
+    EVIDENCE_BEARING_RUN_TYPES,
     BacktestRun,
     FoldResult,
     HypothesisCard,
@@ -182,6 +183,91 @@ def test_backtest_run_rejects_experiment_lineage_drift(
             match=f"lineage mismatch: .*{field}",
         ):
             store.record_backtest_run(conn, BacktestRun(**kwargs))
+
+
+@pytest.mark.parametrize(
+    "run_type",
+    tuple(sorted(EVIDENCE_BEARING_RUN_TYPES)),
+)
+def test_evidence_run_requires_frozen_experiment(run_type: str) -> None:
+    engine, store = _store()
+    base = _run()
+    run_kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    run_kwargs["run_type"] = run_type
+
+    with engine.begin() as conn:
+        store.record_research_hypothesis(conn, _card())
+        store.record_research_dataset_snapshot(conn, _snapshot())
+        store.record_research_experiment(
+            conn,
+            _experiment(state=ResearchState.SPEC),
+        )
+        with pytest.raises(
+            ValueError,
+            match="requires a FROZEN experiment",
+        ):
+            store.record_backtest_run(conn, BacktestRun(**run_kwargs))
+
+
+def test_evidence_run_requires_freeze_before_run_start() -> None:
+    engine, store = _store()
+    experiment = _experiment()
+    experiment_kwargs = {
+        name: getattr(experiment, name)
+        for name in experiment.__dataclass_fields__
+    }
+    experiment_kwargs["frozen_at_utc"] = T0 + timedelta(minutes=1)
+
+    with engine.begin() as conn:
+        store.record_research_hypothesis(conn, _card())
+        store.record_research_dataset_snapshot(conn, _snapshot())
+        store.record_research_experiment(
+            conn,
+            ResearchExperiment(**experiment_kwargs),
+        )
+        with pytest.raises(
+            ValueError,
+            match="frozen before evidence run starts",
+        ):
+            store.record_backtest_run(conn, _run())
+
+
+@pytest.mark.parametrize("run_type", ("backtest", "parameter_sensitivity"))
+def test_exploratory_run_does_not_require_frozen_experiment(
+    run_type: str,
+) -> None:
+    engine, store = _store()
+    base = _run()
+    run_kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    run_kwargs["run_type"] = run_type
+
+    experiment = _experiment(state=ResearchState.SPEC)
+    experiment_kwargs = {
+        name: getattr(experiment, name)
+        for name in experiment.__dataclass_fields__
+    }
+    experiment_kwargs["frozen_at_utc"] = None
+
+    with engine.begin() as conn:
+        store.record_research_hypothesis(conn, _card())
+        store.record_research_dataset_snapshot(conn, _snapshot())
+        store.record_research_experiment(
+            conn,
+            ResearchExperiment(**experiment_kwargs),
+        )
+        store.record_backtest_run(conn, BacktestRun(**run_kwargs))
+
+        row = conn.execute(
+            sa.select(store.tables["backtest_runs"])
+        ).mappings().one()
+
+    assert row["run_type"] == run_type
 
 
 def test_backtest_run_rejects_unknown_experiment_before_persistence() -> None:

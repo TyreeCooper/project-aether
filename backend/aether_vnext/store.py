@@ -51,7 +51,7 @@ from aether_vnext.evidence import (
     SampleDomain,
 )
 from aether_vnext.decay import DecayAssessment, DecayCohort, assess_decay
-from aether_vnext.freeze import EvidenceState
+from aether_vnext.freeze import EvidenceState, ResearchState
 from aether_vnext.registry import ProductType, registry_row
 from aether_vnext.registry_runtime import (
     RuntimeRegistryBinding,
@@ -79,6 +79,7 @@ from aether_vnext.forward_paper import (
 )
 from aether_vnext.research import (
     BacktestRun,
+    EVIDENCE_BEARING_RUN_TYPES,
     FoldResult,
     HypothesisCard,
     PromotionRecord,
@@ -1954,6 +1955,22 @@ class VNextStore:
                 "backtest run/experiment lineage mismatch: "
                 + ",".join(mismatches)
             )
+
+        if run.run_type in EVIDENCE_BEARING_RUN_TYPES:
+            if str(experiment["research_state"]) != ResearchState.FROZEN.value:
+                raise ValueError(
+                    "evidence-bearing research requires a FROZEN experiment"
+                )
+            frozen_at_utc = _stored_utc(experiment["frozen_at_utc"])
+            started_at_utc = _stored_utc(run.started_at_utc)
+            if frozen_at_utc is None:
+                raise ValueError(
+                    "evidence-bearing research requires frozen_at_utc"
+                )
+            if started_at_utc is None or frozen_at_utc > started_at_utc:
+                raise ValueError(
+                    "experiment must be frozen before evidence run starts"
+                )
 
         conn.execute(
             self.tables["backtest_runs"].insert().values(

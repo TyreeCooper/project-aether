@@ -17,6 +17,14 @@ ALPHA_FACTORY_RUN_TYPES = frozenset(
     }
 )
 
+EVIDENCE_BEARING_RUN_TYPES = frozenset(
+    {
+        "walk_forward",
+        "held_out",
+        "cost_stress",
+    }
+)
+
 
 @dataclass(frozen=True, slots=True)
 class HypothesisCard:
