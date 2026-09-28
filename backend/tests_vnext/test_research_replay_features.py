@@ -7,6 +7,7 @@ import pytest
 from aether_vnext.research_bar_selection import PITResearchBarSlice
 from aether_vnext.playbook_runtime import VolatilityBand
 from aether_vnext.research_replay_features import (
+    ResearchClosedBarFeatureSnapshot,
     ResearchFeatureBar,
     ResearchRegimeReadyFeatures,
     build_research_regime_ready_features,
@@ -100,6 +101,60 @@ def test_research_feature_interval_must_match_bucket_duration() -> None:
     row = _row(0)
     with pytest.raises(ValueError, match="interval must match bucket duration"):
         _feature_bar_from_row(row, interval=timedelta(hours=12))
+
+
+@pytest.mark.parametrize(
+    ("field", "value_factory", "message"),
+    (
+        (
+            "asset_id",
+            lambda base: "eth",
+            "feature snapshot asset mismatch",
+        ),
+        (
+            "interval",
+            lambda base: timedelta(hours=12),
+            "feature snapshot interval mismatch",
+        ),
+        (
+            "as_of_utc",
+            lambda base: base.trigger_bar.bucket_close_utc - timedelta(seconds=1),
+            "cannot precede trigger close",
+        ),
+        (
+            "bar_count",
+            lambda base: 49,
+            "requires at least 50 bars",
+        ),
+        (
+            "close",
+            lambda base: base.close + 1.0,
+            "close must match trigger",
+        ),
+        (
+            "indicator_convention_version",
+            lambda base: "other",
+            "indicator convention mismatch",
+        ),
+    ),
+)
+def test_research_feature_snapshot_rejects_lineage_drift(
+    field: str,
+    value_factory: object,
+    message: str,
+) -> None:
+    base = build_research_regime_ready_features(
+        _selection(),
+        prior_range_lookback=20,
+    ).numerical
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs[field] = value_factory(base)
+
+    with pytest.raises(ValueError, match=message):
+        ResearchClosedBarFeatureSnapshot(**kwargs)
 
 
 def test_research_features_use_pit_availability_not_exchange_timestamps() -> None:
