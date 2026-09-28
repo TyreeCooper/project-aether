@@ -98,6 +98,28 @@ class ResearchClosedBarFeatureSnapshot:
     prior_range: PriorClosedBarRange | None
     indicator_convention_version: str = INDICATOR_CONVENTION_VERSION
 
+    def __post_init__(self) -> None:
+        if self.asset_id != self.trigger_bar.asset_id:
+            raise ValueError("research feature snapshot asset mismatch")
+        if self.interval != self.trigger_bar.interval:
+            raise ValueError("research feature snapshot interval mismatch")
+        if self.as_of_utc.tzinfo is None:
+            raise ValueError("as_of_utc must be timezone-aware")
+        if self.as_of_utc < self.trigger_bar.bucket_close_utc:
+            raise ValueError("research feature snapshot cannot precede trigger close")
+        if (
+            not isinstance(self.bar_count, int)
+            or isinstance(self.bar_count, bool)
+            or self.bar_count < 50
+        ):
+            raise ValueError("research feature snapshot requires at least 50 bars")
+        if float(self.close) != float(self.trigger_bar.close):
+            raise ValueError("research feature snapshot close must match trigger")
+        if self.indicator_convention_version != INDICATOR_CONVENTION_VERSION:
+            raise ValueError("research feature snapshot indicator convention mismatch")
+        if self.prior_range is not None and self.prior_range.asset_id != self.asset_id:
+            raise ValueError("research feature prior range asset mismatch")
+
 
 @dataclass(frozen=True, slots=True)
 class ResearchRegimeReadyFeatures:
