@@ -1906,6 +1906,46 @@ class VNextStore:
         conn: Connection,
         experiment: ResearchExperiment,
     ) -> None:
+        hypotheses = self.tables["research_hypotheses"]
+        hypothesis = conn.execute(
+            sa.select(hypotheses.c.hypothesis_id).where(
+                hypotheses.c.hypothesis_id == experiment.hypothesis_id
+            )
+        ).first()
+        if hypothesis is None:
+            raise KeyError(
+                f"unknown research hypothesis: {experiment.hypothesis_id}"
+            )
+
+        datasets = self.tables["research_dataset_snapshots"]
+        dataset = conn.execute(
+            sa.select(datasets.c.dataset_snapshot_id).where(
+                datasets.c.dataset_snapshot_id == experiment.dataset_snapshot_id
+            )
+        ).first()
+        if dataset is None:
+            raise KeyError(
+                "unknown research dataset snapshot: "
+                f"{experiment.dataset_snapshot_id}"
+            )
+
+        experiments = self.tables["research_experiments"]
+        for field in ("parent_experiment_id", "supersedes_experiment_id"):
+            lineage_id = getattr(experiment, field)
+            if lineage_id is None:
+                continue
+            prior = conn.execute(
+                sa.select(experiments).where(
+                    experiments.c.experiment_id == lineage_id
+                )
+            ).mappings().first()
+            if prior is None:
+                raise KeyError(f"unknown {field}: {lineage_id}")
+            if str(prior["hypothesis_id"]) != experiment.hypothesis_id:
+                raise ValueError(
+                    f"{field} must preserve hypothesis lineage"
+                )
+
         conn.execute(
             self.tables["research_experiments"].insert().values(
                 experiment_id=experiment.experiment_id,
