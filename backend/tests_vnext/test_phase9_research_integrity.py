@@ -540,6 +540,100 @@ def test_promotion_record_requires_canonical_identity(
         PromotionRecord(**kwargs)
 
 
+def _persist_promotion_dependencies(
+    conn: sa.Connection,
+    store: VNextStore,
+) -> None:
+    conn.execute(
+        store.tables["policy_snapshots"].insert().values(
+            configuration_hash="cfg-research-1",
+            policy_version="research-policy-v1",
+            effective_at_utc=T0,
+            changed_by="test",
+            change_reason="research promotion test",
+            payload={},
+            created_at_utc=T0,
+        )
+    )
+    conn.execute(
+        store.tables["evidence_windows"].insert().values(
+            evidence_window_id="window-1",
+            route_id="eurusd:intraday:long",
+            playbook_id="pb_fx_intraday_v1_2",
+            playbook_version="1.2",
+            policy_version="research-policy-v1",
+            configuration_hash="cfg-research-1",
+            sample_domain="held_out",
+            first_timestamp_utc=T0 - timedelta(days=30),
+            last_timestamp_utc=T0 - timedelta(days=1),
+            n=1,
+            immutable_trade_ids=["trade-1"],
+            metrics_snapshot_hash="metrics-1",
+            created_at_utc=T0,
+        )
+    )
+    conn.execute(
+        store.tables["review_cards"].insert().values(
+            review_card_id="review-1",
+            firm_event_id=None,
+            trade_id=None,
+            route_id="eurusd:intraday:long",
+            playbook_id="pb_fx_intraday_v1_2",
+            playbook_version="1.2",
+            as_of_utc=T0,
+            evidence_state=EvidenceState.KEEP_PROBATION.value,
+            evidence_id=None,
+            decision_reason="source-bound evidence gate passed",
+            reviewer="Review",
+            configuration_hash="cfg-research-1",
+        )
+    )
+
+
+def test_promotion_record_persists_append_only_review_lineage() -> None:
+    engine, store = _store()
+    promotion = _promotion()
+    with engine.begin() as conn:
+        _persist_promotion_dependencies(conn, store)
+        store.record_research_promotion(conn, promotion)
+        row = conn.execute(
+            sa.select(store.tables["research_promotions"])
+        ).mappings().one()
+
+    assert row["promotion_id"] == "promotion-1"
+    assert row["route_id"] == "eurusd:intraday:long"
+    assert row["from_evidence_state"] == EvidenceState.CANDIDATE.value
+    assert row["to_evidence_state"] == EvidenceState.KEEP_PROBATION.value
+    assert row["review_card_id"] == "review-1"
+    assert row["evidence_window_id"] == "window-1"
+    assert row["n_reset"] is False
+
+    with pytest.raises(IntegrityError):
+        with engine.begin() as conn:
+            store.record_research_promotion(conn, promotion)
+
+
+def test_promotion_record_rejects_review_lineage_drift() -> None:
+    engine, store = _store()
+    base = _promotion()
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs["route_id"] = "usdjpy:intraday:long"
+
+    with engine.begin() as conn:
+        _persist_promotion_dependencies(conn, store)
+        with pytest.raises(
+            ValueError,
+            match="research promotion lineage mismatch",
+        ):
+            store.record_research_promotion(
+                conn,
+                PromotionRecord(**kwargs),
+            )
+
+
 def test_promotion_record_requires_timezone_aware_decision_time() -> None:
     base = _promotion()
     kwargs = {

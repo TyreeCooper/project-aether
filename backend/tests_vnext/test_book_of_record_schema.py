@@ -57,6 +57,7 @@ def test_book_of_record_has_required_tables() -> None:
         "research_experiments",
         "backtest_runs",
         "fold_results",
+        "research_promotions",
         "traffic_experiments",
         "traffic_shadow_comparisons",
         "profitability_readiness_assessments",
@@ -381,11 +382,11 @@ def test_phase5_execution_reservation_columns_are_in_current_schema() -> None:
     assert "fill_market_observation_id" not in columns
 
 
-def test_runtime_schema_facade_is_pinned_to_revision_0025() -> None:
+def test_runtime_schema_facade_is_pinned_to_revision_0026() -> None:
     _, store = _engine_and_store()
     backend = Path(__file__).resolve().parents[1]
     facade = (backend / "aether_vnext" / "schema.py").read_text(encoding="utf-8")
-    assert "schema_v0025" in facade
+    assert "schema_v0026" in facade
 
     campaign_migration = (
         backend
@@ -513,6 +514,37 @@ def test_runtime_schema_facade_is_pinned_to_revision_0025() -> None:
         "source_ref",
         "available_at_utc",
     } <= set(research_bars.c.keys())
+
+
+    promotion_migration = (
+        backend
+        / "alembic"
+        / "versions"
+        / "0026_aether_vnext_research_promotions.py"
+    ).read_text(encoding="utf-8")
+    assert 'revision: str = "0026"' in promotion_migration
+    assert 'down_revision: Union[str, None] = "0025"' in promotion_migration
+    assert "research_promotions" in promotion_migration
+    assert "trg_research_promotions_immutable" in promotion_migration
+    assert "reject_immutable_mutation" in promotion_migration
+
+    promotions = store.tables["research_promotions"]
+    assert {
+        "promotion_id",
+        "route_id",
+        "playbook_version",
+        "from_evidence_state",
+        "to_evidence_state",
+        "review_card_id",
+        "evidence_window_id",
+        "reviewer",
+        "approver",
+        "decided_at_utc",
+        "decision_reason",
+        "configuration_hash",
+        "n_reset",
+        "supersedes",
+    } <= set(promotions.c.keys())
 
 
 def test_phase6_atomic_risk_admission_schema_is_explicit() -> None:

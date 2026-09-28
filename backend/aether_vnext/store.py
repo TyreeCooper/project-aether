@@ -81,6 +81,7 @@ from aether_vnext.research import (
     BacktestRun,
     FoldResult,
     HypothesisCard,
+    PromotionRecord,
     ResearchDatasetSnapshot,
     ResearchExperiment,
 )
@@ -1999,6 +2000,98 @@ class VNextStore:
                 benchmark_result=dict(fold.benchmark_result),
                 passed=fold.passed,
                 failure_reasons=list(fold.failure_reasons),
+            )
+        )
+
+    def record_research_promotion(
+        self,
+        conn: Connection,
+        promotion: PromotionRecord,
+    ) -> None:
+        """Persist a Review-authorized evidence-state transition.
+
+        This is an append-only record boundary, not promotion authority. The
+        referenced ReviewCard and EvidenceWindow must already exist and agree
+        on route, playbook version, configuration, and Review's resulting
+        evidence state.
+        """
+        reviews = self.tables["review_cards"]
+        windows = self.tables["evidence_windows"]
+
+        review = conn.execute(
+            sa.select(reviews).where(
+                reviews.c.review_card_id == promotion.review_card_id
+            )
+        ).mappings().first()
+        if review is None:
+            raise KeyError(
+                f"unknown review_card_id: {promotion.review_card_id}"
+            )
+
+        window = conn.execute(
+            sa.select(windows).where(
+                windows.c.evidence_window_id == promotion.evidence_window_id
+            )
+        ).mappings().first()
+        if window is None:
+            raise KeyError(
+                f"unknown evidence_window_id: {promotion.evidence_window_id}"
+            )
+
+        mismatches: list[str] = []
+        expected = {
+            "route_id": promotion.route_id,
+            "playbook_version": promotion.playbook_version,
+            "configuration_hash": promotion.configuration_hash,
+        }
+        for field, value in expected.items():
+            if str(review[field]) != str(value):
+                mismatches.append(f"review_card.{field}")
+            if str(window[field]) != str(value):
+                mismatches.append(f"evidence_window.{field}")
+        if str(review["evidence_state"]) != promotion.to_evidence_state.value:
+            mismatches.append("review_card.evidence_state")
+        if mismatches:
+            raise ValueError(
+                "research promotion lineage mismatch: "
+                + ",".join(mismatches)
+            )
+
+        if promotion.supersedes is not None:
+            promotions = self.tables["research_promotions"]
+            prior = conn.execute(
+                sa.select(promotions).where(
+                    promotions.c.promotion_id == promotion.supersedes
+                )
+            ).mappings().first()
+            if prior is None:
+                raise KeyError(
+                    f"unknown superseded promotion: {promotion.supersedes}"
+                )
+            if (
+                str(prior["route_id"]) != promotion.route_id
+                or str(prior["playbook_version"]) != promotion.playbook_version
+            ):
+                raise ValueError(
+                    "superseded promotion must preserve route/playbook lineage"
+                )
+
+        conn.execute(
+            self.tables["research_promotions"].insert().values(
+                promotion_id=promotion.promotion_id,
+                route_id=promotion.route_id,
+                playbook_version=promotion.playbook_version,
+                from_evidence_state=promotion.from_evidence_state.value,
+                to_evidence_state=promotion.to_evidence_state.value,
+                review_card_id=promotion.review_card_id,
+                evidence_window_id=promotion.evidence_window_id,
+                reviewer=promotion.reviewer,
+                approver=promotion.approver,
+                decided_at_utc=promotion.decided_at_utc,
+                decision_reason=promotion.decision_reason,
+                configuration_hash=promotion.configuration_hash,
+                n_reset=promotion.n_reset,
+                supersedes=promotion.supersedes,
             )
         )
 
