@@ -60,7 +60,7 @@ def test_replay_result_parser_preserves_reviewed_identity() -> None:
 
 def test_replay_result_parser_rejects_duplicate_trade_ids() -> None:
     module = _module()
-    with pytest.raises(ValueError, match="duplicate trade ID"):
+    with pytest.raises(ValueError, match="cannot contain duplicates"):
         module._parse_replay_results(
             {
                 "results": [
