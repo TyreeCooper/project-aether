@@ -131,7 +131,7 @@ def _features(
         if percentile < 40
         else VolatilityBand.ABOVE_85
         if percentile > 85
-        else VolatilityBand.BETWEEN_40_85
+        else VolatilityBand.ELIGIBLE_40_85
     )
     return RegimeReadyReplayFeatures(
         numerical=numerical,
@@ -224,7 +224,7 @@ def test_family_c_equity_nonconfirmation_is_not_invented() -> None:
     spec = playbook("pb_eq_range_v1_3")
     features = _features(
         asset_id="nvda",
-        interval=timedelta(minutes=1),
+        interval=timedelta(minutes=15),
         close=98.0,
         percentile=20.0,
     )
