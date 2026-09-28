@@ -157,6 +157,57 @@ def test_research_feature_snapshot_rejects_lineage_drift(
         ResearchClosedBarFeatureSnapshot(**kwargs)
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    (
+        (
+            "open",
+            True,
+            "prices/volume must be numeric, not boolean",
+        ),
+        (
+            "close",
+            float("nan"),
+            "prices/volume must be finite",
+        ),
+        (
+            "close",
+            0.0,
+            "prices must be positive",
+        ),
+        (
+            "volume",
+            -1.0,
+            "volume cannot be negative",
+        ),
+        (
+            "high",
+            50.0,
+            "high is inconsistent",
+        ),
+        (
+            "low",
+            150.0,
+            "low is inconsistent",
+        ),
+    ),
+)
+def test_research_feature_bar_rejects_invalid_numerics(
+    field: str,
+    value: object,
+    message: str,
+) -> None:
+    base = _feature_bar_from_row(_row(0))
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs[field] = value
+
+    with pytest.raises(ValueError, match=message):
+        ResearchFeatureBar(**kwargs)
+
+
 def test_research_features_use_pit_availability_not_exchange_timestamps() -> None:
     result = build_research_regime_ready_features(
         _selection(),
