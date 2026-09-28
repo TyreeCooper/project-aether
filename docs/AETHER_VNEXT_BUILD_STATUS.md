@@ -732,17 +732,53 @@ Repository implementation now includes:
 - NinjaTrader/Tradovate MES/MNQ/MGC/MCL/US10Y historical chart boundary that preserves
   provider timestamps and contract identity without inventing bucket semantics;
 - deterministic completed-bar replay feature kernel;
-- regime-ready replay feature snapshot combining EMA/ATR/RV14 with the 90-day
-  volatility percentile and source-bound volatility band.
+- regime-ready replay feature snapshots with the source-bound 90-day volatility band;
+- replay adapters into the frozen Family A/B/C evaluators with unresolved higher-
+  timeframe, dependency, locate, counter-trend, and range facts kept explicit;
+- deterministic closed-bar replay orchestration through the existing A->B->C
+  same-bar precedence engine;
+- point-in-time failed-break episode reconstruction for Family-B replay;
+- exact route x fold replay-result coverage with missing, unexpected, duplicate,
+  identity-drift, and replay-hash checks;
+- canonical held-out FoldResult assembly from reviewed real trade outcomes using the
+  existing AETHER profitability metrics engine;
+- canonical HELD_OUT EvidenceWindow assembly with non-overlapping folds, immutable
+  trade identity, and deterministic metrics snapshot hashes;
+- canonical HELD_OUT research-manifest assembly through the existing strict manifest
+  validator;
+- read-only HELD_OUT closeout readiness aggregation for canonical-route coverage,
+  replay-result coverage, fold/window presence, and preserved external blockers;
+- read-only operator closeout CLI consuming reviewed manifest, replay plan, and replay
+  result artifacts without opening the database or starting a campaign.
 
 Latest verified implementation head before this checkpoint-only documentation commit:
-`c5bea456f1c6af6e6e38c9a2c1eaf5758a0fcf38`
-(`feat(vnext-research): add regime-ready replay features`), with AETHER vNext CI
-#543 and repository CI #852 successful.
+`951eb3cc4ad1de87e83898e65640660be6531025`
+(`test(vnext-research): align closeout CLI duplicate assertion`), with AETHER vNext
+CI #559 and repository CI #868 successful.
 
-No real canonical PIT research dataset has yet been imported and no canonical
-HELD_OUT provenance set for all executable routes has yet been produced. Historical
-replay results must not be fabricated to close this gap.
+Repository-side HELD_OUT closeout tooling is now built through the final read-only
+audit boundary. This does NOT establish empirical Phase 18 completion.
+
+Remaining hard/external or empirical work:
+
+- import a reviewed real canonical PIT research dataset; no synthetic history is
+  permitted;
+- resolve source-bound provider timestamp semantics before IBKR/NinjaTrader raw
+  historical timestamps may be normalized into immutable research bars;
+- provide the exact seed-12 runtime Product Registry binding manifest
+  (`AETHER_VNEXT_RUNTIME_BINDINGS_JSON`);
+- finish the deliberately deferred private tastyfx FIX/session contract for
+  EURUSD/USDJPY rather than substituting guessed provider facts;
+- execute the real canonical route x fold HELD_OUT replay and produce reviewed trade
+  outcomes, FoldResults, EvidenceWindows, and one full-universe manifest;
+- run the strict closeout audit against those real artifacts and require
+  `ready=true`;
+- only after the canonical burn-in preflight is startable may Campaign #1 begin;
+- accumulate real paper-forward/OOS evidence with forced entries OFF.
+
+Phase 18 therefore remains empirically OPEN even though the repository-side closeout
+pipeline is substantially complete. Historical replay results or forward-paper
+evidence must not be fabricated to close this gap.
 
 ### Current campaign state
 
