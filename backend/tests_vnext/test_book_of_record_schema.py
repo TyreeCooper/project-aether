@@ -53,6 +53,7 @@ def test_book_of_record_has_required_tables() -> None:
         "research_hypotheses",
         "research_hypothesis_annotations",
         "research_dataset_snapshots",
+        "research_bars",
         "research_experiments",
         "backtest_runs",
         "fold_results",
@@ -380,11 +381,11 @@ def test_phase5_execution_reservation_columns_are_in_current_schema() -> None:
     assert "fill_market_observation_id" not in columns
 
 
-def test_runtime_schema_facade_is_pinned_to_revision_0024() -> None:
+def test_runtime_schema_facade_is_pinned_to_revision_0025() -> None:
     _, store = _engine_and_store()
     backend = Path(__file__).resolve().parents[1]
     facade = (backend / "aether_vnext" / "schema.py").read_text(encoding="utf-8")
-    assert "schema_v0024" in facade
+    assert "schema_v0025" in facade
 
     campaign_migration = (
         backend
@@ -481,6 +482,37 @@ def test_runtime_schema_facade_is_pinned_to_revision_0024() -> None:
         "adapter_version",
         "created_at_utc",
     } <= set(shortability.c.keys())
+
+
+    research_bar_migration = (
+        backend
+        / "alembic"
+        / "versions"
+        / "0025_aether_vnext_research_bars.py"
+    ).read_text(encoding="utf-8")
+    assert 'revision: str = "0025"' in research_bar_migration
+    assert 'down_revision: Union[str, None] = "0024"' in research_bar_migration
+    assert "research_bars" in research_bar_migration
+    assert "trg_research_bars_immutable" in research_bar_migration
+
+    research_bars = store.tables["research_bars"]
+    assert {
+        "research_bar_id",
+        "dataset_snapshot_id",
+        "asset_id",
+        "interval_seconds",
+        "bucket_open_utc",
+        "bucket_close_utc",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "source_id",
+        "source_data_version",
+        "source_ref",
+        "available_at_utc",
+    } <= set(research_bars.c.keys())
 
 
 def test_phase6_atomic_risk_admission_schema_is_explicit() -> None:

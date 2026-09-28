@@ -761,10 +761,40 @@ def persist_held_out_research_manifest(
             "for the canonical configuration"
         )
 
+    if require_canonical_universe:
+        snapshot_table = store.tables["research_dataset_snapshots"]
+        bars_table = store.tables["research_bars"]
+        for row in manifest.datasets:
+            existing = conn.execute(
+                sa.select(snapshot_table).where(
+                    snapshot_table.c.dataset_snapshot_id
+                    == row.dataset_snapshot_id
+                )
+            ).mappings().first()
+            if existing is None:
+                raise ValueError(
+                    "strict held-out import requires preloaded PIT research dataset"
+                )
+            if str(existing["content_hash"]) != row.content_hash:
+                raise ValueError(
+                    "strict held-out import dataset content_hash mismatch"
+                )
+            bar_count = conn.execute(
+                sa.select(sa.func.count()).select_from(bars_table).where(
+                    bars_table.c.dataset_snapshot_id
+                    == row.dataset_snapshot_id
+                )
+            ).scalar_one()
+            if int(bar_count) <= 0:
+                raise ValueError(
+                    "strict held-out import requires immutable research bars"
+                )
+
     for row in manifest.hypotheses:
         store.record_research_hypothesis(conn, row)
-    for row in manifest.datasets:
-        store.record_research_dataset_snapshot(conn, row)
+    if not require_canonical_universe:
+        for row in manifest.datasets:
+            store.record_research_dataset_snapshot(conn, row)
     for row in manifest.experiments:
         store.record_research_experiment(conn, row)
     for row in manifest.runs:
