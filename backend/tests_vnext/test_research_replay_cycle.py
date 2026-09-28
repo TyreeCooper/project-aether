@@ -52,7 +52,7 @@ def _bar(
         bucket_close_utc=closed,
         open=close,
         high=close + 1.0,
-        low=close - 1.0,
+        low=max(close - 1.0, close / 2.0),
         close=close,
         volume=1.0,
         available_at_utc=closed,
