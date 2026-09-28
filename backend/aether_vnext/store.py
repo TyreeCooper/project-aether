@@ -1927,6 +1927,33 @@ class VNextStore:
         conn: Connection,
         run: BacktestRun,
     ) -> None:
+        experiments = self.tables["research_experiments"]
+        experiment = conn.execute(
+            sa.select(experiments).where(
+                experiments.c.experiment_id == run.experiment_id
+            )
+        ).mappings().first()
+        if experiment is None:
+            raise KeyError(
+                f"unknown research experiment: {run.experiment_id}"
+            )
+
+        lineage_fields = (
+            "dataset_snapshot_id",
+            "code_commit_sha",
+            "configuration_hash",
+        )
+        mismatches = tuple(
+            field
+            for field in lineage_fields
+            if str(experiment[field]) != str(getattr(run, field))
+        )
+        if mismatches:
+            raise ValueError(
+                "backtest run/experiment lineage mismatch: "
+                + ",".join(mismatches)
+            )
+
         conn.execute(
             self.tables["backtest_runs"].insert().values(
                 backtest_run_id=run.backtest_run_id,

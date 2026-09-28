@@ -153,6 +153,53 @@ def test_hypothesis_card_requires_canonical_scalar_identity(
         HypothesisCard(**kwargs)
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("dataset_snapshot_id", "ds-other"),
+        ("code_commit_sha", "different-sha"),
+        ("configuration_hash", "cfg-other"),
+    ),
+)
+def test_backtest_run_rejects_experiment_lineage_drift(
+    field: str,
+    value: str,
+) -> None:
+    engine, store = _store()
+    base = _run()
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs[field] = value
+
+    with engine.begin() as conn:
+        store.record_research_hypothesis(conn, _card())
+        store.record_research_dataset_snapshot(conn, _snapshot())
+        store.record_research_experiment(conn, _experiment())
+        with pytest.raises(
+            ValueError,
+            match=f"lineage mismatch: .*{field}",
+        ):
+            store.record_backtest_run(conn, BacktestRun(**kwargs))
+
+
+def test_backtest_run_rejects_unknown_experiment_before_persistence() -> None:
+    engine, store = _store()
+    base = _run()
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs["experiment_id"] = "missing-exp"
+
+    with engine.begin() as conn:
+        store.record_research_hypothesis(conn, _card())
+        store.record_research_dataset_snapshot(conn, _snapshot())
+        with pytest.raises(KeyError, match="unknown research experiment"):
+            store.record_backtest_run(conn, BacktestRun(**kwargs))
+
+
 def test_research_ledger_retains_failed_candidate_and_reproducibility_lineage() -> None:
     engine, store = _store()
     with engine.begin() as conn:
