@@ -2131,6 +2131,13 @@ class VNextStore:
                 raise ValueError(
                     "superseded promotion must preserve route/playbook lineage"
                 )
+            if (
+                str(prior["to_evidence_state"])
+                != promotion.from_evidence_state.value
+            ):
+                raise ValueError(
+                    "superseded promotion state chain must be continuous"
+                )
 
         conn.execute(
             self.tables["research_promotions"].insert().values(

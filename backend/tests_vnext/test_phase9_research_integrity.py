@@ -852,6 +852,37 @@ def test_promotion_record_rejects_review_lineage_drift() -> None:
             )
 
 
+def test_promotion_record_requires_continuous_superseded_state_chain() -> None:
+    engine, store = _store()
+    prior = _promotion()
+    prior_kwargs = {
+        name: getattr(prior, name)
+        for name in prior.__dataclass_fields__
+    }
+    prior_kwargs["promotion_id"] = "promotion-0"
+
+    current_kwargs = {
+        name: getattr(prior, name)
+        for name in prior.__dataclass_fields__
+    }
+    current_kwargs["supersedes"] = "promotion-0"
+
+    with engine.begin() as conn:
+        _persist_promotion_dependencies(conn, store)
+        store.record_research_promotion(
+            conn,
+            PromotionRecord(**prior_kwargs),
+        )
+        with pytest.raises(
+            ValueError,
+            match="state chain must be continuous",
+        ):
+            store.record_research_promotion(
+                conn,
+                PromotionRecord(**current_kwargs),
+            )
+
+
 def test_promotion_record_rejects_playbook_identity_drift() -> None:
     engine, store = _store()
     with engine.begin() as conn:
