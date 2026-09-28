@@ -48,6 +48,20 @@ def test_burnin_dispatch_is_same_repo_label_gated_and_environment_protected() ->
     assert "aether_vnext_burnin_preflight.py" in source
     assert "aether_vnext_burnin_start.py" in source
 
+    # Artifact publication must follow the producing step, not merely the
+    # requested action. This prevents skipped upstream work from creating a
+    # second misleading "artifact missing" failure.
+    assert "id: bindings" in source
+    assert "steps.bindings.outcome == 'success'" in source
+    assert "id: kraken_probe" in source
+    assert "steps.kraken_probe.outcome == 'success'" in source
+    assert "id: calendar_probe" in source
+    assert "steps.calendar_probe.outcome == 'success'" in source
+    assert "steps.readiness.outcome == 'success'" in source
+    assert "steps.preflight.outcome == 'success'" in source
+    assert "id: campaign_start" in source
+    assert "steps.campaign_start.outcome == 'success'" in source
+
 
 def test_contract_ci_contains_no_secret_bearing_manual_burnin_job() -> None:
     source = VNEXT_CI.read_text(encoding="utf-8")
