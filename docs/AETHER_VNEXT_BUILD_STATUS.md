@@ -642,14 +642,25 @@ It is read-only and must not be confused with initialization or campaign start.
 It supersedes older "current", "next build", environment, and CI wording above when
 those statements conflict with this checkpoint.
 
-### Verified repository state
+### Verified repository-state evidence
+
+This block is a checkpoint record, not a live branch pointer. The current branch HEAD,
+PR state, and CI conclusions MUST be read from GitHub by the monitor at transition
+time. Do not create recursive documentation commits merely to chase the checkpoint
+file's own SHA.
+
+Checkpoint evidence immediately before this status freeze:
 
 - branch: `aether-vnext-swapout`;
 - PR #12: OPEN, DRAFT, mergeable;
-- verified head: `499b496459223867eff20c49b46dac8b8a100c29`;
-- head commit: `fix(vnext-burnin): gate artifacts on producer steps`;
+- implementation head before the checkpoint-only status commit:
+  `499b496459223867eff20c49b46dac8b8a100c29`;
+- implementation commit:
+  `fix(vnext-burnin): gate artifacts on producer steps`;
 - AETHER vNext CI #535: SUCCESS;
 - repository CI #844: SUCCESS;
+- this checkpoint's own commit and later commits are validated by the live monitor,
+  not by rewriting this block after every successful commit;
 - production `main` remains outside this vNext replacement work;
 - PAPER ONLY / LIVE HARD BLOCKED remains unchanged.
 
@@ -735,5 +746,8 @@ Every subsequent transition must use:
 
 Before selecting a module, editing code, committing, dispatching a protected workflow,
 or interpreting a frozen state, verify the live branch head, PR state, both CI lanes,
-and this latest canonical checkpoint. Any mismatch is a hard stop until reconciled.
+and the latest canonical project-fact checkpoint. Any substantive mismatch is a hard
+stop until reconciled. A checkpoint file being one commit behind because that commit
+only froze the checkpoint itself is not substantive drift; live GitHub HEAD/CI remains
+authoritative and prevents self-referential monitor loops.
 
