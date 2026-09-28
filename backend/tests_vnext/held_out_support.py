@@ -20,6 +20,7 @@ def record_provenanced_held_out(
     *,
     dataset_start_at_utc=None,
     dataset_end_at_utc=None,
+    fold_n=None,
 ) -> str:
     """Create a minimal valid research chain and persist one HELD_OUT window."""
     token = window.evidence_window_id
@@ -126,7 +127,7 @@ def record_provenanced_held_out(
             train_end_utc=window.first_timestamp_utc - timedelta(seconds=1),
             test_start_utc=window.first_timestamp_utc,
             test_end_utc=window.last_timestamp_utc,
-            n=window.n,
+            n=window.n if fold_n is None else fold_n,
             net_pnl=0.0,
             expectancy_r=0.0,
             profit_factor=1.0,

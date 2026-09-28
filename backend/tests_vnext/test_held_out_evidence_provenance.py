@@ -114,6 +114,22 @@ def test_held_out_persistence_requires_canonical_provenance_ids(
             )
 
 
+def test_held_out_provenance_requires_window_n_to_match_selected_folds() -> None:
+    engine, store = _store()
+    window = _window("heldout-fold-n-mismatch")
+    with engine.begin() as conn:
+        with pytest.raises(
+            ValueError,
+            match="EvidenceWindow n must equal selected fold n",
+        ):
+            record_provenanced_held_out(
+                conn,
+                store,
+                window,
+                fold_n=window.n - 1,
+            )
+
+
 def test_held_out_provenance_rejects_fold_outside_dataset_snapshot() -> None:
     engine, store = _store()
     window = _window("heldout-dataset-boundary")

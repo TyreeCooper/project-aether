@@ -2869,6 +2869,12 @@ class VNextStore:
                     "held_out fold test windows must not overlap"
                 )
 
+        selected_n = sum(int(row["n"]) for row in ordered)
+        if window.n != selected_n:
+            raise ValueError(
+                "held_out EvidenceWindow n must equal selected fold n"
+            )
+
         first_test_at = min(
             _stored_utc(row["test_start_utc"]) for row in ordered
         )
