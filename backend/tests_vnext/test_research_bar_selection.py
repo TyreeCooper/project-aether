@@ -6,6 +6,7 @@ import pytest
 
 from aether_vnext.research import ResearchDatasetSnapshot
 from aether_vnext.research_bar_selection import (
+    PITResearchBarSlice,
     select_pit_research_bars,
 )
 from aether_vnext.research_warehouse import (
@@ -148,6 +149,36 @@ def _manifest() -> ResearchBarManifest:
         snapshot=snapshot,
         bars=bars,
     )
+
+
+def test_pit_slice_requires_nonempty_immutable_rows() -> None:
+    with pytest.raises(ValueError, match="nonempty immutable tuple"):
+        PITResearchBarSlice(
+            dataset_snapshot_id="dataset-pit-1",
+            asset_id="btc",
+            interval_seconds=3600,
+            as_of_utc=T0 + timedelta(hours=4),
+            start_at_utc=None,
+            rows=[],
+        )
+
+
+def test_pit_slice_rejects_row_identity_drift() -> None:
+    manifest = _manifest()
+    eth_row = next(row for row in manifest.bars if row.asset_id == "eth")
+
+    with pytest.raises(
+        ValueError,
+        match="research bar asset does not match PIT selection",
+    ):
+        PITResearchBarSlice(
+            dataset_snapshot_id=manifest.snapshot.dataset_snapshot_id,
+            asset_id="btc",
+            interval_seconds=3600,
+            as_of_utc=T0 + timedelta(hours=4),
+            start_at_utc=None,
+            rows=(eth_row,),
+        )
 
 
 def test_selector_returns_only_available_matching_rows() -> None:
