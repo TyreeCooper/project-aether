@@ -12,18 +12,26 @@ def test_named_runtime_indicator_conventions_are_explicit_and_bound() -> None:
         "ema",
         "atr",
         "realized_vol",
+        "volatility_percentile",
         "prior_closed_bar_range",
     }
 
     assert indicator_authority("ema").source_bound is True
     assert indicator_authority("atr").source_bound is True
     assert indicator_authority("realized_vol").source_bound is True
+    assert indicator_authority("volatility_percentile").source_bound is True
     assert indicator_authority("prior_closed_bar_range").source_bound is True
 
 
 def test_indicator_convention_v1_clears_named_math_blockers() -> None:
     assert indicator_authority_blockers(
-        ("ema", "atr", "realized_vol", "prior_closed_bar_range")
+        (
+            "ema",
+            "atr",
+            "realized_vol",
+            "volatility_percentile",
+            "prior_closed_bar_range",
+        )
     ) == ()
 
 

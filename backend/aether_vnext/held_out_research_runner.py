@@ -33,6 +33,7 @@ REQUIRED_INDICATORS = (
     "ema",
     "atr",
     "realized_vol",
+    "volatility_percentile",
     "prior_closed_bar_range",
 )
 REPLAY_PLAN_VERSION = "aether-vnext-held-out-replay-plan-v1"

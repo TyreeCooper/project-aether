@@ -194,6 +194,7 @@ def test_configuration_drift_fails_closed() -> None:
     )
 
 
-def test_prior_closed_range_remains_part_of_runner_contract() -> None:
+def test_regime_and_prior_range_features_remain_part_of_runner_contract() -> None:
     result = preflight_canonical_held_out_research_runner()
+    assert "volatility_percentile" in result.required_indicators
     assert "prior_closed_bar_range" in result.required_indicators

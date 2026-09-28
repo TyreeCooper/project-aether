@@ -60,6 +60,17 @@ INDICATOR_AUTHORITIES: Final = MappingProxyType(
                 "with no annualization."
             ),
         ),
+        "volatility_percentile": IndicatorAuthority(
+            indicator_id="volatility_percentile",
+            source_bound=True,
+            blocker_code=None,
+            source_requirement=(
+                "AETHER Volatility Percentile Convention v1: current RV14 "
+                "is ranked against PIT RV14 observations at completed "
+                "same-interval closes in [T-90d,T) using empirical midrank "
+                "with no interpolation."
+            ),
+        ),
         "prior_closed_bar_range": IndicatorAuthority(
             indicator_id="prior_closed_bar_range",
             source_bound=True,
