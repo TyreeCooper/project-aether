@@ -116,6 +116,11 @@ class ResearchExperiment:
                 raise ValueError("frozen_at_utc must be timezone-aware")
             if self.frozen_at_utc < self.created_at_utc:
                 raise ValueError("frozen_at_utc cannot precede created_at_utc")
+        if (
+            self.research_state is ResearchState.FROZEN
+            and self.frozen_at_utc is None
+        ):
+            raise ValueError("FROZEN research requires frozen_at_utc")
 
 
 @dataclass(frozen=True, slots=True)

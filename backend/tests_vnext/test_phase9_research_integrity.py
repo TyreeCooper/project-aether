@@ -357,6 +357,21 @@ def test_research_experiment_requires_canonical_identity(
         ResearchExperiment(**kwargs)
 
 
+def test_frozen_research_experiment_requires_freeze_timestamp() -> None:
+    base = _experiment()
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs["frozen_at_utc"] = None
+
+    with pytest.raises(
+        ValueError,
+        match="FROZEN research requires frozen_at_utc",
+    ):
+        ResearchExperiment(**kwargs)
+
+
 def test_parameter_variants_require_distinct_experiment_ids() -> None:
     engine, store = _store()
     with engine.begin() as conn:
