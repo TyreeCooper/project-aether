@@ -553,6 +553,10 @@ def preflight_forward_paper_campaign_from_book(
                             or str(run["run_type"]).strip().lower()
                             != "held_out"
                             or run["finished_at_utc"] is None
+                            or str(run["status"]).strip().upper()
+                            != "COMPLETE"
+                            or not isinstance(run["integrity_flags"], list)
+                            or bool(run["integrity_flags"])
                             or str(run["playbook_id"])
                             != request.playbook_id
                             or str(run["playbook_version"])
