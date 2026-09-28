@@ -355,8 +355,23 @@ class FoldResult:
         stop_rate = float(self.stop_rate)
         if not math.isfinite(stop_rate) or not 0.0 <= stop_rate <= 1.0:
             raise ValueError("stop_rate must be in [0,1]")
+        if not isinstance(self.benchmark_result, dict):
+            raise ValueError("benchmark_result must be a dict")
+        if not isinstance(self.failure_reasons, tuple):
+            raise ValueError("failure_reasons must be an immutable tuple")
+        if any(
+            not isinstance(value, str)
+            or not value
+            or value != value.strip()
+            for value in self.failure_reasons
+        ):
+            raise ValueError("failure_reasons must contain canonical text")
+        if len(self.failure_reasons) != len(set(self.failure_reasons)):
+            raise ValueError("failure_reasons cannot contain duplicates")
         if not isinstance(self.passed, bool):
             raise ValueError("passed must be boolean")
+        if self.passed and self.failure_reasons:
+            raise ValueError("passed fold cannot contain failure_reasons")
 
 
 @dataclass(frozen=True, slots=True)
