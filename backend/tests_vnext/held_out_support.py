@@ -91,11 +91,11 @@ def record_provenanced_held_out(conn, store, window) -> str:
             cost_model_version="test-cost-v1",
             execution_model_version="test-execution-v1",
             random_seed=7,
-            started_at_utc=window.first_timestamp_utc - timedelta(minutes=1),
+            started_at_utc=window.created_at_utc,
             finished_at_utc=max(
                 window.created_at_utc,
                 window.last_timestamp_utc,
-            ),
+            ) + timedelta(minutes=1),
             status="COMPLETE",
             integrity_flags=(),
             metrics_json={"n": window.n},
