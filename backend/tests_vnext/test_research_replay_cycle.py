@@ -135,6 +135,43 @@ def _features(
     )
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    (
+        ("asset_id", " EURUSD ", "asset_id must be a canonical lowercase ID"),
+        ("asset_id", "EURUSD", "asset_id must be a canonical lowercase ID"),
+        ("asset_id", 1, "asset_id must be a canonical lowercase ID"),
+        ("horizon", " intraday ", "horizon must be canonical text"),
+        ("horizon", 1, "horizon must be canonical text"),
+    ),
+)
+def test_research_cycle_requires_canonical_identity(
+    field: str,
+    value: object,
+    message: str,
+) -> None:
+    spec = playbook("pb_fx_intraday_v1_2")
+    features = _features(
+        asset_id="eurusd",
+        interval=spec.trigger_interval,
+        close=1.1010,
+        percentile=50.0,
+        prior_low=1.0980,
+        prior_high=1.1000,
+        ema20=1.1005,
+        ema20_previous=1.1000,
+        ema50=1.0990,
+    )
+    kwargs = {
+        "asset_id": "eurusd",
+        "horizon": spec.horizon,
+        "features": features,
+    }
+    kwargs[field] = value
+    with pytest.raises(ValueError, match=message):
+        ResearchClosedBarInput(**kwargs)
+
+
 def test_research_cycle_applies_family_a_without_live_bar_fields() -> None:
     spec = playbook("pb_fx_intraday_v1_2")
     features = _features(
