@@ -114,6 +114,24 @@ def test_held_out_persistence_requires_canonical_provenance_ids(
             )
 
 
+def test_held_out_provenance_rejects_fold_outside_dataset_snapshot() -> None:
+    engine, store = _store()
+    window = _window("heldout-dataset-boundary")
+    with engine.begin() as conn:
+        with pytest.raises(
+            ValueError,
+            match="outside research dataset snapshot",
+        ):
+            record_provenanced_held_out(
+                conn,
+                store,
+                window,
+                dataset_start_at_utc=(
+                    window.first_timestamp_utc - timedelta(days=30)
+                ),
+            )
+
+
 def test_generic_held_out_row_is_not_research_provenance() -> None:
     engine, store = _store()
     with engine.begin() as conn:

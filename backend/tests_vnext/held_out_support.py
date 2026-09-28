@@ -13,7 +13,14 @@ from aether_vnext.research import (
 )
 
 
-def record_provenanced_held_out(conn, store, window) -> str:
+def record_provenanced_held_out(
+    conn,
+    store,
+    window,
+    *,
+    dataset_start_at_utc=None,
+    dataset_end_at_utc=None,
+) -> str:
     """Create a minimal valid research chain and persist one HELD_OUT window."""
     token = window.evidence_window_id
     asset_id, horizon, side = window.route_id.split(":")
@@ -47,8 +54,16 @@ def record_provenanced_held_out(conn, store, window) -> str:
             dataset_snapshot_id=dataset_id,
             created_at_utc=window.created_at_utc,
             as_of_utc=max(window.created_at_utc, window.last_timestamp_utc),
-            start_at_utc=window.first_timestamp_utc - timedelta(days=60),
-            end_at_utc=window.last_timestamp_utc,
+            start_at_utc=(
+                window.first_timestamp_utc - timedelta(days=60)
+                if dataset_start_at_utc is None
+                else dataset_start_at_utc
+            ),
+            end_at_utc=(
+                window.last_timestamp_utc
+                if dataset_end_at_utc is None
+                else dataset_end_at_utc
+            ),
             asset_ids=(asset_id,),
             data_version="test-bars-v1",
             source_registry_version="test-sources-v1",

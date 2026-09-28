@@ -2836,10 +2836,19 @@ class VNextStore:
         )
         if len(selected) != len(fold_ids):
             raise KeyError("one or more held_out fold_result_ids are unknown")
+        dataset_start_at = _stored_utc(dataset["start_at_utc"])
+        dataset_end_at = _stored_utc(dataset["end_at_utc"])
         for row in selected:
             if str(row["backtest_run_id"]) != run_id:
                 raise ValueError(
                     "held_out fold_result_id belongs to a different BacktestRun"
+                )
+            if (
+                _stored_utc(row["train_start_utc"]) < dataset_start_at
+                or _stored_utc(row["test_end_utc"]) > dataset_end_at
+            ):
+                raise ValueError(
+                    "held_out fold window outside research dataset snapshot"
                 )
 
         ordered = tuple(
