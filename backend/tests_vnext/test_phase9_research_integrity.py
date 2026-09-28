@@ -199,6 +199,67 @@ def test_hypothesis_card_requires_immutable_canonical_collections(
         HypothesisCard(**kwargs)
 
 
+def test_experiment_persistence_requires_hypothesis_and_dataset() -> None:
+    engine, store = _store()
+
+    with engine.begin() as conn:
+        store.record_research_dataset_snapshot(conn, _snapshot())
+        with pytest.raises(
+            KeyError,
+            match="unknown research hypothesis",
+        ):
+            store.record_research_experiment(conn, _experiment())
+
+    engine, store = _store()
+    with engine.begin() as conn:
+        store.record_research_hypothesis(conn, _card())
+        with pytest.raises(
+            KeyError,
+            match="unknown research dataset snapshot",
+        ):
+            store.record_research_experiment(conn, _experiment())
+
+
+@pytest.mark.parametrize(
+    "lineage_field",
+    ("parent_experiment_id", "supersedes_experiment_id"),
+)
+def test_experiment_persistence_preserves_hypothesis_lineage(
+    lineage_field: str,
+) -> None:
+    engine, store = _store()
+    prior_base = _experiment("exp-other")
+    prior_kwargs = {
+        name: getattr(prior_base, name)
+        for name in prior_base.__dataclass_fields__
+    }
+    prior_kwargs["hypothesis_id"] = "hyp-2"
+
+    current_base = _experiment()
+    current_kwargs = {
+        name: getattr(current_base, name)
+        for name in current_base.__dataclass_fields__
+    }
+    current_kwargs[lineage_field] = "exp-other"
+
+    with engine.begin() as conn:
+        store.record_research_hypothesis(conn, _card())
+        store.record_research_hypothesis(conn, _card("hyp-2"))
+        store.record_research_dataset_snapshot(conn, _snapshot())
+        store.record_research_experiment(
+            conn,
+            ResearchExperiment(**prior_kwargs),
+        )
+        with pytest.raises(
+            ValueError,
+            match=f"{lineage_field} must preserve hypothesis lineage",
+        ):
+            store.record_research_experiment(
+                conn,
+                ResearchExperiment(**current_kwargs),
+            )
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     (
