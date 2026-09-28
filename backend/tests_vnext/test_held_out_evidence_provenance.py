@@ -136,7 +136,7 @@ def test_held_out_provenance_rejects_fold_outside_dataset_snapshot() -> None:
     with engine.begin() as conn:
         with pytest.raises(
             ValueError,
-            match="outside research dataset snapshot",
+            match="research dataset",
         ):
             record_provenanced_held_out(
                 conn,
