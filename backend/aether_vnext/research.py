@@ -7,6 +7,16 @@ from typing import Any
 
 from aether_vnext.freeze import EvidenceState, ResearchState
 
+ALPHA_FACTORY_RUN_TYPES = frozenset(
+    {
+        "backtest",
+        "walk_forward",
+        "held_out",
+        "parameter_sensitivity",
+        "cost_stress",
+    }
+)
+
 
 @dataclass(frozen=True, slots=True)
 class HypothesisCard:
@@ -201,6 +211,10 @@ class BacktestRun:
                 or value != value.strip()
             ):
                 raise ValueError(f"{name} must be canonical text")
+        if self.run_type not in ALPHA_FACTORY_RUN_TYPES:
+            raise ValueError(
+                "run_type must be one of the source-bound Alpha Factory modes"
+            )
         if self.started_at_utc.tzinfo is None:
             raise ValueError("started_at_utc must be timezone-aware")
         if self.finished_at_utc is not None:

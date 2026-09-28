@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 
 from aether_vnext.freeze import EvidenceState, ResearchState
 from aether_vnext.research import (
+    ALPHA_FACTORY_RUN_TYPES,
     BacktestRun,
     FoldResult,
     HypothesisCard,
@@ -371,6 +372,33 @@ def test_fold_result_requires_canonical_identity(
     kwargs[field] = value
     with pytest.raises(ValueError, match=f"{field} must be canonical text"):
         FoldResult(**kwargs)
+
+
+@pytest.mark.parametrize(
+    "run_type",
+    tuple(sorted(ALPHA_FACTORY_RUN_TYPES)),
+)
+def test_backtest_run_accepts_source_bound_alpha_factory_modes(
+    run_type: str,
+) -> None:
+    base = _run()
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs["run_type"] = run_type
+    assert BacktestRun(**kwargs).run_type == run_type
+
+
+def test_backtest_run_rejects_undefined_research_mode() -> None:
+    base = _run()
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs["run_type"] = "ad_hoc_optimized"
+    with pytest.raises(ValueError, match="source-bound Alpha Factory modes"):
+        BacktestRun(**kwargs)
 
 
 def test_fold_result_rejects_random_shuffle_geometry() -> None:
