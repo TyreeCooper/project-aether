@@ -1,10 +1,9 @@
 """Indicator-calculation authority for AETHER vNext.
 
-The Playbook Pack names EMA, ATR, and realized-volatility inputs but does not bind
-all numerical conventions needed for deterministic replay. AETHER must not silently
-choose a library/default convention at runtime.
-
-This registry is intentionally separate from the indicator implementation itself.
+The frozen Master/Playbook source set names EMA20/EMA50, ATR14, and realized
+volatility without binding every numerical convention. AETHER Indicator Convention
+v1 is the operator-approved specification decision that closes those calculation
+gaps without rewriting the historical source documents.
 """
 from __future__ import annotations
 
@@ -35,30 +34,30 @@ INDICATOR_AUTHORITIES: Final = MappingProxyType(
     {
         "ema": IndicatorAuthority(
             indicator_id="ema",
-            source_bound=False,
-            blocker_code="ema_calculation_convention_unbound",
+            source_bound=True,
+            blocker_code=None,
             source_requirement=(
-                "EMA20/EMA50 are required by playbooks, but runtime seed/"
-                "initialization and smoothing convention are not frozen."
+                "AETHER Indicator Convention v1: EMA20/EMA50 use completed "
+                "bar closes, SMA(N) initialization, then alpha=2/(N+1)."
             ),
         ),
         "atr": IndicatorAuthority(
             indicator_id="atr",
-            source_bound=False,
-            blocker_code="atr_calculation_convention_unbound",
+            source_bound=True,
+            blocker_code=None,
             source_requirement=(
-                "ATR(14) is required by playbooks, but smoothing/initialization "
-                "convention is not frozen."
+                "AETHER Indicator Convention v1: ATR14 uses standard true "
+                "range, a 14-TR arithmetic seed, then Wilder smoothing."
             ),
         ),
         "realized_vol": IndicatorAuthority(
             indicator_id="realized_vol",
-            source_bound=False,
-            blocker_code="realized_vol_calculation_convention_unbound",
+            source_bound=True,
+            blocker_code=None,
             source_requirement=(
-                "realized_vol(trigger_interval,14) and prior-90-calendar-day "
-                "percentile comparison are frozen, but the exact return/"
-                "annualization convention is not."
+                "AETHER Indicator Convention v1: realized_vol14 uses the "
+                "trailing 14 completed-bar log returns as sqrt(sum(r^2)) "
+                "with no annualization."
             ),
         ),
         "prior_closed_bar_range": IndicatorAuthority(
@@ -66,8 +65,8 @@ INDICATOR_AUTHORITIES: Final = MappingProxyType(
             source_bound=True,
             blocker_code=None,
             source_requirement=(
-                "Prior-N calculations use CLOSED bars and exclude the current "
-                "trigger/forming bar."
+                "Playbook Pack: prior-N calculations use CLOSED bars and "
+                "exclude the current trigger/forming bar."
             ),
         ),
     }

@@ -17,23 +17,15 @@ def test_canonical_research_plan_matches_74_route_burnin_universe() -> None:
     assert all(row.mechanism_class for row in rows)
 
 
-def test_research_runner_fails_closed_on_unbound_indicator_math() -> None:
+def test_research_runner_indicator_preflight_is_clear_after_v1_binding() -> None:
     result = preflight_canonical_held_out_research_runner()
 
-    assert result.startable is False
+    assert result.startable is True
     assert result.route_count == 74
     assert result.required_indicators == REQUIRED_INDICATORS
-    assert result.blockers == (
-        "ema_calculation_convention_unbound",
-        "atr_calculation_convention_unbound",
-        "realized_vol_calculation_convention_unbound",
-    )
+    assert result.blockers == ()
 
 
-def test_prior_closed_range_is_not_a_runner_blocker() -> None:
+def test_prior_closed_range_remains_part_of_runner_contract() -> None:
     result = preflight_canonical_held_out_research_runner()
     assert "prior_closed_bar_range" in result.required_indicators
-    assert (
-        "prior_closed_bar_range_calculation_convention_unbound"
-        not in result.blockers
-    )

@@ -7,7 +7,7 @@ from aether_vnext.indicator_authority import (
 )
 
 
-def test_named_runtime_indicator_conventions_are_explicit() -> None:
+def test_named_runtime_indicator_conventions_are_explicit_and_bound() -> None:
     assert set(INDICATOR_AUTHORITIES) == {
         "ema",
         "atr",
@@ -15,32 +15,22 @@ def test_named_runtime_indicator_conventions_are_explicit() -> None:
         "prior_closed_bar_range",
     }
 
-    assert indicator_authority("ema").source_bound is False
-    assert indicator_authority("atr").source_bound is False
-    assert indicator_authority("realized_vol").source_bound is False
+    assert indicator_authority("ema").source_bound is True
+    assert indicator_authority("atr").source_bound is True
+    assert indicator_authority("realized_vol").source_bound is True
     assert indicator_authority("prior_closed_bar_range").source_bound is True
 
 
-def test_unbound_indicator_conventions_fail_closed() -> None:
+def test_indicator_convention_v1_clears_named_math_blockers() -> None:
     assert indicator_authority_blockers(
-        ("ema", "atr", "realized_vol")
-    ) == (
-        "ema_calculation_convention_unbound",
-        "atr_calculation_convention_unbound",
-        "realized_vol_calculation_convention_unbound",
-    )
-
-
-def test_source_bound_prior_range_adds_no_blocker() -> None:
-    assert indicator_authority_blockers(
-        ("prior_closed_bar_range",)
+        ("ema", "atr", "realized_vol", "prior_closed_bar_range")
     ) == ()
 
 
-def test_duplicate_requirements_do_not_duplicate_blockers() -> None:
+def test_duplicate_bound_requirements_remain_clear() -> None:
     assert indicator_authority_blockers(
         ("ema", "ema", "prior_closed_bar_range")
-    ) == ("ema_calculation_convention_unbound",)
+    ) == ()
 
 
 def test_unknown_indicator_is_explicitly_blocked() -> None:
