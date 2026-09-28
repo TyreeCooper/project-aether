@@ -39,6 +39,16 @@ from aether_vnext.research_replay_features import (
 )
 
 
+def _canonical_request_text(value: object, name: str) -> str:
+    if (
+        not isinstance(value, str)
+        or not value
+        or value != value.strip()
+    ):
+        raise ValueError(f"{name} must be canonical text")
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class ResearchFamilyARequest:
     playbook_id: str
@@ -47,6 +57,8 @@ class ResearchFamilyARequest:
     trend: PlaybookTrendFeatureSnapshot | None = None
 
     def __post_init__(self) -> None:
+        _canonical_request_text(self.playbook_id, "playbook_id")
+        _canonical_request_text(self.side, "side")
         if self.trend is None or self.extras is None:
             return
         manual_trend = (
@@ -67,12 +79,20 @@ class ResearchFamilyBRequest:
     side: str
     state: FamilyBReplayState
 
+    def __post_init__(self) -> None:
+        _canonical_request_text(self.playbook_id, "playbook_id")
+        _canonical_request_text(self.side, "side")
+
 
 @dataclass(frozen=True, slots=True)
 class ResearchFamilyCRequest:
     playbook_id: str
     side: str
     extras: FamilyCReplayExtras | None = None
+
+    def __post_init__(self) -> None:
+        _canonical_request_text(self.playbook_id, "playbook_id")
+        _canonical_request_text(self.side, "side")
 
 
 @dataclass(frozen=True, slots=True)
