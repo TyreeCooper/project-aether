@@ -187,7 +187,7 @@ def test_research_feature_snapshot_rejects_lineage_drift(
         ),
         (
             "low",
-            150.0,
+            100.5,
             "low is inconsistent",
         ),
     ),
