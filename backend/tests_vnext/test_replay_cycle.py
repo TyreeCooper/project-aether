@@ -11,6 +11,7 @@ from aether_vnext.playbook_runtime import volatility_band
 from aether_vnext.replay_cycle import (
     ReplayClosedBarInput,
     ReplayFamilyARequest,
+    ReplayFamilyBEpisode,
     ReplayFamilyBRequest,
     ReplayFamilyCRequest,
     evaluate_replay_closed_bar,
@@ -19,6 +20,10 @@ from aether_vnext.replay_family_adapter import (
     FamilyAReplayExtras,
     FamilyBReplayState,
     FamilyCReplayExtras,
+)
+from aether_vnext.replay_failed_break import (
+    FrozenBreakReference,
+    ReplayReferenceKind,
 )
 from aether_vnext.replay_features import (
     ClosedBarFeatureSnapshot,
@@ -250,21 +255,11 @@ def test_replay_cycle_can_select_family_c_only_after_a_and_b_fail() -> None:
     assert out.decision.selected_family is PlaybookFamily.C
 
 
-def test_replay_cycle_does_not_invent_family_b_state() -> None:
-    features = _fx_midvol()
-    with pytest.raises(ValueError, match="Family-B replay state is required"):
-        evaluate_replay_closed_bar(
-            ReplayClosedBarInput(
-                asset_id="eurusd",
-                horizon="intraday",
-                features=features,
-                family_b=(
-                    ReplayFamilyBRequest(
-                        playbook_id="pb_fx_failed_session_v1_3",
-                        side="long",
-                    ),
-                ),
-            )
+def test_replay_cycle_requires_exactly_one_family_b_input_form() -> None:
+    with pytest.raises(ValueError, match="exactly one"):
+        ReplayFamilyBRequest(
+            playbook_id="pb_fx_failed_session_v1_3",
+            side="long",
         )
 
 
@@ -327,3 +322,75 @@ def test_replay_cycle_preserves_explicit_family_c_dependency() -> None:
         )
     )
     assert out.decision.selected_family is PlaybookFamily.C
+
+
+
+def test_replay_cycle_reconstructs_family_b_episode_from_closed_bars() -> None:
+    spec = playbook("pb_idx_failed_v1_3")
+    features = _features(
+        asset_id="mes",
+        interval=spec.trigger_interval,
+        close=99.0,
+        percentile=50.0,
+        prior_low=90.0,
+        prior_high=100.0,
+        ema20=99.0,
+        ema20_previous=99.0,
+        ema50=100.0,
+    )
+    interval = spec.trigger_interval
+    start = features.numerical.trigger_bar.bucket_open_utc - (2 * interval)
+
+    def episode_bar(index: int, close: float) -> Bar:
+        opened = start + index * interval
+        closed = opened + interval
+        return Bar(
+            asset_id="mes",
+            interval=interval,
+            bucket_open_utc=opened,
+            bucket_close_utc=closed,
+            open=close,
+            high=close + 0.5,
+            low=close - 0.5,
+            close=close,
+            volume=1.0,
+            first_exchange_ts=opened + timedelta(seconds=1),
+            last_exchange_ts=closed - timedelta(microseconds=1),
+            print_count=1,
+            source_id="reviewed-pit-bars",
+        )
+
+    bars = (
+        episode_bar(0, 101.0),
+        episode_bar(1, 100.5),
+        features.numerical.trigger_bar,
+    )
+    reference = FrozenBreakReference(
+        asset_id="mes",
+        kind=ReplayReferenceKind.PRIOR_OFFICIAL_RTH_DAY,
+        high=100.0,
+        low=90.0,
+        mid=95.0,
+        frozen_at_utc=bars[0].bucket_open_utc - timedelta(minutes=1),
+        source_ref="reviewed-rth-day:v1",
+    )
+    out = evaluate_replay_closed_bar(
+        ReplayClosedBarInput(
+            asset_id="mes",
+            horizon="intraday",
+            features=features,
+            family_b=(
+                ReplayFamilyBRequest(
+                    playbook_id=spec.playbook_id,
+                    side="short",
+                    episode=ReplayFamilyBEpisode(
+                        bars=bars,
+                        reference=reference,
+                        break_bar_close_utc=bars[0].bucket_close_utc,
+                        counter_trend_condition=True,
+                    ),
+                ),
+            ),
+        )
+    )
+    assert out.decision.selected_family is PlaybookFamily.B
