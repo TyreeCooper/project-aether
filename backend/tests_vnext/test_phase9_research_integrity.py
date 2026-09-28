@@ -572,6 +572,45 @@ def test_fold_result_rejects_random_shuffle_geometry() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    (
+        ("fold_index", -1, "fold_index must be a nonnegative integer"),
+        ("n", -1, "n must be a nonnegative integer"),
+        ("stop_rate", 1.1, "stop_rate must be in"),
+        ("max_drawdown", -1.0, "max_drawdown cannot be negative"),
+        ("cost_drag", -1.0, "cost_drag cannot be negative"),
+        ("net_pnl", float("nan"), "net_pnl must be finite"),
+        ("profit_factor", float("nan"), "profit_factor must be nonnegative"),
+        ("passed", 1, "passed must be boolean"),
+    ),
+)
+def test_fold_result_rejects_invalid_metric_contract(
+    field: str,
+    value: object,
+    message: str,
+) -> None:
+    base = _fold()
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs[field] = value
+    with pytest.raises(ValueError, match=message):
+        FoldResult(**kwargs)
+
+
+def test_fold_result_requires_timezone_aware_windows() -> None:
+    base = _fold()
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs["test_end_utc"] = base.test_end_utc.replace(tzinfo=None)
+    with pytest.raises(ValueError, match="test_end_utc must be timezone-aware"):
+        FoldResult(**kwargs)
+
+
 def test_failed_and_retired_experiments_remain_queryable() -> None:
     engine, store = _store()
     with engine.begin() as conn:

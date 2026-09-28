@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+import math
 from typing import Any
 
 from aether_vnext.freeze import EvidenceState, ResearchState
@@ -266,11 +267,47 @@ class FoldResult:
                 or value != value.strip()
             ):
                 raise ValueError(f"{name} must be canonical text")
+        if (
+            not isinstance(self.fold_index, int)
+            or isinstance(self.fold_index, bool)
+            or self.fold_index < 0
+        ):
+            raise ValueError("fold_index must be a nonnegative integer")
+        if (
+            not isinstance(self.n, int)
+            or isinstance(self.n, bool)
+            or self.n < 0
+        ):
+            raise ValueError("n must be a nonnegative integer")
+        for name in (
+            "train_start_utc",
+            "train_end_utc",
+            "test_start_utc",
+            "test_end_utc",
+        ):
+            if getattr(self, name).tzinfo is None:
+                raise ValueError(f"{name} must be timezone-aware")
         if not (
             self.train_start_utc <= self.train_end_utc
             < self.test_start_utc <= self.test_end_utc
         ):
             raise ValueError("fold windows must be chronological and non-overlapping")
+        for name in ("net_pnl", "expectancy_r", "max_drawdown", "cost_drag"):
+            value = float(getattr(self, name))
+            if not math.isfinite(value):
+                raise ValueError(f"{name} must be finite")
+        if float(self.max_drawdown) < 0.0:
+            raise ValueError("max_drawdown cannot be negative")
+        if float(self.cost_drag) < 0.0:
+            raise ValueError("cost_drag cannot be negative")
+        profit_factor = float(self.profit_factor)
+        if math.isnan(profit_factor) or profit_factor < 0.0:
+            raise ValueError("profit_factor must be nonnegative and not NaN")
+        stop_rate = float(self.stop_rate)
+        if not math.isfinite(stop_rate) or not 0.0 <= stop_rate <= 1.0:
+            raise ValueError("stop_rate must be in [0,1]")
+        if not isinstance(self.passed, bool):
+            raise ValueError("passed must be boolean")
 
 
 @dataclass(frozen=True, slots=True)
