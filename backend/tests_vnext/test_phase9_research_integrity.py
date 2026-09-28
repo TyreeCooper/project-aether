@@ -630,6 +630,51 @@ def test_backtest_run_accepts_source_bound_alpha_factory_modes(
     assert BacktestRun(**kwargs).run_type == run_type
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    (
+        (
+            "random_seed",
+            True,
+            "random_seed must be an integer when present",
+        ),
+        (
+            "integrity_flags",
+            ["negative_expectancy"],
+            "integrity_flags must be an immutable tuple",
+        ),
+        (
+            "integrity_flags",
+            ("bad ",),
+            "integrity_flags must contain canonical text",
+        ),
+        (
+            "integrity_flags",
+            ("same", "same"),
+            "integrity_flags cannot contain duplicates",
+        ),
+        (
+            "metrics_json",
+            (),
+            "metrics_json must be a dict",
+        ),
+    ),
+)
+def test_backtest_run_requires_reproducibility_field_contract(
+    field: str,
+    value: object,
+    message: str,
+) -> None:
+    base = _run()
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs[field] = value
+    with pytest.raises(ValueError, match=message):
+        BacktestRun(**kwargs)
+
+
 def test_backtest_run_rejects_undefined_research_mode() -> None:
     base = _run()
     kwargs = {
