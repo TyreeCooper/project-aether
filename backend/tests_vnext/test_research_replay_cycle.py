@@ -6,6 +6,10 @@ import pytest
 
 from aether_vnext.bar_features import PriorClosedBarRange
 from aether_vnext.playbook_runtime import volatility_band
+from aether_vnext.playbook_trend_features import (
+    PlaybookTrendFeatureSnapshot,
+)
+from aether_vnext.playbook_trend_requirements import TrendRuleKind
 from aether_vnext.playbooks import PlaybookFamily, playbook
 from aether_vnext.replay_family_adapter import (
     FamilyAReplayExtras,
@@ -266,4 +270,88 @@ def test_research_cycle_rejects_duplicate_route_requests() -> None:
             horizon=spec.horizon,
             features=features,
             family_a=(request, request),
+        )
+
+
+
+def test_research_cycle_accepts_reviewed_trend_snapshot_directly() -> None:
+    spec = playbook("pb_fx_intraday_v1_2")
+    features = _features(
+        asset_id="eurusd",
+        interval=spec.trigger_interval,
+        close=1.1010,
+        percentile=50.0,
+        prior_low=1.0980,
+        prior_high=1.1000,
+        ema20=1.1005,
+        ema20_previous=1.1000,
+        ema50=1.0990,
+    )
+    trigger_close = features.numerical.trigger_bar.bucket_close_utc
+    trend = PlaybookTrendFeatureSnapshot(
+        playbook_id=spec.playbook_id,
+        asset_id="eurusd",
+        interval=timedelta(hours=1),
+        as_of_utc=trigger_close,
+        source_bar_count=60,
+        last_bar_close_utc=trigger_close - timedelta(minutes=15),
+        rule_kind=TrendRuleKind.EMA20_SLOPE,
+        ema20_current=1.1005,
+        ema20_previous=1.1000,
+        ema50_current=None,
+    )
+
+    out = evaluate_research_closed_bar(
+        ResearchClosedBarInput(
+            asset_id="eurusd",
+            horizon=spec.horizon,
+            features=features,
+            family_a=(
+                ResearchFamilyARequest(
+                    playbook_id=spec.playbook_id,
+                    side="long",
+                    trend=trend,
+                ),
+            ),
+        )
+    )
+    assert out.decision.selected_family is PlaybookFamily.A
+
+
+def test_research_cycle_rejects_manual_trend_override_when_snapshot_present() -> None:
+    spec = playbook("pb_fx_intraday_v1_2")
+    features = _features(
+        asset_id="eurusd",
+        interval=spec.trigger_interval,
+        close=1.1010,
+        percentile=50.0,
+        prior_low=1.0980,
+        prior_high=1.1000,
+        ema20=1.1005,
+        ema20_previous=1.1000,
+        ema50=1.0990,
+    )
+    trigger_close = features.numerical.trigger_bar.bucket_close_utc
+    trend = PlaybookTrendFeatureSnapshot(
+        playbook_id=spec.playbook_id,
+        asset_id="eurusd",
+        interval=timedelta(hours=1),
+        as_of_utc=trigger_close,
+        source_bar_count=60,
+        last_bar_close_utc=trigger_close - timedelta(minutes=15),
+        rule_kind=TrendRuleKind.EMA20_SLOPE,
+        ema20_current=1.1005,
+        ema20_previous=1.1000,
+        ema50_current=None,
+    )
+
+    with pytest.raises(ValueError, match="cannot be combined"):
+        ResearchFamilyARequest(
+            playbook_id=spec.playbook_id,
+            side="long",
+            trend=trend,
+            extras=FamilyAReplayExtras(
+                slope_ema20_current=1.1005,
+                slope_ema20_previous=1.1000,
+            ),
         )
