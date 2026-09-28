@@ -12,13 +12,13 @@ from __future__ import annotations
 from math import isfinite, log, sqrt
 from typing import Final, Sequence
 
-from aether_vnext.bars import Bar
+from aether_vnext.completed_bar_contract import CompletedOHLCBar
 
 
 INDICATOR_CONVENTION_VERSION: Final = "aether_indicator_convention_v1"
 
 
-def _validate_bars(bars: Sequence[Bar], *, minimum: int) -> tuple[Bar, ...]:
+def _validate_bars(bars: Sequence[CompletedOHLCBar], *, minimum: int) -> tuple[CompletedOHLCBar, ...]:
     rows = tuple(bars)
     if len(rows) < minimum:
         raise ValueError(f"at least {minimum} completed bars are required")
@@ -61,7 +61,7 @@ def _validate_bars(bars: Sequence[Bar], *, minimum: int) -> tuple[Bar, ...]:
     return rows
 
 
-def _ema(bars: Sequence[Bar], *, period: int) -> float:
+def _ema(bars: Sequence[CompletedOHLCBar], *, period: int) -> float:
     """SMA-seeded recursive EMA over completed bar closes."""
     rows = _validate_bars(bars, minimum=period)
     closes = tuple(float(bar.close) for bar in rows)
@@ -73,17 +73,17 @@ def _ema(bars: Sequence[Bar], *, period: int) -> float:
     return value
 
 
-def ema20(bars: Sequence[Bar]) -> float:
+def ema20(bars: Sequence[CompletedOHLCBar]) -> float:
     """EMA20: SMA(20) seed, then alpha=2/(20+1), closed-bar closes only."""
     return _ema(bars, period=20)
 
 
-def ema50(bars: Sequence[Bar]) -> float:
+def ema50(bars: Sequence[CompletedOHLCBar]) -> float:
     """EMA50: SMA(50) seed, then alpha=2/(50+1), closed-bar closes only."""
     return _ema(bars, period=50)
 
 
-def atr14(bars: Sequence[Bar]) -> float:
+def atr14(bars: Sequence[CompletedOHLCBar]) -> float:
     """Wilder ATR14 using 14 true-range observations.
 
     The first ATR is the arithmetic mean of the first 14 true ranges. Later
@@ -107,7 +107,7 @@ def atr14(bars: Sequence[Bar]) -> float:
     return value
 
 
-def realized_vol14(bars: Sequence[Bar]) -> float:
+def realized_vol14(bars: Sequence[CompletedOHLCBar]) -> float:
     """Non-annualized 14-return realized volatility on completed closes.
 
     RV14 = sqrt(sum(r_t**2)) for the trailing 14 log returns, where

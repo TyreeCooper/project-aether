@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from aether_vnext.bars import Bar
+from aether_vnext.completed_bar_contract import CompletedOHLCBar
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,12 +18,12 @@ class PriorClosedBarRange:
     high: float
     low: float
     mid: float
-    first_bar: Bar
-    last_bar: Bar
+    first_bar: CompletedOHLCBar
+    last_bar: CompletedOHLCBar
 
 
 def prior_closed_bar_range(
-    bars: tuple[Bar, ...],
+    bars: tuple[CompletedOHLCBar, ...],
     *,
     lookback_bars: int,
 ) -> PriorClosedBarRange:
