@@ -716,6 +716,8 @@ Repository implementation now includes:
 
 - operator-approved AETHER Indicator Convention v1 for deterministic EMA20/EMA50,
   ATR14, and non-annualized RV14;
+- operator-approved Volatility Percentile Convention v1 using PIT empirical midrank
+  against the prior 90 calendar days of the same interval;
 - canonical no-cherry-pick HELD_OUT replay planning for all 74 executable
   route/playbook pairs;
 - real-input requirements for PIT dataset identity, exact code SHA, chronological
@@ -723,8 +725,20 @@ Repository implementation now includes:
 - immutable PIT research-bar warehouse schema revision 0025 with content-addressed
   dataset identity and anti-hindsight availability timestamps;
 - strict canonical HELD_OUT import requiring preloaded immutable research bars;
-- Kraken BTC/ETH downloadable historical OHLCVT parsing that preserves missing
-  intervals rather than synthesizing candles.
+- Kraken BTC/ETH historical OHLCVT parsing that preserves missing intervals rather
+  than synthesizing candles;
+- IBKR NVDA/TSLA/PLTR historical request/response boundary that preserves provider
+  timestamps without inventing bar-open/bar-close semantics;
+- NinjaTrader/Tradovate MES/MNQ/MGC/MCL/US10Y historical chart boundary that preserves
+  provider timestamps and contract identity without inventing bucket semantics;
+- deterministic completed-bar replay feature kernel;
+- regime-ready replay feature snapshot combining EMA/ATR/RV14 with the 90-day
+  volatility percentile and source-bound volatility band.
+
+Latest verified implementation head before this checkpoint-only documentation commit:
+`c5bea456f1c6af6e6e38c9a2c1eaf5758a0fcf38`
+(`feat(vnext-research): add regime-ready replay features`), with AETHER vNext CI
+#543 and repository CI #852 successful.
 
 No real canonical PIT research dataset has yet been imported and no canonical
 HELD_OUT provenance set for all executable routes has yet been produced. Historical
