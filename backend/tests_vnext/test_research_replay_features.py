@@ -7,6 +7,7 @@ import pytest
 from aether_vnext.research_bar_selection import PITResearchBarSlice
 from aether_vnext.playbook_runtime import VolatilityBand
 from aether_vnext.research_replay_features import (
+    ResearchFeatureBar,
     ResearchRegimeReadyFeatures,
     build_research_regime_ready_features,
 )
@@ -61,6 +62,44 @@ def _selection(
         start_at_utc=None,
         rows=rows,
     )
+
+
+def _feature_bar_from_row(
+    row: ResearchBarRecord,
+    *,
+    asset_id: str | None = None,
+    interval: timedelta | None = None,
+) -> ResearchFeatureBar:
+    return ResearchFeatureBar(
+        research_bar_id=row.research_bar_id,
+        asset_id=row.asset_id if asset_id is None else asset_id,
+        interval=(
+            timedelta(seconds=row.interval_seconds)
+            if interval is None
+            else interval
+        ),
+        bucket_open_utc=row.bucket_open_utc,
+        bucket_close_utc=row.bucket_close_utc,
+        open=row.open,
+        high=row.high,
+        low=row.low,
+        close=row.close,
+        volume=row.volume,
+        available_at_utc=row.available_at_utc,
+        source_id=row.source_id,
+    )
+
+
+def test_research_feature_bar_requires_canonical_asset_identity() -> None:
+    row = _row(0)
+    with pytest.raises(ValueError, match="asset_id must be canonical text"):
+        _feature_bar_from_row(row, asset_id=" BTC ")
+
+
+def test_research_feature_interval_must_match_bucket_duration() -> None:
+    row = _row(0)
+    with pytest.raises(ValueError, match="interval must match bucket duration"):
+        _feature_bar_from_row(row, interval=timedelta(hours=12))
 
 
 def test_research_features_use_pit_availability_not_exchange_timestamps() -> None:
