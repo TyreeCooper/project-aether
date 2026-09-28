@@ -1998,6 +1998,37 @@ class VNextStore:
         conn: Connection,
         fold: FoldResult,
     ) -> None:
+        runs = self.tables["backtest_runs"]
+        run = conn.execute(
+            sa.select(runs).where(
+                runs.c.backtest_run_id == fold.backtest_run_id
+            )
+        ).mappings().first()
+        if run is None:
+            raise KeyError(
+                f"unknown backtest_run_id: {fold.backtest_run_id}"
+            )
+
+        datasets = self.tables["research_dataset_snapshots"]
+        dataset = conn.execute(
+            sa.select(datasets).where(
+                datasets.c.dataset_snapshot_id == run["dataset_snapshot_id"]
+            )
+        ).mappings().first()
+        if dataset is None:
+            raise KeyError(
+                "backtest run research dataset snapshot is missing"
+            )
+        if (
+            _stored_utc(fold.train_start_utc)
+            < _stored_utc(dataset["start_at_utc"])
+            or _stored_utc(fold.test_end_utc)
+            > _stored_utc(dataset["end_at_utc"])
+        ):
+            raise ValueError(
+                "fold window must be contained in backtest research dataset"
+            )
+
         conn.execute(
             self.tables["fold_results"].insert().values(
                 fold_result_id=fold.fold_result_id,

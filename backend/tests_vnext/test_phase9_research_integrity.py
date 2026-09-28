@@ -286,6 +286,33 @@ def test_backtest_run_rejects_unknown_experiment_before_persistence() -> None:
             store.record_backtest_run(conn, BacktestRun(**kwargs))
 
 
+def test_fold_persistence_requires_parent_run_and_dataset_window() -> None:
+    engine, store = _store()
+    base = _fold()
+
+    with engine.begin() as conn:
+        with pytest.raises(KeyError, match="unknown backtest_run_id"):
+            store.record_fold_result(conn, base)
+
+    outside_kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    outside_kwargs["train_start_utc"] = T0 - timedelta(days=91)
+    outside = FoldResult(**outside_kwargs)
+
+    with engine.begin() as conn:
+        store.record_research_hypothesis(conn, _card())
+        store.record_research_dataset_snapshot(conn, _snapshot())
+        store.record_research_experiment(conn, _experiment())
+        store.record_backtest_run(conn, _run())
+        with pytest.raises(
+            ValueError,
+            match="contained in backtest research dataset",
+        ):
+            store.record_fold_result(conn, outside)
+
+
 def test_research_ledger_retains_failed_candidate_and_reproducibility_lineage() -> None:
     engine, store = _store()
     with engine.begin() as conn:
