@@ -254,6 +254,24 @@ class BacktestRun:
             raise ValueError(
                 "run_type must be one of the source-bound Alpha Factory modes"
             )
+        if self.random_seed is not None and (
+            not isinstance(self.random_seed, int)
+            or isinstance(self.random_seed, bool)
+        ):
+            raise ValueError("random_seed must be an integer when present")
+        if not isinstance(self.integrity_flags, tuple):
+            raise ValueError("integrity_flags must be an immutable tuple")
+        if any(
+            not isinstance(value, str)
+            or not value
+            or value != value.strip()
+            for value in self.integrity_flags
+        ):
+            raise ValueError("integrity_flags must contain canonical text")
+        if len(self.integrity_flags) != len(set(self.integrity_flags)):
+            raise ValueError("integrity_flags cannot contain duplicates")
+        if not isinstance(self.metrics_json, dict):
+            raise ValueError("metrics_json must be a dict")
         if self.started_at_utc.tzinfo is None:
             raise ValueError("started_at_utc must be timezone-aware")
         if self.finished_at_utc is not None:
