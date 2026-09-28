@@ -477,6 +477,58 @@ def test_preflight_revalidates_heldout_backtest_run() -> None:
 
 
 
+@pytest.mark.parametrize(
+    "updates",
+    (
+        {"status": "FAILED_EVIDENCE"},
+        {"integrity_flags": ["contaminated"]},
+    ),
+)
+def test_preflight_rejects_drifted_heldout_run_integrity(
+    updates: dict[str, object],
+) -> None:
+    engine, store = _store()
+    with engine.begin() as conn:
+        record_provenanced_held_out(
+            conn,
+            store,
+            _window("run-integrity-drift"),
+        )
+        provenance = conn.execute(
+            sa.select(store.tables["held_out_evidence_provenance"]).where(
+                store.tables["held_out_evidence_provenance"].c.evidence_window_id
+                == "run-integrity-drift"
+            )
+        ).mappings().one()
+        runs = store.tables["backtest_runs"]
+        conn.execute(
+            runs.update()
+            .where(
+                runs.c.backtest_run_id
+                == provenance["backtest_run_id"]
+            )
+            .values(**updates)
+        )
+
+        out = preflight_forward_paper_campaign_from_book(
+            conn,
+            store,
+            campaign_id="preflight-run-integrity-drift",
+            requested_routes=(
+                ForwardPaperRouteRequest(
+                    route_id="eurusd:intraday:long",
+                    playbook_id="pb_fx_intraday_v1_2",
+                ),
+            ),
+        )
+
+    assert out.startable is False
+    assert "held_out_provenance_run_invalid" in (
+        out.route_results[0].blockers
+    )
+    assert out.route_results[0].route_baseline_hash is None
+
+
 def test_preflight_revalidates_heldout_dataset() -> None:
     engine, store = _store()
     with engine.begin() as conn:
