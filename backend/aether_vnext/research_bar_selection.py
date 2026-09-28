@@ -29,6 +29,43 @@ class PITResearchBarSlice:
     start_at_utc: datetime | None
     rows: tuple[ResearchBarRecord, ...]
 
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.dataset_snapshot_id, str)
+            or not self.dataset_snapshot_id
+            or self.dataset_snapshot_id != self.dataset_snapshot_id.strip()
+        ):
+            raise ValueError("dataset_snapshot_id must be canonical text")
+        if (
+            not isinstance(self.asset_id, str)
+            or not self.asset_id
+            or self.asset_id != self.asset_id.strip()
+            or self.asset_id != self.asset_id.lower()
+        ):
+            raise ValueError("asset_id must be a canonical lowercase ID")
+        if (
+            not isinstance(self.interval_seconds, int)
+            or isinstance(self.interval_seconds, bool)
+            or self.interval_seconds <= 0
+        ):
+            raise ValueError("interval_seconds must be a positive integer")
+        if self.as_of_utc.tzinfo is None:
+            raise ValueError("as_of_utc must be timezone-aware")
+        if self.start_at_utc is not None:
+            if self.start_at_utc.tzinfo is None:
+                raise ValueError("start_at_utc must be timezone-aware")
+            if self.start_at_utc > self.as_of_utc:
+                raise ValueError("start_at_utc cannot exceed as_of_utc")
+        if not isinstance(self.rows, tuple) or not self.rows:
+            raise ValueError("rows must be a nonempty immutable tuple")
+        for row in self.rows:
+            if row.dataset_snapshot_id != self.dataset_snapshot_id:
+                raise ValueError("research bar dataset does not match PIT selection")
+            if row.asset_id != self.asset_id:
+                raise ValueError("research bar asset does not match PIT selection")
+            if row.interval_seconds != self.interval_seconds:
+                raise ValueError("research bar interval does not match PIT selection")
+
     @property
     def first_bucket_open_utc(self) -> datetime:
         return self.rows[0].bucket_open_utc
