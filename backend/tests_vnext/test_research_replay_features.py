@@ -108,6 +108,23 @@ def test_prior_range_excludes_trigger_bar() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "lookback",
+    (20.5, "20", True, 0, -1),
+)
+def test_prior_range_lookback_requires_exact_positive_integer(
+    lookback: object,
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match="prior_range_lookback must be a positive integer",
+    ):
+        build_research_regime_ready_features(
+            _selection(),
+            prior_range_lookback=lookback,
+        )
+
+
 def test_unavailable_research_bar_fails_closed() -> None:
     selection = _selection()
     rows = list(selection.rows)
