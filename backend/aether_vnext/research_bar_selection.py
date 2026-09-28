@@ -49,9 +49,14 @@ def select_pit_research_bars(
     """Return one ordered, no-lookahead immutable research-bar slice."""
     validate_research_bar_manifest(manifest)
 
-    asset = str(asset_id).strip().lower()
-    if not asset:
-        raise ValueError("asset_id is required")
+    if (
+        not isinstance(asset_id, str)
+        or not asset_id
+        or asset_id != asset_id.strip()
+        or asset_id != asset_id.lower()
+    ):
+        raise ValueError("asset_id must be a canonical lowercase ID")
+    asset = asset_id
     if asset not in manifest.snapshot.asset_ids:
         raise ValueError("asset_id is absent from research dataset snapshot")
     if (
