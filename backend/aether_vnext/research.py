@@ -135,6 +135,12 @@ class ResearchExperiment:
                 or value != value.strip()
             ):
                 raise ValueError(f"{name} must be canonical text when present")
+            if value == self.experiment_id:
+                raise ValueError(f"{name} cannot self-reference experiment_id")
+        if not isinstance(self.research_state, ResearchState):
+            raise ValueError("research_state must be a ResearchState")
+        if not isinstance(self.parameter_spec, dict):
+            raise ValueError("parameter_spec must be a dict")
         if self.created_at_utc.tzinfo is None:
             raise ValueError("created_at_utc must be timezone-aware")
         if self.frozen_at_utc is not None:
