@@ -114,6 +114,44 @@ def test_held_out_persistence_requires_canonical_provenance_ids(
             )
 
 
+@pytest.mark.parametrize(
+    ("updates", "message"),
+    (
+        (
+            {"status": "FAILED_EVIDENCE"},
+            "requires a COMPLETE BacktestRun",
+        ),
+        (
+            {"integrity_flags": ["contaminated"]},
+            "requires a clean BacktestRun integrity ledger",
+        ),
+    ),
+)
+def test_held_out_provenance_requires_clean_complete_source_run(
+    updates: dict[str, object],
+    message: str,
+) -> None:
+    engine, store = _store()
+    window = _window("heldout-source-run-integrity")
+    run_id = f"run:{window.evidence_window_id}"
+    fold_id = f"fold:{window.evidence_window_id}"
+
+    with engine.begin() as conn:
+        record_provenanced_held_out(conn, store, window)
+        conn.execute(
+            store.tables["backtest_runs"].update().where(
+                store.tables["backtest_runs"].c.backtest_run_id == run_id
+            ).values(**updates)
+        )
+        with pytest.raises(ValueError, match=message):
+            store.record_held_out_evidence_window(
+                conn,
+                window,
+                backtest_run_id=run_id,
+                fold_result_ids=(fold_id,),
+            )
+
+
 def test_held_out_provenance_requires_window_n_to_match_selected_folds() -> None:
     engine, store = _store()
     window = _window("heldout-fold-n-mismatch")
