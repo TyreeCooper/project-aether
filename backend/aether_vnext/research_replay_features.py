@@ -52,7 +52,17 @@ class ResearchFeatureBar:
     source_id: str
 
     def __post_init__(self) -> None:
-        if self.interval <= timedelta(0):
+        for name in ("research_bar_id", "asset_id", "source_id"):
+            value = getattr(self, name)
+            if (
+                not isinstance(value, str)
+                or not value
+                or value != value.strip()
+            ):
+                raise ValueError(f"{name} must be canonical text")
+        if self.asset_id != self.asset_id.lower():
+            raise ValueError("asset_id must be canonical lowercase")
+        if not isinstance(self.interval, timedelta) or self.interval <= timedelta(0):
             raise ValueError("research feature interval must be positive")
         if self.bucket_open_utc.tzinfo is None:
             raise ValueError("bucket_open_utc must be timezone-aware")
@@ -62,6 +72,10 @@ class ResearchFeatureBar:
             raise ValueError("available_at_utc must be timezone-aware")
         if self.bucket_close_utc <= self.bucket_open_utc:
             raise ValueError("research feature bar must be completed")
+        if self.bucket_close_utc - self.bucket_open_utc != self.interval:
+            raise ValueError(
+                "research feature interval must match bucket duration"
+            )
         if self.available_at_utc < self.bucket_close_utc:
             raise ValueError(
                 "research feature bar cannot be available before close"
