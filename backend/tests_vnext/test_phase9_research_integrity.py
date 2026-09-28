@@ -907,6 +907,60 @@ def test_fold_result_requires_timezone_aware_windows() -> None:
         FoldResult(**kwargs)
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    (
+        (
+            "benchmark_result",
+            (),
+            "benchmark_result must be a dict",
+        ),
+        (
+            "failure_reasons",
+            ["negative_expectancy"],
+            "failure_reasons must be an immutable tuple",
+        ),
+        (
+            "failure_reasons",
+            (" bad ",),
+            "failure_reasons must contain canonical text",
+        ),
+        (
+            "failure_reasons",
+            ("same", "same"),
+            "failure_reasons cannot contain duplicates",
+        ),
+    ),
+)
+def test_fold_result_requires_canonical_evidence_fields(
+    field: str,
+    value: object,
+    message: str,
+) -> None:
+    base = _fold()
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs[field] = value
+    with pytest.raises(ValueError, match=message):
+        FoldResult(**kwargs)
+
+
+def test_fold_result_rejects_passed_verdict_with_failure_reasons() -> None:
+    base = _fold()
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs["passed"] = True
+    with pytest.raises(
+        ValueError,
+        match="passed fold cannot contain failure_reasons",
+    ):
+        FoldResult(**kwargs)
+
+
 def test_failed_and_retired_experiments_remain_queryable() -> None:
     engine, store = _store()
     with engine.begin() as conn:
