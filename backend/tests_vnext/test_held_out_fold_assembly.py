@@ -218,6 +218,41 @@ def test_fold_verdict_and_failure_reasons_remain_explicit() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("passed", "status", "message"),
+    (
+        (
+            True,
+            ReplayResultStatus.FAILED_EVIDENCE,
+            "passed fold requires COMPLETE",
+        ),
+        (
+            False,
+            ReplayResultStatus.COMPLETE,
+            "failed fold requires FAILED_EVIDENCE",
+        ),
+    ),
+)
+def test_fold_verdict_must_match_terminal_replay_status(
+    passed: bool,
+    status: ReplayResultStatus,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        assemble_held_out_fold(
+            _work(),
+            _fold(),
+            backtest_run_id="run-1",
+            trades=(),
+            replay_status=status,
+            benchmark_result={},
+            passed=passed,
+            failure_reasons=(
+                () if passed else ("negative_expectancy",)
+            ),
+        )
+
+
 def test_trade_outcome_rejects_nonfinite_r_and_reversed_time() -> None:
     opened = _fold().test_start_utc + timedelta(days=1)
     with pytest.raises(ValueError, match="net_r"):

@@ -184,6 +184,14 @@ def assemble_held_out_fold(
     )
     if passed and reasons:
         raise ValueError("passed fold cannot contain failure_reasons")
+    if passed and replay_status is not ReplayResultStatus.COMPLETE:
+        raise ValueError(
+            "passed fold requires COMPLETE replay status"
+        )
+    if not passed and replay_status is ReplayResultStatus.COMPLETE:
+        raise ValueError(
+            "failed fold requires FAILED_EVIDENCE replay status"
+        )
 
     _validate_fold_matches_work_item(work_item, fold)
 
