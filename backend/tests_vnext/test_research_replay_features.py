@@ -5,7 +5,9 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from aether_vnext.research_bar_selection import PITResearchBarSlice
+from aether_vnext.playbook_runtime import VolatilityBand
 from aether_vnext.research_replay_features import (
+    ResearchRegimeReadyFeatures,
     build_research_regime_ready_features,
 )
 from aether_vnext.research_warehouse import ResearchBarRecord
@@ -89,6 +91,20 @@ def test_research_percentile_excludes_trigger_and_uses_prior_90_days() -> None:
     assert result.volatility.current_realized_vol14 == pytest.approx(
         result.numerical.realized_vol14_current
     )
+
+
+def test_research_regime_band_must_match_percentile() -> None:
+    result = build_research_regime_ready_features(_selection())
+
+    with pytest.raises(
+        ValueError,
+        match="volatility band disagrees with percentile",
+    ):
+        ResearchRegimeReadyFeatures(
+            numerical=result.numerical,
+            volatility=result.volatility,
+            volatility_band=VolatilityBand.BELOW_40,
+        )
 
 
 def test_prior_range_excludes_trigger_bar() -> None:
