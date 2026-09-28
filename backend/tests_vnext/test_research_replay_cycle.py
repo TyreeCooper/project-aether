@@ -279,6 +279,32 @@ def test_research_cycle_applies_family_c_after_a_and_b_are_absent() -> None:
     assert out.decision.selected_family is PlaybookFamily.C
 
 
+def test_research_family_requests_require_canonical_identity() -> None:
+    with pytest.raises(ValueError, match="playbook_id must be canonical text"):
+        ResearchFamilyARequest(
+            playbook_id=" pb_fx_intraday_v1_2 ",
+            side="long",
+        )
+
+    with pytest.raises(ValueError, match="side must be canonical text"):
+        ResearchFamilyBRequest(
+            playbook_id="pb_idx_failed_v1_3",
+            side=" long ",
+            state=FamilyBReplayState(
+                break_printed=True,
+                bars_since_break=1,
+                close_back_inside=True,
+                counter_trend_condition=True,
+            ),
+        )
+
+    with pytest.raises(ValueError, match="playbook_id must be canonical text"):
+        ResearchFamilyCRequest(
+            playbook_id=1,
+            side="long",
+        )
+
+
 def test_research_cycle_rejects_duplicate_route_requests() -> None:
     spec = playbook("pb_fx_intraday_v1_2")
     features = _features(
