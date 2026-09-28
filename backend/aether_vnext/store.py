@@ -1863,12 +1863,35 @@ class VNextStore:
         annotation: str,
         created_at_utc: datetime,
     ) -> None:
-        if not str(annotation_id).strip():
-            raise ValueError("annotation_id is required")
-        if not str(annotation).strip():
-            raise ValueError("annotation is required")
+        for name, value in (
+            ("annotation_id", annotation_id),
+            ("hypothesis_id", hypothesis_id),
+            ("annotation", annotation),
+        ):
+            if (
+                not isinstance(value, str)
+                or not value
+                or value != value.strip()
+            ):
+                raise ValueError(f"{name} must be canonical text")
         if created_at_utc.tzinfo is None:
             raise ValueError("created_at_utc must be timezone-aware")
+
+        hypotheses = self.tables["research_hypotheses"]
+        hypothesis = conn.execute(
+            sa.select(hypotheses).where(
+                hypotheses.c.hypothesis_id == hypothesis_id
+            )
+        ).mappings().first()
+        if hypothesis is None:
+            raise KeyError(f"unknown research hypothesis: {hypothesis_id}")
+        if _stored_utc(created_at_utc) < _stored_utc(
+            hypothesis["created_at_utc"]
+        ):
+            raise ValueError(
+                "annotation cannot precede hypothesis creation"
+            )
+
         conn.execute(
             self.tables["research_hypothesis_annotations"].insert().values(
                 annotation_id=annotation_id,
