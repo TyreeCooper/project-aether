@@ -458,9 +458,11 @@ pileups are cancelled automatically and both workflows have a 10-minute timeout.
 - no legacy evidence imported into vNext;
 - PR #12 remains DRAFT.
 
-## Next build target
+## Historical next-build checkpoint — SUPERSEDED
 
-Real non-production vNext burn-in environment + canonical preflight.
+This checkpoint predates the verified burn-in environment and is retained only as
+historical implementation context. The canonical current state is the Monitor
+Reconciliation Checkpoint at the end of this document.
 
 Immediate gates:
 - satisfy AETH-VN-020 by configuring a dedicated non-production vNext PostgreSQL book
@@ -483,7 +485,7 @@ Only after those evidence/cutover gates pass may the project evaluate a separate
 explicitly authorized live-readiness phase. Phase 9 does not grant live authority.
 
 
-### Forward-paper burn-in control plane — REPOSITORY SIDE COMPLETE
+### Historical forward-paper burn-in checkpoint — SUPERSEDED
 
 Status distinction:
 - repository-side burn-in controls are implemented and CI-verified;
@@ -621,27 +623,98 @@ Repository-side integration now includes:
 - read-only burn-in readiness audit covering database isolation, schema completeness,
   seed-12 binding coverage, canonical preflight state, and blocker classification.
 
-### Current real-burn-in gates
+### Current real-burn-in gates — superseded by monitor reconciliation below
 
-The repository is no longer blocked on generic provider abstractions for crypto,
-futures DEMO, equities, exchange calendars, or equity locate evidence.
-
-Real Campaign #1 remains blocked until external and empirical facts are supplied and
-verified:
-
-1. dedicated non-production PostgreSQL burn-in target;
-2. configured/protected GitHub Environment `aether-vnext-burnin`;
-3. reviewed exact seed-12 runtime binding manifest;
-4. tastyfx private FIX specification, approved session configuration, reviewed
-   EURUSD/USDJPY symbol contract, demo integration, and conformance;
-5. canonical held-out research provenance for every executable route;
-6. canonical preflight `startable=true`.
-
-Campaign #1 is NOT started. P11 empirical profitability readiness is NOT established.
-PAPER ONLY / LIVE HARD BLOCKED remains unchanged.
+The provider abstraction statements remain historical implementation context. The
+dedicated burn-in PostgreSQL target and protected GitHub Environment were subsequently
+verified and AETH-VN-020 was closed. Use the Monitor Reconciliation Checkpoint below
+for current blockers.
 
 The protected readiness action is:
 
 `aether-vnext-burnin-readiness-approved`
 
 It is read-only and must not be confused with initialization or campaign start.
+
+## Monitor Reconciliation Checkpoint — 2026-09-27 23:13 EDT
+
+**Authority:** this is the canonical current-status block for the replacement branch.
+It supersedes older "current", "next build", environment, and CI wording above when
+those statements conflict with this checkpoint.
+
+### Verified repository state
+
+- branch: `aether-vnext-swapout`;
+- PR #12: OPEN, DRAFT, mergeable;
+- verified head: `ef77fbeba826941e55853d1984a44ef930b6b010`;
+- head commit: `feat(vnext-research): parse Kraken historical OHLCVT`;
+- AETHER vNext CI #533: SUCCESS;
+- repository CI #842: SUCCESS;
+- production `main` remains outside this vNext replacement work;
+- PAPER ONLY / LIVE HARD BLOCKED remains unchanged.
+
+### Verified burn-in environment state
+
+AETH-VN-020 is CLOSED.
+
+The protected GitHub Environment `aether-vnext-burnin` is operational. The
+dedicated PostgreSQL target `aether_vnext_burnin` was reached successfully, database
+isolation passed, and the legacy-table scan returned none. The approved initialization
+run applied the then-current vNext migrations and bootstrapped the canonical policy
+snapshot.
+
+Repository schema revision 0025 was added later by the PIT research warehouse commit.
+Therefore revision 0025 is present and CI-verified in the branch but must not be
+described as already applied to the external burn-in database until a subsequent
+approved migration run verifies it.
+
+### Current open external/runtime gates
+
+AETH-VN-021 remains OPEN. The exact seed-12
+`AETHER_VNEXT_RUNTIME_BINDINGS_JSON` has not been supplied. No guessed stale
+thresholds, futures lifecycle values, provider IDs, calendar identities, broker
+symbols, or equity locate sources may be substituted.
+
+AETH-VN-022 remains OPEN and is deliberately deferred until the end by operator
+instruction. The private tastyfx FIX/session specification and reviewed EURUSD/USDJPY
+provider contract remain unavailable. Deferral does not change the blocker and does
+not authorize a partial manifest to masquerade as canonical completion.
+
+### Current held-out research state
+
+Repository implementation now includes:
+
+- operator-approved AETHER Indicator Convention v1 for deterministic EMA20/EMA50,
+  ATR14, and non-annualized RV14;
+- canonical no-cherry-pick HELD_OUT replay planning for all 74 executable
+  route/playbook pairs;
+- real-input requirements for PIT dataset identity, exact code SHA, chronological
+  non-overlapping folds, and full canonical asset coverage;
+- immutable PIT research-bar warehouse schema revision 0025 with content-addressed
+  dataset identity and anti-hindsight availability timestamps;
+- strict canonical HELD_OUT import requiring preloaded immutable research bars;
+- Kraken BTC/ETH downloadable historical OHLCVT parsing that preserves missing
+  intervals rather than synthesizing candles.
+
+No real canonical PIT research dataset has yet been imported and no canonical
+HELD_OUT provenance set for all executable routes has yet been produced. Historical
+replay results must not be fabricated to close this gap.
+
+### Current campaign state
+
+- Campaign #1: NOT STARTED;
+- canonical preflight `startable=true`: NOT ESTABLISHED;
+- canonical full-route HELD_OUT provenance: NOT ESTABLISHED;
+- P11 empirical profitability readiness: NOT ESTABLISHED;
+- live authorization: NONE.
+
+### Monitor discipline
+
+Every subsequent transition must use:
+
+`MONITOR -> RECONCILE -> ACT -> VALIDATE -> FREEZE -> MONITOR AGAIN`
+
+Before selecting a module, editing code, committing, dispatching a protected workflow,
+or interpreting a frozen state, verify the live branch head, PR state, both CI lanes,
+and this latest canonical checkpoint. Any mismatch is a hard stop until reconciled.
+
