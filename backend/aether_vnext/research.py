@@ -370,6 +370,11 @@ class PromotionRecord:
                 or value != value.strip()
             ):
                 raise ValueError(f"{name} must be canonical text")
+        for name in ("from_evidence_state", "to_evidence_state"):
+            if not isinstance(getattr(self, name), EvidenceState):
+                raise ValueError(f"{name} must be an EvidenceState")
+        if not isinstance(self.n_reset, bool):
+            raise ValueError("n_reset must be boolean")
         if self.supersedes is not None and (
             not isinstance(self.supersedes, str)
             or not self.supersedes

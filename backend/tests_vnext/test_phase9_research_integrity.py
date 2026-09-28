@@ -707,6 +707,37 @@ def test_promotion_record_requires_canonical_identity(
         PromotionRecord(**kwargs)
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    (
+        (
+            "from_evidence_state",
+            EvidenceState.CANDIDATE.value,
+            "from_evidence_state must be an EvidenceState",
+        ),
+        (
+            "to_evidence_state",
+            EvidenceState.KEEP_PROBATION.value,
+            "to_evidence_state must be an EvidenceState",
+        ),
+        ("n_reset", 1, "n_reset must be boolean"),
+    ),
+)
+def test_promotion_record_requires_typed_transition_state(
+    field: str,
+    value: object,
+    message: str,
+) -> None:
+    base = _promotion()
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs[field] = value
+    with pytest.raises(ValueError, match=message):
+        PromotionRecord(**kwargs)
+
+
 def _persist_promotion_dependencies(
     conn: sa.Connection,
     store: VNextStore,
