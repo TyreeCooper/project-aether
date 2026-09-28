@@ -155,6 +155,51 @@ def test_hypothesis_card_requires_canonical_scalar_identity(
 
 
 @pytest.mark.parametrize(
+    ("field", "value", "message"),
+    (
+        (
+            "eligible_assets",
+            ["eurusd"],
+            "eligible_assets must be an immutable tuple",
+        ),
+        (
+            "eligible_assets",
+            ("EURUSD",),
+            "eligible_assets must contain canonical asset IDs",
+        ),
+        (
+            "allowed_sides",
+            ("long", "long"),
+            "allowed_sides cannot contain duplicates",
+        ),
+        (
+            "benchmark_ids",
+            (" always_flat ",),
+            "benchmark_ids must contain canonical text",
+        ),
+        (
+            "status",
+            ResearchState.FROZEN.value,
+            "status must be a ResearchState",
+        ),
+    ),
+)
+def test_hypothesis_card_requires_immutable_canonical_collections(
+    field: str,
+    value: object,
+    message: str,
+) -> None:
+    base = _card()
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs[field] = value
+    with pytest.raises(ValueError, match=message):
+        HypothesisCard(**kwargs)
+
+
+@pytest.mark.parametrize(
     ("field", "value"),
     (
         ("dataset_snapshot_id", "ds-other"),
