@@ -2902,6 +2902,15 @@ class VNextStore:
             raise ValueError("held_out evidence requires a held_out BacktestRun")
         if run["finished_at_utc"] is None:
             raise ValueError("held_out BacktestRun must be finished")
+        if str(run["status"]).strip().upper() != "COMPLETE":
+            raise ValueError(
+                "held_out evidence requires a COMPLETE BacktestRun"
+            )
+        integrity_flags = run["integrity_flags"]
+        if not isinstance(integrity_flags, list) or integrity_flags:
+            raise ValueError(
+                "held_out evidence requires a clean BacktestRun integrity ledger"
+            )
         if str(run["playbook_id"]) != window.playbook_id:
             raise ValueError("held_out BacktestRun playbook_id mismatch")
         if str(run["playbook_version"]) != window.playbook_version:
