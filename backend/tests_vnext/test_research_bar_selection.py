@@ -226,6 +226,20 @@ def test_selector_rejects_future_dataset_asof_and_empty_selection() -> None:
         )
 
 
+@pytest.mark.parametrize("asset_id", (" BTC ", "BTC", 1))
+def test_selector_requires_canonical_asset_identity(asset_id: object) -> None:
+    with pytest.raises(
+        ValueError,
+        match="asset_id must be a canonical lowercase ID",
+    ):
+        select_pit_research_bars(
+            _manifest(),
+            asset_id=asset_id,
+            interval_seconds=3600,
+            as_of_utc=T0 + timedelta(hours=4),
+        )
+
+
 def test_selector_rejects_asset_outside_snapshot() -> None:
     with pytest.raises(ValueError, match="absent"):
         select_pit_research_bars(
