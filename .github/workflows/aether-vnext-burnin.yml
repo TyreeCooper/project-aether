@@ -67,6 +67,7 @@ jobs:
       - name: Resolve authorized burn-in request
         id: request
         shell: bash
+        working-directory: .
         env:
           EVENT_NAME: ${{ github.event_name }}
           REQUESTED_ACTION: ${{ inputs.action }}
@@ -208,7 +209,7 @@ jobs:
           python scripts/aether_vnext_registry_bindings.py "${args[@]}"
 
       - name: Upload runtime Product Registry binding report
-        if: ${{ always() && (steps.request.outputs.action == 'initialize_and_preflight' || steps.request.outputs.action == 'initialize_kraken_probe' || steps.request.outputs.action == 'initialize_calendar_probe') }}
+        if: ${{ always() && steps.request.outcome == 'success' && (steps.request.outputs.action == 'initialize_and_preflight' || steps.request.outputs.action == 'initialize_kraken_probe' || steps.request.outputs.action == 'initialize_calendar_probe') }}
         uses: actions/upload-artifact@v4
         with:
           name: aether-vnext-runtime-bindings-${{ github.run_id }}
@@ -230,7 +231,7 @@ jobs:
             --output aether-vnext-kraken-market-probe.json
 
       - name: Upload Kraken market probe
-        if: ${{ always() && steps.request.outputs.action == 'initialize_kraken_probe' }}
+        if: ${{ always() && steps.request.outcome == 'success' && steps.request.outputs.action == 'initialize_kraken_probe' }}
         uses: actions/upload-artifact@v4
         with:
           name: aether-vnext-kraken-market-probe-${{ github.run_id }}
@@ -253,7 +254,7 @@ jobs:
             --output aether-vnext-tradinghours-calendar-probe.json
 
       - name: Upload authoritative calendar probe
-        if: ${{ always() && steps.request.outputs.action == 'initialize_calendar_probe' }}
+        if: ${{ always() && steps.request.outcome == 'success' && steps.request.outputs.action == 'initialize_calendar_probe' }}
         uses: actions/upload-artifact@v4
         with:
           name: aether-vnext-tradinghours-calendar-probe-${{ github.run_id }}
@@ -278,7 +279,7 @@ jobs:
           exit 0
 
       - name: Upload burn-in readiness audit
-        if: ${{ always() && steps.request.outputs.action == 'readiness_report' }}
+        if: ${{ always() && steps.request.outcome == 'success' && steps.request.outputs.action == 'readiness_report' }}
         uses: actions/upload-artifact@v4
         with:
           name: aether-vnext-burnin-readiness-${{ github.run_id }}
@@ -310,7 +311,7 @@ jobs:
           exit 0
 
       - name: Upload canonical burn-in preflight
-        if: ${{ always() && steps.request.outputs.action != 'initialize_kraken_probe' && steps.request.outputs.action != 'initialize_calendar_probe' && steps.request.outputs.action != 'readiness_report' }}
+        if: ${{ always() && steps.request.outcome == 'success' && steps.request.outputs.action != 'initialize_kraken_probe' && steps.request.outputs.action != 'initialize_calendar_probe' && steps.request.outputs.action != 'readiness_report' }}
         uses: actions/upload-artifact@v4
         with:
           name: aether-vnext-burnin-preflight-${{ github.run_id }}
