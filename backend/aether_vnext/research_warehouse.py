@@ -367,12 +367,23 @@ def parse_research_bar_manifest(
             raw_bar.get("source_ref", source_ref),
             "source_ref",
         )
+        raw_ohlcv = {
+            "open": raw_bar.get("open"),
+            "high": raw_bar.get("high"),
+            "low": raw_bar.get("low"),
+            "close": raw_bar.get("close"),
+            "volume": raw_bar.get("volume"),
+        }
+        if any(isinstance(value, bool) for value in raw_ohlcv.values()):
+            raise ValueError(
+                "research bar prices/volume must be numeric, not boolean"
+            )
         try:
-            open_ = float(raw_bar.get("open"))
-            high = float(raw_bar.get("high"))
-            low = float(raw_bar.get("low"))
-            close = float(raw_bar.get("close"))
-            volume = float(raw_bar.get("volume"))
+            open_ = float(raw_ohlcv["open"])
+            high = float(raw_ohlcv["high"])
+            low = float(raw_ohlcv["low"])
+            close = float(raw_ohlcv["close"])
+            volume = float(raw_ohlcv["volume"])
         except (TypeError, ValueError) as exc:
             raise ValueError(
                 "bar OHLCV fields must be numeric"
