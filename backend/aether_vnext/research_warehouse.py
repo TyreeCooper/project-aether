@@ -78,6 +78,13 @@ class ResearchBarRecord:
                 raise ValueError(f"{name} must be timezone-aware")
         if self.bucket_close_utc <= self.bucket_open_utc:
             raise ValueError("research bar must close after bucket open")
+        if (
+            (self.bucket_close_utc - self.bucket_open_utc).total_seconds()
+            != float(self.interval_seconds)
+        ):
+            raise ValueError(
+                "research bar bucket duration must equal interval_seconds"
+            )
         if self.available_at_utc < self.bucket_close_utc:
             raise ValueError(
                 "research bar cannot be available before bucket close"
