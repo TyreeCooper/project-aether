@@ -202,8 +202,6 @@ class ResearchDatasetSnapshot:
             raise ValueError("dataset start_at_utc cannot follow end_at_utc")
         if self.end_at_utc > self.as_of_utc:
             raise ValueError("dataset cannot contain information after as_of_utc")
-        if self.as_of_utc > self.created_at_utc:
-            raise ValueError("dataset as_of_utc cannot follow created_at_utc")
         if not isinstance(self.asset_ids, tuple) or not self.asset_ids:
             raise ValueError("asset_ids must be a nonempty immutable tuple")
         if any(
