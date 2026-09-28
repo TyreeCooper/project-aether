@@ -214,6 +214,18 @@ def test_duplicate_asset_interval_bucket_is_rejected() -> None:
         parse_research_bar_manifest(payload)
 
 
+@pytest.mark.parametrize("interval", (3600.5, "3600", True))
+def test_bar_interval_requires_exact_positive_integer(interval: object) -> None:
+    payload = _payload()
+    payload["bars"][0]["interval_seconds"] = interval
+
+    with pytest.raises(
+        ValueError,
+        match="interval_seconds must be a positive integer",
+    ):
+        parse_research_bar_manifest(payload)
+
+
 def test_bar_bucket_duration_must_match_declared_interval() -> None:
     payload = _payload()
     payload["bars"][0]["interval_seconds"] = 1800
