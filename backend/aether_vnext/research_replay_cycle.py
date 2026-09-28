@@ -85,12 +85,20 @@ class ResearchClosedBarInput:
     family_c: tuple[ResearchFamilyCRequest, ...] = ()
 
     def __post_init__(self) -> None:
-        asset = str(self.asset_id).strip().lower()
-        if not asset:
-            raise ValueError("asset_id is required")
-        if not str(self.horizon).strip():
-            raise ValueError("horizon is required")
-        if self.features.numerical.asset_id != asset:
+        if (
+            not isinstance(self.asset_id, str)
+            or not self.asset_id
+            or self.asset_id != self.asset_id.strip()
+            or self.asset_id != self.asset_id.lower()
+        ):
+            raise ValueError("asset_id must be a canonical lowercase ID")
+        if (
+            not isinstance(self.horizon, str)
+            or not self.horizon
+            or self.horizon != self.horizon.strip()
+        ):
+            raise ValueError("horizon must be canonical text")
+        if self.features.numerical.asset_id != self.asset_id:
             raise ValueError("research feature asset mismatch")
         _reject_duplicates(self.family_a, "Family-A")
         _reject_duplicates(self.family_b, "Family-B")
