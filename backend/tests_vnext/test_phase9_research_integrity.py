@@ -852,6 +852,23 @@ def test_promotion_record_rejects_review_lineage_drift() -> None:
             )
 
 
+def test_promotion_record_rejects_playbook_identity_drift() -> None:
+    engine, store = _store()
+    with engine.begin() as conn:
+        _persist_promotion_dependencies(conn, store)
+        conn.execute(
+            store.tables["evidence_windows"].update().where(
+                store.tables["evidence_windows"].c.evidence_window_id
+                == "window-1"
+            ).values(playbook_id="different-playbook")
+        )
+        with pytest.raises(
+            ValueError,
+            match="playbook_id",
+        ):
+            store.record_research_promotion(conn, _promotion())
+
+
 def test_promotion_record_requires_timezone_aware_decision_time() -> None:
     base = _promotion()
     kwargs = {

@@ -2103,6 +2103,8 @@ class VNextStore:
                 mismatches.append(f"review_card.{field}")
             if str(window[field]) != str(value):
                 mismatches.append(f"evidence_window.{field}")
+        if str(review["playbook_id"]) != str(window["playbook_id"]):
+            mismatches.append("review_card/evidence_window.playbook_id")
         if str(review["evidence_state"]) != promotion.to_evidence_state.value:
             mismatches.append("review_card.evidence_state")
         if mismatches:
