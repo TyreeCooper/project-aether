@@ -1,7 +1,8 @@
 # AETHER vNext Burn-in Environment Boundary
 
-Status: repository controls implemented; real external burn-in environment remains
-unverified. This document does not authorize LIVE.
+Status: protected external burn-in environment and dedicated database isolation are
+verified. Runtime Product Registry bindings, provider-specific requirements, and
+empirical evidence remain separate gates. This document does not authorize LIVE.
 
 ## Non-negotiable isolation
 
@@ -122,12 +123,19 @@ The control plane uploads durable JSON artifacts for the relevant actions, inclu
 
 A non-startable readiness/preflight run remains inspectable through its artifact.
 
+## Verified external environment boundary
+
+PR #12 burn-in control-plane evidence verifies:
+
+- protected `aether-vnext-burnin` Environment approval is enforced;
+- dedicated PostgreSQL target `aether_vnext_burnin` is reachable and isolated;
+- no known legacy Aether public tables were present before initialization;
+- current vNext migrations and canonical policy bootstrap complete successfully.
+
 ## Current external gates
 
 Repository implementation does not prove the following external facts:
 
-- existence/protection of the `aether-vnext-burnin` GitHub Environment;
-- dedicated PostgreSQL target configuration and isolation;
 - reviewed runtime values for all seed-12 assets;
 - tastyfx private FIX session/specification/conformance details for EURUSD/USDJPY;
 - real held-out research provenance sufficient for every canonical executable route;

@@ -617,48 +617,50 @@ configuration/playbook lineage, and canonical ClosedTrade evidence.
 **AETH-VN-019 status:** CONTAINED.
 
 
-## AETH-VN-020 — Real vNext burn-in environment is not yet provisioned/configured
+## AETH-VN-020 — Real vNext burn-in environment is provisioned and isolated
 
 **Class:** external infrastructure / evidence-environment dependency  
 **Discovered:** forward-paper burn-in deployment handoff  
-**Status:** OPEN / EXTERNAL SETUP REQUIRED  
+**Status:** CLOSED  
 **Blocks repository-side implementation:** NO  
-**Blocks real canonical burn-in preflight and campaign #1:** YES
+**Blocks real canonical burn-in preflight and campaign #1:** NO — environment gate resolved
 
-### Facts
+### Resolution evidence
 
-The vNext replacement branch remains a draft PR and production `main` continues to
-deploy the legacy `aether-prod-api` runtime. There is currently no verified dedicated
-vNext PostgreSQL burn-in book or configured GitHub Environment
-`aether-vnext-burnin`.
+The protected GitHub Environment `aether-vnext-burnin` is operational and its
+required-review boundary has been exercised successfully on PR #12.
 
-The repository now contains a pre-merge PR-label dispatch path, but the external
-GitHub Environment and its secrets/protection rules are still not configured by code.
-No Azure infrastructure connector is available in this session.
+The dedicated PostgreSQL target `aether_vnext_burnin` is reachable through the
+dedicated vNext database configuration. Burn-in Control Plane run #2, attempt 2,
+verified:
 
-### Control
+- `AETHER_VNEXT_ENVIRONMENT=burnin`;
+- connection mode = dedicated database URL;
+- database isolation = true;
+- legacy Aether tables found = none;
+- target database name = `aether_vnext_burnin`.
 
-Repository-side controls are complete:
-- vNext uses only dedicated `AETHER_VNEXT_*` database configuration;
-- legacy production DB variable names are ignored;
+Burn-in Control Plane run #3 then passed authorized request resolution, exact PR-head
+checkout and identity verification, database configuration validation, legacy-target
+refusal, all current vNext schema migrations, and canonical policy bootstrap.
+
+Run #3 stopped only at the separately tracked runtime Product Registry binding gate
+because `AETHER_VNEXT_RUNTIME_BINDINGS_JSON` is not supplied. That dependency remains
+AETH-VN-021 and does not reopen the environment/isolation issue.
+
+### Preserved controls
+
+- vNext accepts only dedicated `AETHER_VNEXT_*` database configuration;
+- legacy production DB variable names remain ignored;
 - the configured target is scanned for known legacy Aether public tables before
-  migrations and fails closed if they are found;
-- contract CI is secret-free; the dedicated burn-in workflow owns secret-bearing work;
-- pre-merge burn-in requires a same-repository PR, exact head branch
-  `aether-vnext-swapout`, an explicit approval label, exact head-SHA checkout, and the
-  `aether-vnext-burnin` environment boundary;
-- WATCH coverage and executable campaign routes are separated. Source-incomplete
-  playbooks remain visible in the manifest but cannot enter Campaign #1;
-- operator preflight/start paths derive the canonical executable universe internally;
-  arbitrary route subsets are not accepted;
-- HELD_OUT baselines used by Campaign #1 require immutable research provenance;
-- campaign creation remains blocked until real canonical preflight returns
-  `startable=true`.
+  migrations;
+- contract CI remains secret-free;
+- secret-bearing work remains behind same-repository PR, exact-head verification,
+  explicit approval labels, and the protected burn-in Environment;
+- no production database, legacy evidence, synthetic held-out evidence, fake campaign
+  state, or live authorization was used.
 
-No production database, legacy evidence, synthetic held-out evidence, or fake campaign
-state may be used to close this issue.
-
-**AETH-VN-020 status:** OPEN / EXTERNAL SETUP REQUIRED.
+**AETH-VN-020 status:** CLOSED.
 
 
 ## AETH-VN-021 — Real runtime Product Registry bindings are not yet supplied
