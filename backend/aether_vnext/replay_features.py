@@ -5,7 +5,6 @@ source-bound numerical facts needed by downstream Family evaluators.
 
 It deliberately does NOT:
 - choose a playbook reference-range lookback;
-- calculate realized-volatility percentile rank;
 - infer event/counter-trend state;
 - infer equity locate/borrow state;
 - create trades, fills, or evidence.
@@ -30,6 +29,11 @@ from aether_vnext.indicator_convention import (
     ema50,
     realized_vol14,
 )
+from aether_vnext.playbook_runtime import VolatilityBand, volatility_band
+from aether_vnext.volatility_percentile import (
+    VolatilityPercentileSnapshot,
+    realized_vol14_percentile_90d,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +51,32 @@ class ClosedBarFeatureSnapshot:
     realized_vol14_current: float
     prior_range: PriorClosedBarRange | None
     indicator_convention_version: str = INDICATOR_CONVENTION_VERSION
+
+
+@dataclass(frozen=True, slots=True)
+class RegimeReadyReplayFeatures:
+    numerical: ClosedBarFeatureSnapshot
+    volatility: VolatilityPercentileSnapshot
+    volatility_band: VolatilityBand
+
+    def __post_init__(self) -> None:
+        if self.numerical.asset_id != self.volatility.asset_id:
+            raise ValueError("regime-ready feature asset mismatch")
+        if self.numerical.interval != self.volatility.interval:
+            raise ValueError("regime-ready feature interval mismatch")
+        if (
+            self.numerical.trigger_bar.bucket_close_utc
+            != self.volatility.trigger_close_utc
+        ):
+            raise ValueError("regime-ready feature trigger mismatch")
+        if (
+            abs(
+                self.numerical.realized_vol14_current
+                - self.volatility.current_realized_vol14
+            )
+            > 1e-15
+        ):
+            raise ValueError("regime-ready RV14 calculations disagree")
 
 
 def build_closed_bar_feature_snapshot(
@@ -107,4 +137,33 @@ def build_closed_bar_feature_snapshot(
         atr14_current=atr14(rows),
         realized_vol14_current=realized_vol14(rows),
         prior_range=range_result,
+    )
+
+
+
+def build_regime_ready_replay_features(
+    bars: Sequence[Bar],
+    *,
+    as_of_utc: datetime,
+    prior_range_lookback: int | None = None,
+) -> RegimeReadyReplayFeatures:
+    """Build PIT numerical + 90-day volatility-regime features.
+
+    This is still a feature boundary. It does not choose a playbook family or
+    infer event, dependency, locate, cost, risk, or venue state.
+    """
+    rows = tuple(bars)
+    numerical = build_closed_bar_feature_snapshot(
+        rows,
+        as_of_utc=as_of_utc,
+        prior_range_lookback=prior_range_lookback,
+    )
+    volatility = realized_vol14_percentile_90d(
+        rows,
+        as_of_utc=as_of_utc,
+    )
+    return RegimeReadyReplayFeatures(
+        numerical=numerical,
+        volatility=volatility,
+        volatility_band=volatility_band(volatility.percentile),
     )

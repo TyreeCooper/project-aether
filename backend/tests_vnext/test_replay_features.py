@@ -12,8 +12,10 @@ from aether_vnext.indicator_convention import (
     ema50,
     realized_vol14,
 )
+from aether_vnext.playbook_runtime import VolatilityBand
 from aether_vnext.replay_features import (
     build_closed_bar_feature_snapshot,
+    build_regime_ready_replay_features,
 )
 
 
@@ -153,6 +155,57 @@ def test_mixed_asset_history_fails_closed_through_indicator_contract() -> None:
     bars = (*_bars(59), _bar(59, asset_id="eth"))
     with pytest.raises(ValueError, match="asset_id"):
         build_closed_bar_feature_snapshot(
+            bars,
+            as_of_utc=bars[-1].bucket_close_utc,
+        )
+
+
+
+def test_regime_ready_features_bind_percentile_and_band_without_family_choice() -> None:
+    hour = timedelta(hours=1)
+    start = datetime(2026, 6, 1, 0, 0, tzinfo=UTC)
+
+    def hourly_bar(index: int, close: float) -> Bar:
+        opened = start + index * hour
+        closed = opened + hour
+        return Bar(
+            asset_id="btc",
+            interval=hour,
+            bucket_open_utc=opened,
+            bucket_close_utc=closed,
+            open=close,
+            high=close,
+            low=close,
+            close=close,
+            volume=1.0,
+            first_exchange_ts=opened + timedelta(seconds=1),
+            last_exchange_ts=closed - timedelta(microseconds=1),
+            print_count=1,
+            source_id="reviewed-pit-bars",
+        )
+
+    count = 92 * 24
+    bars = tuple(hourly_bar(index, 100.0) for index in range(count - 1)) + (
+        hourly_bar(count - 1, 110.0),
+    )
+
+    result = build_regime_ready_replay_features(
+        bars,
+        as_of_utc=bars[-1].bucket_close_utc,
+        prior_range_lookback=20,
+    )
+
+    assert result.numerical.asset_id == "btc"
+    assert result.numerical.prior_range is not None
+    assert result.volatility.reference_count > 0
+    assert result.volatility.percentile == pytest.approx(100.0)
+    assert result.volatility_band is VolatilityBand.ABOVE_85
+
+
+def test_regime_ready_features_fail_closed_without_full_90_day_history() -> None:
+    bars = _bars(60)
+    with pytest.raises(ValueError, match="pre-window RV14 warm-up"):
+        build_regime_ready_replay_features(
             bars,
             as_of_utc=bars[-1].bucket_close_utc,
         )
