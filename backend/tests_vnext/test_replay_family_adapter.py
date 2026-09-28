@@ -56,15 +56,50 @@ def _features(
         print_count=1,
         source_id="reviewed-pit-bars",
     )
-    prior = (
-        None
-        if prior_low is None or prior_high is None
-        else PriorClosedBarRange(
+    if prior_low is None or prior_high is None:
+        prior = None
+    else:
+        first_ref_open = opened - (2 * interval)
+        last_ref_open = opened - interval
+        first_ref = Bar(
+            asset_id=asset_id,
+            interval=interval,
+            bucket_open_utc=first_ref_open,
+            bucket_close_utc=first_ref_open + interval,
+            open=(prior_low + prior_high) / 2.0,
+            high=prior_high,
+            low=prior_low,
+            close=(prior_low + prior_high) / 2.0,
+            volume=1.0,
+            first_exchange_ts=first_ref_open + timedelta(seconds=1),
+            last_exchange_ts=first_ref_open + interval - timedelta(microseconds=1),
+            print_count=1,
+            source_id="reviewed-pit-bars",
+        )
+        last_ref = Bar(
+            asset_id=asset_id,
+            interval=interval,
+            bucket_open_utc=last_ref_open,
+            bucket_close_utc=last_ref_open + interval,
+            open=(prior_low + prior_high) / 2.0,
+            high=prior_high,
+            low=prior_low,
+            close=(prior_low + prior_high) / 2.0,
+            volume=1.0,
+            first_exchange_ts=last_ref_open + timedelta(seconds=1),
+            last_exchange_ts=last_ref_open + interval - timedelta(microseconds=1),
+            print_count=1,
+            source_id="reviewed-pit-bars",
+        )
+        prior = PriorClosedBarRange(
+            asset_id=asset_id,
             lookback_bars=20,
             high=prior_high,
             low=prior_low,
+            mid=(prior_high + prior_low) / 2.0,
+            first_bar=first_ref,
+            last_bar=last_ref,
         )
-    )
     numerical = ClosedBarFeatureSnapshot(
         asset_id=asset_id,
         interval=interval,
