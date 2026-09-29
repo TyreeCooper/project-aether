@@ -7,6 +7,7 @@ import pytest
 from aether_vnext.bars import Bar
 from aether_vnext.volatility_percentile import (
     VOLATILITY_PERCENTILE_CONVENTION_VERSION,
+    VolatilityPercentileSnapshot,
     empirical_midrank_percentile,
     realized_vol14_percentile_90d,
 )
@@ -113,6 +114,62 @@ def test_future_and_forming_bars_fail_closed() -> None:
             forming,
             as_of_utc=forming[-1].bucket_close_utc,
         )
+
+
+def test_midrank_rejects_boolean_volatility_inputs() -> None:
+    with pytest.raises(
+        ValueError,
+        match="current volatility must be numeric, not boolean",
+    ):
+        empirical_midrank_percentile(True, (1.0,))
+
+    with pytest.raises(
+        ValueError,
+        match="reference volatility values must be numeric, not boolean",
+    ):
+        empirical_midrank_percentile(1.0, (False,))
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    (
+        (
+            "current_realized_vol14",
+            True,
+            "current_realized_vol14 must be numeric, not boolean",
+        ),
+        (
+            "percentile",
+            True,
+            "percentile must be numeric, not boolean",
+        ),
+    ),
+)
+def test_volatility_snapshot_rejects_boolean_numerics(
+    field: str,
+    value: object,
+    message: str,
+) -> None:
+    base = VolatilityPercentileSnapshot(
+        asset_id="btc",
+        interval=HOUR,
+        trigger_close_utc=T0,
+        window_start_utc=T0 - timedelta(days=90),
+        window_end_exclusive_utc=T0,
+        current_realized_vol14=1.0,
+        reference_count=2,
+        less_count=1,
+        equal_count=0,
+        percentile=50.0,
+    )
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs[field] = value
+
+    with pytest.raises(ValueError, match=message):
+        VolatilityPercentileSnapshot(**kwargs)
 
 
 def test_empty_midrank_reference_fails_closed() -> None:
