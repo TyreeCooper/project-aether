@@ -565,11 +565,10 @@ def test_runtime_schema_facade_is_pinned_to_revision_0027() -> None:
         assert table_name in intelligence_migration
         assert table_name in store.tables
 
-    assert "trg_source_trust_decisions_immutable" in intelligence_migration
-    assert "trg_intelligence_health_snapshots_immutable" in intelligence_migration
-    assert "trg_cross_source_conflict_assessments_immutable" in intelligence_migration
-    assert "trg_event_reaction_measurements_immutable" in intelligence_migration
-    assert "trg_event_reaction_rollups_immutable" in intelligence_migration
+    assert "def _immutable_trigger(table_name: str) -> None:" in intelligence_migration
+    assert "BEFORE UPDATE OR DELETE" in intelligence_migration
+    assert "_immutable_trigger(table_name)" in intelligence_migration
+    assert "reject_immutable_mutation" in intelligence_migration
 
     sources = store.tables["intelligence_sources"]
     assert {
