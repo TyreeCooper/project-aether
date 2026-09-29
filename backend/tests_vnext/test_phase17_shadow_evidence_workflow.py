@@ -19,6 +19,7 @@ def test_shadow_evidence_workflow_is_manual_protected_and_branch_scoped() -> Non
     assert "pull_request:" not in workflow
     assert "github.ref_name == 'aether-vnext-swapout'" in workflow
     assert "environment: aether-vnext-burnin" in workflow
+    assert "permissions:\n  contents: read" in workflow
     assert 'test "$GITHUB_REF_NAME" = "aether-vnext-swapout"' in workflow
 
 
