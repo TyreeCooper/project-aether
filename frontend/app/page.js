@@ -15,6 +15,21 @@ function text(value, fallback = "—") {
   return value === null || value === undefined || value === "" ? fallback : String(value);
 }
 
+function timestamp(value, fallback = "waiting") {
+  if (!value) return fallback;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return fallback;
+  return parsed.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZoneName: "short",
+  });
+}
+
 function number(value, digits = 2) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return "—";
@@ -161,7 +176,8 @@ export default function DashboardPage() {
       </header>
 
       <section className="statusStrip" aria-label="Floor status">
-        <span><b>Snapshot</b> {text(floor?.as_of_utc, "waiting for vNext")}</span>
+        <span><b>App restarted</b> {timestamp(floor?.runtime_started_at_utc, "waiting for runtime")}</span>
+        <span><b>Data refreshed</b> {timestamp(floor?.as_of_utc, "waiting for vNext")}</span>
         <span><b>Universe</b> {universe.length}</span>
         <span><b>Attention</b> {top12.length}/12</span>
         <span><b>Open cockpits</b> {cockpits.length}</span>

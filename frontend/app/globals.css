@@ -23,7 +23,7 @@ button { color: inherit; }
 .mode { border: 1px solid var(--line); border-radius: 999px; padding: 7px 9px; font-size: 10px; font-weight: 900; letter-spacing: .08em; white-space: nowrap; }
 .mode.paper { color: var(--active); border-color: color-mix(in srgb, var(--active) 55%, var(--line)); }
 .mode.blocked { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 55%, var(--line)); }
-.statusStrip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--line); }
+.statusStrip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1px; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--line); }
 .statusStrip span { min-width: 0; background: var(--panel); padding: 10px 12px; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .statusStrip b { color: var(--text); margin-right: 5px; }
 .apiNotice { display: grid; gap: 3px; margin-top: 12px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--active) 45%, var(--line)); border-radius: 10px; background: color-mix(in srgb, var(--active) 7%, var(--panel)); }

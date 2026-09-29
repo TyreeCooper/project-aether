@@ -8,6 +8,7 @@ runtime or silently cutting traffic over early.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from datetime import datetime, timezone
 import inspect
 
 from fastapi import APIRouter
@@ -23,9 +24,16 @@ FloorSnapshotProvider = Callable[[], UnifiedFirmFloorSnapshot | Awaitable[Unifie
 
 def create_operator_floor_router(
     snapshot_provider: FloorSnapshotProvider,
+    *,
+    runtime_started_at_utc: datetime | None = None,
 ) -> APIRouter:
     if not callable(snapshot_provider):
         raise ValueError("snapshot_provider must be callable")
+
+    started_at = runtime_started_at_utc or datetime.now(timezone.utc)
+    if started_at.tzinfo is None:
+        raise ValueError("runtime_started_at_utc must be timezone-aware")
+    started_at = started_at.astimezone(timezone.utc)
 
     router = APIRouter()
 
@@ -37,6 +45,8 @@ def create_operator_floor_router(
             raise TypeError(
                 "snapshot_provider must return UnifiedFirmFloorSnapshot"
             )
-        return build_unified_firm_floor(snapshot)
+        payload = build_unified_firm_floor(snapshot)
+        payload["runtime_started_at_utc"] = started_at.isoformat()
+        return payload
 
     return router

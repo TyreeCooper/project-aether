@@ -56,9 +56,14 @@ def _snapshot() -> UnifiedFirmFloorSnapshot:
     )
 
 
-def _client() -> TestClient:
+def _client(*, runtime_started_at_utc: datetime | None = None) -> TestClient:
     app = FastAPI()
-    app.include_router(create_operator_floor_router(_snapshot))
+    app.include_router(
+        create_operator_floor_router(
+            _snapshot,
+            runtime_started_at_utc=runtime_started_at_utc,
+        )
+    )
     return TestClient(app)
 
 
@@ -87,3 +92,30 @@ def test_floor_router_has_no_legacy_runtime_import() -> None:
     source = module.__loader__.get_source(module.__name__)
     assert "from app" not in source
     assert "import app" not in source
+
+
+def test_floor_router_exposes_fixed_runtime_start_separate_from_snapshot_time() -> None:
+    runtime_started = datetime(2026, 9, 29, 17, 0, tzinfo=UTC)
+    client = _client(runtime_started_at_utc=runtime_started)
+
+    first = client.get("/api/v1/vnext/floor").json()
+    second = client.get("/api/v1/vnext/floor").json()
+
+    assert first["runtime_started_at_utc"] == runtime_started.isoformat()
+    assert second["runtime_started_at_utc"] == runtime_started.isoformat()
+    assert first["as_of_utc"] == T0.isoformat()
+    assert second["as_of_utc"] == T0.isoformat()
+    assert first["runtime_started_at_utc"] != first["as_of_utc"]
+
+
+def test_floor_router_rejects_naive_runtime_start_timestamp() -> None:
+    app = FastAPI()
+    try:
+        create_operator_floor_router(
+            _snapshot,
+            runtime_started_at_utc=datetime(2026, 9, 29, 17, 0),
+        )
+    except ValueError as exc:
+        assert str(exc) == "runtime_started_at_utc must be timezone-aware"
+    else:
+        raise AssertionError("naive runtime start timestamp must be rejected")
