@@ -6,6 +6,8 @@ import pytest
 
 from aether_vnext.news import (
     EventAssetLink,
+    EventMarketResponse,
+    HistoricalAnalogRun,
     NewsSource,
     NormalizedEvent,
     RawNewsItem,
@@ -235,6 +237,127 @@ def test_event_asset_link_requires_immutable_canonical_evidence_ids() -> None:
 
     with pytest.raises(ValueError, match="evidence_source_ids"):
         _link(evidence_source_ids=(" fed ",))
+
+
+def _response(**overrides: object) -> EventMarketResponse:
+    kwargs: dict[str, object] = {
+        "event_id": "event-1",
+        "asset_id": "btc",
+        "pre_event_observation_id": "obs-pre-1",
+        "return_1m": 0.01,
+        "return_5m": 0.02,
+        "return_15m": 0.03,
+        "return_1h": 0.04,
+        "return_4h": 0.05,
+        "return_1d": 0.06,
+        "mfe": 0.07,
+        "mae": -0.02,
+        "realized_vol_change": 0.01,
+        "volume_change": 0.10,
+        "spread_change": -0.01,
+        "liquidity_change": 0.02,
+        "correlation_change": 0.03,
+        "continuation_or_reversal": "continuation",
+        "stabilization_time": 300.0,
+        "market_data_version": "market-v1",
+    }
+    kwargs.update(overrides)
+    return EventMarketResponse(**kwargs)
+
+
+def _analog(**overrides: object) -> HistoricalAnalogRun:
+    kwargs: dict[str, object] = {
+        "analog_run_id": "analog-1",
+        "query_event_or_state_id": "event-1",
+        "feature_spec_version": "features-v1",
+        "as_of_utc": T0,
+        "eligible_history_cutoff_utc": T0,
+        "matched_event_ids": ("event-old-1",),
+        "similarity_scores": (0.8,),
+        "outcome_distribution": {"median_return_1h": 0.01},
+        "created_at_utc": T0,
+        "research_only": True,
+    }
+    kwargs.update(overrides)
+    return HistoricalAnalogRun(**kwargs)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    (
+        ("event_id", " event-1 ", "event_id must be canonical text"),
+        ("return_1m", True, "return_1m must be finite when present"),
+        ("mfe", float("nan"), "mfe must be finite when present"),
+        (
+            "continuation_or_reversal",
+            " continuation ",
+            "continuation_or_reversal must be canonical text",
+        ),
+    ),
+)
+def test_event_market_response_rejects_invalid_contract(
+    field: str,
+    value: object,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        _response(**{field: value})
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    (
+        (
+            "as_of_utc",
+            T0.replace(tzinfo=None),
+            "as_of_utc must be timezone-aware",
+        ),
+        ("research_only", False, "historical analog output is research_only"),
+        (
+            "matched_event_ids",
+            ["event-old-1"],
+            "matched_event_ids must be an immutable tuple",
+        ),
+        (
+            "similarity_scores",
+            (True,),
+            "similarity_scores must be finite numerics",
+        ),
+    ),
+)
+def test_historical_analog_rejects_invalid_contract(
+    field: str,
+    value: object,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        _analog(**{field: value})
+
+
+def test_historical_analog_enforces_alignment_and_no_lookahead_cutoff() -> None:
+    with pytest.raises(
+        ValueError,
+        match="matched_event_ids and similarity_scores must align",
+    ):
+        _analog(
+            matched_event_ids=("event-old-1", "event-old-2"),
+            similarity_scores=(0.8,),
+        )
+
+    with pytest.raises(
+        ValueError,
+        match="history cutoff cannot be after as_of_utc",
+    ):
+        _analog(
+            eligible_history_cutoff_utc=datetime(
+                2026,
+                9,
+                1,
+                12,
+                1,
+                tzinfo=UTC,
+            )
+        )
 
 
 def test_provider_identity_key_remains_deterministic() -> None:
