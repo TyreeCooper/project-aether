@@ -382,11 +382,11 @@ def test_phase5_execution_reservation_columns_are_in_current_schema() -> None:
     assert "fill_market_observation_id" not in columns
 
 
-def test_runtime_schema_facade_is_pinned_to_revision_0028() -> None:
+def test_runtime_schema_facade_is_pinned_to_revision_0029() -> None:
     _, store = _engine_and_store()
     backend = Path(__file__).resolve().parents[1]
     facade = (backend / "aether_vnext" / "schema.py").read_text(encoding="utf-8")
-    assert "schema_v0028" in facade
+    assert "schema_v0029" in facade
 
     campaign_migration = (
         backend
@@ -660,6 +660,34 @@ def test_runtime_schema_facade_is_pinned_to_revision_0028() -> None:
         "created_at_utc",
         "research_only",
     } <= set(analogs.c.keys())
+
+    audit_migration = (
+        backend
+        / "alembic"
+        / "versions"
+        / "0029_aether_vnext_intelligence_shadow_audit.py"
+    ).read_text(encoding="utf-8")
+    assert 'revision: str = "0029"' in audit_migration
+    assert 'down_revision: Union[str, None] = "0028"' in audit_migration
+    assert "trg_intelligence_shadow_audits_immutable" in audit_migration
+    assert "BEFORE UPDATE OR DELETE" in audit_migration
+
+    audits = store.tables["intelligence_shadow_audits"]
+    assert {
+        "audit_id",
+        "opportunity_id",
+        "route_id",
+        "as_of_utc",
+        "baseline_configuration_hash",
+        "shadow_configuration_hash",
+        "enabled_components",
+        "baseline_outcome",
+        "shadow_outcome",
+        "evidence_ids",
+        "research_only",
+        "order_created",
+        "trade_influence_enabled",
+    } <= set(audits.c.keys())
 
 
 def test_phase6_atomic_risk_admission_schema_is_explicit() -> None:
