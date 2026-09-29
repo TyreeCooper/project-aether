@@ -75,6 +75,10 @@ class VolatilityPercentileSnapshot:
             != self.trigger_close_utc - VOLATILITY_PERCENTILE_WINDOW
         ):
             raise ValueError("volatility window must cover prior 90 days")
+        if isinstance(self.current_realized_vol14, bool):
+            raise ValueError(
+                "current_realized_vol14 must be numeric, not boolean"
+            )
         current = float(self.current_realized_vol14)
         if not isfinite(current) or current < 0.0:
             raise ValueError(
@@ -92,6 +96,8 @@ class VolatilityPercentileSnapshot:
             raise ValueError("reference_count must be positive")
         if self.less_count + self.equal_count > self.reference_count:
             raise ValueError("volatility counts exceed reference_count")
+        if isinstance(self.percentile, bool):
+            raise ValueError("percentile must be numeric, not boolean")
         percentile = float(self.percentile)
         if not isfinite(percentile) or not 0.0 <= percentile <= 100.0:
             raise ValueError("percentile must be finite and in [0,100]")
@@ -108,11 +114,18 @@ def empirical_midrank_percentile(
     current: float,
     reference: Sequence[float],
 ) -> tuple[float, int, int]:
+    if isinstance(current, bool):
+        raise ValueError("current volatility must be numeric, not boolean")
     value = float(current)
     if not isfinite(value) or value < 0.0:
         raise ValueError("current volatility must be finite and nonnegative")
 
-    rows = tuple(float(item) for item in reference)
+    raw_rows = tuple(reference)
+    if any(isinstance(item, bool) for item in raw_rows):
+        raise ValueError(
+            "reference volatility values must be numeric, not boolean"
+        )
+    rows = tuple(float(item) for item in raw_rows)
     if not rows:
         raise ValueError("reference distribution cannot be empty")
     if any(not isfinite(item) or item < 0.0 for item in rows):
