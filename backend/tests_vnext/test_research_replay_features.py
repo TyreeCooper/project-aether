@@ -316,7 +316,7 @@ def test_research_percentile_excludes_trigger_and_uses_prior_90_days() -> None:
         (
             "percentile",
             lambda base: base.percentile - 1.0,
-            "percentile disagrees with counts",
+            "percentile disagrees with count",
         ),
     ),
 )
