@@ -1,0 +1,102 @@
+name: AETHER vNext Shadow Evidence Probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Explicit non-production AETHER app base URL"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aether-vnext-shadow-evidence
+  cancel-in-progress: false
+
+jobs:
+  shadow-evidence:
+    if: ${{ github.ref_name == 'aether-vnext-swapout' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: aether-vnext-burnin
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout selected vNext revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Verify authorized branch
+        shell: bash
+        working-directory: .
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "aether-vnext-swapout"
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$GITHUB_SHA"
+          echo "authorized head: $actual"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Validate explicit target
+        id: target
+        shell: bash
+        env:
+          SHADOW_BASE_URL: ${{ inputs.base_url }}
+        run: |
+          set -euo pipefail
+          case "$SHADOW_BASE_URL" in
+            https://*) ;;
+            *)
+              echo "base_url must use https."
+              exit 2
+              ;;
+          esac
+          if printf '%s' "$SHADOW_BASE_URL" | grep -qi 'aether-prod-api'; then
+            echo "Production app target is forbidden for shadow evidence."
+            exit 2
+          fi
+          echo "base_url=$SHADOW_BASE_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Probe deployed shadow coexistence
+        id: probe
+        env:
+          PYTHONPATH: .
+          SHADOW_BASE_URL: ${{ steps.target.outputs.base_url }}
+        shell: bash
+        run: |
+          set +e
+          python scripts/aether_vnext_shadow_http_probe.py \
+            --base-url "$SHADOW_BASE_URL" \
+            --output aether-vnext-shadow-http-probe.json
+          status=$?
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload shadow evidence
+        if: ${{ always() && steps.probe.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-vnext-shadow-http-probe-${{ github.run_id }}
+          path: backend/aether-vnext-shadow-http-probe.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Propagate probe result
+        if: ${{ steps.probe.outputs.exit_code != '0' }}
+        shell: bash
+        run: |
+          echo "Shadow evidence probe is not green; inspect the JSON artifact."
+          exit "${{ steps.probe.outputs.exit_code }}"
