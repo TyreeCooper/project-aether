@@ -81,3 +81,17 @@ def test_floor_surfaces_fresh_test_epoch_bank_and_blotter_confirmation() -> None
     assert "seed_bank_usd" in page
     assert "blotter_trade_count" in page
     assert ".testStatus" in css
+
+
+def test_vnext_frontend_is_static_exported_for_same_origin_azure_mount() -> None:
+    root = _repo_root()
+    page = (root / "frontend" / "app" / "page.js").read_text(encoding="utf-8")
+    config = (root / "frontend" / "next.config.js").read_text(encoding="utf-8")
+    main = (root / "backend" / "app" / "main.py").read_text(encoding="utf-8")
+
+    assert 'output: "export"' in config
+    assert 'basePath: "/vnext"' in config
+    assert 'trailingSlash: true' in config
+    assert 'process.env.NEXT_PUBLIC_API_BASE || ""' in page
+    assert 'Path(__file__).parent / "vnext_ui"' in main
+    assert 'app.mount("/vnext", StaticFiles(directory=VNEXT_UI, html=True)' in main

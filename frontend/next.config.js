@@ -1,5 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: "standalone",
+  output: "export",
+  basePath: "/vnext",
+  trailingSlash: true,
 };
 module.exports = nextConfig;

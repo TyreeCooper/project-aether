@@ -29,6 +29,7 @@ from app.universe import public_catalog
 from app.vnext_shadow import mount_configured_vnext_shadow_floor
 
 STATIC = Path(__file__).parent / "static"
+VNEXT_UI = Path(__file__).parent / "vnext_ui"
 ICON_LINKS = (
     '<link rel="icon" href="/favicon.svg?v=3" type="image/svg+xml"/>'
     '<link rel="icon" href="/static/aether-mark.svg?v=3" type="image/svg+xml"/>'
@@ -651,5 +652,8 @@ async def flatten(_: None = Depends(require_operator)):
 async def unlock(_: None = Depends(require_operator)):
     return await engine.unlock()
 
+
+if VNEXT_UI.exists():
+    app.mount("/vnext", StaticFiles(directory=VNEXT_UI, html=True), name="vnext-ui")
 
 app.mount("/static", StaticFiles(directory=STATIC), name="static")

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-const apiBase = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
+const apiBase = process.env.NEXT_PUBLIC_API_BASE || "";
 const floorPath = process.env.NEXT_PUBLIC_AETHER_FLOOR_PATH || "/api/v1/vnext/floor";
 
 async function getJson(path) {
