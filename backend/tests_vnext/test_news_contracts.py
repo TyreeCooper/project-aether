@@ -5,7 +5,9 @@ from datetime import datetime, timezone
 import pytest
 
 from aether_vnext.news import (
+    EventAssetLink,
     NewsSource,
+    NormalizedEvent,
     RawNewsItem,
     raw_news_identity_key,
 )
@@ -128,6 +130,111 @@ def test_raw_news_identity_key_rejects_noncanonical_or_naive_inputs() -> None:
             published_at_utc=T0.replace(tzinfo=None),
             normalized_title="policy statement",
         )
+
+
+def _event(**overrides: object) -> NormalizedEvent:
+    kwargs: dict[str, object] = {
+        "event_id": "event-1",
+        "event_cluster_id": "cluster-1",
+        "event_type": "macro_release",
+        "source_news_item_ids": ("news-1",),
+        "assets": ("usd",),
+        "clusters": ("rates",),
+        "canonical_event_at_utc": T0,
+        "information_available_at_utc": T0,
+        "scheduled": True,
+        "expected": True,
+        "consensus": 2.0,
+        "actual": 2.1,
+        "surprise_magnitude": 0.1,
+        "direction": "up",
+        "severity": 0.5,
+        "novelty": 0.2,
+        "confidence": 0.9,
+        "market_scope": "macro",
+        "macro": True,
+        "normalizer_version": "normalizer-v1",
+    }
+    kwargs.update(overrides)
+    return NormalizedEvent(**kwargs)
+
+
+def _link(**overrides: object) -> EventAssetLink:
+    kwargs: dict[str, object] = {
+        "event_id": "event-1",
+        "asset_id": "usd",
+        "relation_type": "direct",
+        "confidence": 0.9,
+        "evidence_source_ids": ("fed",),
+        "created_at_utc": T0,
+        "linker_version": "linker-v1",
+    }
+    kwargs.update(overrides)
+    return EventAssetLink(**kwargs)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    (
+        ("event_id", " event-1 ", "event_id must be canonical text"),
+        (
+            "canonical_event_at_utc",
+            T0.replace(tzinfo=None),
+            "canonical_event_at_utc must be timezone-aware",
+        ),
+        ("scheduled", 1, "scheduled must be boolean"),
+        ("expected", 1, "expected must be boolean when present"),
+        ("macro", 1, "macro must be boolean"),
+        ("severity", True, "severity must be finite when present"),
+    ),
+)
+def test_normalized_event_rejects_invalid_contract(
+    field: str,
+    value: object,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        _event(**{field: value})
+
+
+def test_normalized_event_requires_immutable_canonical_identity_collections() -> None:
+    with pytest.raises(ValueError, match="assets must be an immutable tuple"):
+        _event(assets=["usd"])
+
+    with pytest.raises(
+        ValueError,
+        match="source_news_item_ids entries must be canonical text",
+    ):
+        _event(source_news_item_ids=(" news-1 ",))
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    (
+        ("event_id", " event-1 ", "event_id must be canonical text"),
+        ("confidence", True, "confidence must be finite"),
+        (
+            "created_at_utc",
+            T0.replace(tzinfo=None),
+            "created_at_utc must be timezone-aware",
+        ),
+    ),
+)
+def test_event_asset_link_rejects_invalid_contract(
+    field: str,
+    value: object,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        _link(**{field: value})
+
+
+def test_event_asset_link_requires_immutable_canonical_evidence_ids() -> None:
+    with pytest.raises(ValueError, match="evidence_source_ids"):
+        _link(evidence_source_ids=["fed"])
+
+    with pytest.raises(ValueError, match="evidence_source_ids"):
+        _link(evidence_source_ids=(" fed ",))
 
 
 def test_provider_identity_key_remains_deterministic() -> None:
