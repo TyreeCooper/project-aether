@@ -95,4 +95,6 @@ def test_phase17_closeout_document_keeps_actual_activation_open() -> None:
     assert "PAPER ONLY / LIVE HARD BLOCKED" in closeout
     assert "has **not**" in closeout
     assert "runtime authority actually changes" in closeout
-    assert "Phase 18 — Forward Paper Evidence remains separately" in closeout\n    assert "synthetic runtime, restart, rollback" in closeout\n    assert "aether-vnext-burnin" in closeout
+    assert "Phase 18 — Forward Paper Evidence remains separately" in closeout
+    assert "synthetic runtime, restart, rollback" in closeout
+    assert "aether-vnext-burnin" in closeout
