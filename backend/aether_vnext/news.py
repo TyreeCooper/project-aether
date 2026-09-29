@@ -19,6 +19,35 @@ class NewsSource:
     active: bool
     terms_licensing_metadata_ref: str | None
 
+    def __post_init__(self) -> None:
+        for name in (
+            "source_id",
+            "source_name",
+            "source_class",
+            "primary_or_secondary",
+            "authority_class",
+            "base_timezone",
+            "provider_adapter_id",
+        ):
+            value = getattr(self, name)
+            if (
+                not isinstance(value, str)
+                or not value
+                or value != value.strip()
+            ):
+                raise ValueError(f"{name} must be canonical text")
+        if not isinstance(self.active, bool):
+            raise ValueError("active must be boolean")
+        if self.terms_licensing_metadata_ref is not None and (
+            not isinstance(self.terms_licensing_metadata_ref, str)
+            or not self.terms_licensing_metadata_ref
+            or self.terms_licensing_metadata_ref
+            != self.terms_licensing_metadata_ref.strip()
+        ):
+            raise ValueError(
+                "terms_licensing_metadata_ref must be canonical text when present"
+            )
+
 
 @dataclass(frozen=True, slots=True)
 class RawNewsItem:
@@ -37,6 +66,46 @@ class RawNewsItem:
     ingest_status: str
     dedupe_key: str
     raw_payload_ref: str
+
+    def __post_init__(self) -> None:
+        for name in (
+            "news_item_id",
+            "source_id",
+            "title",
+            "body_hash",
+            "language",
+            "ingest_status",
+            "dedupe_key",
+            "raw_payload_ref",
+        ):
+            value = getattr(self, name)
+            if (
+                not isinstance(value, str)
+                or not value
+                or value != value.strip()
+            ):
+                raise ValueError(f"{name} must be canonical text")
+        for name in (
+            "provider_item_id",
+            "canonical_url",
+            "revision_of_news_item_id",
+        ):
+            value = getattr(self, name)
+            if value is not None and (
+                not isinstance(value, str)
+                or not value
+                or value != value.strip()
+            ):
+                raise ValueError(f"{name} must be canonical text when present")
+        for name in (
+            "published_at_utc",
+            "first_seen_at_utc",
+            "received_at_utc",
+        ):
+            if getattr(self, name).tzinfo is None:
+                raise ValueError(f"{name} must be timezone-aware")
+        if not isinstance(self.correction_or_retraction, bool):
+            raise ValueError("correction_or_retraction must be boolean")
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,6 +206,28 @@ def raw_news_identity_key(
     normalized_title: str,
 ) -> str:
     """Return the frozen F-007 SHA-256 raw-item identity key."""
+    for name, value in (
+        ("source_id", source_id),
+        ("normalized_title", normalized_title),
+    ):
+        if (
+            not isinstance(value, str)
+            or not value
+            or value != value.strip()
+        ):
+            raise ValueError(f"{name} must be canonical text")
+    for name, value in (
+        ("provider_item_id", provider_item_id),
+        ("canonical_url", canonical_url),
+    ):
+        if value is not None and (
+            not isinstance(value, str)
+            or not value
+            or value != value.strip()
+        ):
+            raise ValueError(f"{name} must be canonical text when present")
+    if published_at_utc.tzinfo is None:
+        raise ValueError("published_at_utc must be timezone-aware")
     if provider_item_id:
         material = f"{source_id}|{provider_item_id}"
     else:
