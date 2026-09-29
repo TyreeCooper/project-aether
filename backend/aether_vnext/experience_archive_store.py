@@ -1,6 +1,8 @@
 """Durable storage/query adapter for Phase-14 crisis/regime experience."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import sqlalchemy as sa
 from sqlalchemy.engine import Connection
 
@@ -10,6 +12,12 @@ from aether_vnext.experience_archive import (
     retrieve_crisis_regime_archive,
 )
 from aether_vnext.store import VNextStore
+
+
+def _stored_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def load_crisis_regime_archive_entry(
@@ -30,9 +38,9 @@ def load_crisis_regime_archive_entry(
         episode_ref=str(row["episode_ref"]),
         asset_ids=tuple(str(value) for value in (row["asset_ids"] or [])),
         regime_ids=tuple(str(value) for value in (row["regime_ids"] or [])),
-        started_at_utc=row["started_at_utc"],
-        ended_at_utc=row["ended_at_utc"],
-        recorded_at_utc=row["recorded_at_utc"],
+        started_at_utc=_stored_utc(row["started_at_utc"]),
+        ended_at_utc=_stored_utc(row["ended_at_utc"]),
+        recorded_at_utc=_stored_utc(row["recorded_at_utc"]),
         source_record_ids=tuple(
             str(value) for value in (row["source_record_ids"] or [])
         ),
