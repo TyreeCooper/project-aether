@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 import hashlib
+import math
 from typing import Any
 
 
@@ -140,6 +141,88 @@ class NormalizedEvent:
     liquidity: bool = False
     normalizer_version: str = ""
 
+    def __post_init__(self) -> None:
+        for name in (
+            "event_id",
+            "event_cluster_id",
+            "event_type",
+            "market_scope",
+            "normalizer_version",
+        ):
+            value = getattr(self, name)
+            if (
+                not isinstance(value, str)
+                or not value
+                or value != value.strip()
+            ):
+                raise ValueError(f"{name} must be canonical text")
+        for name in ("source_news_item_ids", "assets", "clusters"):
+            values = getattr(self, name)
+            if not isinstance(values, tuple):
+                raise ValueError(f"{name} must be an immutable tuple")
+            for value in values:
+                if (
+                    not isinstance(value, str)
+                    or not value
+                    or value != value.strip()
+                ):
+                    raise ValueError(
+                        f"{name} entries must be canonical text"
+                    )
+        for name in (
+            "canonical_event_at_utc",
+            "information_available_at_utc",
+        ):
+            if getattr(self, name).tzinfo is None:
+                raise ValueError(f"{name} must be timezone-aware")
+        if not isinstance(self.scheduled, bool):
+            raise ValueError("scheduled must be boolean")
+        if self.expected is not None and not isinstance(self.expected, bool):
+            raise ValueError("expected must be boolean when present")
+        for name in (
+            "company_specific",
+            "sector_specific",
+            "macro",
+            "geopolitical",
+            "regulatory",
+            "earnings",
+            "policy",
+            "supply",
+            "demand",
+            "liquidity",
+        ):
+            if not isinstance(getattr(self, name), bool):
+                raise ValueError(f"{name} must be boolean")
+        for name in ("consensus", "actual"):
+            value = getattr(self, name)
+            if value is None:
+                continue
+            if isinstance(value, bool):
+                raise ValueError(f"{name} must not be boolean")
+            if isinstance(value, str):
+                if not value or value != value.strip():
+                    raise ValueError(f"{name} text must be canonical")
+            elif not math.isfinite(float(value)):
+                raise ValueError(f"{name} must be finite when numeric")
+        for name in (
+            "surprise_magnitude",
+            "severity",
+            "novelty",
+            "confidence",
+        ):
+            value = getattr(self, name)
+            if value is not None and (
+                isinstance(value, bool)
+                or not math.isfinite(float(value))
+            ):
+                raise ValueError(f"{name} must be finite when present")
+        if self.direction is not None and (
+            not isinstance(self.direction, str)
+            or not self.direction
+            or self.direction != self.direction.strip()
+        ):
+            raise ValueError("direction must be canonical text when present")
+
 
 @dataclass(frozen=True, slots=True)
 class EventAssetLink:
@@ -150,6 +233,39 @@ class EventAssetLink:
     evidence_source_ids: tuple[str, ...]
     created_at_utc: datetime
     linker_version: str
+
+    def __post_init__(self) -> None:
+        for name in (
+            "event_id",
+            "asset_id",
+            "relation_type",
+            "linker_version",
+        ):
+            value = getattr(self, name)
+            if (
+                not isinstance(value, str)
+                or not value
+                or value != value.strip()
+            ):
+                raise ValueError(f"{name} must be canonical text")
+        if (
+            not isinstance(self.evidence_source_ids, tuple)
+            or any(
+                not isinstance(value, str)
+                or not value
+                or value != value.strip()
+                for value in self.evidence_source_ids
+            )
+        ):
+            raise ValueError(
+                "evidence_source_ids must be an immutable tuple of canonical text"
+            )
+        if isinstance(self.confidence, bool) or not math.isfinite(
+            float(self.confidence)
+        ):
+            raise ValueError("confidence must be finite")
+        if self.created_at_utc.tzinfo is None:
+            raise ValueError("created_at_utc must be timezone-aware")
 
 
 @dataclass(frozen=True, slots=True)
