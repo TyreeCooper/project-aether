@@ -13,6 +13,7 @@ from aether_vnext.research_replay_features import (
     build_research_regime_ready_features,
 )
 from aether_vnext.research_warehouse import ResearchBarRecord
+from aether_vnext.volatility_percentile import VolatilityPercentileSnapshot
 
 
 UTC = timezone.utc
@@ -236,6 +237,63 @@ def test_research_percentile_excludes_trigger_and_uses_prior_90_days() -> None:
     assert result.volatility.current_realized_vol14 == pytest.approx(
         result.numerical.realized_vol14_current
     )
+
+
+@pytest.mark.parametrize(
+    ("field", "value_factory", "message"),
+    (
+        (
+            "window_end_exclusive_utc",
+            lambda base: base.window_end_exclusive_utc - timedelta(seconds=1),
+            "window must end at trigger close",
+        ),
+        (
+            "window_start_utc",
+            lambda base: base.window_start_utc + timedelta(days=1),
+            "window must cover prior 90 days",
+        ),
+        (
+            "convention_version",
+            lambda base: "other",
+            "convention version mismatch",
+        ),
+        (
+            "reference_count",
+            lambda base: 0,
+            "reference_count must be positive",
+        ),
+        (
+            "less_count",
+            lambda base: base.reference_count + 1,
+            "counts exceed reference_count",
+        ),
+        (
+            "percentile",
+            lambda base: base.percentile - 1.0,
+            "percentile disagrees with counts",
+        ),
+    ),
+)
+def test_research_regime_rejects_volatility_snapshot_drift(
+    field: str,
+    value_factory: object,
+    message: str,
+) -> None:
+    result = build_research_regime_ready_features(_selection())
+    base = result.volatility
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs[field] = value_factory(base)
+    drifted = VolatilityPercentileSnapshot(**kwargs)
+
+    with pytest.raises(ValueError, match=message):
+        ResearchRegimeReadyFeatures(
+            numerical=result.numerical,
+            volatility=drifted,
+            volatility_band=result.volatility_band,
+        )
 
 
 def test_research_regime_band_must_match_percentile() -> None:
