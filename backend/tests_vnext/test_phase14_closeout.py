@@ -115,7 +115,8 @@ def test_phase14_change_ledger_preserves_canonical_traceability_fields() -> None
         assert required in source
 
 
-def test_phase14_schema_is_pinned_through_crisis_archive_revision_0031() -> None:
+def test_phase14_crisis_archive_revision_0031_remains_frozen() -> None:
+    frozen_schema = _module("schema_v0031.py")
     facade = _module("schema.py")
     migration = (
         _root()
@@ -123,7 +124,9 @@ def test_phase14_schema_is_pinned_through_crisis_archive_revision_0031() -> None
         / "versions"
         / "0031_aether_vnext_crisis_regime_archive.py"
     ).read_text(encoding="utf-8")
-    assert "schema_v0031" in facade
+    assert "schema_v0030" in frozen_schema
+    assert "crisis_regime_archive_entries" in frozen_schema
+    assert "schema_v0032" in facade
     assert 'revision: str = "0031"' in migration
     assert 'down_revision: Union[str, None] = "0030"' in migration
     assert "trg_crisis_regime_archive_entries_immutable" in migration
