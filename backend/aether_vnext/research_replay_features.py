@@ -153,6 +153,22 @@ class ResearchClosedBarFeatureSnapshot:
             raise ValueError("research feature snapshot close must match trigger")
         if self.indicator_convention_version != INDICATOR_CONVENTION_VERSION:
             raise ValueError("research feature snapshot indicator convention mismatch")
+        for name in (
+            "ema20_current",
+            "ema20_previous",
+            "ema50_current",
+            "atr14_current",
+            "realized_vol14_current",
+        ):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not math.isfinite(float(value)):
+                raise ValueError(
+                    f"research feature snapshot {name} must be finite"
+                )
+        if float(self.atr14_current) < 0.0:
+            raise ValueError("research feature snapshot ATR14 cannot be negative")
+        if float(self.realized_vol14_current) < 0.0:
+            raise ValueError("research feature snapshot RV14 cannot be negative")
         if self.prior_range is not None and self.prior_range.asset_id != self.asset_id:
             raise ValueError("research feature prior range asset mismatch")
 
