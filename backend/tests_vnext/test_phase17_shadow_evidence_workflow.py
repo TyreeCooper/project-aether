@@ -48,3 +48,15 @@ def test_shadow_evidence_workflow_has_no_protected_secret_references() -> None:
     assert "secrets." not in workflow
     assert "AETHER_VNEXT_DATABASE_URL" not in workflow
     assert "azure/login" not in workflow
+
+
+
+def test_vnext_ci_watches_shadow_evidence_workflow_changes() -> None:
+    ci = (
+        _repo_root()
+        / ".github"
+        / "workflows"
+        / "aether-vnext-ci.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "'.github/workflows/aether-vnext-shadow-evidence.yml'" in ci

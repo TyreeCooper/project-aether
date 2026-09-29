@@ -12,6 +12,7 @@ on:
       - 'docs/AETHER_VNEXT_PHASE0_CONTROL.md'
       - '.github/workflows/aether-vnext-ci.yml'
       - '.github/workflows/aether-vnext-burnin.yml'
+      - '.github/workflows/aether-vnext-shadow-evidence.yml'
 
 permissions:
   contents: read
