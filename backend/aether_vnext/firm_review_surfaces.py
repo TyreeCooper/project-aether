@@ -7,14 +7,22 @@ execution authority and must not promote routes, alter Risk, or reset Governor.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone\nfrom zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from typing import Any, Mapping, Sequence
 
 
 def _utc_timestamp(name: str, value: datetime) -> datetime:
     if value.tzinfo is None:
         raise ValueError(f"{name} must be timezone-aware")
-    return value
+    return value.astimezone(timezone.utc)
+
+
+def _operator_timestamp(value: datetime, timezone_name: str) -> str:
+    try:
+        zone = ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError as exc:
+        raise ValueError("operator_timezone must be a valid IANA timezone") from exc
+    return value.astimezone(zone).isoformat()
 
 
 def _mapping_tuple(
@@ -54,6 +62,12 @@ class DailyFirmReviewInput:
             or self.operator_timezone != self.operator_timezone.strip()
         ):
             raise ValueError("operator_timezone must be canonical text")
+        try:
+            ZoneInfo(self.operator_timezone)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError(
+                "operator_timezone must be a valid IANA timezone"
+            ) from exc
         for name in (
             "market_event_regimes",
             "material_news_events_and_analogs",
@@ -95,6 +109,12 @@ class WeeklyFirmResearchReviewInput:
             or self.operator_timezone != self.operator_timezone.strip()
         ):
             raise ValueError("operator_timezone must be canonical text")
+        try:
+            ZoneInfo(self.operator_timezone)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError(
+                "operator_timezone must be a valid IANA timezone"
+            ) from exc
         for name in (
             "route_comparisons",
             "mechanism_comparison_and_concentration",
@@ -127,8 +147,15 @@ def build_daily_firm_review(
     """Build the canonical C9.2 daily review projection."""
     return {
         "review_type": "daily_firm_review",
-        "review_timestamp": review.review_timestamp.isoformat(),
+        "review_timestamp": _utc_timestamp(
+            "review_timestamp",
+            review.review_timestamp,
+        ).isoformat(),
         "operator_timezone": review.operator_timezone,
+        "review_timestamp_local": _operator_timestamp(
+            review.review_timestamp,
+            review.operator_timezone,
+        ),
         "authority": _authority(),
         "market_event_regimes": list(
             _mapping_tuple("market_event_regimes", review.market_event_regimes)
@@ -182,8 +209,15 @@ def build_weekly_firm_research_review(
     """Build the canonical C9.3 weekly research review projection."""
     return {
         "review_type": "weekly_firm_research_review",
-        "review_timestamp": review.review_timestamp.isoformat(),
+        "review_timestamp": _utc_timestamp(
+            "review_timestamp",
+            review.review_timestamp,
+        ).isoformat(),
         "operator_timezone": review.operator_timezone,
+        "review_timestamp_local": _operator_timestamp(
+            review.review_timestamp,
+            review.operator_timezone,
+        ),
         "authority": _authority(),
         "promotion_policy": {
             "automatic_promotion": False,
