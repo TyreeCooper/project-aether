@@ -72,5 +72,6 @@ def test_shadow_mount_contract_forbids_cutover_and_second_runtime() -> None:
         "paper_only": True,
         "live_blocked": True,
         "legacy_fallback_allowed": False,
+        "database_source": "dedicated_aether_vnext_burnin",
         "mutation_methods": (),
     }
