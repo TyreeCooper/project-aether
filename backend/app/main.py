@@ -26,6 +26,7 @@ from app.paper_exec import (
     install as install_harsh_paper,
 )
 from app.universe import public_catalog
+from app.vnext_shadow import mount_configured_vnext_shadow_floor
 
 STATIC = Path(__file__).parent / "static"
 ICON_LINKS = (
@@ -75,6 +76,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Phase 16: GET-only shadow mount; no database is opened until the route is read.
+mount_configured_vnext_shadow_floor(app)
 
 
 @app.middleware("http")

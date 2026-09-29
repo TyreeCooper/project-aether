@@ -7,7 +7,8 @@ runtime or silently cutting traffic over early.
 """
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+import inspect
 
 from fastapi import APIRouter
 
@@ -17,7 +18,7 @@ from aether_vnext.operator_floor import (
 )
 
 
-FloorSnapshotProvider = Callable[[], UnifiedFirmFloorSnapshot]
+FloorSnapshotProvider = Callable[[], UnifiedFirmFloorSnapshot | Awaitable[UnifiedFirmFloorSnapshot]]
 
 
 def create_operator_floor_router(
@@ -29,8 +30,9 @@ def create_operator_floor_router(
     router = APIRouter()
 
     @router.get("/api/v1/vnext/floor")
-    def read_unified_firm_floor() -> dict[str, object]:
-        snapshot = snapshot_provider()
+    async def read_unified_firm_floor() -> dict[str, object]:
+        result = snapshot_provider()
+        snapshot = await result if inspect.isawaitable(result) else result
         if not isinstance(snapshot, UnifiedFirmFloorSnapshot):
             raise TypeError(
                 "snapshot_provider must return UnifiedFirmFloorSnapshot"
