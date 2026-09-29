@@ -90,9 +90,9 @@ def test_phase17_closeout_document_keeps_actual_activation_open() -> None:
         _repo_root() / "docs" / "AETHER_PHASE17_CLOSEOUT.md"
     ).read_text(encoding="utf-8")
 
-    assert "REPOSITORY CONTROL-PLANE PREP CLOSEOUT CANDIDATE" in closeout
+    assert "REPOSITORY CONTROL-PLANE PREP CLOSED" in closeout
     assert "RUNTIME ACTIVATION BLOCKED" in closeout
     assert "PAPER ONLY / LIVE HARD BLOCKED" in closeout
     assert "has **not**" in closeout
     assert "runtime authority actually changes" in closeout
-    assert "Phase 18 — Forward Paper Evidence remains separately" in closeout
+    assert "Phase 18 — Forward Paper Evidence remains separately" in closeout\n    assert "synthetic runtime, restart, rollback" in closeout\n    assert "aether-vnext-burnin" in closeout
