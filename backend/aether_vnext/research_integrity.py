@@ -36,6 +36,8 @@ class ResearchIntegrityTrade:
                 raise ValueError(f"{name} must be canonical text")
         if self.sample_domain not in EvidenceWindow.VALID_SAMPLE_DOMAINS:
             raise ValueError(f"invalid sample_domain: {self.sample_domain}")
+        if isinstance(self.net_pnl_usd, bool):
+            raise ValueError("net_pnl_usd must be numeric, not boolean")
         if not math.isfinite(float(self.net_pnl_usd)):
             raise ValueError("net_pnl_usd must be finite")
 
@@ -65,6 +67,8 @@ class ResearchIntegrityPolicy:
             "max_regime_share",
         ):
             value = getattr(self, name)
+            if value is not None and isinstance(value, bool):
+                raise ValueError(f"{name} must be numeric, not boolean")
             if value is not None and (
                 not math.isfinite(float(value))
                 or not 0.0 <= float(value) <= 1.0
