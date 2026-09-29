@@ -117,7 +117,7 @@ export default function DashboardPage() {
           if (current && (data.full_universe || []).some((row) => row.asset_id === current)) {
             return current;
           }
-          return data.inspection_drawer?.asset_id || data.top12_attention?.[0]?.asset_id || data.full_universe?.[0]?.asset_id || null;
+          return null;
         });
       } catch {
         if (mounted) setError("Canonical vNext Floor endpoint unavailable.");
@@ -143,17 +143,8 @@ export default function DashboardPage() {
 
   const drawer = floor?.inspection_drawer?.asset_id === selectedAsset
     ? floor.inspection_drawer
-    : selectedStation
-      ? {
-          asset_id: selectedStation.asset_id,
-          station_ref: `station:${selectedStation.asset_id}`,
-          market_observation_ref: null,
-          decision_lineage_ref: null,
-          evidence_refs: [],
-          blocker_refs: selectedStation.first_blocker ? [selectedStation.first_blocker] : [],
-          read_only: true,
-        }
-      : null;
+    : null;
+  const drawerOpen = Boolean(selectedStation);
 
   return (
     <main className="floorShell">
@@ -248,25 +239,33 @@ export default function DashboardPage() {
         </section>
       </section>
 
-      <aside className={`inspectionDrawer ${drawer ? "open" : ""}`} aria-label="Inspection Drawer">
+      <aside className={`inspectionDrawer ${drawerOpen ? "open" : ""}`} aria-label="Inspection Drawer">
         <div className="drawerHead">
           <div><p className="eyebrow">READ-ONLY INSPECTION</p><h2>Inspection Drawer</h2></div>
           <button type="button" onClick={() => setSelectedAsset(null)} aria-label="Close inspection drawer">×</button>
         </div>
-        {drawer ? (
+        {selectedStation ? (
           <>
             <div className="drawerAsset">
-              <strong>{drawer.asset_id?.toUpperCase()}</strong>
-              <span className={stateClass(selectedStation?.dominant_state)}>{text(selectedStation?.dominant_state, "NO")}</span>
+              <strong>{selectedStation.asset_id?.toUpperCase()}</strong>
+              <span className={stateClass(selectedStation.dominant_state)}>{text(selectedStation.dominant_state, "NO")}</span>
             </div>
             <dl className="drawerList">
-              <div><dt>Seat owner</dt><dd>{text(selectedStation?.seat_owner)}</dd></div>
-              <div><dt>First blocker</dt><dd>{text(selectedStation?.first_blocker, "clear")}</dd></div>
-              <div><dt>Observation</dt><dd>{text(drawer.market_observation_ref)}</dd></div>
-              <div><dt>Decision lineage</dt><dd>{text(drawer.decision_lineage_ref)}</dd></div>
-              <div><dt>Evidence refs</dt><dd>{(drawer.evidence_refs || []).join(", ") || "—"}</dd></div>
-              <div><dt>Blocker refs</dt><dd>{(drawer.blocker_refs || []).join(", ") || "—"}</dd></div>
+              <div><dt>Seat owner</dt><dd>{text(selectedStation.seat_owner)}</dd></div>
+              <div><dt>First blocker</dt><dd>{text(selectedStation.first_blocker, "clear")}</dd></div>
+              <div><dt>First blocker reason</dt><dd>{text(selectedStation.first_blocker_reason)}</dd></div>
+              <div><dt>Open positions</dt><dd>{text(selectedStation.open_position_count, "0")}</dd></div>
             </dl>
+            {drawer ? (
+              <dl className="drawerList canonicalDetails">
+                <div><dt>Observation</dt><dd>{text(drawer.market_observation_ref)}</dd></div>
+                <div><dt>Decision lineage</dt><dd>{text(drawer.decision_lineage_ref)}</dd></div>
+                <div><dt>Evidence refs</dt><dd>{(drawer.evidence_refs || []).join(", ") || "—"}</dd></div>
+                <div><dt>Blocker refs</dt><dd>{(drawer.blocker_refs || []).join(", ") || "—"}</dd></div>
+              </dl>
+            ) : (
+              <Empty>Canonical lineage drawer details are unavailable for this station in the current snapshot.</Empty>
+            )}
             <p className="drawerLaw">Inspection only. No order, Risk, Governor, or route-state mutation controls are exposed here.</p>
           </>
         ) : <Empty>Select an asset station to inspect it.</Empty>}
