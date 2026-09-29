@@ -13,6 +13,7 @@ import inspect
 
 from fastapi import APIRouter
 
+from aether_vnext.build_info import load_build_info
 from aether_vnext.operator_floor import (
     UnifiedFirmFloorSnapshot,
     build_unified_firm_floor,
@@ -34,6 +35,7 @@ def create_operator_floor_router(
     if started_at.tzinfo is None:
         raise ValueError("runtime_started_at_utc must be timezone-aware")
     started_at = started_at.astimezone(timezone.utc)
+    build = load_build_info()
 
     router = APIRouter()
 
@@ -47,6 +49,7 @@ def create_operator_floor_router(
             )
         payload = build_unified_firm_floor(snapshot)
         payload["runtime_started_at_utc"] = started_at.isoformat()
+        payload["build"] = dict(build)
         return payload
 
     return router

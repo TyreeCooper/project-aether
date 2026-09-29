@@ -95,3 +95,17 @@ def test_vnext_frontend_is_static_exported_for_same_origin_azure_mount() -> None
     assert 'process.env.NEXT_PUBLIC_API_BASE || ""' in page
     assert 'Path(__file__).parent / "vnext_ui"' in main
     assert 'app.mount("/vnext", StaticFiles(directory=VNEXT_UI, html=True)' in main
+
+
+def test_floor_header_surfaces_deployed_build_revision() -> None:
+    page = (_repo_root() / "frontend" / "app" / "page.js").read_text(
+        encoding="utf-8"
+    )
+    css = (_repo_root() / "frontend" / "app" / "globals.css").read_text(
+        encoding="utf-8"
+    )
+
+    assert "<b>Build</b>" in page
+    assert "floor?.build?.source_revision" in page
+    assert ".slice(0, 8)" in page
+    assert "repeat(6, minmax(0, 1fr))" in css

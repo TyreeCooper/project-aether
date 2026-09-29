@@ -178,6 +178,7 @@ export default function DashboardPage() {
       <section className="statusStrip" aria-label="Floor status">
         <span><b>App restarted</b> {timestamp(floor?.runtime_started_at_utc, "waiting for runtime")}</span>
         <span><b>Data refreshed</b> {timestamp(floor?.as_of_utc, "waiting for vNext")}</span>
+        <span title={text(floor?.build?.source_revision, "local build")}><b>Build</b> {text(floor?.build?.source_revision?.slice(0, 8), "local")}</span>
         <span><b>Universe</b> {universe.length}</span>
         <span><b>Attention</b> {top12.length}/12</span>
         <span><b>Open cockpits</b> {cockpits.length}</span>

@@ -83,6 +83,30 @@ jobs:
           test -f out/index.html
           test -d out/_next
 
+      - name: Embed exact vNext build identity
+        shell: bash
+        env:
+          SOURCE_REVISION: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          from datetime import datetime, timezone
+          import json
+          import os
+          from pathlib import Path
+
+          revision = os.environ["SOURCE_REVISION"].strip()
+          if len(revision) != 40:
+              raise SystemExit("SOURCE_REVISION must be a full commit SHA")
+          payload = {
+              "source_revision": revision,
+              "package_built_at_utc": datetime.now(timezone.utc).isoformat(),
+          }
+          Path("backend/aether_vnext/build_manifest.json").write_text(
+              json.dumps(payload, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
       - name: Embed vNext UI into backend package
         shell: bash
         run: |
@@ -162,6 +186,7 @@ jobs:
         shell: bash
         env:
           HOST: ${{ steps.azure_target.outputs.host }}
+          EXPECTED_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           base="https://$HOST"
@@ -197,6 +222,10 @@ jobs:
           assert mode.get("paper_only") is True, body
           assert mode.get("live_blocked") is True, body
           assert body.get("runtime_started_at_utc"), body
+          build=body.get("build") or {}
+          import os
+          assert build.get("source_revision") == os.environ["EXPECTED_SHA"], build
+          assert build.get("package_built_at_utc"), build
           paper_test=body.get("paper_test") or {}
           assert "seed_bank_usd" in paper_test, body
           assert "blotter_trade_count" in paper_test, body

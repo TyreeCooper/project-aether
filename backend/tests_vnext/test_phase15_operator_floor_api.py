@@ -119,3 +119,11 @@ def test_floor_router_rejects_naive_runtime_start_timestamp() -> None:
         assert str(exc) == "runtime_started_at_utc must be timezone-aware"
     else:
         raise AssertionError("naive runtime start timestamp must be rejected")
+
+
+def test_floor_router_exposes_build_identity_shape() -> None:
+    body = _client().get("/api/v1/vnext/floor").json()
+    assert set(body["build"]) == {
+        "source_revision",
+        "package_built_at_utc",
+    }
