@@ -382,11 +382,11 @@ def test_phase5_execution_reservation_columns_are_in_current_schema() -> None:
     assert "fill_market_observation_id" not in columns
 
 
-def test_runtime_schema_facade_is_pinned_to_revision_0030() -> None:
+def test_runtime_schema_facade_is_pinned_to_revision_0031() -> None:
     _, store = _engine_and_store()
     backend = Path(__file__).resolve().parents[1]
     facade = (backend / "aether_vnext" / "schema.py").read_text(encoding="utf-8")
-    assert "schema_v0030" in facade
+    assert "schema_v0031" in facade
 
     campaign_migration = (
         backend
@@ -847,3 +847,72 @@ def test_broker_ledger_and_normalized_inventory_cover_v421_sleeve_fields() -> No
         "broker_account_id",
         "asset_id",
     )
+
+
+def test_phase14_crisis_regime_archive_schema_is_current_and_guarded() -> None:
+    engine, store = _engine_and_store()
+    backend = Path(__file__).resolve().parents[1]
+    migration = (
+        backend
+        / "alembic"
+        / "versions"
+        / "0031_aether_vnext_crisis_regime_archive.py"
+    ).read_text(encoding="utf-8")
+
+    assert 'revision: str = "0031"' in migration
+    assert 'down_revision: Union[str, None] = "0030"' in migration
+    assert "crisis_regime_archive_entries" in migration
+    assert "trg_crisis_regime_archive_entries_immutable" in migration
+    assert "BEFORE UPDATE OR DELETE" in migration
+    assert "reject_immutable_mutation" in migration
+
+    archive = store.tables["crisis_regime_archive_entries"]
+    assert {
+        "archive_id",
+        "category",
+        "episode_ref",
+        "asset_ids",
+        "regime_ids",
+        "started_at_utc",
+        "ended_at_utc",
+        "recorded_at_utc",
+        "source_record_ids",
+        "synthetic",
+        "research_only",
+    } <= set(archive.c.keys())
+
+    with pytest.raises(IntegrityError):
+        with engine.begin() as conn:
+            conn.execute(
+                archive.insert().values(
+                    archive_id="archive-bad-policy",
+                    category="liquidity_crisis",
+                    episode_ref="episode-1",
+                    asset_ids=["btc"],
+                    regime_ids=["risk_off"],
+                    started_at_utc=NOW,
+                    ended_at_utc=NOW,
+                    recorded_at_utc=NOW,
+                    source_record_ids=["source-1"],
+                    synthetic=False,
+                    research_only=False,
+                )
+            )
+
+    with pytest.raises(IntegrityError):
+        with engine.begin() as conn:
+            conn.execute(
+                archive.insert().values(
+                    archive_id="archive-bad-category",
+                    category="invented",
+                    episode_ref="episode-2",
+                    asset_ids=["btc"],
+                    regime_ids=["risk_off"],
+                    started_at_utc=NOW,
+                    ended_at_utc=NOW,
+                    recorded_at_utc=NOW,
+                    source_record_ids=["source-2"],
+                    synthetic=False,
+                    research_only=True,
+                )
+            )
