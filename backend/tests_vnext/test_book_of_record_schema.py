@@ -382,11 +382,11 @@ def test_phase5_execution_reservation_columns_are_in_current_schema() -> None:
     assert "fill_market_observation_id" not in columns
 
 
-def test_runtime_schema_facade_is_pinned_to_revision_0029() -> None:
+def test_runtime_schema_facade_is_pinned_to_revision_0030() -> None:
     _, store = _engine_and_store()
     backend = Path(__file__).resolve().parents[1]
     facade = (backend / "aether_vnext" / "schema.py").read_text(encoding="utf-8")
-    assert "schema_v0029" in facade
+    assert "schema_v0030" in facade
 
     campaign_migration = (
         backend
@@ -688,6 +688,79 @@ def test_runtime_schema_facade_is_pinned_to_revision_0029() -> None:
         "order_created",
         "trade_influence_enabled",
     } <= set(audits.c.keys())
+
+    memory_migration = (
+        backend
+        / "alembic"
+        / "versions"
+        / "0030_aether_vnext_institutional_memory.py"
+    ).read_text(encoding="utf-8")
+    assert 'revision: str = "0030"' in memory_migration
+    assert 'down_revision: Union[str, None] = "0029"' in memory_migration
+    assert "def _immutable_trigger(table_name: str) -> None:" in memory_migration
+    assert "BEFORE UPDATE OR DELETE" in memory_migration
+    assert "reject_immutable_mutation" in memory_migration
+    for table_name in (
+        "pnl_attributions",
+        "institutional_memories",
+        "failure_archive_entries",
+        "counterfactual_replays",
+        "experience_coverage_snapshots",
+    ):
+        assert table_name in memory_migration
+        assert table_name in store.tables
+
+    attributions = store.tables["pnl_attributions"]
+    assert {
+        "attribution_id",
+        "firm_id",
+        "mechanism_id",
+        "playbook_id",
+        "playbook_version",
+        "route_id",
+        "asset_id",
+        "horizon",
+        "side",
+        "regime_id",
+        "trade_id",
+        "configuration_hash",
+        "net_pnl_usd",
+        "components",
+        "attributed_at_utc",
+        "source_record_ids",
+    } <= set(attributions.c.keys())
+
+    memories = store.tables["institutional_memories"]
+    assert {
+        "memory_id",
+        "trade_id",
+        "route_id",
+        "market_state_ref",
+        "information_state_ref",
+        "signal_ref",
+        "decision_ref",
+        "expected_outcome_ref",
+        "actual_outcome_ref",
+        "execution_quality_ref",
+        "risk_state_ref",
+        "success_failure_reason",
+        "lesson",
+        "future_relevance",
+        "occurred_at_utc",
+        "recorded_at_utc",
+        "source_record_ids",
+    } <= set(memories.c.keys())
+
+    counterfactuals = store.tables["counterfactual_replays"]
+    assert {
+        "replay_id",
+        "original_memory_id",
+        "variation_keys",
+        "hypothetical_result_ref",
+        "created_at_utc",
+        "hypothetical",
+        "independent_evidence_credit",
+    } <= set(counterfactuals.c.keys())
 
 
 def test_phase6_atomic_risk_admission_schema_is_explicit() -> None:
