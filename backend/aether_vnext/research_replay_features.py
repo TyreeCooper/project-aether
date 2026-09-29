@@ -31,6 +31,7 @@ from aether_vnext.research_bar_selection import PITResearchBarSlice
 from aether_vnext.research_warehouse import ResearchBarRecord
 from aether_vnext.volatility_percentile import (
     RV14_REQUIRED_CLOSES,
+    VOLATILITY_PERCENTILE_CONVENTION_VERSION,
     VOLATILITY_PERCENTILE_WINDOW,
     VolatilityPercentileSnapshot,
     empirical_midrank_percentile,
@@ -180,6 +181,61 @@ class ResearchRegimeReadyFeatures:
             > 1e-15
         ):
             raise ValueError("research RV14 calculations disagree")
+        if (
+            self.volatility.window_end_exclusive_utc
+            != self.volatility.trigger_close_utc
+        ):
+            raise ValueError(
+                "research volatility window must end at trigger close"
+            )
+        if (
+            self.volatility.window_start_utc
+            != self.volatility.trigger_close_utc
+            - VOLATILITY_PERCENTILE_WINDOW
+        ):
+            raise ValueError(
+                "research volatility window must cover prior 90 days"
+            )
+        if (
+            self.volatility.convention_version
+            != VOLATILITY_PERCENTILE_CONVENTION_VERSION
+        ):
+            raise ValueError(
+                "research volatility convention version mismatch"
+            )
+        if (
+            not isinstance(self.volatility.reference_count, int)
+            or isinstance(self.volatility.reference_count, bool)
+            or self.volatility.reference_count <= 0
+        ):
+            raise ValueError(
+                "research volatility reference_count must be positive"
+            )
+        for name in ("less_count", "equal_count"):
+            value = getattr(self.volatility, name)
+            if (
+                not isinstance(value, int)
+                or isinstance(value, bool)
+                or value < 0
+            ):
+                raise ValueError(
+                    f"research volatility {name} must be nonnegative"
+                )
+        if (
+            self.volatility.less_count + self.volatility.equal_count
+            > self.volatility.reference_count
+        ):
+            raise ValueError(
+                "research volatility counts exceed reference_count"
+            )
+        expected_percentile = 100.0 * (
+            self.volatility.less_count
+            + 0.5 * self.volatility.equal_count
+        ) / float(self.volatility.reference_count)
+        if abs(self.volatility.percentile - expected_percentile) > 1e-12:
+            raise ValueError(
+                "research volatility percentile disagrees with counts"
+            )
         expected_band = volatility_band(self.volatility.percentile)
         if self.volatility_band is not expected_band:
             raise ValueError(
