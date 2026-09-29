@@ -382,11 +382,11 @@ def test_phase5_execution_reservation_columns_are_in_current_schema() -> None:
     assert "fill_market_observation_id" not in columns
 
 
-def test_runtime_schema_facade_is_pinned_to_revision_0027() -> None:
+def test_runtime_schema_facade_is_pinned_to_revision_0028() -> None:
     _, store = _engine_and_store()
     backend = Path(__file__).resolve().parents[1]
     facade = (backend / "aether_vnext" / "schema.py").read_text(encoding="utf-8")
-    assert "schema_v0027" in facade
+    assert "schema_v0028" in facade
 
     campaign_migration = (
         backend
@@ -601,6 +601,65 @@ def test_runtime_schema_facade_is_pinned_to_revision_0027() -> None:
         "market_data_version",
         "research_only",
     } <= set(reactions.c.keys())
+
+    news_migration = (
+        backend
+        / "alembic"
+        / "versions"
+        / "0028_aether_vnext_news_ledger.py"
+    ).read_text(encoding="utf-8")
+    assert 'revision: str = "0028"' in news_migration
+    assert 'down_revision: Union[str, None] = "0027"' in news_migration
+    assert "def _immutable_trigger(table_name: str) -> None:" in news_migration
+    assert "BEFORE UPDATE OR DELETE" in news_migration
+    assert "reject_immutable_mutation" in news_migration
+    for table_name in (
+        "news_sources",
+        "raw_news_items",
+        "normalized_events",
+        "event_asset_links",
+        "event_market_responses",
+        "historical_analog_runs",
+    ):
+        assert table_name in news_migration
+        assert table_name in store.tables
+
+    normalized = store.tables["normalized_events"]
+    assert {
+        "event_id",
+        "event_cluster_id",
+        "event_type",
+        "source_news_item_ids",
+        "assets",
+        "clusters",
+        "canonical_event_at_utc",
+        "information_available_at_utc",
+        "scheduled",
+        "expected",
+        "consensus",
+        "actual",
+        "surprise_magnitude",
+        "direction",
+        "severity",
+        "novelty",
+        "confidence",
+        "market_scope",
+        "normalizer_version",
+    } <= set(normalized.c.keys())
+
+    analogs = store.tables["historical_analog_runs"]
+    assert {
+        "analog_run_id",
+        "query_event_or_state_id",
+        "feature_spec_version",
+        "as_of_utc",
+        "eligible_history_cutoff_utc",
+        "matched_event_ids",
+        "similarity_scores",
+        "outcome_distribution",
+        "created_at_utc",
+        "research_only",
+    } <= set(analogs.c.keys())
 
 
 def test_phase6_atomic_risk_admission_schema_is_explicit() -> None:
