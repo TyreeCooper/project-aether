@@ -162,6 +162,52 @@ def test_research_feature_snapshot_rejects_lineage_drift(
     ("field", "value", "message"),
     (
         (
+            "ema20_current",
+            float("nan"),
+            "ema20_current must be finite",
+        ),
+        (
+            "ema20_previous",
+            float("inf"),
+            "ema20_previous must be finite",
+        ),
+        (
+            "ema50_current",
+            True,
+            "ema50_current must be finite",
+        ),
+        (
+            "atr14_current",
+            -0.1,
+            "ATR14 cannot be negative",
+        ),
+        (
+            "realized_vol14_current",
+            -0.1,
+            "RV14 cannot be negative",
+        ),
+    ),
+)
+def test_research_feature_snapshot_rejects_invalid_numerics(
+    field: str,
+    value: object,
+    message: str,
+) -> None:
+    base = build_research_regime_ready_features(_selection()).numerical
+    kwargs = {
+        name: getattr(base, name)
+        for name in base.__dataclass_fields__
+    }
+    kwargs[field] = value
+
+    with pytest.raises(ValueError, match=message):
+        ResearchClosedBarFeatureSnapshot(**kwargs)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    (
+        (
             "open",
             True,
             "prices/volume must be numeric, not boolean",
