@@ -71,6 +71,7 @@ def test_book_of_record_has_required_tables() -> None:
         "ledger_transfers",
         "reconciliation_runs",
         "event_ledger",
+        "paper_test_epochs",
     } <= set(store.tables)
 
 
@@ -382,11 +383,11 @@ def test_phase5_execution_reservation_columns_are_in_current_schema() -> None:
     assert "fill_market_observation_id" not in columns
 
 
-def test_runtime_schema_facade_is_pinned_to_revision_0031() -> None:
+def test_runtime_schema_facade_is_pinned_to_revision_0032() -> None:
     _, store = _engine_and_store()
     backend = Path(__file__).resolve().parents[1]
     facade = (backend / "aether_vnext" / "schema.py").read_text(encoding="utf-8")
-    assert "schema_v0031" in facade
+    assert "schema_v0032" in facade
 
     campaign_migration = (
         backend
@@ -916,3 +917,34 @@ def test_phase14_crisis_regime_archive_schema_is_current_and_guarded() -> None:
                     research_only=True,
                 )
             )
+
+
+def test_phase17_paper_test_epoch_schema_is_current_and_immutable() -> None:
+    _, store = _engine_and_store()
+    backend = Path(__file__).resolve().parents[1]
+    migration = (
+        backend
+        / "alembic"
+        / "versions"
+        / "0032_aether_vnext_paper_test_epochs.py"
+    ).read_text(encoding="utf-8")
+
+    assert 'revision: str = "0032"' in migration
+    assert 'down_revision: Union[str, None] = "0031"' in migration
+    assert "paper_test_epochs" in migration
+    assert "trg_paper_test_epochs_immutable" in migration
+    assert "BEFORE UPDATE OR DELETE" in migration
+    assert "reject_immutable_mutation" in migration
+
+    epochs = store.tables["paper_test_epochs"]
+    assert {
+        "epoch_id",
+        "started_at_utc",
+        "created_at_utc",
+        "reason",
+        "prior_state_hash",
+        "seed_sleeves",
+        "seed_bank_total_usd",
+        "paper_only",
+        "live_blocked",
+    } <= set(epochs.c.keys())
