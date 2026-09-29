@@ -31,3 +31,22 @@ jobs:
         env:
           PYTHONPATH: .
           PYTHONUNBUFFERED: "1"
+
+  frontend-build:
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install frontend dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build Unified Firm Floor
+        env:
+          NEXT_PUBLIC_API_BASE: http://127.0.0.1:8000
+          NEXT_PUBLIC_AETHER_FLOOR_PATH: /api/v1/vnext/floor
+        run: npm run build
