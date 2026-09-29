@@ -382,11 +382,11 @@ def test_phase5_execution_reservation_columns_are_in_current_schema() -> None:
     assert "fill_market_observation_id" not in columns
 
 
-def test_runtime_schema_facade_is_pinned_to_revision_0026() -> None:
+def test_runtime_schema_facade_is_pinned_to_revision_0027() -> None:
     _, store = _engine_and_store()
     backend = Path(__file__).resolve().parents[1]
     facade = (backend / "aether_vnext" / "schema.py").read_text(encoding="utf-8")
-    assert "schema_v0026" in facade
+    assert "schema_v0027" in facade
 
     campaign_migration = (
         backend
@@ -545,6 +545,63 @@ def test_runtime_schema_facade_is_pinned_to_revision_0026() -> None:
         "n_reset",
         "supersedes",
     } <= set(promotions.c.keys())
+
+    intelligence_migration = (
+        backend
+        / "alembic"
+        / "versions"
+        / "0027_aether_vnext_intelligence_persistence.py"
+    ).read_text(encoding="utf-8")
+    assert 'revision: str = "0027"' in intelligence_migration
+    assert 'down_revision: Union[str, None] = "0026"' in intelligence_migration
+    for table_name in (
+        "intelligence_sources",
+        "source_trust_decisions",
+        "intelligence_health_snapshots",
+        "cross_source_conflict_assessments",
+        "event_reaction_measurements",
+        "event_reaction_rollups",
+    ):
+        assert table_name in intelligence_migration
+        assert table_name in store.tables
+
+    assert "trg_source_trust_decisions_immutable" in intelligence_migration
+    assert "trg_intelligence_health_snapshots_immutable" in intelligence_migration
+    assert "trg_cross_source_conflict_assessments_immutable" in intelligence_migration
+    assert "trg_event_reaction_measurements_immutable" in intelligence_migration
+    assert "trg_event_reaction_rollups_immutable" in intelligence_migration
+
+    sources = store.tables["intelligence_sources"]
+    assert {
+        "source_id",
+        "asset_id",
+        "source_type",
+        "platform",
+        "name",
+        "url",
+        "tier",
+        "trust_state",
+        "origin",
+        "ingestion_mode",
+        "trade_influence_enabled",
+        "operator_approved_by",
+        "operator_approved_at_utc",
+        "row_version",
+    } <= set(sources.c.keys())
+
+    reactions = store.tables["event_reaction_measurements"]
+    assert {
+        "observation_id",
+        "event_id",
+        "asset_id",
+        "event_at_utc",
+        "information_available_at_utc",
+        "horizon_seconds",
+        "observed_at_utc",
+        "return_value",
+        "market_data_version",
+        "research_only",
+    } <= set(reactions.c.keys())
 
 
 def test_phase6_atomic_risk_admission_schema_is_explicit() -> None:
