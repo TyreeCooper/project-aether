@@ -399,6 +399,225 @@ class VNextStore:
         )
         return True
 
+    def current_paper_test_epoch(
+        self,
+        conn: Connection,
+    ) -> dict[str, Any] | None:
+        table = self.tables["paper_test_epochs"]
+        row = conn.execute(
+            sa.select(table)
+            .order_by(
+                table.c.started_at_utc.desc(),
+                table.c.created_at_utc.desc(),
+            )
+            .limit(1)
+        ).mappings().first()
+        return None if row is None else dict(row)
+
+    def paper_test_reset_preview(
+        self,
+        conn: Connection,
+    ) -> dict[str, Any]:
+        """Preview a clean paper-test reset without mutating durable state."""
+        t = self.tables
+
+        def count_rows(table_name: str, *where) -> int:
+            stmt = sa.select(sa.func.count()).select_from(t[table_name])
+            if where:
+                stmt = stmt.where(*where)
+            return int(conn.execute(stmt).scalar_one())
+
+        active_positions = count_rows("active_positions")
+        risk_reservations = count_rows("risk_admission_reservations")
+        sleeve_inventory = count_rows("sleeve_inventory")
+        in_flight_setups = count_rows(
+            "setups",
+            t["setups"].c.state.in_(("WATCH", "FIRE")),
+        )
+        in_flight_tickets = count_rows(
+            "tickets",
+            t["tickets"].c.state.in_(("FIRE", "SIZE", "READY")),
+        )
+        in_flight_intents = count_rows(
+            "order_intents",
+            t["order_intents"].c.state.in_(
+                ("RESERVED", "SUBMITTED", "ACCEPTED", "PARTIAL")
+            ),
+        )
+
+        ledger_rows = self.ledger_rows(conn)
+        actual_ledgers = {
+            str(row["broker_account_id"]) for row in ledger_rows
+        }
+        expected_ledgers = set(SEED_LEDGER_CASH_USD)
+
+        blockers: list[str] = []
+        for name, value in (
+            ("active_positions", active_positions),
+            ("risk_admission_reservations", risk_reservations),
+            ("sleeve_inventory", sleeve_inventory),
+            ("in_flight_setups", in_flight_setups),
+            ("in_flight_tickets", in_flight_tickets),
+            ("in_flight_order_intents", in_flight_intents),
+        ):
+            if value:
+                blockers.append(f"{name}:{value}")
+        if actual_ledgers != expected_ledgers:
+            missing = sorted(expected_ledgers - actual_ledgers)
+            extra = sorted(actual_ledgers - expected_ledgers)
+            if missing:
+                blockers.append("missing_ledgers:" + ",".join(missing))
+            if extra:
+                blockers.append("unexpected_ledgers:" + ",".join(extra))
+
+        prior_epoch = self.current_paper_test_epoch(conn)
+        prior_state = {
+            "prior_epoch_id": (
+                None if prior_epoch is None else str(prior_epoch["epoch_id"])
+            ),
+            "ledger_rows": [
+                {
+                    "broker_account_id": str(row["broker_account_id"]),
+                    "cash_available_usd": float(row["cash_available_usd"]),
+                    "cash_reserved_usd": float(row["cash_reserved_usd"]),
+                    "margin_used_usd": float(row["margin_used_usd"]),
+                    "margin_available_usd": float(row["margin_available_usd"]),
+                    "realized_pnl_usd": float(row["realized_pnl_usd"]),
+                    "unrealized_pnl_usd": float(row["unrealized_pnl_usd"]),
+                    "fees_accrued_usd": float(row["fees_accrued_usd"]),
+                    "carry_accrued_usd": float(row["carry_accrued_usd"]),
+                    "settled_cash_usd": (
+                        None
+                        if row["settled_cash_usd"] is None
+                        else float(row["settled_cash_usd"])
+                    ),
+                    "reconciliation_state": str(row["reconciliation_state"]),
+                    "row_version": int(row["row_version"]),
+                }
+                for row in ledger_rows
+            ],
+            "closed_trade_count": count_rows("closed_trades"),
+            "open_trade_count": count_rows("open_trades"),
+            "event_count": count_rows("event_ledger"),
+            "active_positions": active_positions,
+            "risk_admission_reservations": risk_reservations,
+            "sleeve_inventory": sleeve_inventory,
+            "in_flight_setups": in_flight_setups,
+            "in_flight_tickets": in_flight_tickets,
+            "in_flight_order_intents": in_flight_intents,
+        }
+        return {
+            "resettable": not blockers,
+            "blockers": tuple(blockers),
+            "prior_state": prior_state,
+            "prior_state_hash": canonical_payload_hash(prior_state),
+            "seed_sleeves": dict(SEED_LEDGER_CASH_USD),
+            "seed_bank_total_usd": float(sum(SEED_LEDGER_CASH_USD.values())),
+        }
+
+    def start_new_paper_test_epoch(
+        self,
+        conn: Connection,
+        *,
+        epoch_id: str,
+        started_at_utc: datetime,
+        reason: str,
+        created_at_utc: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Reset paper capital and start a new blotter epoch without deleting history."""
+        epoch_id = str(epoch_id).strip()
+        reason = str(reason).strip()
+        if not epoch_id:
+            raise ValueError("epoch_id is required")
+        if not reason:
+            raise ValueError("reason is required")
+        if started_at_utc.tzinfo is None:
+            raise ValueError("started_at_utc must be timezone-aware")
+        created = created_at_utc or started_at_utc
+        if created.tzinfo is None:
+            raise ValueError("created_at_utc must be timezone-aware")
+        if created < started_at_utc:
+            raise ValueError("created_at_utc cannot predate started_at_utc")
+
+        preview = self.paper_test_reset_preview(conn)
+        if not preview["resettable"]:
+            raise RuntimeError(
+                "paper test reset blocked: " + ";".join(preview["blockers"])
+            )
+
+        ledgers = self.tables["broker_account_ledgers"]
+        locked = tuple(
+            conn.execute(
+                sa.select(ledgers)
+                .order_by(ledgers.c.broker_account_id)
+                .with_for_update()
+            ).mappings()
+        )
+        if {
+            str(row["broker_account_id"]) for row in locked
+        } != set(SEED_LEDGER_CASH_USD):
+            raise RuntimeError("paper test ledger set changed during reset")
+
+        for row in locked:
+            broker_id = str(row["broker_account_id"])
+            seed_cash = float(SEED_LEDGER_CASH_USD[broker_id])
+            conn.execute(
+                ledgers.update()
+                .where(ledgers.c.broker_account_id == broker_id)
+                .values(
+                    cash_available_usd=seed_cash,
+                    cash_reserved_usd=0.0,
+                    margin_used_usd=0.0,
+                    margin_available_usd=seed_cash,
+                    realized_pnl_usd=0.0,
+                    unrealized_pnl_usd=0.0,
+                    fees_accrued_usd=0.0,
+                    carry_accrued_usd=0.0,
+                    settled_cash_usd=seed_cash,
+                    reconciliation_state="clean",
+                    last_reconciled_at=started_at_utc,
+                    row_version=int(row["row_version"]) + 1,
+                )
+            )
+
+        epochs = self.tables["paper_test_epochs"]
+        values = {
+            "epoch_id": epoch_id,
+            "started_at_utc": started_at_utc,
+            "created_at_utc": created,
+            "reason": reason,
+            "prior_state_hash": str(preview["prior_state_hash"]),
+            "seed_sleeves": dict(SEED_LEDGER_CASH_USD),
+            "seed_bank_total_usd": float(
+                sum(SEED_LEDGER_CASH_USD.values())
+            ),
+            "paper_only": True,
+            "live_blocked": True,
+        }
+        conn.execute(epochs.insert().values(**values))
+        return dict(values)
+
+    def closed_trades_current_paper_epoch(
+        self,
+        conn: Connection,
+        *,
+        limit: int = 200,
+    ) -> tuple[dict[str, Any], ...]:
+        """Return blotter rows only for the current paper-test epoch."""
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+            raise ValueError("limit must be a positive integer")
+        table = self.tables["closed_trades"]
+        stmt = sa.select(table)
+        epoch = self.current_paper_test_epoch(conn)
+        if epoch is not None:
+            stmt = stmt.where(
+                table.c.closed_at_utc >= epoch["started_at_utc"]
+            )
+        rows = conn.execute(
+            stmt.order_by(table.c.closed_at_utc.desc()).limit(limit)
+        ).mappings()
+        return tuple(dict(row) for row in rows)
+
     def upsert_runtime_registry_binding(
         self,
         conn: Connection,
