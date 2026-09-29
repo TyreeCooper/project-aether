@@ -146,6 +146,36 @@ def test_duplicate_trade_ids_are_rejected() -> None:
         )
 
 
+def test_integrity_trade_rejects_boolean_pnl() -> None:
+    with pytest.raises(
+        ValueError,
+        match="net_pnl_usd must be numeric, not boolean",
+    ):
+        _trade("t1", episode_id="e1", pnl=True)
+
+
+@pytest.mark.parametrize(
+    "field",
+    (
+        "max_largest_trade_share",
+        "max_top_decile_trade_share",
+        "max_regime_share",
+    ),
+)
+def test_integrity_policy_rejects_boolean_ratio_thresholds(field: str) -> None:
+    kwargs = {
+        "minimum_independent_n": 1,
+        "max_parameter_variants": 1,
+        "max_largest_trade_share": 1.0,
+        "max_top_decile_trade_share": 1.0,
+        "max_regime_share": 1.0,
+    }
+    kwargs[field] = True
+
+    with pytest.raises(ValueError, match="numeric, not boolean"):
+        ResearchIntegrityPolicy(**kwargs)
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     (
