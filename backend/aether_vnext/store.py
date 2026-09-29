@@ -47,6 +47,7 @@ from aether_vnext.event_reactions import (
     EventReactionMeasurement,
     EventReactionRollup,
 )
+from aether_vnext.intelligence_audit import IntelligenceShadowAudit
 from aether_vnext.intelligence_health import (
     CrossSourceConflictAssessment,
     SourceHealthSnapshot,
@@ -7526,6 +7527,129 @@ class VNextStore:
                 created_at_utc=run.created_at_utc,
                 research_only=True,
             )
+        )
+
+    def load_intelligence_shadow_audit(
+        self,
+        conn: Connection,
+        *,
+        audit_id: str,
+    ) -> IntelligenceShadowAudit | None:
+        table = self.tables["intelligence_shadow_audits"]
+        row = conn.execute(
+            sa.select(table).where(table.c.audit_id == str(audit_id))
+        ).mappings().first()
+        if row is None:
+            return None
+        return IntelligenceShadowAudit(
+            audit_id=str(row["audit_id"]),
+            opportunity_id=str(row["opportunity_id"]),
+            route_id=str(row["route_id"]),
+            as_of_utc=_stored_utc(row["as_of_utc"]),
+            baseline_configuration_hash=str(
+                row["baseline_configuration_hash"]
+            ),
+            shadow_configuration_hash=str(
+                row["shadow_configuration_hash"]
+            ),
+            enabled_components=tuple(
+                str(value) for value in (row["enabled_components"] or [])
+            ),
+            baseline_outcome=str(row["baseline_outcome"]),
+            shadow_outcome=str(row["shadow_outcome"]),
+            evidence_ids=tuple(
+                str(value) for value in (row["evidence_ids"] or [])
+            ),
+            research_only=bool(row["research_only"]),
+            order_created=bool(row["order_created"]),
+            trade_influence_enabled=bool(
+                row["trade_influence_enabled"]
+            ),
+        )
+
+    def record_intelligence_shadow_audit(
+        self,
+        conn: Connection,
+        audit: IntelligenceShadowAudit,
+    ) -> None:
+        existing = self.load_intelligence_shadow_audit(
+            conn,
+            audit_id=audit.audit_id,
+        )
+        if existing is not None:
+            if existing != audit:
+                raise ValueError(
+                    "conflicting immutable intelligence shadow audit"
+                )
+            return
+        conn.execute(
+            self.tables["intelligence_shadow_audits"].insert().values(
+                audit_id=audit.audit_id,
+                opportunity_id=audit.opportunity_id,
+                route_id=audit.route_id,
+                as_of_utc=audit.as_of_utc,
+                baseline_configuration_hash=(
+                    audit.baseline_configuration_hash
+                ),
+                shadow_configuration_hash=(
+                    audit.shadow_configuration_hash
+                ),
+                enabled_components=list(audit.enabled_components),
+                baseline_outcome=audit.baseline_outcome,
+                shadow_outcome=audit.shadow_outcome,
+                evidence_ids=list(audit.evidence_ids),
+                research_only=True,
+                order_created=False,
+                trade_influence_enabled=False,
+            )
+        )
+
+    def list_intelligence_shadow_audits(
+        self,
+        conn: Connection,
+        *,
+        opportunity_id: str | None = None,
+    ) -> tuple[IntelligenceShadowAudit, ...]:
+        table = self.tables["intelligence_shadow_audits"]
+        query = sa.select(table)
+        if opportunity_id is not None:
+            query = query.where(
+                table.c.opportunity_id == str(opportunity_id)
+            )
+        rows = conn.execute(
+            query.order_by(
+                table.c.as_of_utc.asc(),
+                table.c.audit_id.asc(),
+            )
+        ).mappings()
+        return tuple(
+            IntelligenceShadowAudit(
+                audit_id=str(row["audit_id"]),
+                opportunity_id=str(row["opportunity_id"]),
+                route_id=str(row["route_id"]),
+                as_of_utc=_stored_utc(row["as_of_utc"]),
+                baseline_configuration_hash=str(
+                    row["baseline_configuration_hash"]
+                ),
+                shadow_configuration_hash=str(
+                    row["shadow_configuration_hash"]
+                ),
+                enabled_components=tuple(
+                    str(value)
+                    for value in (row["enabled_components"] or [])
+                ),
+                baseline_outcome=str(row["baseline_outcome"]),
+                shadow_outcome=str(row["shadow_outcome"]),
+                evidence_ids=tuple(
+                    str(value) for value in (row["evidence_ids"] or [])
+                ),
+                research_only=bool(row["research_only"]),
+                order_created=bool(row["order_created"]),
+                trade_influence_enabled=bool(
+                    row["trade_influence_enabled"]
+                ),
+            )
+            for row in rows
         )
 
     def event_rows(self, conn: Connection) -> list[dict[str, Any]]:
