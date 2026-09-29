@@ -43,6 +43,19 @@ from aether_vnext.equity import (
     sleeve_equity_projection,
 )
 from aether_vnext.execution import entry_fill_price
+from aether_vnext.event_reactions import (
+    EventReactionMeasurement,
+    EventReactionRollup,
+)
+from aether_vnext.intelligence_health import (
+    CrossSourceConflictAssessment,
+    SourceHealthSnapshot,
+)
+from aether_vnext.source_registry import (
+    AssetSourceRecord,
+    SourceTrustDecision,
+    apply_trust_decision,
+)
 from aether_vnext.exit_plan import ExitPlan
 from aether_vnext.evidence import (
     CostSensitivity,
@@ -6626,6 +6639,444 @@ class VNextStore:
             )
 
         return aggregate_book_risk(rows)
+
+    def load_intelligence_source(
+        self,
+        conn: Connection,
+        *,
+        source_id: str,
+    ) -> AssetSourceRecord | None:
+        table = self.tables["intelligence_sources"]
+        row = conn.execute(
+            sa.select(table).where(table.c.source_id == str(source_id))
+        ).mappings().first()
+        if row is None:
+            return None
+        return AssetSourceRecord(
+            source_id=str(row["source_id"]),
+            asset_id=str(row["asset_id"]),
+            source_type=str(row["source_type"]),
+            platform=str(row["platform"]),
+            name=str(row["name"]),
+            url=str(row["url"]),
+            tier=str(row["tier"]),
+            trust_state=str(row["trust_state"]),
+            origin=str(row["origin"]),
+            ingestion_mode=str(row["ingestion_mode"]),
+            trade_influence_enabled=bool(row["trade_influence_enabled"]),
+            operator_approved_by=(
+                None
+                if row["operator_approved_by"] is None
+                else str(row["operator_approved_by"])
+            ),
+            operator_approved_at_utc=_stored_utc(
+                row["operator_approved_at_utc"]
+            ),
+        )
+
+    def upsert_intelligence_source(
+        self,
+        conn: Connection,
+        source: AssetSourceRecord,
+    ) -> int:
+        table = self.tables["intelligence_sources"]
+        existing = conn.execute(
+            sa.select(table)
+            .where(table.c.source_id == source.source_id)
+            .with_for_update()
+        ).mappings().first()
+
+        if existing is None:
+            if source.trust_state == "trusted":
+                raise ValueError(
+                    "trusted source must be created through a trust decision"
+                )
+            conn.execute(
+                table.insert().values(
+                    source_id=source.source_id,
+                    asset_id=source.asset_id,
+                    source_type=source.source_type,
+                    platform=source.platform,
+                    name=source.name,
+                    url=source.url,
+                    tier=source.tier,
+                    trust_state=source.trust_state,
+                    origin=source.origin,
+                    ingestion_mode=source.ingestion_mode,
+                    trade_influence_enabled=False,
+                    operator_approved_by=source.operator_approved_by,
+                    operator_approved_at_utc=source.operator_approved_at_utc,
+                    row_version=1,
+                )
+            )
+            return 1
+
+        if str(existing["trust_state"]) != source.trust_state:
+            raise ValueError(
+                "trust_state changes require a source trust decision"
+            )
+        if (
+            existing["operator_approved_by"] != source.operator_approved_by
+            or _stored_utc(existing["operator_approved_at_utc"])
+            != source.operator_approved_at_utc
+        ):
+            raise ValueError(
+                "operator approval changes require a source trust decision"
+            )
+
+        version = int(existing["row_version"]) + 1
+        conn.execute(
+            table.update()
+            .where(table.c.source_id == source.source_id)
+            .values(
+                asset_id=source.asset_id,
+                source_type=source.source_type,
+                platform=source.platform,
+                name=source.name,
+                url=source.url,
+                tier=source.tier,
+                origin=source.origin,
+                ingestion_mode=source.ingestion_mode,
+                trade_influence_enabled=False,
+                row_version=version,
+            )
+        )
+        return version
+
+    def list_intelligence_sources(
+        self,
+        conn: Connection,
+    ) -> tuple[AssetSourceRecord, ...]:
+        table = self.tables["intelligence_sources"]
+        source_ids = tuple(
+            str(row[0])
+            for row in conn.execute(
+                sa.select(table.c.source_id).order_by(table.c.source_id.asc())
+            )
+        )
+        return tuple(
+            source
+            for source_id in source_ids
+            if (
+                source := self.load_intelligence_source(
+                    conn,
+                    source_id=source_id,
+                )
+            )
+            is not None
+        )
+
+    def record_source_trust_decision(
+        self,
+        conn: Connection,
+        *,
+        decision_id: str,
+        decision: SourceTrustDecision,
+    ) -> AssetSourceRecord:
+        if not str(decision_id).strip():
+            raise ValueError("decision_id is required")
+
+        sources = self.tables["intelligence_sources"]
+        decisions = self.tables["source_trust_decisions"]
+        row = conn.execute(
+            sa.select(sources)
+            .where(sources.c.source_id == decision.source_id)
+            .with_for_update()
+        ).mappings().first()
+        if row is None:
+            raise KeyError(f"unknown intelligence source: {decision.source_id}")
+
+        current = AssetSourceRecord(
+            source_id=str(row["source_id"]),
+            asset_id=str(row["asset_id"]),
+            source_type=str(row["source_type"]),
+            platform=str(row["platform"]),
+            name=str(row["name"]),
+            url=str(row["url"]),
+            tier=str(row["tier"]),
+            trust_state=str(row["trust_state"]),
+            origin=str(row["origin"]),
+            ingestion_mode=str(row["ingestion_mode"]),
+            trade_influence_enabled=bool(row["trade_influence_enabled"]),
+            operator_approved_by=(
+                None
+                if row["operator_approved_by"] is None
+                else str(row["operator_approved_by"])
+            ),
+            operator_approved_at_utc=_stored_utc(
+                row["operator_approved_at_utc"]
+            ),
+        )
+        updated = apply_trust_decision(current, decision)
+
+        conn.execute(
+            decisions.insert().values(
+                decision_id=str(decision_id),
+                source_id=decision.source_id,
+                prior_state=decision.prior_state,
+                new_state=decision.new_state,
+                operator_id=decision.operator_id,
+                decided_at_utc=decision.decided_at_utc,
+                rationale=decision.rationale,
+            )
+        )
+        conn.execute(
+            sources.update()
+            .where(sources.c.source_id == decision.source_id)
+            .values(
+                trust_state=updated.trust_state,
+                trade_influence_enabled=False,
+                operator_approved_by=updated.operator_approved_by,
+                operator_approved_at_utc=updated.operator_approved_at_utc,
+                row_version=int(row["row_version"]) + 1,
+            )
+        )
+        return updated
+
+    def record_intelligence_health_snapshot(
+        self,
+        conn: Connection,
+        *,
+        health_snapshot_id: str,
+        snapshot: SourceHealthSnapshot,
+    ) -> None:
+        if not str(health_snapshot_id).strip():
+            raise ValueError("health_snapshot_id is required")
+        conn.execute(
+            self.tables["intelligence_health_snapshots"].insert().values(
+                health_snapshot_id=str(health_snapshot_id),
+                source_id=snapshot.source_id,
+                state=snapshot.state,
+                observed_at_utc=snapshot.observed_at_utc,
+                last_success_at_utc=snapshot.last_success_at_utc,
+                age_seconds=snapshot.age_seconds,
+                stale_after_seconds=snapshot.stale_after_seconds,
+                last_error=snapshot.last_error,
+                trade_influence_enabled=False,
+            )
+        )
+
+    def latest_intelligence_health_snapshot(
+        self,
+        conn: Connection,
+        *,
+        source_id: str,
+    ) -> SourceHealthSnapshot | None:
+        table = self.tables["intelligence_health_snapshots"]
+        row = conn.execute(
+            sa.select(table)
+            .where(table.c.source_id == str(source_id))
+            .order_by(
+                table.c.observed_at_utc.desc(),
+                table.c.health_snapshot_id.desc(),
+            )
+            .limit(1)
+        ).mappings().first()
+        if row is None:
+            return None
+        return SourceHealthSnapshot(
+            source_id=str(row["source_id"]),
+            state=str(row["state"]),
+            observed_at_utc=_stored_utc(row["observed_at_utc"]),
+            last_success_at_utc=_stored_utc(row["last_success_at_utc"]),
+            age_seconds=(
+                None if row["age_seconds"] is None else float(row["age_seconds"])
+            ),
+            stale_after_seconds=int(row["stale_after_seconds"]),
+            last_error=(
+                None if row["last_error"] is None else str(row["last_error"])
+            ),
+            trade_influence_enabled=bool(row["trade_influence_enabled"]),
+        )
+
+    def record_cross_source_conflict_assessment(
+        self,
+        conn: Connection,
+        *,
+        assessment_id: str,
+        assessment: CrossSourceConflictAssessment,
+    ) -> None:
+        if not str(assessment_id).strip():
+            raise ValueError("assessment_id is required")
+        conn.execute(
+            self.tables["cross_source_conflict_assessments"].insert().values(
+                assessment_id=str(assessment_id),
+                claim_key=assessment.claim_key,
+                state=assessment.state,
+                source_ids=list(assessment.source_ids),
+                value_fingerprints=list(assessment.value_fingerprints),
+                assessed_at_utc=assessment.assessed_at_utc,
+                trade_influence_enabled=False,
+            )
+        )
+
+    def latest_cross_source_conflict_assessment(
+        self,
+        conn: Connection,
+        *,
+        claim_key: str,
+    ) -> CrossSourceConflictAssessment | None:
+        table = self.tables["cross_source_conflict_assessments"]
+        row = conn.execute(
+            sa.select(table)
+            .where(table.c.claim_key == str(claim_key))
+            .order_by(
+                table.c.assessed_at_utc.desc(),
+                table.c.assessment_id.desc(),
+            )
+            .limit(1)
+        ).mappings().first()
+        if row is None:
+            return None
+        return CrossSourceConflictAssessment(
+            claim_key=str(row["claim_key"]),
+            state=str(row["state"]),
+            source_ids=tuple(str(x) for x in (row["source_ids"] or [])),
+            value_fingerprints=tuple(
+                str(x) for x in (row["value_fingerprints"] or [])
+            ),
+            assessed_at_utc=_stored_utc(row["assessed_at_utc"]),
+            trade_influence_enabled=bool(row["trade_influence_enabled"]),
+        )
+
+    def record_event_reaction_rollup(
+        self,
+        conn: Connection,
+        *,
+        rollup_id: str,
+        rollup: EventReactionRollup,
+    ) -> None:
+        if not str(rollup_id).strip():
+            raise ValueError("rollup_id is required")
+
+        measurements = self.tables["event_reaction_measurements"]
+        measurement_ids: list[str] = []
+        for measurement in rollup.measurements:
+            existing = conn.execute(
+                sa.select(measurements).where(
+                    sa.and_(
+                        measurements.c.event_id == measurement.event_id,
+                        measurements.c.asset_id == measurement.asset_id,
+                        measurements.c.market_data_version
+                        == measurement.market_data_version,
+                        measurements.c.horizon_seconds
+                        == measurement.horizon_seconds,
+                    )
+                )
+            ).mappings().first()
+            if existing is None:
+                conn.execute(
+                    measurements.insert().values(
+                        observation_id=measurement.observation_id,
+                        event_id=measurement.event_id,
+                        asset_id=measurement.asset_id,
+                        event_at_utc=measurement.event_at_utc,
+                        information_available_at_utc=(
+                            measurement.information_available_at_utc
+                        ),
+                        horizon_seconds=measurement.horizon_seconds,
+                        observed_at_utc=measurement.observed_at_utc,
+                        return_value=measurement.return_value,
+                        market_data_version=measurement.market_data_version,
+                        research_only=True,
+                    )
+                )
+                measurement_ids.append(measurement.observation_id)
+                continue
+
+            matches = (
+                str(existing["observation_id"]) == measurement.observation_id
+                and _stored_utc(existing["event_at_utc"])
+                == measurement.event_at_utc
+                and _stored_utc(existing["information_available_at_utc"])
+                == measurement.information_available_at_utc
+                and _stored_utc(existing["observed_at_utc"])
+                == measurement.observed_at_utc
+                and float(existing["return_value"])
+                == float(measurement.return_value)
+                and bool(existing["research_only"]) is True
+            )
+            if not matches:
+                raise ValueError(
+                    "conflicting event-reaction measurement for canonical horizon"
+                )
+            measurement_ids.append(str(existing["observation_id"]))
+
+        conn.execute(
+            self.tables["event_reaction_rollups"].insert().values(
+                rollup_id=str(rollup_id),
+                event_id=rollup.event_id,
+                asset_id=rollup.asset_id,
+                event_at_utc=rollup.event_at_utc,
+                information_available_at_utc=(
+                    rollup.information_available_at_utc
+                ),
+                market_data_version=rollup.market_data_version,
+                measurement_ids=measurement_ids,
+                complete=rollup.complete,
+                materialized_at_utc=rollup.materialized_at_utc,
+                research_only=True,
+            )
+        )
+
+    def load_event_reaction_rollup(
+        self,
+        conn: Connection,
+        *,
+        rollup_id: str,
+    ) -> EventReactionRollup | None:
+        rollups = self.tables["event_reaction_rollups"]
+        measurements = self.tables["event_reaction_measurements"]
+        row = conn.execute(
+            sa.select(rollups).where(rollups.c.rollup_id == str(rollup_id))
+        ).mappings().first()
+        if row is None:
+            return None
+
+        rows: list[EventReactionMeasurement] = []
+        for observation_id in tuple(row["measurement_ids"] or []):
+            measurement = conn.execute(
+                sa.select(measurements).where(
+                    measurements.c.observation_id == str(observation_id)
+                )
+            ).mappings().first()
+            if measurement is None:
+                raise RuntimeError(
+                    f"event-reaction rollup missing measurement: {observation_id}"
+                )
+            rows.append(
+                EventReactionMeasurement(
+                    event_id=str(measurement["event_id"]),
+                    asset_id=str(measurement["asset_id"]),
+                    event_at_utc=_stored_utc(measurement["event_at_utc"]),
+                    information_available_at_utc=_stored_utc(
+                        measurement["information_available_at_utc"]
+                    ),
+                    horizon_seconds=int(measurement["horizon_seconds"]),
+                    observed_at_utc=_stored_utc(
+                        measurement["observed_at_utc"]
+                    ),
+                    return_value=float(measurement["return_value"]),
+                    observation_id=str(measurement["observation_id"]),
+                    market_data_version=str(
+                        measurement["market_data_version"]
+                    ),
+                    research_only=bool(measurement["research_only"]),
+                )
+            )
+
+        return EventReactionRollup(
+            event_id=str(row["event_id"]),
+            asset_id=str(row["asset_id"]),
+            event_at_utc=_stored_utc(row["event_at_utc"]),
+            information_available_at_utc=_stored_utc(
+                row["information_available_at_utc"]
+            ),
+            market_data_version=str(row["market_data_version"]),
+            measurements=tuple(rows),
+            materialized_at_utc=_stored_utc(row["materialized_at_utc"]),
+            research_only=bool(row["research_only"]),
+        )
 
     def event_rows(self, conn: Connection) -> list[dict[str, Any]]:
         table = self.tables["event_ledger"]
