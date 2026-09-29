@@ -320,7 +320,7 @@ def test_research_percentile_excludes_trigger_and_uses_prior_90_days() -> None:
         ),
     ),
 )
-def test_research_regime_rejects_volatility_snapshot_drift(
+def test_volatility_snapshot_rejects_drifted_contract(
     field: str,
     value_factory: object,
     message: str,
@@ -332,14 +332,9 @@ def test_research_regime_rejects_volatility_snapshot_drift(
         for name in base.__dataclass_fields__
     }
     kwargs[field] = value_factory(base)
-    drifted = VolatilityPercentileSnapshot(**kwargs)
 
     with pytest.raises(ValueError, match=message):
-        ResearchRegimeReadyFeatures(
-            numerical=result.numerical,
-            volatility=drifted,
-            volatility_band=result.volatility_band,
-        )
+        VolatilityPercentileSnapshot(**kwargs)
 
 
 def test_research_regime_band_must_match_percentile() -> None:
