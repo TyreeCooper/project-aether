@@ -14,7 +14,7 @@ from aether_vnext.operator_floor import (
     UnifiedFirmFloorSnapshot,
 )
 from aether_vnext.registry import SEED_REGISTRY
-from aether_vnext.store import VNextStore
+from aether_vnext.store import SEED_LEDGER_CASH_USD, VNextStore
 
 
 _DISPLAY_PRIORITY = {
@@ -112,6 +112,27 @@ def build_shadow_floor_snapshot(
     if as_of_utc.tzinfo is None:
         raise ValueError("as_of_utc must be timezone-aware")
     t = store.tables
+    paper_epoch = store.current_paper_test_epoch(conn)
+    paper_epoch_start = (
+        None
+        if paper_epoch is None
+        else _stored_utc(paper_epoch["started_at_utc"])
+    )
+    closed_trade_stmt = sa.select(sa.func.count()).select_from(
+        t["closed_trades"]
+    )
+    if paper_epoch_start is not None:
+        closed_trade_stmt = closed_trade_stmt.where(
+            t["closed_trades"].c.closed_at_utc >= paper_epoch_start
+        )
+    paper_closed_trade_count = int(
+        conn.execute(closed_trade_stmt).scalar_one()
+    )
+    paper_seed_bank_usd = (
+        float(sum(SEED_LEDGER_CASH_USD.values()))
+        if paper_epoch is None
+        else float(paper_epoch["seed_bank_total_usd"])
+    )
 
     latest_mark: dict[str, float | None] = {}
     observations = conn.execute(
@@ -368,5 +389,11 @@ def build_shadow_floor_snapshot(
         open_cockpits=tuple(
             sorted(open_cockpits, key=lambda row: row.position_key)
         ),
+        paper_test_epoch_id=(
+            None if paper_epoch is None else str(paper_epoch["epoch_id"])
+        ),
+        paper_test_started_at_utc=paper_epoch_start,
+        paper_test_seed_bank_usd=paper_seed_bank_usd,
+        paper_test_closed_trade_count=paper_closed_trade_count,
         inspection_drawer=None,
     )

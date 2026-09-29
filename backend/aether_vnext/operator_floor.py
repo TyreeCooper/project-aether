@@ -243,6 +243,10 @@ class UnifiedFirmFloorSnapshot:
     top12_attention: tuple[AttentionStation, ...]
     seat_queues: tuple[SeatQueueSnapshot, ...]
     open_cockpits: tuple[OpenPositionCockpit, ...]
+    paper_test_epoch_id: str | None = None
+    paper_test_started_at_utc: datetime | None = None
+    paper_test_seed_bank_usd: float | None = None
+    paper_test_closed_trade_count: int = 0
     inspection_drawer: InspectionDrawer | None = None
     paper_only: bool = True
     live_blocked: bool = True
@@ -252,6 +256,28 @@ class UnifiedFirmFloorSnapshot:
             raise ValueError("as_of_utc must be timezone-aware")
         if self.paper_only is not True or self.live_blocked is not True:
             raise ValueError("Unified Firm Floor must remain PAPER ONLY / LIVE BLOCKED")
+        if self.paper_test_epoch_id is not None:
+            _text("paper_test_epoch_id", self.paper_test_epoch_id)
+        if (
+            self.paper_test_started_at_utc is not None
+            and self.paper_test_started_at_utc.tzinfo is None
+        ):
+            raise ValueError("paper_test_started_at_utc must be timezone-aware")
+        if self.paper_test_seed_bank_usd is not None:
+            seed = _finite_optional(
+                "paper_test_seed_bank_usd",
+                self.paper_test_seed_bank_usd,
+            )
+            if seed is None or seed <= 0:
+                raise ValueError("paper_test_seed_bank_usd must be positive")
+        if (
+            not isinstance(self.paper_test_closed_trade_count, int)
+            or isinstance(self.paper_test_closed_trade_count, bool)
+            or self.paper_test_closed_trade_count < 0
+        ):
+            raise ValueError(
+                "paper_test_closed_trade_count must be a nonnegative integer"
+            )
 
         asset_ids = tuple(row.asset_id for row in self.full_universe)
         if len(asset_ids) != len(set(asset_ids)):
@@ -316,6 +342,18 @@ def build_unified_firm_floor(
             "execution_permission": False,
             "may_mutate_firm_state": False,
             "second_runtime": False,
+        },
+        "paper_test": {
+            "epoch_id": snapshot.paper_test_epoch_id,
+            "started_at_utc": (
+                None
+                if snapshot.paper_test_started_at_utc is None
+                else snapshot.paper_test_started_at_utc.astimezone(
+                    timezone.utc
+                ).isoformat()
+            ),
+            "seed_bank_usd": snapshot.paper_test_seed_bank_usd,
+            "blotter_trade_count": snapshot.paper_test_closed_trade_count,
         },
         "full_universe": [station(row) for row in snapshot.full_universe],
         "top12_attention": [

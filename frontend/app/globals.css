@@ -26,6 +26,9 @@ button { color: inherit; }
 .statusStrip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1px; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--line); }
 .statusStrip span { min-width: 0; background: var(--panel); padding: 10px 12px; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .statusStrip b { color: var(--text); margin-right: 5px; }
+.testStatus { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; margin-top: 6px; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--line); }
+.testStatus span { min-width: 0; background: var(--panel-2); padding: 8px 12px; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.testStatus b { color: var(--text); margin-right: 5px; }
 .apiNotice { display: grid; gap: 3px; margin-top: 12px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--active) 45%, var(--line)); border-radius: 10px; background: color-mix(in srgb, var(--active) 7%, var(--panel)); }
 .apiNotice strong { color: var(--active); font-size: 11px; letter-spacing: .09em; }
 .apiNotice span { font-size: 13px; }
@@ -87,6 +90,7 @@ button { color: inherit; }
   .floorHeader { align-items: center; }
   .subtle { display: none; }
   .statusStrip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .testStatus { grid-template-columns: 1fr; }
   .attentionGrid, .universeGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .split { grid-template-columns: 1fr; gap: 0; }
   .cockpitGrid { grid-template-columns: repeat(2, 1fr); }

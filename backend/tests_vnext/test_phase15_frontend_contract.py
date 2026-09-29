@@ -63,3 +63,21 @@ def test_floor_header_surfaces_runtime_restart_and_data_refresh_times() -> None:
     assert "Data refreshed" in page
     assert "as_of_utc" in page
     assert 'timeZoneName: "short"' in page
+
+
+def test_floor_surfaces_fresh_test_epoch_bank_and_blotter_confirmation() -> None:
+    page = (_repo_root() / "frontend" / "app" / "page.js").read_text(
+        encoding="utf-8"
+    )
+    css = (_repo_root() / "frontend" / "app" / "globals.css").read_text(
+        encoding="utf-8"
+    )
+
+    assert "Paper test status" in page
+    assert "Test run" in page
+    assert "Starting bank" in page
+    assert "Blotter" in page
+    assert "paper_test" in page
+    assert "seed_bank_usd" in page
+    assert "blotter_trade_count" in page
+    assert ".testStatus" in css

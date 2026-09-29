@@ -183,6 +183,12 @@ export default function DashboardPage() {
         <span><b>Open cockpits</b> {cockpits.length}</span>
       </section>
 
+      <section className="testStatus" aria-label="Paper test status">
+        <span><b>Test run</b> {text(floor?.paper_test?.epoch_id, "not reset")}</span>
+        <span><b>Starting bank</b> ${number(floor?.paper_test?.seed_bank_usd, 2)}</span>
+        <span><b>Blotter</b> {text(floor?.paper_test?.blotter_trade_count, "0")} trade(s)</span>
+      </section>
+
       {error ? (
         <section className="apiNotice">
           <strong>READ-ONLY FLOOR WAITING</strong>
