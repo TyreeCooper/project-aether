@@ -48,6 +48,61 @@ class VolatilityPercentileSnapshot:
     percentile: float
     convention_version: str = VOLATILITY_PERCENTILE_CONVENTION_VERSION
 
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.asset_id, str)
+            or not self.asset_id
+            or self.asset_id != self.asset_id.strip()
+            or self.asset_id != self.asset_id.lower()
+        ):
+            raise ValueError("asset_id must be a canonical lowercase ID")
+        if (
+            not isinstance(self.interval, timedelta)
+            or self.interval <= timedelta(0)
+        ):
+            raise ValueError("interval must be positive")
+        for name in (
+            "trigger_close_utc",
+            "window_start_utc",
+            "window_end_exclusive_utc",
+        ):
+            if getattr(self, name).tzinfo is None:
+                raise ValueError(f"{name} must be timezone-aware")
+        if self.window_end_exclusive_utc != self.trigger_close_utc:
+            raise ValueError("volatility window must end at trigger close")
+        if (
+            self.window_start_utc
+            != self.trigger_close_utc - VOLATILITY_PERCENTILE_WINDOW
+        ):
+            raise ValueError("volatility window must cover prior 90 days")
+        current = float(self.current_realized_vol14)
+        if not isfinite(current) or current < 0.0:
+            raise ValueError(
+                "current_realized_vol14 must be finite and nonnegative"
+            )
+        for name in ("reference_count", "less_count", "equal_count"):
+            value = getattr(self, name)
+            if (
+                not isinstance(value, int)
+                or isinstance(value, bool)
+                or value < 0
+            ):
+                raise ValueError(f"{name} must be a nonnegative integer")
+        if self.reference_count <= 0:
+            raise ValueError("reference_count must be positive")
+        if self.less_count + self.equal_count > self.reference_count:
+            raise ValueError("volatility counts exceed reference_count")
+        percentile = float(self.percentile)
+        if not isfinite(percentile) or not 0.0 <= percentile <= 100.0:
+            raise ValueError("percentile must be finite and in [0,100]")
+        expected_percentile = 100.0 * (
+            self.less_count + 0.5 * self.equal_count
+        ) / float(self.reference_count)
+        if abs(percentile - expected_percentile) > 1e-12:
+            raise ValueError("percentile disagrees with count arithmetic")
+        if self.convention_version != VOLATILITY_PERCENTILE_CONVENTION_VERSION:
+            raise ValueError("volatility percentile convention version mismatch")
+
 
 def empirical_midrank_percentile(
     current: float,
