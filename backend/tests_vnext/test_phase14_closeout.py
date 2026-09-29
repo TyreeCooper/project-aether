@@ -128,3 +128,26 @@ def test_phase14_schema_is_pinned_through_crisis_archive_revision_0031() -> None
     assert 'down_revision: Union[str, None] = "0030"' in migration
     assert "trg_crisis_regime_archive_entries_immutable" in migration
     assert "BEFORE UPDATE OR DELETE" in migration
+
+
+def test_phase14_document_change_ledger_uses_verified_commit_timestamps() -> None:
+    ledger = (
+        _root().parent / "docs" / "AETHER_PHASE14_CHANGE_LEDGER.md"
+    ).read_text(encoding="utf-8")
+    for required in (
+        "Version",
+        "Timestamp",
+        "Section changed",
+        "Reason",
+        "logic_changed",
+        "evidence n reset",
+        "Superseded version/reference",
+        "Commit / source ref",
+        "63d3226f",
+        "2026-09-29T12:50:13Z",
+        "85152a6d",
+        "2026-09-29T16:23:45Z",
+        "ae1a8a67",
+        "2026-09-29T16:27:55Z",
+    ):
+        assert required in ledger
