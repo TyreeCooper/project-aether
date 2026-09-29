@@ -48,6 +48,14 @@ from aether_vnext.event_reactions import (
     EventReactionRollup,
 )
 from aether_vnext.intelligence_audit import IntelligenceShadowAudit
+from aether_vnext.institutional_memory import (
+    CounterfactualReplayRecord,
+    ExperienceCoverage,
+    FailureArchiveEntry,
+    InstitutionalMemoryRecord,
+    PnlAttributionComponent,
+    PnlAttributionRecord,
+)
 from aether_vnext.intelligence_health import (
     CrossSourceConflictAssessment,
     SourceHealthSnapshot,
@@ -7650,6 +7658,342 @@ class VNextStore:
                 ),
             )
             for row in rows
+        )
+
+    def load_pnl_attribution(
+        self,
+        conn: Connection,
+        *,
+        attribution_id: str,
+    ) -> PnlAttributionRecord | None:
+        table = self.tables["pnl_attributions"]
+        row = conn.execute(
+            sa.select(table).where(
+                table.c.attribution_id == str(attribution_id)
+            )
+        ).mappings().first()
+        if row is None:
+            return None
+        return PnlAttributionRecord(
+            attribution_id=str(row["attribution_id"]),
+            firm_id=str(row["firm_id"]),
+            mechanism_id=str(row["mechanism_id"]),
+            playbook_id=str(row["playbook_id"]),
+            playbook_version=str(row["playbook_version"]),
+            route_id=str(row["route_id"]),
+            asset_id=str(row["asset_id"]),
+            horizon=str(row["horizon"]),
+            side=str(row["side"]),
+            regime_id=str(row["regime_id"]),
+            trade_id=str(row["trade_id"]),
+            configuration_hash=str(row["configuration_hash"]),
+            net_pnl_usd=float(row["net_pnl_usd"]),
+            components=tuple(
+                PnlAttributionComponent(
+                    category=str(item["category"]),
+                    amount_usd=float(item["amount_usd"]),
+                )
+                for item in (row["components"] or [])
+            ),
+            attributed_at_utc=_stored_utc(row["attributed_at_utc"]),
+            source_record_ids=tuple(
+                str(value) for value in (row["source_record_ids"] or [])
+            ),
+        )
+
+    def record_pnl_attribution(
+        self,
+        conn: Connection,
+        record: PnlAttributionRecord,
+    ) -> None:
+        existing = self.load_pnl_attribution(
+            conn,
+            attribution_id=record.attribution_id,
+        )
+        if existing is not None:
+            if existing != record:
+                raise ValueError("conflicting immutable P&L attribution")
+            return
+        conn.execute(
+            self.tables["pnl_attributions"].insert().values(
+                attribution_id=record.attribution_id,
+                firm_id=record.firm_id,
+                mechanism_id=record.mechanism_id,
+                playbook_id=record.playbook_id,
+                playbook_version=record.playbook_version,
+                route_id=record.route_id,
+                asset_id=record.asset_id,
+                horizon=record.horizon,
+                side=record.side,
+                regime_id=record.regime_id,
+                trade_id=record.trade_id,
+                configuration_hash=record.configuration_hash,
+                net_pnl_usd=record.net_pnl_usd,
+                components=[
+                    {
+                        "category": item.category,
+                        "amount_usd": item.amount_usd,
+                    }
+                    for item in record.components
+                ],
+                attributed_at_utc=record.attributed_at_utc,
+                source_record_ids=list(record.source_record_ids),
+            )
+        )
+
+    def load_institutional_memory(
+        self,
+        conn: Connection,
+        *,
+        memory_id: str,
+    ) -> InstitutionalMemoryRecord | None:
+        table = self.tables["institutional_memories"]
+        row = conn.execute(
+            sa.select(table).where(table.c.memory_id == str(memory_id))
+        ).mappings().first()
+        if row is None:
+            return None
+        return InstitutionalMemoryRecord(
+            memory_id=str(row["memory_id"]),
+            trade_id=str(row["trade_id"]),
+            route_id=str(row["route_id"]),
+            playbook_id=str(row["playbook_id"]),
+            playbook_version=str(row["playbook_version"]),
+            configuration_hash=str(row["configuration_hash"]),
+            market_state_ref=str(row["market_state_ref"]),
+            information_state_ref=str(row["information_state_ref"]),
+            signal_ref=str(row["signal_ref"]),
+            decision_ref=str(row["decision_ref"]),
+            expected_outcome_ref=str(row["expected_outcome_ref"]),
+            actual_outcome_ref=str(row["actual_outcome_ref"]),
+            execution_quality_ref=str(row["execution_quality_ref"]),
+            risk_state_ref=str(row["risk_state_ref"]),
+            success_failure_reason=str(row["success_failure_reason"]),
+            lesson=str(row["lesson"]),
+            future_relevance=tuple(
+                str(value) for value in (row["future_relevance"] or [])
+            ),
+            occurred_at_utc=_stored_utc(row["occurred_at_utc"]),
+            recorded_at_utc=_stored_utc(row["recorded_at_utc"]),
+            source_record_ids=tuple(
+                str(value) for value in (row["source_record_ids"] or [])
+            ),
+        )
+
+    def record_institutional_memory(
+        self,
+        conn: Connection,
+        record: InstitutionalMemoryRecord,
+    ) -> None:
+        existing = self.load_institutional_memory(
+            conn,
+            memory_id=record.memory_id,
+        )
+        if existing is not None:
+            if existing != record:
+                raise ValueError("conflicting immutable institutional memory")
+            return
+        conn.execute(
+            self.tables["institutional_memories"].insert().values(
+                memory_id=record.memory_id,
+                trade_id=record.trade_id,
+                route_id=record.route_id,
+                playbook_id=record.playbook_id,
+                playbook_version=record.playbook_version,
+                configuration_hash=record.configuration_hash,
+                market_state_ref=record.market_state_ref,
+                information_state_ref=record.information_state_ref,
+                signal_ref=record.signal_ref,
+                decision_ref=record.decision_ref,
+                expected_outcome_ref=record.expected_outcome_ref,
+                actual_outcome_ref=record.actual_outcome_ref,
+                execution_quality_ref=record.execution_quality_ref,
+                risk_state_ref=record.risk_state_ref,
+                success_failure_reason=record.success_failure_reason,
+                lesson=record.lesson,
+                future_relevance=list(record.future_relevance),
+                occurred_at_utc=record.occurred_at_utc,
+                recorded_at_utc=record.recorded_at_utc,
+                source_record_ids=list(record.source_record_ids),
+            )
+        )
+
+    def load_failure_archive_entry(
+        self,
+        conn: Connection,
+        *,
+        failure_id: str,
+    ) -> FailureArchiveEntry | None:
+        table = self.tables["failure_archive_entries"]
+        row = conn.execute(
+            sa.select(table).where(table.c.failure_id == str(failure_id))
+        ).mappings().first()
+        if row is None:
+            return None
+        return FailureArchiveEntry(
+            failure_id=str(row["failure_id"]),
+            memory_id=str(row["memory_id"]),
+            trade_id=str(row["trade_id"]),
+            category=str(row["category"]),
+            reason=str(row["reason"]),
+            recovery_lesson=str(row["recovery_lesson"]),
+            recorded_at_utc=_stored_utc(row["recorded_at_utc"]),
+            source_record_ids=tuple(
+                str(value) for value in (row["source_record_ids"] or [])
+            ),
+        )
+
+    def record_failure_archive_entry(
+        self,
+        conn: Connection,
+        entry: FailureArchiveEntry,
+    ) -> None:
+        existing = self.load_failure_archive_entry(
+            conn,
+            failure_id=entry.failure_id,
+        )
+        if existing is not None:
+            if existing != entry:
+                raise ValueError("conflicting immutable failure archive entry")
+            return
+        conn.execute(
+            self.tables["failure_archive_entries"].insert().values(
+                failure_id=entry.failure_id,
+                memory_id=entry.memory_id,
+                trade_id=entry.trade_id,
+                category=entry.category,
+                reason=entry.reason,
+                recovery_lesson=entry.recovery_lesson,
+                recorded_at_utc=entry.recorded_at_utc,
+                source_record_ids=list(entry.source_record_ids),
+            )
+        )
+
+    def load_counterfactual_replay(
+        self,
+        conn: Connection,
+        *,
+        replay_id: str,
+    ) -> CounterfactualReplayRecord | None:
+        table = self.tables["counterfactual_replays"]
+        row = conn.execute(
+            sa.select(table).where(table.c.replay_id == str(replay_id))
+        ).mappings().first()
+        if row is None:
+            return None
+        return CounterfactualReplayRecord(
+            replay_id=str(row["replay_id"]),
+            original_memory_id=str(row["original_memory_id"]),
+            variation_keys=tuple(
+                str(value) for value in (row["variation_keys"] or [])
+            ),
+            hypothetical_result_ref=str(row["hypothetical_result_ref"]),
+            created_at_utc=_stored_utc(row["created_at_utc"]),
+            hypothetical=bool(row["hypothetical"]),
+            independent_evidence_credit=bool(
+                row["independent_evidence_credit"]
+            ),
+        )
+
+    def record_counterfactual_replay(
+        self,
+        conn: Connection,
+        replay: CounterfactualReplayRecord,
+    ) -> None:
+        existing = self.load_counterfactual_replay(
+            conn,
+            replay_id=replay.replay_id,
+        )
+        if existing is not None:
+            if existing != replay:
+                raise ValueError("conflicting immutable counterfactual replay")
+            return
+        conn.execute(
+            self.tables["counterfactual_replays"].insert().values(
+                replay_id=replay.replay_id,
+                original_memory_id=replay.original_memory_id,
+                variation_keys=list(replay.variation_keys),
+                hypothetical_result_ref=replay.hypothetical_result_ref,
+                created_at_utc=replay.created_at_utc,
+                hypothetical=True,
+                independent_evidence_credit=False,
+            )
+        )
+
+    def load_experience_coverage(
+        self,
+        conn: Connection,
+        *,
+        coverage_id: str,
+    ) -> ExperienceCoverage | None:
+        table = self.tables["experience_coverage_snapshots"]
+        row = conn.execute(
+            sa.select(table).where(table.c.coverage_id == str(coverage_id))
+        ).mappings().first()
+        if row is None:
+            return None
+        return ExperienceCoverage(
+            historical_years=float(row["historical_years"]),
+            unique_regimes_crises=int(row["unique_regimes_crises"]),
+            event_categories=int(row["event_categories"]),
+            asset_event_combinations=int(row["asset_event_combinations"]),
+            execution_failure_scenarios=int(
+                row["execution_failure_scenarios"]
+            ),
+            correlation_stress_scenarios=int(
+                row["correlation_stress_scenarios"]
+            ),
+            unique_market_state_clusters=int(
+                row["unique_market_state_clusters"]
+            ),
+            forward_paper_days=int(row["forward_paper_days"]),
+            forward_paper_trades=int(row["forward_paper_trades"]),
+            historical_forward_gaps=int(row["historical_forward_gaps"]),
+        )
+
+    def record_experience_coverage(
+        self,
+        conn: Connection,
+        *,
+        coverage_id: str,
+        as_of_utc: datetime,
+        coverage: ExperienceCoverage,
+    ) -> None:
+        if not str(coverage_id).strip():
+            raise ValueError("coverage_id is required")
+        if as_of_utc.tzinfo is None:
+            raise ValueError("as_of_utc must be timezone-aware")
+        existing = self.load_experience_coverage(
+            conn,
+            coverage_id=coverage_id,
+        )
+        if existing is not None:
+            if existing != coverage:
+                raise ValueError(
+                    "conflicting immutable experience coverage snapshot"
+                )
+            return
+        conn.execute(
+            self.tables["experience_coverage_snapshots"].insert().values(
+                coverage_id=str(coverage_id),
+                as_of_utc=as_of_utc,
+                historical_years=coverage.historical_years,
+                unique_regimes_crises=coverage.unique_regimes_crises,
+                event_categories=coverage.event_categories,
+                asset_event_combinations=coverage.asset_event_combinations,
+                execution_failure_scenarios=(
+                    coverage.execution_failure_scenarios
+                ),
+                correlation_stress_scenarios=(
+                    coverage.correlation_stress_scenarios
+                ),
+                unique_market_state_clusters=(
+                    coverage.unique_market_state_clusters
+                ),
+                forward_paper_days=coverage.forward_paper_days,
+                forward_paper_trades=coverage.forward_paper_trades,
+                historical_forward_gaps=coverage.historical_forward_gaps,
+            )
         )
 
     def event_rows(self, conn: Connection) -> list[dict[str, Any]]:
