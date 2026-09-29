@@ -290,6 +290,52 @@ class EventMarketResponse:
     stabilization_time: float | None
     market_data_version: str
 
+    def __post_init__(self) -> None:
+        for name in (
+            "event_id",
+            "asset_id",
+            "pre_event_observation_id",
+            "market_data_version",
+        ):
+            value = getattr(self, name)
+            if (
+                not isinstance(value, str)
+                or not value
+                or value != value.strip()
+            ):
+                raise ValueError(f"{name} must be canonical text")
+        for name in (
+            "return_1m",
+            "return_5m",
+            "return_15m",
+            "return_1h",
+            "return_4h",
+            "return_1d",
+            "mfe",
+            "mae",
+            "realized_vol_change",
+            "volume_change",
+            "spread_change",
+            "liquidity_change",
+            "correlation_change",
+            "stabilization_time",
+        ):
+            value = getattr(self, name)
+            if value is not None and (
+                isinstance(value, bool)
+                or not math.isfinite(float(value))
+            ):
+                raise ValueError(f"{name} must be finite when present")
+        if self.continuation_or_reversal is not None and (
+            not isinstance(self.continuation_or_reversal, str)
+            or not self.continuation_or_reversal
+            or self.continuation_or_reversal
+            != self.continuation_or_reversal.strip()
+        ):
+            raise ValueError(
+                "continuation_or_reversal must be canonical text when present"
+            )
+
 
 @dataclass(frozen=True, slots=True)
 class HistoricalAnalogRun:
@@ -305,6 +351,45 @@ class HistoricalAnalogRun:
     research_only: bool = True
 
     def __post_init__(self) -> None:
+        for name in (
+            "analog_run_id",
+            "query_event_or_state_id",
+            "feature_spec_version",
+        ):
+            value = getattr(self, name)
+            if (
+                not isinstance(value, str)
+                or not value
+                or value != value.strip()
+            ):
+                raise ValueError(f"{name} must be canonical text")
+        for name in (
+            "as_of_utc",
+            "eligible_history_cutoff_utc",
+            "created_at_utc",
+        ):
+            if getattr(self, name).tzinfo is None:
+                raise ValueError(f"{name} must be timezone-aware")
+        if not isinstance(self.matched_event_ids, tuple):
+            raise ValueError("matched_event_ids must be an immutable tuple")
+        if any(
+            not isinstance(value, str)
+            or not value
+            or value != value.strip()
+            for value in self.matched_event_ids
+        ):
+            raise ValueError(
+                "matched_event_ids entries must be canonical text"
+            )
+        if not isinstance(self.similarity_scores, tuple):
+            raise ValueError("similarity_scores must be an immutable tuple")
+        if any(
+            isinstance(value, bool) or not math.isfinite(float(value))
+            for value in self.similarity_scores
+        ):
+            raise ValueError("similarity_scores must be finite numerics")
+        if not isinstance(self.outcome_distribution, dict):
+            raise ValueError("outcome_distribution must be a dict")
         if self.research_only is not True:
             raise ValueError("historical analog output is research_only")
         if len(self.matched_event_ids) != len(self.similarity_scores):
