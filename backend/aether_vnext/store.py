@@ -51,6 +51,14 @@ from aether_vnext.intelligence_health import (
     CrossSourceConflictAssessment,
     SourceHealthSnapshot,
 )
+from aether_vnext.news import (
+    EventAssetLink,
+    EventMarketResponse,
+    HistoricalAnalogRun,
+    NewsSource,
+    NormalizedEvent,
+    RawNewsItem,
+)
 from aether_vnext.source_registry import (
     AssetSourceRecord,
     SourceTrustDecision,
@@ -7076,6 +7084,448 @@ class VNextStore:
             measurements=tuple(rows),
             materialized_at_utc=_stored_utc(row["materialized_at_utc"]),
             research_only=bool(row["research_only"]),
+        )
+
+    def load_news_source(
+        self,
+        conn: Connection,
+        *,
+        source_id: str,
+    ) -> NewsSource | None:
+        table = self.tables["news_sources"]
+        row = conn.execute(
+            sa.select(table).where(table.c.source_id == str(source_id))
+        ).mappings().first()
+        if row is None:
+            return None
+        return NewsSource(
+            source_id=str(row["source_id"]),
+            source_name=str(row["source_name"]),
+            source_class=str(row["source_class"]),
+            primary_or_secondary=str(row["primary_or_secondary"]),
+            authority_class=str(row["authority_class"]),
+            base_timezone=str(row["base_timezone"]),
+            provider_adapter_id=str(row["provider_adapter_id"]),
+            active=bool(row["active"]),
+            terms_licensing_metadata_ref=(
+                None
+                if row["terms_licensing_metadata_ref"] is None
+                else str(row["terms_licensing_metadata_ref"])
+            ),
+        )
+
+    def upsert_news_source(
+        self,
+        conn: Connection,
+        source: NewsSource,
+    ) -> int:
+        table = self.tables["news_sources"]
+        existing = conn.execute(
+            sa.select(table)
+            .where(table.c.source_id == source.source_id)
+            .with_for_update()
+        ).mappings().first()
+        values = {
+            "source_name": source.source_name,
+            "source_class": source.source_class,
+            "primary_or_secondary": source.primary_or_secondary,
+            "authority_class": source.authority_class,
+            "base_timezone": source.base_timezone,
+            "provider_adapter_id": source.provider_adapter_id,
+            "active": source.active,
+            "terms_licensing_metadata_ref": source.terms_licensing_metadata_ref,
+        }
+        if existing is None:
+            conn.execute(
+                table.insert().values(
+                    source_id=source.source_id,
+                    row_version=1,
+                    **values,
+                )
+            )
+            return 1
+        version = int(existing["row_version"]) + 1
+        conn.execute(
+            table.update()
+            .where(table.c.source_id == source.source_id)
+            .values(row_version=version, **values)
+        )
+        return version
+
+    def load_raw_news_item(
+        self,
+        conn: Connection,
+        *,
+        news_item_id: str,
+    ) -> RawNewsItem | None:
+        table = self.tables["raw_news_items"]
+        row = conn.execute(
+            sa.select(table).where(table.c.news_item_id == str(news_item_id))
+        ).mappings().first()
+        if row is None:
+            return None
+        return RawNewsItem(
+            news_item_id=str(row["news_item_id"]),
+            source_id=str(row["source_id"]),
+            provider_item_id=(
+                None if row["provider_item_id"] is None else str(row["provider_item_id"])
+            ),
+            canonical_url=(
+                None if row["canonical_url"] is None else str(row["canonical_url"])
+            ),
+            title=str(row["title"]),
+            body_hash=str(row["body_hash"]),
+            published_at_utc=_stored_utc(row["published_at_utc"]),
+            first_seen_at_utc=_stored_utc(row["first_seen_at_utc"]),
+            received_at_utc=_stored_utc(row["received_at_utc"]),
+            revision_of_news_item_id=(
+                None
+                if row["revision_of_news_item_id"] is None
+                else str(row["revision_of_news_item_id"])
+            ),
+            correction_or_retraction=bool(row["correction_or_retraction"]),
+            language=str(row["language"]),
+            ingest_status=str(row["ingest_status"]),
+            dedupe_key=str(row["dedupe_key"]),
+            raw_payload_ref=str(row["raw_payload_ref"]),
+        )
+
+    def record_raw_news_item(
+        self,
+        conn: Connection,
+        item: RawNewsItem,
+    ) -> None:
+        table = self.tables["raw_news_items"]
+        existing = self.load_raw_news_item(
+            conn,
+            news_item_id=item.news_item_id,
+        )
+        if existing is not None:
+            if existing != item:
+                raise ValueError("conflicting immutable raw news item")
+            return
+        if self.load_news_source(conn, source_id=item.source_id) is None:
+            raise KeyError(f"unknown news source: {item.source_id}")
+        conn.execute(
+            table.insert().values(
+                news_item_id=item.news_item_id,
+                source_id=item.source_id,
+                provider_item_id=item.provider_item_id,
+                canonical_url=item.canonical_url,
+                title=item.title,
+                body_hash=item.body_hash,
+                published_at_utc=item.published_at_utc,
+                first_seen_at_utc=item.first_seen_at_utc,
+                received_at_utc=item.received_at_utc,
+                revision_of_news_item_id=item.revision_of_news_item_id,
+                correction_or_retraction=item.correction_or_retraction,
+                language=item.language,
+                ingest_status=item.ingest_status,
+                dedupe_key=item.dedupe_key,
+                raw_payload_ref=item.raw_payload_ref,
+            )
+        )
+
+    def load_normalized_event(
+        self,
+        conn: Connection,
+        *,
+        event_id: str,
+    ) -> NormalizedEvent | None:
+        table = self.tables["normalized_events"]
+        row = conn.execute(
+            sa.select(table).where(table.c.event_id == str(event_id))
+        ).mappings().first()
+        if row is None:
+            return None
+        return NormalizedEvent(
+            event_id=str(row["event_id"]),
+            event_cluster_id=str(row["event_cluster_id"]),
+            event_type=str(row["event_type"]),
+            source_news_item_ids=tuple(
+                str(value) for value in (row["source_news_item_ids"] or [])
+            ),
+            assets=tuple(str(value) for value in (row["assets"] or [])),
+            clusters=tuple(str(value) for value in (row["clusters"] or [])),
+            canonical_event_at_utc=_stored_utc(row["canonical_event_at_utc"]),
+            information_available_at_utc=_stored_utc(
+                row["information_available_at_utc"]
+            ),
+            scheduled=bool(row["scheduled"]),
+            expected=(None if row["expected"] is None else bool(row["expected"])),
+            consensus=row["consensus"],
+            actual=row["actual"],
+            surprise_magnitude=(
+                None
+                if row["surprise_magnitude"] is None
+                else float(row["surprise_magnitude"])
+            ),
+            direction=(None if row["direction"] is None else str(row["direction"])),
+            severity=None if row["severity"] is None else float(row["severity"]),
+            novelty=None if row["novelty"] is None else float(row["novelty"]),
+            confidence=(
+                None if row["confidence"] is None else float(row["confidence"])
+            ),
+            market_scope=str(row["market_scope"]),
+            company_specific=bool(row["company_specific"]),
+            sector_specific=bool(row["sector_specific"]),
+            macro=bool(row["macro"]),
+            geopolitical=bool(row["geopolitical"]),
+            regulatory=bool(row["regulatory"]),
+            earnings=bool(row["earnings"]),
+            policy=bool(row["policy"]),
+            supply=bool(row["supply"]),
+            demand=bool(row["demand"]),
+            liquidity=bool(row["liquidity"]),
+            normalizer_version=str(row["normalizer_version"]),
+        )
+
+    def record_normalized_event(
+        self,
+        conn: Connection,
+        event: NormalizedEvent,
+    ) -> None:
+        existing = self.load_normalized_event(conn, event_id=event.event_id)
+        if existing is not None:
+            if existing != event:
+                raise ValueError("conflicting immutable normalized event")
+            return
+        conn.execute(
+            self.tables["normalized_events"].insert().values(
+                event_id=event.event_id,
+                event_cluster_id=event.event_cluster_id,
+                event_type=event.event_type,
+                source_news_item_ids=list(event.source_news_item_ids),
+                assets=list(event.assets),
+                clusters=list(event.clusters),
+                canonical_event_at_utc=event.canonical_event_at_utc,
+                information_available_at_utc=event.information_available_at_utc,
+                scheduled=event.scheduled,
+                expected=event.expected,
+                consensus=event.consensus,
+                actual=event.actual,
+                surprise_magnitude=event.surprise_magnitude,
+                direction=event.direction,
+                severity=event.severity,
+                novelty=event.novelty,
+                confidence=event.confidence,
+                market_scope=event.market_scope,
+                company_specific=event.company_specific,
+                sector_specific=event.sector_specific,
+                macro=event.macro,
+                geopolitical=event.geopolitical,
+                regulatory=event.regulatory,
+                earnings=event.earnings,
+                policy=event.policy,
+                supply=event.supply,
+                demand=event.demand,
+                liquidity=event.liquidity,
+                normalizer_version=event.normalizer_version,
+            )
+        )
+
+    def record_event_asset_link(
+        self,
+        conn: Connection,
+        link: EventAssetLink,
+    ) -> None:
+        table = self.tables["event_asset_links"]
+        predicate = sa.and_(
+            table.c.event_id == link.event_id,
+            table.c.asset_id == link.asset_id,
+            table.c.relation_type == link.relation_type,
+            table.c.linker_version == link.linker_version,
+        )
+        row = conn.execute(sa.select(table).where(predicate)).mappings().first()
+        if row is not None:
+            same = (
+                float(row["confidence"]) == float(link.confidence)
+                and tuple(str(x) for x in (row["evidence_source_ids"] or []))
+                == link.evidence_source_ids
+                and _stored_utc(row["created_at_utc"]) == link.created_at_utc
+            )
+            if not same:
+                raise ValueError("conflicting immutable event asset link")
+            return
+        conn.execute(
+            table.insert().values(
+                event_id=link.event_id,
+                asset_id=link.asset_id,
+                relation_type=link.relation_type,
+                confidence=link.confidence,
+                evidence_source_ids=list(link.evidence_source_ids),
+                created_at_utc=link.created_at_utc,
+                linker_version=link.linker_version,
+            )
+        )
+
+    def list_event_asset_links(
+        self,
+        conn: Connection,
+        *,
+        event_id: str,
+    ) -> tuple[EventAssetLink, ...]:
+        table = self.tables["event_asset_links"]
+        rows = conn.execute(
+            sa.select(table)
+            .where(table.c.event_id == str(event_id))
+            .order_by(
+                table.c.asset_id.asc(),
+                table.c.relation_type.asc(),
+                table.c.linker_version.asc(),
+            )
+        ).mappings()
+        return tuple(
+            EventAssetLink(
+                event_id=str(row["event_id"]),
+                asset_id=str(row["asset_id"]),
+                relation_type=str(row["relation_type"]),
+                confidence=float(row["confidence"]),
+                evidence_source_ids=tuple(
+                    str(x) for x in (row["evidence_source_ids"] or [])
+                ),
+                created_at_utc=_stored_utc(row["created_at_utc"]),
+                linker_version=str(row["linker_version"]),
+            )
+            for row in rows
+        )
+
+    def load_event_market_response(
+        self,
+        conn: Connection,
+        *,
+        event_id: str,
+        asset_id: str,
+        market_data_version: str,
+    ) -> EventMarketResponse | None:
+        table = self.tables["event_market_responses"]
+        row = conn.execute(
+            sa.select(table).where(
+                sa.and_(
+                    table.c.event_id == str(event_id),
+                    table.c.asset_id == str(asset_id),
+                    table.c.market_data_version == str(market_data_version),
+                )
+            )
+        ).mappings().first()
+        if row is None:
+            return None
+        optional_float_names = (
+            "return_1m",
+            "return_5m",
+            "return_15m",
+            "return_1h",
+            "return_4h",
+            "return_1d",
+            "mfe",
+            "mae",
+            "realized_vol_change",
+            "volume_change",
+            "spread_change",
+            "liquidity_change",
+            "correlation_change",
+            "stabilization_time",
+        )
+        values = {
+            name: None if row[name] is None else float(row[name])
+            for name in optional_float_names
+        }
+        return EventMarketResponse(
+            event_id=str(row["event_id"]),
+            asset_id=str(row["asset_id"]),
+            pre_event_observation_id=str(row["pre_event_observation_id"]),
+            continuation_or_reversal=(
+                None
+                if row["continuation_or_reversal"] is None
+                else str(row["continuation_or_reversal"])
+            ),
+            market_data_version=str(row["market_data_version"]),
+            **values,
+        )
+
+    def record_event_market_response(
+        self,
+        conn: Connection,
+        response: EventMarketResponse,
+    ) -> None:
+        existing = self.load_event_market_response(
+            conn,
+            event_id=response.event_id,
+            asset_id=response.asset_id,
+            market_data_version=response.market_data_version,
+        )
+        if existing is not None:
+            if existing != response:
+                raise ValueError("conflicting immutable event market response")
+            return
+        conn.execute(
+            self.tables["event_market_responses"].insert().values(
+                **{
+                    name: getattr(response, name)
+                    for name in response.__dataclass_fields__
+                }
+            )
+        )
+
+    def load_historical_analog_run(
+        self,
+        conn: Connection,
+        *,
+        analog_run_id: str,
+    ) -> HistoricalAnalogRun | None:
+        table = self.tables["historical_analog_runs"]
+        row = conn.execute(
+            sa.select(table).where(
+                table.c.analog_run_id == str(analog_run_id)
+            )
+        ).mappings().first()
+        if row is None:
+            return None
+        return HistoricalAnalogRun(
+            analog_run_id=str(row["analog_run_id"]),
+            query_event_or_state_id=str(row["query_event_or_state_id"]),
+            feature_spec_version=str(row["feature_spec_version"]),
+            as_of_utc=_stored_utc(row["as_of_utc"]),
+            eligible_history_cutoff_utc=_stored_utc(
+                row["eligible_history_cutoff_utc"]
+            ),
+            matched_event_ids=tuple(
+                str(x) for x in (row["matched_event_ids"] or [])
+            ),
+            similarity_scores=tuple(
+                float(x) for x in (row["similarity_scores"] or [])
+            ),
+            outcome_distribution=dict(row["outcome_distribution"] or {}),
+            created_at_utc=_stored_utc(row["created_at_utc"]),
+            research_only=bool(row["research_only"]),
+        )
+
+    def record_historical_analog_run(
+        self,
+        conn: Connection,
+        run: HistoricalAnalogRun,
+    ) -> None:
+        existing = self.load_historical_analog_run(
+            conn,
+            analog_run_id=run.analog_run_id,
+        )
+        if existing is not None:
+            if existing != run:
+                raise ValueError("conflicting immutable historical analog run")
+            return
+        conn.execute(
+            self.tables["historical_analog_runs"].insert().values(
+                analog_run_id=run.analog_run_id,
+                query_event_or_state_id=run.query_event_or_state_id,
+                feature_spec_version=run.feature_spec_version,
+                as_of_utc=run.as_of_utc,
+                eligible_history_cutoff_utc=run.eligible_history_cutoff_utc,
+                matched_event_ids=list(run.matched_event_ids),
+                similarity_scores=list(run.similarity_scores),
+                outcome_distribution=dict(run.outcome_distribution),
+                created_at_utc=run.created_at_utc,
+                research_only=True,
+            )
         )
 
     def event_rows(self, conn: Connection) -> list[dict[str, Any]]:
