@@ -201,7 +201,18 @@ jobs:
           assert result.get("subscription_acknowledged") is True, result
           PY
 
-          curl --fail --silent --show-error --max-time 20             "$base/api/v1/vnext/floor" >/tmp/floor.json
+          for attempt in $(seq 1 12); do
+            if curl --fail --silent --show-error --max-time 45 \
+              "$base/api/v1/vnext/floor" >/tmp/floor.json; then
+              break
+            fi
+            if [ "$attempt" -eq 12 ]; then
+              echo "vNext Floor did not recover after prototype restart."
+              exit 1
+            fi
+            sleep 10
+          done
+
           python - <<'PY'
           import json, os
           body=json.load(open("/tmp/floor.json", encoding="utf-8"))
