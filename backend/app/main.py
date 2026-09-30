@@ -32,6 +32,11 @@ from app.vnext_ingress import (
     start_configured_vnext_ingress,
     stop_configured_vnext_ingress,
 )
+from app.vnext_strategy import (
+    mount_vnext_strategy_status,
+    start_configured_vnext_strategy,
+    stop_configured_vnext_strategy,
+)
 
 STATIC = Path(__file__).parent / "static"
 VNEXT_UI = Path(__file__).parent / "vnext_ui"
@@ -60,6 +65,7 @@ async def lifespan(_: FastAPI):
     install_harsh_paper(engine)
     engine.start_loop()
     await start_configured_vnext_ingress()
+    await start_configured_vnext_strategy()
     logger.info(
         "event=app_start phase=ready version=2.1.0 storage_configured=%s storage_initialized=%s live_ready=%s",
         db_store.status().get("configured"),
@@ -70,6 +76,7 @@ async def lifespan(_: FastAPI):
         yield
     finally:
         logger.info("event=app_shutdown phase=begin")
+        await stop_configured_vnext_strategy()
         await stop_configured_vnext_ingress()
         await engine.shutdown()
         await db_store.close()
@@ -88,6 +95,7 @@ app.add_middleware(
 # Phase 16: GET-only shadow mount; no database is opened until the route is read.
 mount_configured_vnext_shadow_floor(app)
 mount_vnext_ingress_status(app)
+mount_vnext_strategy_status(app)
 
 
 @app.middleware("http")
