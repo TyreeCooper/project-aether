@@ -78,7 +78,7 @@ jobs:
                       def inspect(sync_conn):
                           revision = sync_conn.execute(
                               sa.text(
-                                  "SELECT version_num FROM aether_vnext.alembic_version"
+                                  "SELECT version_num FROM alembic_version"
                               )
                           ).scalar_one()
                           exists = sync_conn.execute(
