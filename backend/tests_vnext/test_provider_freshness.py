@@ -7,6 +7,7 @@ import pytest
 from aether_vnext.provider_freshness import (
     ProviderTimingSample,
     measure_provider_timing,
+    provider_timing_evidence_payload,
 )
 
 
@@ -109,3 +110,12 @@ def test_equal_provider_timestamps_are_preserved_as_zero_gap() -> None:
     assert evidence.provider_interarrival is not None
     assert evidence.provider_interarrival.minimum_ms == 0
     assert evidence.provider_interarrival.maximum_ms == 0
+
+
+def test_serialized_evidence_cannot_smuggle_a_policy_choice() -> None:
+    payload = provider_timing_evidence_payload(
+        measure_provider_timing((_sample(100, 130),))
+    )
+    assert payload["stale_threshold_ms"] is None
+    assert payload["policy_selected"] is False
+    assert payload["transport_latency"]["p99_ms"] == 30

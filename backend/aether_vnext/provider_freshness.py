@@ -7,7 +7,7 @@ freshness controls.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime
 import math
 from typing import Iterable
@@ -170,3 +170,13 @@ def measure_provider_timing(
         ),
         transport_latency=_distribution(latencies),
     )
+
+
+def provider_timing_evidence_payload(
+    evidence: ProviderTimingEvidence,
+) -> dict[str, object]:
+    """Serialize timing evidence while proving that no policy was selected."""
+    payload = asdict(evidence)
+    payload["stale_threshold_ms"] = None
+    payload["policy_selected"] = False
+    return payload
