@@ -22,6 +22,7 @@ from aether_vnext.playbook_runtime import volatility_band
 from aether_vnext.playbooks import playbook
 from aether_vnext.prototype_crypto_features import PrototypeCryptoFeatureSnapshot
 from aether_vnext.regime import RegimeTags
+from aether_vnext.registry import registry_row
 
 
 PROTOTYPE_CRYPTO_PLAYBOOK_ID = "pb_crypto_swing_v1_2"
@@ -264,10 +265,7 @@ def build_prototype_crypto_entry_plan(
         raise RuntimeError("crypto swing first target is required")
 
     costs = modeled_round_trip_cost(
-        playbook_row := __import__(
-            "aether_vnext.registry",
-            fromlist=["registry_row"],
-        ).registry_row(asset),
+        registry_row(asset),
         qty=1.0,
         entry_price=entry,
         exit_reference_price=geometry.first_target_price,
@@ -276,7 +274,6 @@ def build_prototype_crypto_entry_plan(
         exit_side="sell",
         cost_edge_multiple=PROTOTYPE_COST_EDGE_MULTIPLE,
     )
-    del playbook_row
 
     invalidation_hit = (
         float(current_observation.bid) <= float(feature.prior_20h_high)

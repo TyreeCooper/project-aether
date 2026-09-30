@@ -32,7 +32,7 @@ def _feature(*, eligible: bool = True) -> PrototypeCryptoFeatureSnapshot:
         current_realized_vol14=0.01,
         reference_count=2160,
         less_count=1296,
-        equal_count=1,
+        equal_count=0,
         percentile=60.0,
     )
     family = FamilyAEvaluation(
