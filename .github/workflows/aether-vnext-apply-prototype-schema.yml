@@ -1,0 +1,110 @@
+name: AETHER vNext Apply Prototype Schema
+
+on:
+  push:
+    branches:
+      - aether-vnext-swapout
+    paths:
+      - ".github/workflows/aether-vnext-apply-prototype-schema.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aether-vnext-apply-prototype-schema
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: aether-vnext-burnin
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      AETHER_VNEXT_ENVIRONMENT: burnin
+      AETHER_VNEXT_DATABASE_URL: ${{ secrets.AETHER_VNEXT_BURNIN_DATABASE_URL }}
+
+    steps:
+      - name: Checkout exact vNext head
+        uses: actions/checkout@v4
+
+      - name: Verify branch and protected database secret
+        shell: bash
+        working-directory: .
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "aether-vnext-swapout"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -n "$AETHER_VNEXT_DATABASE_URL"
+          echo "Prototype schema head: $GITHUB_SHA"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Refuse legacy production database target
+        env:
+          PYTHONPATH: .
+        run: python scripts/aether_vnext_check_db_isolation.py
+
+      - name: Apply isolated vNext schema migrations
+        env:
+          PYTHONPATH: .
+        run: python scripts/aether_vnext_migrate.py
+
+      - name: Verify revision 0033 and prototype ledger
+        env:
+          PYTHONPATH: .
+        shell: bash
+        run: |
+          python - <<'PY'
+          import asyncio
+          import json
+          import sqlalchemy as sa
+
+          from aether_vnext.db_runtime import open_vnext_engine
+
+          async def main():
+              async with open_vnext_engine() as engine:
+                  async with engine.connect() as conn:
+                      def inspect(sync_conn):
+                          revision = sync_conn.execute(
+                              sa.text(
+                                  "SELECT version_num FROM aether_vnext.alembic_version"
+                              )
+                          ).scalar_one()
+                          exists = sync_conn.execute(
+                              sa.text(
+                                  """
+                                  SELECT EXISTS (
+                                      SELECT 1
+                                      FROM information_schema.tables
+                                      WHERE table_schema = 'aether_vnext'
+                                        AND table_name = 'prototype_market_bars'
+                                  )
+                                  """
+                              )
+                          ).scalar_one()
+                          return str(revision), bool(exists)
+
+                      revision, exists = await conn.run_sync(inspect)
+
+              assert revision == "0033", revision
+              assert exists is True
+              print(json.dumps({
+                  "revision": revision,
+                  "prototype_market_bars_exists": exists,
+                  "paper_only": True,
+                  "live_blocked": True,
+              }, indent=2, sort_keys=True))
+
+          asyncio.run(main())
+          PY
