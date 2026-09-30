@@ -1,0 +1,48 @@
+name: AETHER vNext Runtime Probe
+
+on:
+  push:
+    branches:
+      - aether-vnext-swapout
+    paths:
+      - ".github/workflows/aether-vnext-runtime-probe.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Probe deployed prototype
+        shell: bash
+        run: |
+          set -u
+          base="https://aether-vnext-nonprod-gpcrcme8czarbnfy.centralus-01.azurewebsites.net"
+
+          probe() {
+            label="$1"
+            path="$2"
+            body="/tmp/$label.body"
+            code="$(curl --silent --show-error --max-time 30 -o "$body" -w '%{http_code}' "$base$path" || true)"
+            echo "$label HTTP $code"
+            head -c 1200 "$body" 2>/dev/null || true
+            echo
+            echo "---"
+          }
+
+          for attempt in $(seq 1 6); do
+            code="$(curl --silent --show-error --max-time 30 -o /tmp/health.body -w '%{http_code}' "$base/api/v1/health" || true)"
+            echo "health attempt $attempt HTTP $code"
+            if [ "$code" = "200" ]; then
+              cat /tmp/health.body
+              echo
+              break
+            fi
+            sleep 15
+          done
+
+          probe vnext "/vnext/"
+          probe floor "/api/v1/vnext/floor"
