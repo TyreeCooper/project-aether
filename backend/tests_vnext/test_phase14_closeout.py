@@ -126,7 +126,7 @@ def test_phase14_crisis_archive_revision_0031_remains_frozen() -> None:
     ).read_text(encoding="utf-8")
     assert "schema_v0030" in frozen_schema
     assert "crisis_regime_archive_entries" in frozen_schema
-    assert "schema_v0032" in facade
+    assert "schema_v0033" in facade
     assert 'revision: str = "0031"' in migration
     assert 'down_revision: Union[str, None] = "0030"' in migration
     assert "trg_crisis_regime_archive_entries_immutable" in migration

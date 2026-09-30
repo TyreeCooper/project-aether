@@ -7,7 +7,7 @@ held-out or Phase 18 evidence requirements.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import math
@@ -130,6 +130,16 @@ def persist_prototype_market_bars(
     return inserted
 
 
+def _restore_utc(value: datetime) -> datetime:
+    """Normalize DB-driver timestamps to an aware UTC datetime.
+
+    PostgreSQL preserves timezone awareness for TIMESTAMPTZ. SQLite test
+    round-trips DateTime(timezone=True) as naive values, so tests and local
+    tooling must restore the declared UTC contract explicitly.
+    """
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+
+
 def load_prototype_market_bars(
     conn: Connection,
     store: VNextStore,
@@ -162,8 +172,8 @@ def load_prototype_market_bars(
         PrototypeMarketBar(
             asset_id=str(row["asset_id"]),
             interval_seconds=int(row["interval_seconds"]),
-            bucket_open_utc=row["bucket_open_utc"],
-            bucket_close_utc=row["bucket_close_utc"],
+            bucket_open_utc=_restore_utc(row["bucket_open_utc"]),
+            bucket_close_utc=_restore_utc(row["bucket_close_utc"]),
             open=float(row["open"]),
             high=float(row["high"]),
             low=float(row["low"]),
@@ -172,7 +182,7 @@ def load_prototype_market_bars(
             trade_count=int(row["trade_count"]),
             source_id=str(row["source_id"]),
             source_ref=str(row["source_ref"]),
-            available_at_utc=row["available_at_utc"],
+            available_at_utc=_restore_utc(row["available_at_utc"]),
         )
         for row in rows
     )
