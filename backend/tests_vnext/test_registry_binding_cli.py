@@ -249,3 +249,59 @@ async def test_strict_partial_manifest_fails_before_database_mutation(
         "runtime_binding_seed_universe_missing_assets"
     ]
     assert set(report["missing_asset_ids"]) == set(SEED_REGISTRY) - {"btc"}
+
+
+@pytest.mark.asyncio
+async def test_validate_only_complete_manifest_never_opens_database(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    module = _module()
+    opened = False
+
+    def forbidden_engine():
+        nonlocal opened
+        opened = True
+        raise AssertionError("validate-only mode must not open database")
+
+    monkeypatch.setattr(module, "open_vnext_engine", forbidden_engine)
+    output = tmp_path / "validate-only.json"
+    payload = {
+        "registry_version": "review-only-v1",
+        "configuration_hash": CONFIGURATION_HASH,
+        "bindings": [
+            {
+                "asset_id": "btc",
+                "broker_symbol": "XBTUSD",
+                "primary_market_source_id": "kraken_public",
+                "stale_threshold_ms": 1000,
+                "calendar_provider_id": None,
+                "source_ref": "reviewed-provider-evidence",
+            }
+        ],
+    }
+
+    code = await module._main(
+        manifest_json=json.dumps(payload),
+        manifest_file=None,
+        require_complete=True,
+        require_seed_universe=False,
+        require_implemented_source=True,
+        require_implemented_calendar=True,
+        require_implemented_shortability=True,
+        output=str(output),
+        validate_only=True,
+    )
+
+    assert code == 0
+    assert opened is False
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["incomplete_binding_count"] == 0
+    assert report["validate_only"] is True
+    assert report["persisted"] is False
+
+
+def test_cli_exposes_validate_only_review_gate() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert "--validate-only" in source
+    assert "must not open the database" in source

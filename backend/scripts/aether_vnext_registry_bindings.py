@@ -166,6 +166,7 @@ async def _main(
     require_implemented_calendar: bool,
     require_implemented_shortability: bool,
     output: str | None,
+    validate_only: bool = False,
 ) -> int:
     payload = _load_payload(
         manifest_json=manifest_json,
@@ -187,7 +188,12 @@ async def _main(
     strict_failure = bool(report["manifest_blockers"]) or bool(
         report["incomplete_binding_count"]
     )
+    report["validate_only"] = bool(validate_only)
     if require_complete and strict_failure:
+        report["persisted"] = False
+    elif validate_only:
+        # Review-only mode must not open the database, even when the entire
+        # manifest is valid. Persistence remains a separate explicit action.
         report["persisted"] = False
     else:
         store = VNextStore(schema="aether_vnext")
@@ -250,6 +256,11 @@ if __name__ == "__main__":
             "lacks vNext implementation"
         ),
     )
+    parser.add_argument(
+        "--validate-only",
+        action="store_true",
+        help="validate and report the manifest without opening or mutating the database",
+    )
     parser.add_argument("--output")
     args = parser.parse_args()
     raise SystemExit(
@@ -265,6 +276,7 @@ if __name__ == "__main__":
                     args.require_implemented_shortability
                 ),
                 output=args.output,
+                validate_only=args.validate_only,
             )
         )
     )
