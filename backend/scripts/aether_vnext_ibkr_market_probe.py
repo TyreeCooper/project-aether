@@ -9,7 +9,8 @@ The probe:
 2. requires IBKR market-data source + reviewed conid + TradingHours market identity;
 3. prefetches the authoritative calendar snapshot for the current ET session date;
 4. fetches one real-time IBKR top-of-book sample per configured equity;
-5. persists each sample through canonical market_ingress.
+5. independently requires one provider-authored Last Price + Last Size trade print;
+6. persists each quote sample through canonical market_ingress.
 
 No order, position, account-mutation, or LIVE execution methods are used.
 """
@@ -30,6 +31,7 @@ from aether_vnext.ibkr_webapi_market import (
     IBKR_WEBAPI_SHORTABILITY_PROVIDER_ID,
     fetch_ibkr_shortability,
     fetch_ibkr_top_of_book,
+    fetch_ibkr_trade_prints,
 )
 from aether_vnext.market_ingress import ingest_market_quotes
 from aether_vnext.registry import registry_row
@@ -134,10 +136,18 @@ def _contract_map(rows: tuple[dict, ...]) -> dict[str, int]:
     }
 
 
-def _serialize(batch, shortability_batch, ingress_results) -> dict[str, object]:
+def _serialize(
+    batch,
+    trade_print_batch,
+    shortability_batch,
+    ingress_results,
+) -> dict[str, object]:
     by_asset = {row.asset_id: row for row in ingress_results}
     shortability_by_asset = {
         row.asset_id: row for row in shortability_batch.evidence
+    }
+    trade_print_by_asset = {
+        row.asset_id: row for row in trade_print_batch.prints
     }
     return {
         "provider": "IBKR",
@@ -173,6 +183,19 @@ def _serialize(batch, shortability_batch, ingress_results) -> dict[str, object]:
                 "rejection_reasons": list(
                     by_asset[quote.asset_id].rejection_reasons
                 ),
+                "trade_print": {
+                    "price": trade_print_by_asset[quote.asset_id].price,
+                    "volume": trade_print_by_asset[quote.asset_id].volume,
+                    "exchange_ts": trade_print_by_asset[
+                        quote.asset_id
+                    ].exchange_ts.isoformat(),
+                    "received_ts": trade_print_by_asset[
+                        quote.asset_id
+                    ].received_ts.isoformat(),
+                    "source_id": trade_print_by_asset[
+                        quote.asset_id
+                    ].source_id,
+                },
                 "shortability": {
                     "evidence_id": shortability_by_asset[
                         quote.asset_id
@@ -286,6 +309,14 @@ async def _main(
             timeout_s=timeout_s,
             allow_insecure_localhost_tls=allow_insecure,
         )
+        trade_print_batch = await fetch_ibkr_trade_prints(
+            asset_contract_ids=contract_map,
+            session_token=session_token,
+            auth_mode=auth_mode,
+            websocket_url=websocket_url,
+            timeout_s=timeout_s,
+            allow_insecure_localhost_tls=allow_insecure,
+        )
         shortability_batch = await fetch_ibkr_shortability(
             asset_contract_ids=contract_map,
             session_token=session_token,
@@ -332,6 +363,7 @@ async def _main(
 
     payload = _serialize(
         batch,
+        trade_print_batch,
         shortability_batch,
         tuple(ingress_results),
     )

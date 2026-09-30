@@ -138,6 +138,7 @@ def test_probe_is_market_data_only_and_credentials_are_external() -> None:
     assert "AETHER_VNEXT_IBKR_WEBSOCKET_URL" in source
     assert "AETHER_VNEXT_TRADINGHOURS_API_TOKEN" in source
     assert "fetch_ibkr_shortability" in source
+    assert "fetch_ibkr_trade_prints" in source
     assert "record_shortability_evidence" in source
 
     prohibited = (
@@ -147,3 +148,10 @@ def test_probe_is_market_data_only_and_credentials_are_external() -> None:
         "iserver/account/orders",
     )
     assert all(value not in source for value in prohibited)
+
+
+def test_probe_requires_provider_authored_trade_print_evidence() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert "fetch_ibkr_trade_prints" in source
+    assert '"trade_print"' in source
+    assert "Last Price + Last Size" in source
