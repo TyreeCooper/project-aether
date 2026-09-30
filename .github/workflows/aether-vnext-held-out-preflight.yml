@@ -1,0 +1,86 @@
+name: AETHER vNext Held-out Research Preflight
+
+on:
+  push:
+    branches:
+      - aether-vnext-swapout
+    paths:
+      - ".github/workflows/aether-vnext-held-out-preflight.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout exact vNext head
+        uses: actions/checkout@v4
+
+      - name: Verify branch
+        shell: bash
+        working-directory: .
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "aether-vnext-swapout"
+          echo "Held-out preflight head: $(git rev-parse HEAD)"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run fail-closed held-out research preflight
+        id: preflight
+        env:
+          PYTHONPATH: .
+        shell: bash
+        run: |
+          set +e
+          python scripts/aether_vnext_held_out_research_preflight.py             > aether-vnext-held-out-preflight.json
+          status=$?
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Verify diagnostic is read-only and explicit
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          body = json.loads(Path("aether-vnext-held-out-preflight.json").read_text())
+          blockers = set(body["blockers"])
+          required = {
+              "held_out_dataset_snapshot_required",
+              "held_out_fold_plan_required",
+              "held_out_code_commit_sha_required",
+          }
+          assert required.issubset(blockers), body
+          assert body["work_item_count"] == 0, body
+          print(json.dumps({
+              "startable": body["startable"],
+              "route_count": body["route_count"],
+              "required_asset_ids": body["required_asset_ids"],
+              "required_indicators": body["required_indicators"],
+              "blockers": body["blockers"],
+          }, indent=2, sort_keys=True))
+          PY
+
+      - name: Upload held-out preflight
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-vnext-held-out-preflight-${{ github.run_id }}
+          path: backend/aether-vnext-held-out-preflight.json
+          if-no-files-found: error
+          retention-days: 30
