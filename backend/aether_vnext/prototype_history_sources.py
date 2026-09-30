@@ -327,3 +327,98 @@ async def fetch_kraken_completed_daily(
     finally:
         if owns_client:
             await http.aclose()
+
+
+def parse_kraken_completed_hourly_payload(
+    payload: Mapping[str, Any],
+    *,
+    asset_id: str,
+    end_at_utc: datetime,
+) -> tuple[PrototypeMarketBar, ...]:
+    """Parse completed 1h bars from Kraken REST, excluding the forming final row."""
+    asset = _asset(asset_id)
+    if end_at_utc.tzinfo is None:
+        raise ValueError("end_at_utc must be timezone-aware")
+    errors = payload.get("error")
+    if errors not in (None, [], ()):
+        raise RuntimeError(f"Kraken OHLC error: {errors}")
+    result = payload.get("result")
+    if not isinstance(result, Mapping):
+        raise ValueError("Kraken OHLC result is missing")
+    series = next(
+        (
+            value
+            for key, value in result.items()
+            if key != "last" and isinstance(value, Sequence)
+        ),
+        None,
+    )
+    if series is None:
+        raise ValueError("Kraken OHLC series is missing")
+
+    source_ref = (
+        f"kraken:/0/public/OHLC:pair={KRAKEN_PAIR[asset]}:"
+        "interval=60:completed-only"
+    )
+    out: list[PrototypeMarketBar] = []
+    for raw in tuple(series)[:-1]:
+        if not isinstance(raw, Sequence) or len(raw) < 8:
+            raise ValueError("Kraken OHLC row must contain at least 8 values")
+        opened = _aware_utc_from_epoch(raw[0])
+        closed = opened + HOUR
+        if closed > end_at_utc:
+            continue
+        try:
+            trades = int(raw[7])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Kraken OHLC trade count must be an integer") from exc
+        if trades < 0:
+            raise ValueError("Kraken OHLC trade count cannot be negative")
+        out.append(
+            PrototypeMarketBar(
+                asset_id=asset,
+                interval_seconds=3600,
+                bucket_open_utc=opened,
+                bucket_close_utc=closed,
+                open=_positive_float(raw[1], "open"),
+                high=_positive_float(raw[2], "high"),
+                low=_positive_float(raw[3], "low"),
+                close=_positive_float(raw[4], "close"),
+                volume=_nonnegative_float(raw[6], "volume"),
+                trade_count=trades,
+                source_id=KRAKEN_DAILY_SOURCE_ID,
+                source_ref=source_ref,
+                available_at_utc=closed,
+            )
+        )
+    return tuple(out)
+
+
+async def fetch_kraken_completed_hourly(
+    *,
+    asset_id: str,
+    end_at_utc: datetime,
+    timeout_s: float = 20.0,
+    client: httpx.AsyncClient | None = None,
+) -> tuple[PrototypeMarketBar, ...]:
+    asset = _asset(asset_id)
+    owns_client = client is None
+    http = client or httpx.AsyncClient(timeout=timeout_s)
+    try:
+        response = await http.get(
+            KRAKEN_REST_OHLC_URL,
+            params={
+                "pair": KRAKEN_PAIR[asset],
+                "interval": 60,
+                "assetVersion": 1,
+            },
+        )
+        response.raise_for_status()
+        return parse_kraken_completed_hourly_payload(
+            response.json(),
+            asset_id=asset,
+            end_at_utc=end_at_utc,
+        )
+    finally:
+        if owns_client:
+            await http.aclose()

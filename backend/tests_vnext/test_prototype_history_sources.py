@@ -9,6 +9,7 @@ from aether_vnext.prototype_history_sources import (
     KRAKEN_DAILY_SOURCE_ID,
     parse_cryptocompare_kraken_hourly_payload,
     parse_kraken_completed_daily_payload,
+    parse_kraken_completed_hourly_payload,
 )
 
 
@@ -118,3 +119,24 @@ def test_kraken_daily_error_fails_closed() -> None:
             asset_id="btc",
             end_at_utc=END,
         )
+
+
+def test_kraken_hourly_parser_drops_forming_final_row() -> None:
+    payload = {
+        "error": [],
+        "result": {
+            "BTC/USD": [
+                [1790798400, "100", "105", "99", "104", "102", "12.5", 7],
+                [1790802000, "104", "108", "103", "107", "106", "8.0", 4],
+                [1790805600, "107", "109", "106", "108", "108", "3.0", 2],
+            ],
+            "last": 1790805600,
+        },
+    }
+    rows = parse_kraken_completed_hourly_payload(
+        payload,
+        asset_id="btc",
+        end_at_utc=END,
+    )
+    assert len(rows) == 2
+    assert rows[-1].bucket_close_utc.isoformat() == "2026-09-30T22:00:00+00:00"
