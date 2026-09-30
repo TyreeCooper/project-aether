@@ -13,7 +13,7 @@ from aether_vnext.prototype_history_sources import (
 
 
 UTC = timezone.utc
-END = datetime(2026, 9, 30, 22, 0, tzinfo=UTC)
+END = datetime(2026, 10, 1, 0, 0, tzinfo=UTC)
 
 
 def test_cryptocompare_parser_keeps_exchange_scoped_hourly_provenance() -> None:
