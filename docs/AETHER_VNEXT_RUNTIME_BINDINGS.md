@@ -125,6 +125,25 @@ a short OrderIntent when Phase A admits it. Delayed/frozen/not-subscribed eviden
 stale evidence, contract/provider mismatch, or insufficient shares cannot authorize
 the short.
 
+## Commissioning helpers
+
+Repository-side no-fabrication tooling is available before provider sign-in:
+
+- `aether_vnext_tradinghours_discovery.py` enumerates only TradingHours markets
+  available to the authenticated subscription and does not bind a FinID automatically;
+- `ibkr_instrument_discovery.py` preserves all returned equity contract candidates
+  and does not choose a conid automatically;
+- `ninjatrader_contract_discovery.py` preserves provider contract IDs, maturities,
+  expiries, and front-contract flags without making the AETHER roll decision;
+- `aether_vnext_provider_commissioning_readiness.py` projects the exact remaining
+  external facts by provider without recording credentials or claiming account state;
+- `aether_vnext_provider_freshness.py` measures provider cadence/latency evidence
+  but cannot choose or write `stale_threshold_ms`.
+
+These helpers reduce the authenticated commissioning pass to reviewed provider facts.
+They do not convert candidates into runtime authority, and they do not bypass strict
+manifest validation.
+
 ## Persistence identity
 
 Runtime bindings live in `product_registry_state` and are content-hashed. Campaign

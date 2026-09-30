@@ -4,8 +4,10 @@ The weekly session rules in calendars.py are Firm logic. Non-24x7 date-specific
 holiday/early-close truth must come from an implemented authoritative provider.
 Naming a provider in runtime configuration is not enough.
 
-There is intentionally no non-crypto provider registered yet. Until one is
-implemented, canonical burn-in remains fail-closed for FX, futures, and equities.
+TradingHours is registered for the exchange-calendar IDs used by futures and
+equities. FX OTC and crypto keep their frozen internal weekly/24x7 calendar contracts.
+Canonical burn-in still fails closed until reviewed provider market IDs are bound where
+the registered provider requires them.
 """
 from __future__ import annotations
 
