@@ -390,7 +390,7 @@ def test_ibkr_shortability_strict_provider_gate_requires_implemented_source() ->
     )
 
 
-def test_strict_market_print_gate_distinguishes_crypto_from_quote_only_sources() -> None:
+def test_strict_market_print_gate_accepts_implemented_crypto_and_equity_sources() -> None:
     crypto = RuntimeRegistryBinding(
         asset_id="btc",
         broker_symbol="XBTUSD",
@@ -416,7 +416,7 @@ def test_strict_market_print_gate_distinguishes_crypto_from_quote_only_sources()
         shortability_stale_threshold_ms=1500,
         source_ref="reviewed-ibkr-binding",
     )
-    assert "market_print_source_implementation_missing" in binding_blockers(
+    assert "market_print_source_implementation_missing" not in binding_blockers(
         equity,
         require_market_print_implementation=True,
     )
