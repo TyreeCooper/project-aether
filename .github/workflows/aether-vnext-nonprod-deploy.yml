@@ -3,15 +3,6 @@ name: AETHER vNext Nonprod Deploy
 on:
   workflow_dispatch:
     inputs:
-      app_name:
-        description: "Existing Azure Web App name for non-production vNext testing"
-        required: true
-        type: string
-      slot_name:
-        description: "Existing non-production slot name; leave blank for a dedicated nonprod app"
-        required: false
-        default: ""
-        type: string
       expected_head_sha:
         description: "Exact aether-vnext-swapout commit SHA approved for deployment"
         required: true
@@ -30,7 +21,6 @@ jobs:
     if: ${{ github.ref_name == 'aether-vnext-swapout' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment: aether-vnext-burnin
 
     steps:
       - name: Checkout authorized vNext revision
@@ -38,12 +28,9 @@ jobs:
         with:
           ref: ${{ github.sha }}
 
-      - name: Verify branch, revision, and nonproduction target
-        id: target
+      - name: Verify exact branch and revision
         shell: bash
         env:
-          REQUESTED_APP_NAME: ${{ inputs.app_name }}
-          REQUESTED_SLOT_NAME: ${{ inputs.slot_name }}
           EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
         run: |
           set -euo pipefail
@@ -51,22 +38,7 @@ jobs:
           test "$GITHUB_REF_NAME" = "aether-vnext-swapout"
           test "$actual" = "$EXPECTED_HEAD_SHA"
           test "$actual" = "$GITHUB_SHA"
-
-          app_name="$(printf '%s' "$REQUESTED_APP_NAME" | xargs)"
-          slot_name="$(printf '%s' "$REQUESTED_SLOT_NAME" | xargs)"
-
-          if [ -z "$app_name" ]; then
-            echo "app_name is required."
-            exit 2
-          fi
-          if [ "$app_name" = "aether-prod-api" ] && { [ -z "$slot_name" ] || [ "$slot_name" = "Production" ]; }; then
-            echo "Direct deployment to aether-prod-api Production is forbidden."
-            exit 2
-          fi
-
-          echo "app_name=$app_name" >> "$GITHUB_OUTPUT"
-          echo "slot_name=$slot_name" >> "$GITHUB_OUTPUT"
-          echo "authorized revision: $actual"
+          echo "authorized vNext revision: $actual"
 
       - uses: actions/setup-node@v4
         with:
@@ -138,48 +110,49 @@ jobs:
           test -f app/main.py
           test -f app/vnext_ui/index.html
 
-      - uses: azure/login@v2
+      - name: Login to Azure with dedicated vNext identity
+        uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_530CF31F9C844B6BBFDBCED78DB6E9E4 }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_C8115A17EE8945578F04F145FD68F4CE }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_AD212BE4448A497488FE91D5E47F27B6 }}
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_E2CE53939F2D406CBA8FB39DB4948C7B }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_0E83D5CA9CF543228DA7FA7818D7C998 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_B530D2ECBF5549A39B4758868409068A }}
 
-      - name: Resolve authorized Azure target
+      - name: Resolve and verify dedicated nonproduction target
         id: azure_target
         shell: bash
-        env:
-          APP_NAME: ${{ steps.target.outputs.app_name }}
-          SLOT_NAME: ${{ steps.target.outputs.slot_name }}
         run: |
           set -euo pipefail
-          if [ -n "$SLOT_NAME" ]; then
-            host="$(az webapp deployment slot list               --name "$APP_NAME"               --query "[?name=='$SLOT_NAME'].defaultHostName | [0]"               -o tsv)"
-          else
-            host="$(az webapp list               --query "[?name=='$APP_NAME'].defaultHostName | [0]"               -o tsv)"
-          fi
+          app_name="aether-vnext-nonprod"
+          resource_group="aether-rg"
+          host="$(az webapp show \
+            --name "$app_name" \
+            --resource-group "$resource_group" \
+            --query defaultHostName \
+            -o tsv)"
           if [ -z "$host" ]; then
-            echo "Requested Azure nonproduction target does not exist or is not visible."
+            echo "Dedicated vNext nonproduction target is not visible."
             exit 2
           fi
-          if [ "$host" = "aether-prod-api.azurewebsites.net" ]; then
-            echo "Production hostname is forbidden."
+          if [ "$app_name" = "aether-prod-api" ] || [ "$host" = "aether-prod-api.azurewebsites.net" ]; then
+            echo "Production target is forbidden."
             exit 2
           fi
+          case "$host" in
+            aether-vnext-nonprod-*.azurewebsites.net|aether-vnext-nonprod.azurewebsites.net)
+              ;;
+            *)
+              echo "Unexpected nonproduction hostname: $host"
+              exit 2
+              ;;
+          esac
+          echo "app_name=$app_name" >> "$GITHUB_OUTPUT"
+          echo "resource_group=$resource_group" >> "$GITHUB_OUTPUT"
           echo "host=$host" >> "$GITHUB_OUTPUT"
 
-      - name: Deploy vNext nonproduction package
-        if: ${{ steps.target.outputs.slot_name == '' }}
+      - name: Deploy exact vNext nonproduction package
         uses: azure/webapps-deploy@v3
         with:
-          app-name: ${{ steps.target.outputs.app_name }}
-          package: backend
-
-      - name: Deploy vNext nonproduction slot package
-        if: ${{ steps.target.outputs.slot_name != '' }}
-        uses: azure/webapps-deploy@v3
-        with:
-          app-name: ${{ steps.target.outputs.app_name }}
-          slot-name: ${{ steps.target.outputs.slot_name }}
+          app-name: ${{ steps.azure_target.outputs.app_name }}
           package: backend
 
       - name: Verify deployed paper-only vNext surface
@@ -217,13 +190,14 @@ jobs:
           curl --fail --silent --show-error --max-time 20 "$base/api/v1/vnext/floor" >/tmp/vnext-floor.json
           python - <<'PY'
           import json
+          import os
+
           body=json.load(open("/tmp/vnext-floor.json", encoding="utf-8"))
           mode=body.get("mode") or {}
           assert mode.get("paper_only") is True, body
           assert mode.get("live_blocked") is True, body
           assert body.get("runtime_started_at_utc"), body
           build=body.get("build") or {}
-          import os
           assert build.get("source_revision") == os.environ["EXPECTED_SHA"], build
           assert build.get("package_built_at_utc"), build
           paper_test=body.get("paper_test") or {}
