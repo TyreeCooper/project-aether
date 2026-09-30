@@ -5,6 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 BURNIN = ROOT / ".github" / "workflows" / "aether-vnext-burnin.yml"
+KRAKEN_PUBLIC = ROOT / ".github" / "workflows" / "aether-vnext-kraken-public.yml"
 VNEXT_CI = ROOT / ".github" / "workflows" / "aether-vnext-ci.yml"
 
 
@@ -19,7 +20,6 @@ def test_burnin_dispatch_is_same_repo_label_gated_and_environment_protected() ->
     assert "github.event.pull_request.head.ref == 'aether-vnext-swapout'" in source
     assert "aether-vnext-burnin-preflight-approved" in source
     assert "aether-vnext-burnin-readiness-approved" in source
-    assert "aether-vnext-kraken-probe-approved" in source
     assert "aether-vnext-calendar-probe-approved" in source
     assert "aether-vnext-burnin-start-approved" in source
 
@@ -36,10 +36,7 @@ def test_burnin_dispatch_is_same_repo_label_gated_and_environment_protected() ->
     assert "--require-implemented-source" in source
     assert "--require-implemented-calendar" in source
     assert "--require-implemented-shortability" in source
-    assert "aether_vnext_kraken_market_probe.py" in source
     assert "aether_vnext_tradinghours_calendar_probe.py" in source
-    assert "--assets btc,eth" in source
-    assert "--require-executable" in source
 
     assert "routes_json" not in source
     assert "--routes-json" not in source
@@ -53,8 +50,6 @@ def test_burnin_dispatch_is_same_repo_label_gated_and_environment_protected() ->
     # second misleading "artifact missing" failure.
     assert "id: bindings" in source
     assert "steps.bindings.outcome == 'success'" in source
-    assert "id: kraken_probe" in source
-    assert "steps.kraken_probe.outcome == 'success'" in source
     assert "id: calendar_probe" in source
     assert "steps.calendar_probe.outcome == 'success'" in source
     assert "steps.readiness.outcome == 'success'" in source
@@ -69,3 +64,36 @@ def test_contract_ci_contains_no_secret_bearing_manual_burnin_job() -> None:
     assert "burnin-preflight-manual" not in source
     assert "AETHER_VNEXT_BURNIN_DATABASE_URL" not in source
     assert "secrets." not in source
+
+
+def test_kraken_public_commissioning_is_secret_free_and_not_burnin_authority() -> None:
+    source = KRAKEN_PUBLIC.read_text(encoding="utf-8")
+
+    assert "pull_request:" in source
+    assert "- labeled" in source
+    assert "pull_request_target" not in source
+    assert "github.event.pull_request.head.repo.full_name == github.repository" in source
+    assert "github.event.pull_request.head.ref == 'aether-vnext-swapout'" in source
+    assert "aether-vnext-kraken-probe-approved" in source
+    assert "github.event.pull_request.head.sha" in source
+
+    assert "aether_vnext_kraken_public_probe.py" in source
+    assert "--assets btc,eth" in source
+    assert "--ticker-timeout-seconds 15" in source
+    assert "--trade-timeout-seconds 30" in source
+    assert "source_revision" in source
+
+    assert "environment:" not in source
+    assert "secrets." not in source
+    assert "AETHER_VNEXT_DATABASE_URL" not in source
+    assert "AETHER_VNEXT_RUNTIME_BINDINGS_JSON" not in source
+    assert "aether_vnext_migrate.py" not in source
+    assert "aether_vnext_registry_bindings.py" not in source
+    assert "aether_vnext_burnin_start.py" not in source
+
+
+def test_burnin_control_plane_no_longer_owns_public_kraken_probe() -> None:
+    source = BURNIN.read_text(encoding="utf-8")
+    assert "initialize_kraken_probe" not in source
+    assert "aether-vnext-kraken-probe-approved" not in source
+    assert "aether_vnext_kraken_market_probe.py" not in source

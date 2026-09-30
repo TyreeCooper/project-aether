@@ -12,7 +12,6 @@ on:
           - preflight
           - readiness_report
           - initialize_and_preflight
-          - initialize_kraken_probe
           - initialize_calendar_probe
           - start_campaign
       campaign_id:
@@ -45,7 +44,6 @@ jobs:
         (
           github.event.label.name == 'aether-vnext-burnin-preflight-approved' ||
           github.event.label.name == 'aether-vnext-burnin-readiness-approved' ||
-          github.event.label.name == 'aether-vnext-kraken-probe-approved' ||
           github.event.label.name == 'aether-vnext-calendar-probe-approved' ||
           github.event.label.name == 'aether-vnext-burnin-start-approved'
         )
@@ -93,9 +91,6 @@ jobs:
                 ;;
               aether-vnext-burnin-readiness-approved)
                 action="readiness_report"
-                ;;
-              aether-vnext-kraken-probe-approved)
-                action="initialize_kraken_probe"
                 ;;
               aether-vnext-calendar-probe-approved)
                 action="initialize_calendar_probe"
@@ -173,20 +168,20 @@ jobs:
         run: python scripts/aether_vnext_check_db_isolation.py
 
       - name: Apply vNext schema migrations
-        if: ${{ steps.request.outputs.action == 'initialize_and_preflight' || steps.request.outputs.action == 'initialize_kraken_probe' || steps.request.outputs.action == 'initialize_calendar_probe' }}
+        if: ${{ steps.request.outputs.action == 'initialize_and_preflight' || steps.request.outputs.action == 'initialize_calendar_probe' }}
         env:
           PYTHONPATH: .
         run: python scripts/aether_vnext_migrate.py
 
       - name: Bootstrap canonical policy snapshot
-        if: ${{ steps.request.outputs.action == 'initialize_and_preflight' || steps.request.outputs.action == 'initialize_kraken_probe' || steps.request.outputs.action == 'initialize_calendar_probe' }}
+        if: ${{ steps.request.outputs.action == 'initialize_and_preflight' || steps.request.outputs.action == 'initialize_calendar_probe' }}
         env:
           PYTHONPATH: .
         run: python scripts/aether_vnext_bootstrap_policy.py
 
       - name: Apply reviewed runtime Product Registry bindings
         id: bindings
-        if: ${{ steps.request.outputs.action == 'initialize_and_preflight' || steps.request.outputs.action == 'initialize_kraken_probe' || steps.request.outputs.action == 'initialize_calendar_probe' }}
+        if: ${{ steps.request.outputs.action == 'initialize_and_preflight' || steps.request.outputs.action == 'initialize_calendar_probe' }}
         env:
           PYTHONPATH: .
         shell: bash
@@ -215,29 +210,6 @@ jobs:
         with:
           name: aether-vnext-runtime-bindings-${{ github.run_id }}
           path: backend/aether-vnext-runtime-bindings.json
-          if-no-files-found: warn
-          retention-days: 30
-
-      - name: Probe real Kraken BTC/ETH public market data
-        id: kraken_probe
-        if: ${{ steps.request.outputs.action == 'initialize_kraken_probe' }}
-        env:
-          PYTHONPATH: .
-        shell: bash
-        run: |
-          set -euo pipefail
-          python scripts/aether_vnext_kraken_market_probe.py \
-            --assets btc,eth \
-            --timeout-seconds 15 \
-            --require-executable \
-            --output aether-vnext-kraken-market-probe.json
-
-      - name: Upload Kraken market probe
-        if: ${{ always() && steps.kraken_probe.outcome == 'success' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: aether-vnext-kraken-market-probe-${{ github.run_id }}
-          path: backend/aether-vnext-kraken-market-probe.json
           if-no-files-found: warn
           retention-days: 30
 
@@ -299,7 +271,7 @@ jobs:
 
       - name: Run canonical read-only burn-in preflight
         id: preflight
-        if: ${{ steps.request.outputs.action != 'initialize_kraken_probe' && steps.request.outputs.action != 'initialize_calendar_probe' && steps.request.outputs.action != 'readiness_report' }}
+        if: ${{ steps.request.outputs.action != 'initialize_calendar_probe' && steps.request.outputs.action != 'readiness_report' }}
         env:
           PYTHONPATH: .
           AETHER_BURNIN_CAMPAIGN_ID: ${{ steps.request.outputs.campaign_id }}
@@ -323,7 +295,7 @@ jobs:
           retention-days: 30
 
       - name: Propagate canonical preflight result
-        if: ${{ steps.request.outputs.action != 'initialize_kraken_probe' && steps.request.outputs.action != 'initialize_calendar_probe' && steps.request.outputs.action != 'readiness_report' && steps.preflight.outputs.exit_code != '0' }}
+        if: ${{ steps.request.outputs.action != 'initialize_calendar_probe' && steps.request.outputs.action != 'readiness_report' && steps.preflight.outputs.exit_code != '0' }}
         shell: bash
         run: |
           echo "Canonical burn-in preflight is not startable; inspect the JSON artifact."
