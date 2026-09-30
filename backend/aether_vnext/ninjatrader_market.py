@@ -14,7 +14,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 import json
-from typing import Any
+from typing import Any, Mapping
+
+from aether_vnext.bars import MarketPrint
 
 
 NINJATRADER_HEARTBEAT_REPLY = "[]"
@@ -22,6 +24,9 @@ NINJATRADER_MARKET_SOURCE_ID = "ninjatrader_market_data"
 NINJATRADER_DEMO_TRANSPORT_ID = "ninjatrader_demo_market_websocket"
 NINJATRADER_DEMO_ADAPTER_VERSION = (
     "ninjatrader_md_demo_quote_v1:contract_id_locked"
+)
+NINJATRADER_MARKET_PRINT_ADAPTER_VERSION = (
+    "ninjatrader_md_demo_trade_v1:contract_id_locked"
 )
 
 
@@ -244,6 +249,16 @@ def _positive_price(entry: object) -> float | None:
     return value if value > 0 else None
 
 
+def _positive_size(entry: object) -> float | None:
+    if not isinstance(entry, dict):
+        return None
+    try:
+        value = float(entry["size"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
 def _parse_timestamp(value: object) -> datetime | None:
     if value is None:
         return None
@@ -292,6 +307,72 @@ def parse_quote_events(
                     bid=bid,
                     ask=ask,
                     last=last,
+                )
+            )
+    return tuple(out)
+
+
+def parse_trade_prints(
+    messages: tuple[dict[str, Any], ...],
+    *,
+    contract_to_asset: Mapping[int, str],
+    received_at_utc: datetime,
+) -> tuple[MarketPrint, ...]:
+    """Decode documented Trade entries into canonical exchange-timestamp prints.
+
+    NinjaTrader/Tradovate quote messages carry a Trade entry with both price and
+    size. Contract identity remains explicit: callers must provide the reviewed
+    contractId -> AETHER asset mapping, so this parser never guesses symbols.
+    """
+    if received_at_utc.tzinfo is None:
+        raise ValueError("received_at_utc must be timezone-aware")
+
+    normalized: dict[int, str] = {}
+    for raw_contract_id, raw_asset_id in contract_to_asset.items():
+        if isinstance(raw_contract_id, bool):
+            raise ValueError("contract IDs must be positive integers")
+        contract_id = int(raw_contract_id)
+        asset_id = str(raw_asset_id).strip().lower()
+        if contract_id <= 0:
+            raise ValueError("contract IDs must be positive integers")
+        if not asset_id:
+            raise ValueError("asset_id must be nonblank")
+        normalized[contract_id] = asset_id
+
+    out: list[MarketPrint] = []
+    for message in messages:
+        if message.get("e") != "md":
+            continue
+        data = message.get("d")
+        if not isinstance(data, dict):
+            continue
+        for quote in data.get("quotes") or ():
+            if not isinstance(quote, dict):
+                continue
+            try:
+                contract_id = int(quote["contractId"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            asset_id = normalized.get(contract_id)
+            if asset_id is None:
+                continue
+            timestamp = _parse_timestamp(quote.get("timestamp"))
+            entries = quote.get("entries")
+            if timestamp is None or not isinstance(entries, dict):
+                continue
+            trade = entries.get("Trade")
+            price = _positive_price(trade)
+            size = _positive_size(trade)
+            if price is None or size is None:
+                continue
+            out.append(
+                MarketPrint(
+                    asset_id=asset_id,
+                    price=price,
+                    volume=size,
+                    exchange_ts=timestamp,
+                    received_ts=received_at_utc,
+                    source_id=NINJATRADER_MARKET_SOURCE_ID,
                 )
             )
     return tuple(out)

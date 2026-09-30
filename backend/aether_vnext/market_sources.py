@@ -21,6 +21,7 @@ from aether_vnext.ibkr_webapi_market import (
 from aether_vnext.ninjatrader_market import (
     NINJATRADER_DEMO_ADAPTER_VERSION,
     NINJATRADER_DEMO_TRANSPORT_ID,
+    NINJATRADER_MARKET_PRINT_ADAPTER_VERSION,
     NINJATRADER_MARKET_SOURCE_ID,
 )
 from aether_vnext.tastyfx_fix_market import (
@@ -70,6 +71,8 @@ IMPLEMENTED_MARKET_SOURCES: Final = MappingProxyType(
                 {"mes", "mnq", "mgc", "mcl", "us10y"}
             ),
             public_market_data=False,
+            market_print_transport_id=NINJATRADER_DEMO_TRANSPORT_ID,
+            market_print_parser_version=NINJATRADER_MARKET_PRINT_ADAPTER_VERSION,
         ),
     }
 )

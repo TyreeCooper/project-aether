@@ -7,10 +7,12 @@ import pytest
 
 from aether_vnext.ninjatrader_market import (
     NINJATRADER_HEARTBEAT_REPLY,
+    NINJATRADER_MARKET_SOURCE_ID,
     authorize_market_data_request,
     decode_server_frame,
     encode_request,
     parse_quote_events,
+    parse_trade_prints,
     require_success_response,
     subscribe_quote_request,
     unsubscribe_quote_request,
@@ -158,3 +160,71 @@ def test_request_inputs_reject_newline_injection() -> None:
         authorize_market_data_request(md_access_token="token\nother")
     with pytest.raises(ValueError):
         subscribe_quote_request(symbol="MESZ6\norder/placeorder", request_id=2)
+
+
+def test_trade_print_parser_uses_documented_trade_price_and_size() -> None:
+    messages = (
+        {
+            "e": "md",
+            "d": {
+                "quotes": [
+                    {
+                        "timestamp": "2026-09-27T03:05:06.588Z",
+                        "contractId": 123456,
+                        "entries": {
+                            "Bid": {"price": 6700.25, "size": 12},
+                            "Offer": {"price": 6700.50, "size": 8},
+                            "Trade": {"price": 6700.25, "size": 3},
+                        },
+                    }
+                ]
+            },
+        },
+    )
+    received = datetime(2026, 9, 27, 3, 5, 7, tzinfo=UTC)
+
+    prints = parse_trade_prints(
+        messages,
+        contract_to_asset={123456: "mes"},
+        received_at_utc=received,
+    )
+
+    assert len(prints) == 1
+    print_ = prints[0]
+    assert print_.asset_id == "mes"
+    assert print_.price == 6700.25
+    assert print_.volume == 3
+    assert print_.exchange_ts == datetime(
+        2026, 9, 27, 3, 5, 6, 588000, tzinfo=UTC
+    )
+    assert print_.received_ts == received
+    assert print_.source_id == NINJATRADER_MARKET_SOURCE_ID
+
+
+def test_trade_print_parser_requires_reviewed_contract_mapping_and_real_size() -> None:
+    received = datetime(2026, 9, 27, 3, 5, 7, tzinfo=UTC)
+    messages = (
+        {
+            "e": "md",
+            "d": {
+                "quotes": [
+                    {
+                        "timestamp": "2026-09-27T03:05:06.588Z",
+                        "contractId": 123456,
+                        "entries": {"Trade": {"price": 6700.25}},
+                    },
+                    {
+                        "timestamp": "2026-09-27T03:05:06.700Z",
+                        "contractId": 999999,
+                        "entries": {"Trade": {"price": 6700.50, "size": 2}},
+                    },
+                ]
+            },
+        },
+    )
+
+    assert parse_trade_prints(
+        messages,
+        contract_to_asset={123456: "mes"},
+        received_at_utc=received,
+    ) == ()
