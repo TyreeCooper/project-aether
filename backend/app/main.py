@@ -26,7 +26,7 @@ from app.paper_exec import (
     install as install_harsh_paper,
 )
 from app.universe import public_catalog
-from app.vnext_shadow import mount_configured_vnext_shadow_floor
+from app.vnext_shadow import mount_configured_vnext_shadow_floor\nfrom app.vnext_ingress import (\n    mount_vnext_ingress_status,\n    start_configured_vnext_ingress,\n    stop_configured_vnext_ingress,\n)
 
 STATIC = Path(__file__).parent / "static"
 VNEXT_UI = Path(__file__).parent / "vnext_ui"
@@ -79,7 +79,7 @@ app.add_middleware(
 )
 
 # Phase 16: GET-only shadow mount; no database is opened until the route is read.
-mount_configured_vnext_shadow_floor(app)
+mount_configured_vnext_shadow_floor(app)\nmount_vnext_ingress_status(app)
 
 
 @app.middleware("http")
