@@ -135,6 +135,31 @@ jobs:
           echo "app_name=$app_name" >> "$GITHUB_OUTPUT"
           echo "host=$host" >> "$GITHUB_OUTPUT"
 
+      - name: Configure FastAPI startup command
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_name="aether-vnext-nonprod"
+          resource_group="aether-rg"
+          echo "Current nonprod runtime/startup configuration:"
+          az webapp config show \
+            --name "$app_name" \
+            --resource-group "$resource_group" \
+            --query "{linuxFxVersion:linuxFxVersion,appCommandLine:appCommandLine}" \
+            -o json
+          az webapp config set \
+            --name "$app_name" \
+            --resource-group "$resource_group" \
+            --startup-file "startup.sh" \
+            --output none
+          configured="$(az webapp config show \
+            --name "$app_name" \
+            --resource-group "$resource_group" \
+            --query appCommandLine \
+            -o tsv)"
+          test "$configured" = "startup.sh"
+          echo "vNext startup command configured: $configured"
+
       - name: Deploy approved vNext package
         uses: azure/webapps-deploy@v3
         with:
