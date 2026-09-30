@@ -150,14 +150,14 @@ jobs:
           az webapp config set \
             --name "$app_name" \
             --resource-group "$resource_group" \
-            --startup-file "startup.sh" \
+            --startup-file "bash startup.sh" \
             --output none
           configured="$(az webapp config show \
             --name "$app_name" \
             --resource-group "$resource_group" \
             --query appCommandLine \
             -o tsv)"
-          test "$configured" = "startup.sh"
+          test "$configured" = "bash startup.sh"
           echo "vNext startup command configured: $configured"
 
       - name: Deploy approved vNext package
