@@ -7,6 +7,11 @@ on:
         description: "Exact aether-vnext-swapout commit SHA approved for deployment"
         required: true
         type: string
+  pull_request:
+    branches:
+      - main
+    types:
+      - labeled
 
 permissions:
   contents: read
@@ -18,7 +23,17 @@ concurrency:
 
 jobs:
   deploy:
-    if: ${{ github.ref_name == 'aether-vnext-swapout' }}
+    if: >-
+      (
+        github.event_name == 'workflow_dispatch' &&
+        github.ref_name == 'aether-vnext-swapout'
+      ) ||
+      (
+        github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        github.event.pull_request.head.ref == 'aether-vnext-swapout' &&
+        github.event.label.name == 'aether-vnext-nonprod-deploy-approved'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -26,18 +41,24 @@ jobs:
       - name: Checkout authorized vNext revision
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
       - name: Verify exact branch and revision
+        id: revision
         shell: bash
         env:
-          EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
+          EXPECTED_HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || inputs.expected_head_sha }}
         run: |
           set -euo pipefail
           actual="$(git rev-parse HEAD)"
-          test "$GITHUB_REF_NAME" = "aether-vnext-swapout"
           test "$actual" = "$EXPECTED_HEAD_SHA"
-          test "$actual" = "$GITHUB_SHA"
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            test "$GITHUB_HEAD_REF" = "aether-vnext-swapout"
+          else
+            test "$GITHUB_REF_NAME" = "aether-vnext-swapout"
+            test "$actual" = "$GITHUB_SHA"
+          fi
+          echo "source_revision=$actual" >> "$GITHUB_OUTPUT"
           echo "authorized vNext revision: $actual"
 
       - uses: actions/setup-node@v4
@@ -58,7 +79,7 @@ jobs:
       - name: Embed exact vNext build identity
         shell: bash
         env:
-          SOURCE_REVISION: ${{ github.sha }}
+          SOURCE_REVISION: ${{ steps.revision.outputs.source_revision }}
         run: |
           python - <<'PY'
           from datetime import datetime, timezone
@@ -159,7 +180,7 @@ jobs:
         shell: bash
         env:
           HOST: ${{ steps.azure_target.outputs.host }}
-          EXPECTED_SHA: ${{ github.sha }}
+          EXPECTED_SHA: ${{ steps.revision.outputs.source_revision }}
         run: |
           set -euo pipefail
           base="https://$HOST"

@@ -16,17 +16,23 @@ def _workflow() -> str:
     ).read_text(encoding="utf-8")
 
 
-def test_nonprod_deploy_workflow_is_manual_and_exact_head_gated() -> None:
+def test_nonprod_deploy_workflow_is_explicitly_authorized_and_exact_head_gated() -> None:
     workflow = _workflow()
 
     assert "workflow_dispatch:" in workflow
-    assert "pull_request:" not in workflow
+    assert "pull_request:" in workflow
+    assert "- labeled" in workflow
     assert "push:" not in workflow
     assert "environment: aether-vnext-burnin" not in workflow
-    assert "github.ref_name == 'aether-vnext-swapout'" in workflow
+    assert "github.event.pull_request.head.repo.full_name == github.repository" in workflow
+    assert "github.event.pull_request.head.ref == 'aether-vnext-swapout'" in workflow
+    assert "aether-vnext-nonprod-deploy-approved" in workflow
     assert "expected_head_sha:" in workflow
+    assert "github.event.pull_request.head.sha" in workflow
     assert 'test "$actual" = "$EXPECTED_HEAD_SHA"' in workflow
-    assert 'test "$actual" = "$GITHUB_SHA"' in workflow
+    assert 'test "$GITHUB_HEAD_REF" = "aether-vnext-swapout"' in workflow
+    assert 'test "$GITHUB_REF_NAME" = "aether-vnext-swapout"' in workflow
+    assert 'echo "source_revision=$actual" >> "$GITHUB_OUTPUT"' in workflow
 
 
 def test_nonprod_deploy_workflow_is_hard_bound_to_dedicated_vnext_app() -> None:
@@ -51,6 +57,8 @@ def test_nonprod_deploy_workflow_verifies_vnext_paper_surface() -> None:
     assert 'body.get("live_blocked") is True' in workflow
     assert 'mode.get("paper_only") is True' in workflow
     assert 'mode.get("live_blocked") is True' in workflow
+    assert 'SOURCE_REVISION: ${{ steps.revision.outputs.source_revision }}' in workflow
+    assert 'EXPECTED_SHA: ${{ steps.revision.outputs.source_revision }}' in workflow
     assert 'build.get("source_revision") == os.environ["EXPECTED_SHA"]' in workflow
     assert 'test "$code" = "405"' in workflow
 
