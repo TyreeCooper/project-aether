@@ -135,6 +135,8 @@ def test_probe_is_explicitly_demo_market_data_only() -> None:
     assert "AETHER_VNEXT_NINJATRADER_MARKET_AUTH_JSON" in source
     assert "AETHER_VNEXT_TRADINGHOURS_API_TOKEN" in source
     assert "fetch_ninjatrader_demo_quote" in source
+    assert "require_trade_print=True" in source
+    assert '"trade_print"' in source
 
     prohibited = (
         "accessToken",

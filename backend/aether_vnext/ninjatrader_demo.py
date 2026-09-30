@@ -20,6 +20,7 @@ from typing import Any, Callable, Protocol
 
 import websockets
 
+from aether_vnext.bars import MarketPrint
 from aether_vnext.market_data import RawQuote
 from aether_vnext.ninjatrader_market import (
     NINJATRADER_DEMO_ADAPTER_VERSION,
@@ -28,6 +29,7 @@ from aether_vnext.ninjatrader_market import (
     authorize_market_data_request,
     decode_server_frame,
     parse_quote_events,
+    parse_trade_prints,
     require_success_response,
     response_for_request,
     subscribe_quote_request,
@@ -147,6 +149,7 @@ class NinjaTraderDemoQuoteSample:
     quote: RawQuote
     heartbeat_count: int
     message_count: int
+    trade_print: MarketPrint | None = None
 
 
 async def _wait_for_response(
@@ -187,6 +190,7 @@ async def fetch_ninjatrader_demo_quote(
     binding: RuntimeRegistryBinding,
     auth: NinjaTraderDemoMarketAuth,
     timeout_s: float = 10.0,
+    require_trade_print: bool = False,
     connect_factory: Callable[..., Any] | None = None,
 ) -> NinjaTraderDemoQuoteSample:
     """Fetch one contract-ID-locked DEMO quote for one reviewed futures binding."""
@@ -282,6 +286,7 @@ async def fetch_ninjatrader_demo_quote(
                 ask: float | None = None
                 last: float | None = None
                 exchange_ts: datetime | None = None
+                trade_print: MarketPrint | None = None
 
                 while True:
                     raw_frame = await websocket.recv()
@@ -300,6 +305,14 @@ async def fetch_ninjatrader_demo_quote(
                     if frame.frame_type != "a":
                         continue
 
+                    prints = parse_trade_prints(
+                        frame.messages,
+                        contract_to_asset={expected_contract_id: asset_id},
+                        received_at_utc=received_at,
+                    )
+                    if prints:
+                        trade_print = prints[-1]
+
                     for event in parse_quote_events(frame.messages):
                         if event.contract_id != expected_contract_id:
                             raise RuntimeError(
@@ -315,6 +328,8 @@ async def fetch_ninjatrader_demo_quote(
                         exchange_ts = event.timestamp_utc
 
                     if bid is None or ask is None or exchange_ts is None:
+                        continue
+                    if require_trade_print and trade_print is None:
                         continue
 
                     quote = RawQuote(
@@ -337,9 +352,14 @@ async def fetch_ninjatrader_demo_quote(
                         quote=quote,
                         heartbeat_count=heartbeat_count,
                         message_count=message_count,
+                        trade_print=trade_print,
                     )
     except TimeoutError as exc:
         raise TimeoutError(
-            "NinjaTrader DEMO quote sample timed out before a complete "
-            "contract-ID-locked BBO was observed"
+            "NinjaTrader DEMO quote sample timed out before the required "
+            + (
+                "contract-ID-locked BBO + provider trade print were observed"
+                if require_trade_print
+                else "contract-ID-locked BBO was observed"
+            )
         ) from exc

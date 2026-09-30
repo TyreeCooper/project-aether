@@ -8,6 +8,7 @@ For each requested futures asset the probe:
 - loads the durable reviewed contract symbol + numeric market-data contract ID;
 - prefetches the configured TradingHours calendar snapshot;
 - retrieves one DEMO BBO quote from the reviewed contract;
+- requires one provider-authored Trade price + size event for the same reviewed contract;
 - persists the quote through canonical market_ingress.
 
 No order, account, position, or live-trading endpoint is used.
@@ -148,6 +149,13 @@ def _serialize(samples, ingress_results) -> dict[str, object]:
                 ),
                 "received_ts": sample.quote.received_ts.isoformat(),
                 "adapter_version": sample.quote.adapter_version,
+                "trade_print": {
+                    "price": sample.trade_print.price,
+                    "volume": sample.trade_print.volume,
+                    "exchange_ts": sample.trade_print.exchange_ts.isoformat(),
+                    "received_ts": sample.trade_print.received_ts.isoformat(),
+                    "source_id": sample.trade_print.source_id,
+                },
                 "ingress_attempt_id": by_asset[
                     sample.asset_id
                 ].attempt_id,
@@ -218,13 +226,17 @@ async def _main(
 
         samples = []
         for row in selected:
-            samples.append(
-                await fetch_ninjatrader_demo_quote(
+            sample = await fetch_ninjatrader_demo_quote(
                     binding=row["binding"],
                     auth=auth,
                     timeout_s=timeout_s,
+                    require_trade_print=True,
                 )
-            )
+            if sample.trade_print is None:
+                raise RuntimeError(
+                    f"{sample.asset_id} provider trade print was not observed"
+                )
+            samples.append(sample)
 
         ingress_results = []
         as_of_utc = datetime.now(timezone.utc)

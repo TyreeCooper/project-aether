@@ -154,6 +154,7 @@ async def test_demo_transport_authorizes_subscribes_heartbeats_and_maps_contract
         binding=_binding(),
         auth=_auth(),
         timeout_s=1.0,
+        require_trade_print=True,
         connect_factory=factory,
     )
 
@@ -172,6 +173,10 @@ async def test_demo_transport_authorizes_subscribes_heartbeats_and_maps_contract
     assert sample.quote.exchange_ts == datetime(
         2026, 9, 27, 3, 12, 0, 125000, tzinfo=UTC
     )
+    assert sample.trade_print is not None
+    assert sample.trade_print.price == 6700.25
+    assert sample.trade_print.volume == 2
+    assert sample.trade_print.exchange_ts == sample.quote.exchange_ts
 
     assert socket.sent[0] == "authorize\n1\n\ndemo-md-token"
     assert socket.sent[1] == 'md/subscribeQuote\n2\n\n{"symbol":"MESZ6"}'
@@ -299,3 +304,57 @@ async def test_transport_rejects_non_ninjatrader_source_before_connect() -> None
             connect_factory=factory,
         )
     assert called is False
+
+
+@pytest.mark.asyncio
+async def test_trade_print_requirement_waits_for_real_trade_event() -> None:
+    bbo_only = {
+        "e": "md",
+        "d": {
+            "quotes": [
+                {
+                    "timestamp": "2026-09-27T03:12:00.100Z",
+                    "contractId": 987654,
+                    "entries": {
+                        "Bid": {"price": 6700.25},
+                        "Offer": {"price": 6700.50},
+                    },
+                }
+            ]
+        },
+    }
+    trade = {
+        "e": "md",
+        "d": {
+            "quotes": [
+                {
+                    "timestamp": "2026-09-27T03:12:00.200Z",
+                    "contractId": 987654,
+                    "entries": {
+                        "Trade": {"price": 6700.50, "size": 4},
+                    },
+                }
+            ]
+        },
+    }
+    _, _, factory = _connect(
+        [
+            "o",
+            'a[{"s":200,"i":1}]',
+            'a[{"s":200,"i":2}]',
+            "a" + json.dumps([bbo_only], separators=(",", ":")),
+            "a" + json.dumps([trade], separators=(",", ":")),
+        ]
+    )
+
+    sample = await fetch_ninjatrader_demo_quote(
+        binding=_binding(),
+        auth=_auth(),
+        timeout_s=1.0,
+        require_trade_print=True,
+        connect_factory=factory,
+    )
+
+    assert sample.trade_print is not None
+    assert sample.trade_print.price == 6700.50
+    assert sample.trade_print.volume == 4
