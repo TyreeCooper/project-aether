@@ -22,6 +22,7 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from websockets.asyncio.client import connect as websocket_connect
 
+from aether_vnext.bars import MarketPrint
 from aether_vnext.market_data import RawQuote
 from aether_vnext.shortability import (
     ShortabilityEvidence,
@@ -32,8 +33,10 @@ from aether_vnext.shortability import (
 IBKR_WEBAPI_MARKET_SOURCE_ID = "ibkr_webapi_market_data"
 IBKR_WEBAPI_TRANSPORT_ID = "ibkr_webapi_smd_websocket"
 IBKR_WEBAPI_ADAPTER_VERSION = "ibkr_webapi_smd_v1:mid_mark_v1"
+IBKR_WEBAPI_MARKET_PRINT_ADAPTER_VERSION = "ibkr_webapi_smd_trade_v1:last_size_v1"
 IBKR_CPGW_WEBSOCKET_URL = "wss://localhost:5000/v1/api/ws"
 IBKR_MARKET_DATA_FIELDS = ("31", "84", "86", "6509")
+IBKR_MARKET_PRINT_FIELDS = ("31", "7059", "6509")
 IBKR_WEBAPI_SHORTABILITY_PROVIDER_ID = "ibkr_webapi_shortability"
 IBKR_WEBAPI_SHORTABILITY_ADAPTER_VERSION = "ibkr_webapi_shortability_smd_v1"
 IBKR_SHORTABILITY_FIELDS = ("7636", "7637", "7644", "6509")
@@ -46,6 +49,15 @@ class IbkrTopOfBookBatch:
     requested_contract_ids: tuple[int, ...]
     message_count: int
     quotes: tuple[RawQuote, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class IbkrMarketPrintBatch:
+    websocket_url: str
+    auth_mode: str
+    requested_contract_ids: tuple[int, ...]
+    message_count: int
+    prints: tuple[MarketPrint, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,6 +175,68 @@ def _raw_quote_from_state(
         exchange_ts=exchange_ts,
         received_ts=received_at_utc,
         adapter_version=IBKR_WEBAPI_ADAPTER_VERSION,
+    )
+
+
+def _parse_positive_number(value: object) -> float | None:
+    if value is None:
+        return None
+    text = str(value).strip().replace(",", "")
+    if not text:
+        return None
+    try:
+        parsed = float(text)
+    except ValueError:
+        return None
+    return parsed if parsed > 0 else None
+
+
+def parse_ibkr_trade_print(
+    payload: Mapping[str, object],
+    *,
+    asset_id: str,
+    received_at_utc: datetime,
+) -> MarketPrint | None:
+    """Parse one provider-authored last-trade update without synthesizing ticks.
+
+    IBKR Web API documents field 31 as Last Price and field 7059 as Last Size.
+    AETHER emits a print only when the same provider message contains both fields,
+    a real-time availability flag, and a provider update timestamp.
+    """
+    if received_at_utc.tzinfo is None:
+        raise ValueError("received_at_utc must be timezone-aware")
+    if not isinstance(payload, Mapping):
+        raise ValueError("payload must be a mapping")
+
+    availability = payload.get("6509")
+    if availability is None:
+        return None
+    if not _availability_is_realtime(availability):
+        raise RuntimeError("ibkr_market_print_not_realtime:" + str(availability))
+
+    if "31" not in payload or "7059" not in payload:
+        return None
+
+    price, prefix = _parse_price(payload.get("31"))
+    if prefix == "H":
+        raise RuntimeError("ibkr_market_halted")
+    if prefix is not None:
+        return None
+    size = _parse_positive_number(payload.get("7059"))
+    exchange_ts = _updated_at_utc(payload.get("_updated"))
+    if price is None or size is None or exchange_ts is None:
+        return None
+
+    asset = str(asset_id).strip().lower()
+    if not asset:
+        raise ValueError("asset_id is required")
+    return MarketPrint(
+        asset_id=asset,
+        price=price,
+        volume=size,
+        exchange_ts=exchange_ts,
+        received_ts=received_at_utc,
+        source_id=IBKR_WEBAPI_MARKET_SOURCE_ID,
     )
 
 
@@ -315,6 +389,121 @@ async def fetch_ibkr_top_of_book(
         requested_contract_ids=ordered_contract_ids,
         message_count=message_count,
         quotes=tuple(latest_quotes[value] for value in ordered_contract_ids),
+    )
+
+
+async def fetch_ibkr_trade_prints(
+    *,
+    asset_contract_ids: Mapping[str, int],
+    session_token: str,
+    auth_mode: str = "cpgw_cookie",
+    websocket_url: str = IBKR_CPGW_WEBSOCKET_URL,
+    timeout_s: float = 10.0,
+    allow_insecure_localhost_tls: bool = False,
+    connect_factory: Callable[..., Any] | None = None,
+) -> IbkrMarketPrintBatch:
+    """Collect one real-time provider-authored last trade per reviewed conid."""
+    token = str(session_token).strip()
+    if not token:
+        raise ValueError("IBKR session token is required")
+    if timeout_s <= 0:
+        raise ValueError("timeout_s must be positive")
+
+    normalized: dict[str, int] = {}
+    for raw_asset, raw_contract_id in asset_contract_ids.items():
+        asset_id = str(raw_asset).strip().lower()
+        if not asset_id:
+            raise ValueError("asset_id is required")
+        if isinstance(raw_contract_id, bool) or int(raw_contract_id) <= 0:
+            raise ValueError("IBKR contract IDs must be positive integers")
+        normalized[asset_id] = int(raw_contract_id)
+    if not normalized:
+        raise ValueError("asset_contract_ids must be non-empty")
+    if len(set(normalized.values())) != len(normalized):
+        raise ValueError("duplicate IBKR contract ID")
+
+    mode = str(auth_mode).strip().lower()
+    if mode not in {"cpgw_cookie", "oauth2_query"}:
+        raise ValueError("IBKR auth_mode must be cpgw_cookie or oauth2_query")
+
+    target_url = str(websocket_url).strip()
+    if not target_url:
+        raise ValueError("websocket_url is required")
+    headers = None
+    if mode == "cpgw_cookie":
+        headers = {"Cookie": f"api={token}"}
+    else:
+        target_url = _oauth2_url(target_url, token)
+
+    connect = connect_factory or websocket_connect
+    kwargs: dict[str, object] = {
+        "open_timeout": timeout_s,
+        "close_timeout": 5.0,
+        "ping_interval": 20.0,
+        "ping_timeout": 20.0,
+        "max_queue": 64,
+    }
+    if headers is not None:
+        kwargs["additional_headers"] = headers
+    if allow_insecure_localhost_tls:
+        kwargs["ssl"] = _insecure_localhost_context(target_url)
+
+    contract_to_asset = {
+        contract_id: asset_id
+        for asset_id, contract_id in normalized.items()
+    }
+    prints_by_contract: dict[int, MarketPrint] = {}
+    message_count = 0
+
+    async with connect(target_url, **kwargs) as websocket:
+        for contract_id in contract_to_asset:
+            await websocket.send(
+                market_data_subscription(
+                    contract_id=contract_id,
+                    fields=IBKR_MARKET_PRINT_FIELDS,
+                )
+            )
+
+        try:
+            async with asyncio.timeout(timeout_s):
+                while len(prints_by_contract) < len(contract_to_asset):
+                    raw = await websocket.recv()
+                    message_count += 1
+                    payload = _decode(raw)
+                    if payload is None:
+                        continue
+                    try:
+                        contract_id = int(payload.get("conid"))
+                    except (TypeError, ValueError):
+                        continue
+                    asset_id = contract_to_asset.get(contract_id)
+                    if asset_id is None:
+                        continue
+                    print_ = parse_ibkr_trade_print(
+                        payload,
+                        asset_id=asset_id,
+                        received_at_utc=datetime.now(timezone.utc),
+                    )
+                    if print_ is not None:
+                        prints_by_contract[contract_id] = print_
+        except TimeoutError as exc:
+            missing = sorted(
+                contract_id
+                for contract_id in contract_to_asset
+                if contract_id not in prints_by_contract
+            )
+            raise TimeoutError(
+                "IBKR trade-print sample timed out for contract IDs: "
+                + ",".join(str(value) for value in missing)
+            ) from exc
+
+    ordered_contract_ids = tuple(normalized.values())
+    return IbkrMarketPrintBatch(
+        websocket_url=str(websocket_url).strip(),
+        auth_mode=mode,
+        requested_contract_ids=ordered_contract_ids,
+        message_count=message_count,
+        prints=tuple(prints_by_contract[value] for value in ordered_contract_ids),
     )
 
 

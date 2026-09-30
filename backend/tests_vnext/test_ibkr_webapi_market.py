@@ -10,12 +10,16 @@ import pytest
 from aether_vnext.ibkr_webapi_market import (
     IBKR_CPGW_WEBSOCKET_URL,
     IBKR_MARKET_DATA_FIELDS,
+    IBKR_MARKET_PRINT_FIELDS,
     IBKR_SHORTABILITY_FIELDS,
+    IBKR_WEBAPI_MARKET_PRINT_ADAPTER_VERSION,
     IBKR_WEBAPI_MARKET_SOURCE_ID,
     IBKR_WEBAPI_SHORTABILITY_PROVIDER_ID,
     fetch_ibkr_shortability,
+    fetch_ibkr_trade_prints,
     fetch_ibkr_top_of_book,
     market_data_subscription,
+    parse_ibkr_trade_print,
 )
 
 
@@ -372,3 +376,89 @@ async def test_shortability_zero_shares_is_valid_unavailable_evidence() -> None:
         connect_factory=factory,
     )
     assert batch.evidence[0].shortable_shares == 0
+
+
+def test_trade_print_fields_are_exact_documented_tags() -> None:
+    assert IBKR_MARKET_PRINT_FIELDS == ("31", "7059", "6509")
+    encoded = market_data_subscription(
+        contract_id=265598,
+        fields=IBKR_MARKET_PRINT_FIELDS,
+    )
+    assert encoded == 'smd+265598+{"fields":["31","7059","6509"]}'
+
+
+def test_trade_print_parser_requires_same_message_price_size_and_realtime() -> None:
+    received = datetime(2026, 9, 29, 20, 0, tzinfo=UTC)
+    payload = {
+        "conid": 265598,
+        "31": "100.50",
+        "7059": "7",
+        "6509": "RpB",
+        "_updated": 1_796_000_000_125,
+    }
+    print_ = parse_ibkr_trade_print(
+        payload,
+        asset_id="nvda",
+        received_at_utc=received,
+    )
+    assert print_ is not None
+    assert print_.asset_id == "nvda"
+    assert print_.price == 100.50
+    assert print_.volume == 7
+    assert print_.source_id == IBKR_WEBAPI_MARKET_SOURCE_ID
+    assert print_.exchange_ts == datetime.fromtimestamp(
+        1_796_000_000.125,
+        tz=UTC,
+    )
+
+    assert parse_ibkr_trade_print(
+        {**payload, "7059": None},
+        asset_id="nvda",
+        received_at_utc=received,
+    ) is None
+    assert parse_ibkr_trade_print(
+        {key: value for key, value in payload.items() if key != "7059"},
+        asset_id="nvda",
+        received_at_utc=received,
+    ) is None
+
+    with pytest.raises(RuntimeError, match="ibkr_market_print_not_realtime"):
+        parse_ibkr_trade_print(
+            {**payload, "6509": "DpB"},
+            asset_id="nvda",
+            received_at_utc=received,
+        )
+
+
+@pytest.mark.asyncio
+async def test_trade_print_stream_collects_provider_last_price_and_size() -> None:
+    socket, calls, factory = _connect(
+        [
+            {
+                "conid": 265598,
+                "31": "100.50",
+                "7059": "7",
+                "6509": "RpB",
+                "_updated": 1_796_000_000_125,
+            }
+        ]
+    )
+
+    batch = await fetch_ibkr_trade_prints(
+        asset_contract_ids={"nvda": 265598},
+        session_token="session-cookie-token",
+        timeout_s=1.0,
+        connect_factory=factory,
+    )
+
+    assert calls[0][1]["additional_headers"] == {
+        "Cookie": "api=session-cookie-token"
+    }
+    assert socket.sent == [
+        'smd+265598+{"fields":["31","7059","6509"]}'
+    ]
+    assert batch.requested_contract_ids == (265598,)
+    assert len(batch.prints) == 1
+    assert batch.prints[0].price == 100.50
+    assert batch.prints[0].volume == 7
+    assert IBKR_WEBAPI_MARKET_PRINT_ADAPTER_VERSION.endswith("last_size_v1")

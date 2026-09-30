@@ -15,6 +15,7 @@ from typing import Final
 from aether_vnext.adapters import KrakenPublicTickerV2, KrakenPublicTradeV2
 from aether_vnext.ibkr_webapi_market import (
     IBKR_WEBAPI_ADAPTER_VERSION,
+    IBKR_WEBAPI_MARKET_PRINT_ADAPTER_VERSION,
     IBKR_WEBAPI_MARKET_SOURCE_ID,
     IBKR_WEBAPI_TRANSPORT_ID,
 )
@@ -62,6 +63,8 @@ IMPLEMENTED_MARKET_SOURCES: Final = MappingProxyType(
             parser_version=IBKR_WEBAPI_ADAPTER_VERSION,
             supported_assets=frozenset({"nvda", "tsla", "pltr"}),
             public_market_data=False,
+            market_print_transport_id=IBKR_WEBAPI_TRANSPORT_ID,
+            market_print_parser_version=IBKR_WEBAPI_MARKET_PRINT_ADAPTER_VERSION,
         ),
         NINJATRADER_MARKET_SOURCE_ID: MarketSourceCapability(
             source_id=NINJATRADER_MARKET_SOURCE_ID,

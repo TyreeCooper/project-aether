@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from aether_vnext.ibkr_webapi_market import IBKR_WEBAPI_MARKET_SOURCE_ID
+from aether_vnext.ibkr_webapi_market import (
+    IBKR_WEBAPI_MARKET_PRINT_ADAPTER_VERSION,
+    IBKR_WEBAPI_MARKET_SOURCE_ID,
+    IBKR_WEBAPI_TRANSPORT_ID,
+)
 from aether_vnext.ninjatrader_market import (
     NINJATRADER_DEMO_TRANSPORT_ID,
     NINJATRADER_MARKET_PRINT_ADAPTER_VERSION,
@@ -43,6 +47,11 @@ def test_implemented_market_sources_are_explicit_and_asset_scoped() -> None:
     assert ibkr.public_market_data is False
     assert ibkr.transport_id == "ibkr_webapi_smd_websocket"
     assert ibkr.supported_assets == frozenset({"nvda", "tsla", "pltr"})
+    assert ibkr.market_print_transport_id == IBKR_WEBAPI_TRANSPORT_ID
+    assert (
+        ibkr.market_print_parser_version
+        == IBKR_WEBAPI_MARKET_PRINT_ADAPTER_VERSION
+    )
 
     ninja = market_source_capability(NINJATRADER_MARKET_SOURCE_ID)
     assert ninja is not None
@@ -167,7 +176,7 @@ def test_market_print_capability_is_distinct_from_quote_implementation() -> None
         primary_source_id=IBKR_WEBAPI_MARKET_SOURCE_ID,
         fallback_source_id=None,
         asset_id="nvda",
-    ) == ("market_print_source_implementation_missing",)
+    ) == ()
 
     assert market_print_implementation_blockers(
         primary_source_id=NINJATRADER_MARKET_SOURCE_ID,
