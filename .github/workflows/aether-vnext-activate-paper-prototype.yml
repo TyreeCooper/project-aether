@@ -1,0 +1,288 @@
+name: AETHER vNext Activate Autonomous Paper Prototype
+
+on:
+  push:
+    branches:
+      - aether-vnext-swapout
+    paths:
+      - ".github/workflows/aether-vnext-activate-paper-prototype.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: aether-vnext-activate-paper-prototype
+  cancel-in-progress: false
+
+jobs:
+  activate:
+    if: github.ref_name == 'aether-vnext-swapout'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: aether-vnext-burnin
+
+    steps:
+      - name: Checkout exact vNext head
+        uses: actions/checkout@v4
+
+      - name: Verify protected prototype boundary
+        id: revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "aether-vnext-swapout"
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$GITHUB_SHA"
+          echo "source_revision=$actual" >> "$GITHUB_OUTPUT"
+          echo "Activating autonomous PAPER prototype at $actual"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build Unified Firm Floor
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_API_BASE: ""
+          NEXT_PUBLIC_AETHER_FLOOR_PATH: "/api/v1/vnext/floor"
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+          test -f out/index.html
+
+      - name: Embed exact build identity and UI
+        shell: bash
+        env:
+          SOURCE_REVISION: ${{ steps.revision.outputs.source_revision }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from datetime import datetime, timezone
+          import json, os
+          from pathlib import Path
+
+          payload = {
+              "source_revision": os.environ["SOURCE_REVISION"],
+              "package_built_at_utc": datetime.now(timezone.utc).isoformat(),
+          }
+          Path("backend/aether_vnext/build_manifest.json").write_text(
+              json.dumps(payload, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+          rm -rf backend/app/vnext_ui
+          mkdir -p backend/app/vnext_ui
+          cp -R frontend/out/. backend/app/vnext_ui/
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate exact autonomous PAPER package
+        working-directory: backend
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python -m pytest -q             tests_vnext/test_vnext_runtime_mode.py             tests_vnext/test_kraken_ingress_supervisor.py             tests_vnext/test_prototype_crypto_features.py             tests_vnext/test_prototype_crypto_entry_plan.py             tests_vnext/test_prototype_crypto_entry_runtime.py             tests_vnext/test_prototype_crypto_exit.py             tests_vnext/test_prototype_crypto_exit_runtime.py             tests_vnext/test_prototype_strategy_supervisor.py             tests_vnext/test_phase17_floor_test_status.py
+          python -m py_compile             app/main.py             app/vnext_ingress.py             app/vnext_strategy.py             app/vnext_runtime_mode.py             aether_vnext/kraken_ingress_supervisor.py             aether_vnext/prototype_strategy_supervisor.py
+
+      - name: Require protected burn-in database URL
+        env:
+          DATABASE_URL: ${{ secrets.AETHER_VNEXT_BURNIN_DATABASE_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$DATABASE_URL"
+
+      - name: Login to Azure with dedicated vNext identity
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_E2CE53939F2D406CBA8FB39DB4948C7B }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_0E83D5CA9CF543228DA7FA7818D7C998 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_B530D2ECBF5549A39B4758868409068A }}
+
+      - name: Bind autonomous prototype-only runtime settings
+        env:
+          DATABASE_URL: ${{ secrets.AETHER_VNEXT_BURNIN_DATABASE_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="aether-vnext-nonprod"
+          rg="aether-rg"
+
+          host="$(az webapp show             --name "$app"             --resource-group "$rg"             --query defaultHostName -o tsv)"
+
+          case "$host" in
+            aether-vnext-nonprod-*.azurewebsites.net|aether-vnext-nonprod.azurewebsites.net) ;;
+            *) echo "Forbidden/unexpected target: $host"; exit 2 ;;
+          esac
+          test "$app" != "aether-prod-api"
+
+          az webapp config appsettings delete             --name "$app"             --resource-group "$rg"             --setting-names AETHER_VNEXT_AZURE_POSTGRESQL_CONNECTIONSTRING             >/dev/null 2>&1 || true
+
+          az webapp config appsettings set             --name "$app"             --resource-group "$rg"             --settings               AETHER_VNEXT_ENVIRONMENT=burnin               AETHER_VNEXT_DATABASE_URL="$DATABASE_URL"               AETHER_VNEXT_RUNTIME_ONLY=true               AETHER_VNEXT_KRAKEN_INGRESS_ENABLED=true               AETHER_VNEXT_KRAKEN_INGRESS_INTERVAL_SECONDS=15               AETHER_VNEXT_PROTOTYPE_TRADING_ENABLED=true               AETHER_VNEXT_PROTOTYPE_TRADING_INTERVAL_SECONDS=60             >/dev/null
+
+          echo "app_name=$app" >> "$GITHUB_ENV"
+          echo "resource_group=$rg" >> "$GITHUB_ENV"
+          echo "prototype_host=$host" >> "$GITHUB_ENV"
+
+      - name: Verify runtime-only settings are bound to prototype
+        shell: bash
+        run: |
+          set -euo pipefail
+          values="$(az webapp config appsettings list             --name "$app_name"             --resource-group "$resource_group"             --query "[?name=='AETHER_VNEXT_RUNTIME_ONLY' || name=='AETHER_VNEXT_KRAKEN_INGRESS_ENABLED' || name=='AETHER_VNEXT_PROTOTYPE_TRADING_ENABLED'].{name:name,value:value}"             -o json)"
+          python - "$values" <<'PY'
+          import json, sys
+          rows = {row["name"]: str(row["value"]).lower() for row in json.loads(sys.argv[1])}
+          assert rows.get("AETHER_VNEXT_RUNTIME_ONLY") == "true", rows
+          assert rows.get("AETHER_VNEXT_KRAKEN_INGRESS_ENABLED") == "true", rows
+          assert rows.get("AETHER_VNEXT_PROTOTYPE_TRADING_ENABLED") == "true", rows
+          print(json.dumps(rows, indent=2, sort_keys=True))
+          PY
+
+      - name: Deploy exact autonomous prototype package
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: aether-vnext-nonprod
+          package: backend
+
+      - name: Restart prototype only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$app_name" = "aether-vnext-nonprod"
+          az webapp restart             --name "$app_name"             --resource-group "$resource_group"
+
+      - name: Verify deployed PAPER runtime end to end
+        env:
+          EXPECTED_SHA: ${{ steps.revision.outputs.source_revision }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://$prototype_host"
+
+          for attempt in $(seq 1 30); do
+            code="$(curl --silent --show-error --max-time 30               -o /tmp/health.json -w '%{http_code}'               "$base/api/v1/health" || true)"
+            if [ "$code" = "200" ]; then
+              break
+            fi
+            test "$attempt" -lt 30
+            sleep 10
+          done
+
+          python - <<'PY'
+          import json
+          body=json.load(open("/tmp/health.json", encoding="utf-8"))
+          assert body.get("ok") is True, body
+          assert body.get("paper_mode") is True, body
+          assert body.get("live_blocked") is True, body
+          PY
+
+          for attempt in $(seq 1 18); do
+            code="$(curl --silent --show-error --max-time 45               -o /tmp/ingress.json -w '%{http_code}'               "$base/api/v1/vnext/ingress-runtime" || true)"
+            if [ "$code" = "200" ] && python - <<'PY'
+          import json, sys
+          body=json.load(open("/tmp/ingress.json", encoding="utf-8"))
+          result=body.get("last_result") or {}
+          rows=result.get("asset_results") or []
+          by_asset={row.get("asset_id"): row for row in rows}
+          ok=(
+              body.get("enabled") is True
+              and body.get("running") is True
+              and int(body.get("cycle_count") or 0) >= 1
+              and body.get("last_error") is None
+              and body.get("paper_only") is True
+              and body.get("live_blocked") is True
+              and by_asset.get("btc", {}).get("executable") is True
+              and by_asset.get("eth", {}).get("executable") is True
+          )
+          sys.exit(0 if ok else 1)
+          PY
+            then
+              break
+            fi
+            test "$attempt" -lt 18
+            sleep 10
+          done
+
+          for attempt in $(seq 1 24); do
+            code="$(curl --silent --show-error --max-time 60               -o /tmp/strategy.json -w '%{http_code}'               "$base/api/v1/vnext/strategy-runtime" || true)"
+            if [ "$code" = "200" ] && python - <<'PY'
+          import json, sys
+          body=json.load(open("/tmp/strategy.json", encoding="utf-8"))
+          result=body.get("last_result") or {}
+          assets=result.get("assets") or {}
+          ok=(
+              body.get("enabled") is True
+              and body.get("running") is True
+              and int(body.get("cycle_count") or 0) >= 1
+              and body.get("last_error") is None
+              and body.get("paper_only") is True
+              and body.get("live_blocked") is True
+              and result.get("paper_only") is True
+              and result.get("live_blocked") is True
+              and result.get("phase18_evidence") is False
+              and result.get("paper_epoch_id") == "aether-prototype-new-system-test-001"
+              and "btc" in assets
+              and "eth" in assets
+          )
+          sys.exit(0 if ok else 1)
+          PY
+            then
+              break
+            fi
+            test "$attempt" -lt 24
+            sleep 10
+          done
+
+          echo "=== Kraken ingress runtime ==="
+          cat /tmp/ingress.json
+          echo
+          echo "=== Autonomous strategy runtime ==="
+          cat /tmp/strategy.json
+          echo
+
+          for attempt in $(seq 1 12); do
+            code="$(curl --silent --show-error --max-time 60               -o /tmp/floor.json -w '%{http_code}'               "$base/api/v1/vnext/floor" || true)"
+            if [ "$code" = "200" ]; then
+              break
+            fi
+            test "$attempt" -lt 12
+            sleep 10
+          done
+
+          python - <<'PY'
+          import json, os
+          body=json.load(open("/tmp/floor.json", encoding="utf-8"))
+          mode=body.get("mode") or {}
+          assert mode.get("paper_only") is True, body
+          assert mode.get("live_blocked") is True, body
+          build=body.get("build") or {}
+          assert build.get("source_revision") == os.environ["EXPECTED_SHA"], build
+          paper=body.get("paper_test") or {}
+          assert paper.get("epoch_id") == "aether-prototype-new-system-test-001", paper
+          assert paper.get("seed_bank_usd") == 10000.0, paper
+          print(json.dumps({
+              "source_revision": build.get("source_revision"),
+              "epoch_id": paper.get("epoch_id"),
+              "seed_bank_usd": paper.get("seed_bank_usd"),
+              "blotter_trade_count": paper.get("blotter_trade_count"),
+              "paper_only": mode.get("paper_only"),
+              "live_blocked": mode.get("live_blocked"),
+          }, indent=2, sort_keys=True))
+          PY
+
+      - name: Upload activation proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-vnext-autonomous-paper-activation-${{ github.run_id }}
+          path: |
+            /tmp/ingress.json
+            /tmp/strategy.json
+            /tmp/floor.json
+          if-no-files-found: error
+          retention-days: 90
