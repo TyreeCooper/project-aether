@@ -1,0 +1,210 @@
+name: AETHER vNext Bind Prototype Kraken Products
+
+on:
+  push:
+    branches:
+      - aether-vnext-swapout
+    paths:
+      - ".github/workflows/aether-vnext-bind-prototype-kraken.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aether-vnext-bind-prototype-kraken
+  cancel-in-progress: false
+
+jobs:
+  bind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: aether-vnext-burnin
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      AETHER_VNEXT_ENVIRONMENT: burnin
+      AETHER_VNEXT_DATABASE_URL: ${{ secrets.AETHER_VNEXT_BURNIN_DATABASE_URL }}
+
+    steps:
+      - name: Checkout exact vNext head
+        uses: actions/checkout@v4
+
+      - name: Verify prototype boundary
+        shell: bash
+        working-directory: .
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "aether-vnext-swapout"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build reviewed BTC ETH prototype manifest
+        shell: bash
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from aether_vnext.freeze import CONFIGURATION_HASH
+
+          # Prototype-only freshness policy:
+          # Kraken commissioning #2 measured provider cadence + transport p99
+          # below 4 seconds for BTC and ETH. 5000 ms is an explicit conservative
+          # prototype ceiling with headroom; it is not represented as a provider fact.
+          stale_threshold_ms = 5000
+          payload = {
+              "registry_version": "prototype-kraken-v1",
+              "configuration_hash": CONFIGURATION_HASH,
+              "bindings": [
+                  {
+                      "asset_id": "btc",
+                      "broker_symbol": "XBTUSD",
+                      "primary_market_source_id": "kraken_public",
+                      "fallback_market_source_id": None,
+                      "stale_threshold_ms": stale_threshold_ms,
+                      "calendar_provider_id": None,
+                      "calendar_market_id": None,
+                      "current_contract": None,
+                      "market_data_contract_id": None,
+                      "expiry_utc": None,
+                      "next_contract": None,
+                      "shortability_provider_id": None,
+                      "shortability_stale_threshold_ms": None,
+                      "source_ref": (
+                          "prototype-policy:kraken-public:"
+                          "commissioning-run-36752335784:5000ms"
+                      ),
+                  },
+                  {
+                      "asset_id": "eth",
+                      "broker_symbol": "ETHUSD",
+                      "primary_market_source_id": "kraken_public",
+                      "fallback_market_source_id": None,
+                      "stale_threshold_ms": stale_threshold_ms,
+                      "calendar_provider_id": None,
+                      "calendar_market_id": None,
+                      "current_contract": None,
+                      "market_data_contract_id": None,
+                      "expiry_utc": None,
+                      "next_contract": None,
+                      "shortability_provider_id": None,
+                      "shortability_stale_threshold_ms": None,
+                      "source_ref": (
+                          "prototype-policy:kraken-public:"
+                          "commissioning-run-36752335784:5000ms"
+                      ),
+                  },
+              ],
+          }
+          Path("/tmp/aether-prototype-kraken-bindings.json").write_text(
+              json.dumps(payload, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps({
+              "registry_version": payload["registry_version"],
+              "asset_ids": ["btc", "eth"],
+              "stale_threshold_ms": stale_threshold_ms,
+              "configuration_hash": CONFIGURATION_HASH,
+          }, indent=2, sort_keys=True))
+          PY
+
+      - name: Validate prototype bindings without mutation
+        shell: bash
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          python scripts/aether_vnext_registry_bindings.py             --manifest-file /tmp/aether-prototype-kraken-bindings.json             --require-complete             --require-implemented-source             --validate-only             --output /tmp/prototype-binding-validation.json
+
+      - name: Persist only BTC ETH prototype bindings
+        shell: bash
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          python scripts/aether_vnext_registry_bindings.py             --manifest-file /tmp/aether-prototype-kraken-bindings.json             --require-complete             --require-implemented-source             --output /tmp/prototype-binding-persist.json
+
+      - name: Verify durable prototype bindings
+        shell: bash
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import asyncio
+          from aether_vnext.db_runtime import open_vnext_engine
+          from aether_vnext.store import VNextStore
+
+          async def main():
+              store = VNextStore(schema="aether_vnext")
+              async with open_vnext_engine() as engine:
+                  async with engine.connect() as conn:
+                      def read(sync_conn):
+                          rows = {}
+                          for asset_id in ("btc", "eth"):
+                              row = store.load_runtime_registry_binding(
+                                  sync_conn, asset_id=asset_id
+                              )
+                              assert row is not None, asset_id
+                              binding = row["binding"]
+                              assert binding.primary_market_source_id == "kraken_public"
+                              assert binding.stale_threshold_ms == 5000
+                              assert binding.broker_symbol in {"XBTUSD", "ETHUSD"}
+                              rows[asset_id] = {
+                                  "binding_hash": row["binding_hash"],
+                                  "source": binding.primary_market_source_id,
+                                  "stale_threshold_ms": binding.stale_threshold_ms,
+                              }
+                          return rows
+                      rows = await conn.run_sync(read)
+                      print(rows)
+
+          asyncio.run(main())
+          PY
+
+      - name: Verify autonomous ingress becomes executable
+        shell: bash
+        working-directory: .
+        run: |
+          set -euo pipefail
+          base="https://aether-vnext-nonprod-gpcrcme8czarbnfy.centralus-01.azurewebsites.net"
+
+          for attempt in $(seq 1 18); do
+            code="$(curl --silent --show-error --max-time 45               -o /tmp/ingress.json -w '%{http_code}'               "$base/api/v1/vnext/ingress-runtime" || true)"
+            if [ "$code" = "200" ] && python - <<'PY'
+          import json, sys
+          body=json.load(open("/tmp/ingress.json", encoding="utf-8"))
+          rows=(body.get("last_result") or {}).get("asset_results") or []
+          by_asset={row.get("asset_id"): row for row in rows}
+          ok=(
+              body.get("enabled") is True
+              and body.get("running") is True
+              and body.get("paper_only") is True
+              and body.get("live_blocked") is True
+              and by_asset.get("btc", {}).get("executable") is True
+              and by_asset.get("eth", {}).get("executable") is True
+              and bool(by_asset.get("btc", {}).get("observation_id"))
+              and bool(by_asset.get("eth", {}).get("observation_id"))
+          )
+          sys.exit(0 if ok else 1)
+          PY
+            then
+              cat /tmp/ingress.json
+              exit 0
+            fi
+            sleep 15
+          done
+
+          echo "BTC/ETH ingress did not become executable in time."
+          cat /tmp/ingress.json 2>/dev/null || true
+          exit 1
