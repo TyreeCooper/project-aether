@@ -72,6 +72,18 @@ jobs:
             --trade-timeout-seconds 30 \
             --output aether-vnext-kraken-public-commissioning.json
 
+      - name: Measure Kraken BTC/ETH freshness evidence
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          python scripts/aether_vnext_kraken_freshness_probe.py \
+            --assets btc,eth \
+            --rounds 6 \
+            --timeout-seconds 10 \
+            --pause-seconds 0.5 \
+            --output aether-vnext-kraken-freshness.json
+
       - name: Attach exact revision
         shell: bash
         env:
@@ -82,19 +94,25 @@ jobs:
           import os
           from pathlib import Path
 
-          path = Path("aether-vnext-kraken-public-commissioning.json")
-          payload = json.loads(path.read_text(encoding="utf-8"))
-          payload["source_revision"] = os.environ["SOURCE_REVISION"]
-          path.write_text(
-              json.dumps(payload, indent=2, sort_keys=True) + "\n",
-              encoding="utf-8",
-          )
+          for name in (
+              "aether-vnext-kraken-public-commissioning.json",
+              "aether-vnext-kraken-freshness.json",
+          ):
+              path = Path(name)
+              payload = json.loads(path.read_text(encoding="utf-8"))
+              payload["source_revision"] = os.environ["SOURCE_REVISION"]
+              path.write_text(
+                  json.dumps(payload, indent=2, sort_keys=True) + "\n",
+                  encoding="utf-8",
+              )
           PY
 
       - name: Upload Kraken public commissioning evidence
         uses: actions/upload-artifact@v4
         with:
           name: aether-vnext-kraken-public-${{ github.run_id }}
-          path: backend/aether-vnext-kraken-public-commissioning.json
+          path: |
+            backend/aether-vnext-kraken-public-commissioning.json
+            backend/aether-vnext-kraken-freshness.json
           if-no-files-found: error
           retention-days: 30

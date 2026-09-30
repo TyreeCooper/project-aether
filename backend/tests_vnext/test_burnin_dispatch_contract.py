@@ -81,6 +81,10 @@ def test_kraken_public_commissioning_is_secret_free_and_not_burnin_authority() -
     assert "--assets btc,eth" in source
     assert "--ticker-timeout-seconds 15" in source
     assert "--trade-timeout-seconds 30" in source
+    assert "aether_vnext_kraken_freshness_probe.py" in source
+    assert "--rounds 6" in source
+    assert "--pause-seconds 0.5" in source
+    assert "aether-vnext-kraken-freshness.json" in source
     assert "source_revision" in source
 
     assert "environment:" not in source
