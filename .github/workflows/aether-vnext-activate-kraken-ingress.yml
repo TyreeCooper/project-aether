@@ -1,0 +1,216 @@
+name: AETHER vNext Activate Kraken Ingress
+
+on:
+  push:
+    branches:
+      - aether-vnext-swapout
+    paths:
+      - ".github/workflows/aether-vnext-activate-kraken-ingress.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: aether-vnext-activate-kraken-ingress
+  cancel-in-progress: false
+
+jobs:
+  activate:
+    if: github.ref_name == 'aether-vnext-swapout'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: aether-vnext-burnin
+
+    steps:
+      - name: Checkout exact vNext head
+        uses: actions/checkout@v4
+
+      - name: Verify protected prototype boundary
+        id: revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "aether-vnext-swapout"
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$GITHUB_SHA"
+          echo "source_revision=$actual" >> "$GITHUB_OUTPUT"
+          echo "Activating vNext ingress at $actual"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build Unified Firm Floor
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_API_BASE: ""
+          NEXT_PUBLIC_AETHER_FLOOR_PATH: "/api/v1/vnext/floor"
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+          test -f out/index.html
+
+      - name: Embed build identity and UI
+        shell: bash
+        env:
+          SOURCE_REVISION: ${{ steps.revision.outputs.source_revision }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from datetime import datetime, timezone
+          import json, os
+          from pathlib import Path
+
+          payload = {
+              "source_revision": os.environ["SOURCE_REVISION"],
+              "package_built_at_utc": datetime.now(timezone.utc).isoformat(),
+          }
+          Path("backend/aether_vnext/build_manifest.json").write_text(
+              json.dumps(payload, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+          rm -rf backend/app/vnext_ui
+          mkdir -p backend/app/vnext_ui
+          cp -R frontend/out/. backend/app/vnext_ui/
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate runtime package
+        working-directory: backend
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python -m pytest -q             tests_vnext/test_kraken_ingress_supervisor.py             tests_vnext/test_phase16_shadow_mount.py             tests_vnext/test_phase17_floor_test_status.py             tests_vnext/test_phase17_paper_test_reset.py
+          python -m py_compile app/main.py app/vnext_ingress.py             aether_vnext/kraken_ingress_supervisor.py
+
+      - name: Require protected burn-in database URL
+        env:
+          DATABASE_URL: ${{ secrets.AETHER_VNEXT_BURNIN_DATABASE_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$DATABASE_URL"
+
+      - name: Login to Azure with dedicated vNext identity
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_E2CE53939F2D406CBA8FB39DB4948C7B }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_0E83D5CA9CF543228DA7FA7818D7C998 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_B530D2ECBF5549A39B4758868409068A }}
+
+      - name: Bind prototype-only runtime settings
+        env:
+          DATABASE_URL: ${{ secrets.AETHER_VNEXT_BURNIN_DATABASE_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="aether-vnext-nonprod"
+          rg="aether-rg"
+
+          host="$(az webapp show --name "$app" --resource-group "$rg" --query defaultHostName -o tsv)"
+          case "$host" in
+            aether-vnext-nonprod-*.azurewebsites.net|aether-vnext-nonprod.azurewebsites.net) ;;
+            *) echo "Forbidden/unexpected target: $host"; exit 2 ;;
+          esac
+          test "$app" != "aether-prod-api"
+
+          az webapp config appsettings delete             --name "$app"             --resource-group "$rg"             --setting-names AETHER_VNEXT_AZURE_POSTGRESQL_CONNECTIONSTRING             >/dev/null 2>&1 || true
+
+          az webapp config appsettings set             --name "$app"             --resource-group "$rg"             --settings               AETHER_VNEXT_ENVIRONMENT=burnin               AETHER_VNEXT_DATABASE_URL="$DATABASE_URL"               AETHER_VNEXT_KRAKEN_INGRESS_ENABLED=true               AETHER_VNEXT_KRAKEN_INGRESS_INTERVAL_SECONDS=15             >/dev/null
+
+          echo "app_name=$app" >> "$GITHUB_ENV"
+          echo "resource_group=$rg" >> "$GITHUB_ENV"
+          echo "prototype_host=$host" >> "$GITHUB_ENV"
+
+      - name: Deploy exact vNext prototype package
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: aether-vnext-nonprod
+          package: backend
+
+      - name: Restart prototype only
+        shell: bash
+        run: |
+          set -euo pipefail
+          az webapp restart             --name "$app_name"             --resource-group "$resource_group"
+
+      - name: Verify autonomous Kraken ingress is alive
+        env:
+          EXPECTED_SHA: ${{ steps.revision.outputs.source_revision }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://$prototype_host"
+
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error --max-time 20               "$base/api/v1/health" >/tmp/health.json; then
+              break
+            fi
+            test "$attempt" -lt 30
+            sleep 10
+          done
+
+          python - <<'PY'
+          import json
+          body=json.load(open("/tmp/health.json", encoding="utf-8"))
+          assert body.get("ok") is True, body
+          assert body.get("paper_mode") is True, body
+          assert body.get("live_blocked") is True, body
+          PY
+
+          for attempt in $(seq 1 12); do
+            curl --fail --silent --show-error --max-time 20               "$base/api/v1/vnext/ingress-runtime" >/tmp/ingress.json
+            if python - <<'PY'
+          import json, sys
+          body=json.load(open("/tmp/ingress.json", encoding="utf-8"))
+          ok=(
+              body.get("enabled") is True
+              and body.get("running") is True
+              and int(body.get("cycle_count") or 0) >= 1
+              and body.get("paper_only") is True
+              and body.get("live_blocked") is True
+          )
+          sys.exit(0 if ok else 1)
+          PY
+            then
+              break
+            fi
+            test "$attempt" -lt 12
+            sleep 10
+          done
+
+          python - <<'PY'
+          import json
+          body=json.load(open("/tmp/ingress.json", encoding="utf-8"))
+          print(json.dumps(body, indent=2, sort_keys=True))
+          assert body["enabled"] is True
+          assert body["running"] is True
+          assert body["cycle_count"] >= 1
+          assert body["paper_only"] is True
+          assert body["live_blocked"] is True
+          result=body.get("last_result") or {}
+          assert result.get("provider") == "kraken_public", result
+          assert result.get("status_system") == "online", result
+          assert result.get("subscription_acknowledged") is True, result
+          PY
+
+          curl --fail --silent --show-error --max-time 20             "$base/api/v1/vnext/floor" >/tmp/floor.json
+          python - <<'PY'
+          import json, os
+          body=json.load(open("/tmp/floor.json", encoding="utf-8"))
+          mode=body.get("mode") or {}
+          assert mode.get("paper_only") is True, body
+          assert mode.get("live_blocked") is True, body
+          build=body.get("build") or {}
+          assert build.get("source_revision") == os.environ["EXPECTED_SHA"], build
+          paper=body.get("paper_test") or {}
+          assert paper.get("epoch_id") == "aether-prototype-new-system-test-001", paper
+          assert paper.get("seed_bank_usd") == 10000.0, paper
+          PY
