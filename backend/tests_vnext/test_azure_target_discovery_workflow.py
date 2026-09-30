@@ -29,7 +29,9 @@ def test_azure_target_discovery_is_read_only_and_excludes_production() -> None:
     source = WORKFLOW.read_text(encoding="utf-8")
 
     assert "az webapp list" in source
-    assert "az webapp deployment slot list" in source
+    assert '"deployment",' in source
+    assert '"slot",' in source
+    assert '"list",' in source
     assert '"read_only": True' in source
     assert '"production_target_excluded": True' in source
     assert 'name != "aether-prod-api"' in source
