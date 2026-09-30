@@ -117,14 +117,16 @@ def test_structure_fail_plan_is_read_only_no_entry_contract() -> None:
     assert plan.estimated_cost_per_unit is None
 
 
-def test_breakout_reversal_is_frozen_invalidation_hit() -> None:
+def test_intrabar_quote_dip_does_not_fake_completed_bar_invalidation() -> None:
     plan = build_prototype_crypto_entry_plan(
         feature=_feature(),
         current_observation=_observation(bid=100_900.0, ask=100_920.0),
         as_of_utc=T0 + timedelta(seconds=2),
     )
     assert plan.eligible is True
-    assert plan.invalidation_hit is True
+    # Source-bound invalidation is a future completed 1h close below the frozen
+    # breakout level, not a current-bid touch/dip.
+    assert plan.invalidation_hit is False
 
 
 def test_entry_ids_are_deterministic_per_closed_bar() -> None:

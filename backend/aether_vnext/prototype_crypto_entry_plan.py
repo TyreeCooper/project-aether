@@ -275,9 +275,12 @@ def build_prototype_crypto_entry_plan(
         cost_edge_multiple=PROTOTYPE_COST_EDGE_MULTIPLE,
     )
 
-    invalidation_hit = (
-        float(current_observation.bid) <= float(feature.prior_20h_high)
-    )
+    # The frozen crypto structure invalidation is a COMPLETED 1h close below
+    # the frozen breakout level. A live/intrabar bid dip is not that event.
+    # The signal bar already closed above the reference to create this WATCH, so
+    # Sniper entry-time structure invalidation is false here. The runtime exit
+    # manager evaluates future completed 1h closes after a trade is OPEN.
+    invalidation_hit = False
     return PrototypeCryptoEntryPlan(
         asset_id=asset,
         trigger_close_utc=feature.trigger_close_utc,
