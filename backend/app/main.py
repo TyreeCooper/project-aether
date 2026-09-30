@@ -27,6 +27,10 @@ from app.paper_exec import (
 )
 from app.universe import public_catalog
 from app.vnext_shadow import mount_configured_vnext_shadow_floor
+from app.vnext_runtime_mode import (
+    configured_vnext_runtime_only,
+    validate_vnext_runtime_only_environment,
+)
 from app.vnext_ingress import (
     mount_vnext_ingress_status,
     start_configured_vnext_ingress,
@@ -63,7 +67,13 @@ async def lifespan(_: FastAPI):
     await engine.initialize_persistence()
     await desk.initialize_history_persistence()
     install_harsh_paper(engine)
-    engine.start_loop()
+    validate_vnext_runtime_only_environment()
+    if configured_vnext_runtime_only():
+        logger.info(
+            "event=legacy_engine_loop state=disabled reason=vnext_runtime_only"
+        )
+    else:
+        engine.start_loop()
     await start_configured_vnext_ingress()
     await start_configured_vnext_strategy()
     logger.info(
