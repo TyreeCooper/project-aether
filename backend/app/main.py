@@ -54,6 +54,7 @@ async def lifespan(_: FastAPI):
     await desk.initialize_history_persistence()
     install_harsh_paper(engine)
     engine.start_loop()
+    await start_configured_vnext_ingress()
     logger.info(
         "event=app_start phase=ready version=2.1.0 storage_configured=%s storage_initialized=%s live_ready=%s",
         db_store.status().get("configured"),
@@ -64,6 +65,7 @@ async def lifespan(_: FastAPI):
         yield
     finally:
         logger.info("event=app_shutdown phase=begin")
+        await stop_configured_vnext_ingress()
         await engine.shutdown()
         await db_store.close()
         logger.info("event=app_shutdown phase=complete")
