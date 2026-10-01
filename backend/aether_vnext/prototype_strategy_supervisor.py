@@ -27,6 +27,7 @@ from aether_vnext.prototype_crypto_entry_plan import build_prototype_crypto_entr
 from aether_vnext.prototype_crypto_entry_runtime import advance_prototype_crypto_entry
 from aether_vnext.prototype_crypto_exit_runtime import advance_prototype_crypto_exit
 from aether_vnext.prototype_forward_paper_evidence import (
+    count_prototype_no_setup_observations,
     persist_prototype_no_setup_observation,
 )
 from aether_vnext.prototype_crypto_warmup import assemble_prototype_crypto_warmup
@@ -385,6 +386,13 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                 result["exit_results"] = exit_results
                 result["assets"] = asset_results
                 result["paper_epoch_id"] = EXPECTED_EPOCH
+                result["forward_paper_observation_count"] = (
+                    count_prototype_no_setup_observations(
+                        sync_conn,
+                        store,
+                        paper_epoch_id=EXPECTED_EPOCH,
+                    )
+                )
 
             await connection.run_sync(cycle)
 

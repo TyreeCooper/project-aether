@@ -59,6 +59,27 @@ def _policy_version(conn: Connection, store: VNextStore) -> str:
     return value
 
 
+def count_prototype_no_setup_observations(
+    conn: Connection,
+    store: VNextStore,
+    *,
+    paper_epoch_id: str,
+) -> int:
+    epoch = str(paper_epoch_id).strip()
+    if not epoch:
+        raise ValueError("paper_epoch_id is required")
+    events = store.tables["event_ledger"]
+    value = conn.execute(
+        sa.select(sa.func.count())
+        .select_from(events)
+        .where(
+            events.c.aggregate_type == AGGREGATE_TYPE,
+            events.c.aggregate_id.like(f"{epoch}:%"),
+        )
+    ).scalar_one()
+    return int(value)
+
+
 def persist_prototype_no_setup_observation(
     conn: Connection,
     store: VNextStore,

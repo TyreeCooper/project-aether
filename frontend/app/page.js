@@ -260,6 +260,7 @@ export default function DashboardPage() {
         <div className="runtimeMetrics">
           <div><span>Ingress cycles</span><b>{text(ingress?.cycle_count, "0")}</b></div>
           <div><span>Strategy cycles</span><b>{text(strategy?.cycle_count, "0")}</b></div>
+          <div><span>Forward-paper observations</span><b>{text(strategy?.last_result?.forward_paper_observation_count, "0")}</b></div>
           <div><span>Last strategy cycle</span><b>{timestamp(strategy?.last_cycle_finished_at_utc, "waiting")}</b></div>
           <div><span>Last error</span><b className={strategy?.last_error ? "runtimeFault" : ""}>{text(strategy?.last_error, "none")}</b></div>
         </div>

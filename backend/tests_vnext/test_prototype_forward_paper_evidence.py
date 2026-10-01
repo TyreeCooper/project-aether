@@ -8,6 +8,7 @@ from aether_vnext.freeze import CONFIGURATION_HASH
 from aether_vnext.prototype_forward_paper_evidence import (
     AGGREGATE_TYPE,
     SAMPLE_DOMAIN,
+    count_prototype_no_setup_observations,
     persist_prototype_no_setup_observation,
     prototype_strategy_observation_event_id,
 )
@@ -59,6 +60,11 @@ def test_no_setup_observation_is_immutable_idempotent_and_non_phase18() -> None:
     with engine.begin() as conn:
         assert persist_prototype_no_setup_observation(conn, store, **kwargs) is True
         assert persist_prototype_no_setup_observation(conn, store, **kwargs) is False
+        assert count_prototype_no_setup_observations(
+            conn,
+            store,
+            paper_epoch_id="aether-prototype-new-system-test-001",
+        ) == 1
 
         rows = tuple(
             conn.execute(
