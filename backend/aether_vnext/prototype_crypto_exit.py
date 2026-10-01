@@ -1,4 +1,4 @@
-"""Source-bound exit evaluation for the BTC/ETH PAPER prototype.
+"""Source-bound exit evaluation for Kraken crypto PAPER trades.
 
 The frozen crypto-swing exit precedence is:
 1. authenticated Governor HALT -> flatten;
@@ -118,8 +118,8 @@ def evaluate_prototype_crypto_exit(
 ) -> PrototypeCryptoExitDecision:
     """Evaluate one OPEN crypto trade without mutating durable state."""
     asset = str(asset_id).strip().lower()
-    if asset not in {"btc", "eth"}:
-        raise ValueError("prototype crypto exit supports btc/eth only")
+    if not asset:
+        raise ValueError("asset_id is required")
     if str(side).strip().lower() != "long":
         raise ValueError("prototype crypto exit is long-only")
     _aware(opened_at_utc, "opened_at_utc")

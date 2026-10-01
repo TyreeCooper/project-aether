@@ -1,4 +1,4 @@
-"""Crash-resumable BTC/ETH PAPER close state machine.
+"""Crash-resumable Kraken crypto PAPER close state machine.
 
 This layer consumes the source-ordered crypto Exit decision and composes the
 existing Exit -> Portfolio -> paper submit -> paper fill bridges. It never talks
@@ -26,6 +26,10 @@ from aether_vnext.runtime_close_execution_bridge import submit_runtime_reserved_
 from aether_vnext.runtime_close_fill_bridge import fill_runtime_submitted_close
 from aether_vnext.runtime_close_reserve_bridge import reserve_runtime_flatten
 from aether_vnext.runtime_exit_request_bridge import request_runtime_flatten
+from aether_vnext.runtime_product_policy import (
+    resolve_runtime_product,
+    runtime_playbook_for_product,
+)
 from aether_vnext.store import VNextStore
 
 
@@ -173,7 +177,7 @@ def advance_prototype_crypto_exit(
     as_of_utc: datetime,
     desk_scope_id: str | None = None,
 ) -> PrototypeExitAdvanceResult:
-    """Advance one active BTC/ETH PAPER trade toward FLAT when a frozen exit fires."""
+    """Advance one active verified Kraken crypto PAPER trade toward FLAT."""
     if as_of_utc.tzinfo is None:
         raise ValueError("as_of_utc must be timezone-aware")
     if not PAPER_ONLY or not LIVE_BLOCKED:
@@ -198,8 +202,18 @@ def advance_prototype_crypto_exit(
         raise KeyError(f"unknown OPEN trade: {trade_id}")
 
     asset_id = str(trade["asset_id"]).strip().lower()
-    if asset_id not in {"btc", "eth"}:
-        raise ValueError("prototype exit supports btc/eth only")
+    if not asset_id:
+        raise RuntimeError("OPEN trade missing asset identity")
+    resolved = resolve_runtime_product(
+        conn,
+        store,
+        asset_id=asset_id,
+        as_of_utc=as_of_utc,
+    )
+    runtime_playbook_for_product(
+        resolved.product,
+        playbook_id="pb_crypto_swing_v1_2",
+    )
     if current_observation.asset_id != asset_id:
         raise ValueError("current observation asset mismatch")
 

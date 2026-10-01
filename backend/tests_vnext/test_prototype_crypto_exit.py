@@ -41,6 +41,7 @@ def _plan(*, deadline: datetime | None = None):
 
 def _obs(
     *,
+    asset_id: str = "btc",
     bid: float = 100_000.0,
     ask: float = 100_020.0,
     quality: QualityState = QualityState.HEALTHY,
@@ -48,7 +49,7 @@ def _obs(
     mark = (bid + ask) / 2.0
     return MarketObservation(
         observation_id="obs-exit",
-        asset_id="btc",
+        asset_id=asset_id,
         venue="Kraken",
         bid=bid,
         ask=ask,
@@ -68,10 +69,15 @@ def _obs(
     )
 
 
-def _bar(*, close: float = 100_500.0, closed_at: datetime | None = None):
+def _bar(
+    *,
+    asset_id: str = "btc",
+    close: float = 100_500.0,
+    closed_at: datetime | None = None,
+):
     closed = closed_at or NOW
     return PrototypeMarketBar(
-        asset_id="btc",
+        asset_id=asset_id,
         interval_seconds=3600,
         bucket_open_utc=closed - timedelta(hours=1),
         bucket_close_utc=closed,
@@ -180,3 +186,23 @@ def test_stale_quote_does_not_manufacture_hard_stop() -> None:
         latest_completed_hourly_bar=_bar(close=100_100.0),
     )
     assert out.should_flatten is False
+
+
+
+def test_verified_dynamic_kraken_asset_uses_same_frozen_exit_laws() -> None:
+    asset_id = "kraken:solusd"
+    out = _evaluate(
+        asset_id=asset_id,
+        current_observation=_obs(
+            asset_id=asset_id,
+            bid=94_999.0,
+            ask=95_010.0,
+        ),
+        latest_completed_hourly_bar=_bar(
+            asset_id=asset_id,
+            close=98_000.0,
+        ),
+    )
+    assert out.should_flatten is True
+    assert out.exit_reason is ExitReason.HARD_STOP
+    assert out.reason == "hard_stop_on_bid"
