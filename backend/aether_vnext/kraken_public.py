@@ -15,7 +15,7 @@ import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Mapping, Protocol
 
 import websockets
 
@@ -73,6 +73,7 @@ def kraken_ticker_subscription(
     *,
     symbols: tuple[str, ...],
     req_id: int = 1,
+    allowed_symbols: frozenset[str] | None = None,
 ) -> dict[str, Any]:
     if not symbols:
         raise ValueError("at least one Kraken symbol is required")
@@ -81,10 +82,15 @@ def kraken_ticker_subscription(
         raise ValueError("Kraken symbols must be nonblank")
     if len(requested) != len(set(requested)):
         raise ValueError("duplicate Kraken symbol")
+    allowed = (
+        frozenset(KRAKEN_V2_SYMBOL_TO_CRYPTO_ASSET)
+        if allowed_symbols is None
+        else allowed_symbols
+    )
     unsupported = tuple(
         symbol
         for symbol in requested
-        if symbol not in KRAKEN_V2_SYMBOL_TO_CRYPTO_ASSET
+        if symbol not in allowed
     )
     if unsupported:
         raise ValueError(
@@ -201,6 +207,7 @@ async def _collect_from_socket(
     websocket: _WebSocketLike,
     *,
     symbols: tuple[str, ...],
+    symbol_to_asset: Mapping[str, str],
     timeout_s: float,
     adapter: KrakenPublicTickerV2,
 ) -> KrakenTickerBatch:
@@ -209,14 +216,17 @@ async def _collect_from_socket(
 
     await websocket.send(
         json.dumps(
-            kraken_ticker_subscription(symbols=symbols),
+            kraken_ticker_subscription(
+                symbols=symbols,
+                allowed_symbols=frozenset(symbol_to_asset),
+            ),
             separators=(",", ":"),
             sort_keys=True,
         )
     )
 
     requested_assets = {
-        KRAKEN_V2_SYMBOL_TO_CRYPTO_ASSET[symbol]
+        str(symbol_to_asset[symbol]).strip().lower()
         for symbol in symbols
     }
     latest_quotes: dict[str, RawQuote] = {}
@@ -274,7 +284,7 @@ async def _collect_from_socket(
             ):
                 ordered = tuple(
                     latest_quotes[
-                        KRAKEN_V2_SYMBOL_TO_CRYPTO_ASSET[symbol]
+                        str(symbol_to_asset[symbol]).strip().lower()
                     ]
                     for symbol in symbols
                 )
@@ -451,6 +461,7 @@ async def fetch_kraken_public_trades(
 async def fetch_kraken_public_tickers(
     *,
     assets: tuple[str, ...] = ("btc", "eth"),
+    symbol_by_asset: Mapping[str, str] | None = None,
     timeout_s: float = 10.0,
     connect_factory: Callable[..., Any] | None = None,
 ) -> KrakenTickerBatch:
@@ -460,21 +471,36 @@ async def fetch_kraken_public_tickers(
         raise ValueError("at least one asset is required")
     if len(requested_assets) != len(set(requested_assets)):
         raise ValueError("duplicate asset_id")
+    if symbol_by_asset is None:
+        mapping = {
+            asset: CRYPTO_ASSET_TO_KRAKEN_V2_SYMBOL[asset]
+            for asset in requested_assets
+            if asset in CRYPTO_ASSET_TO_KRAKEN_V2_SYMBOL
+        }
+    else:
+        mapping = {
+            str(asset).strip().lower(): str(symbol).strip()
+            for asset, symbol in symbol_by_asset.items()
+        }
+
     unknown = tuple(
-        asset
-        for asset in requested_assets
-        if asset not in CRYPTO_ASSET_TO_KRAKEN_V2_SYMBOL
+        asset for asset in requested_assets if asset not in mapping
     )
     if unknown:
         raise ValueError(
             "unsupported AETHER Kraken asset(s): " + ",".join(unknown)
         )
+    if any(not mapping[asset] for asset in requested_assets):
+        raise ValueError("Kraken provider symbols must be nonblank")
 
-    symbols = tuple(
-        CRYPTO_ASSET_TO_KRAKEN_V2_SYMBOL[asset]
+    symbols = tuple(mapping[asset] for asset in requested_assets)
+    if len(symbols) != len(set(symbols)):
+        raise ValueError("duplicate Kraken provider symbol")
+    symbol_to_asset = {
+        mapping[asset]: asset
         for asset in requested_assets
-    )
-    adapter = KrakenPublicTickerV2()
+    }
+    adapter = KrakenPublicTickerV2(pair_to_asset=symbol_to_asset)
     connect = connect_factory or websockets.connect
 
     async with connect(
@@ -489,6 +515,7 @@ async def fetch_kraken_public_tickers(
             return await _collect_from_socket(
                 websocket,
                 symbols=symbols,
+                symbol_to_asset=symbol_to_asset,
                 timeout_s=timeout_s,
                 adapter=adapter,
             )

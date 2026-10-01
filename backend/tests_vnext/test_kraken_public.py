@@ -211,3 +211,31 @@ async def test_unknown_aether_asset_never_opens_websocket() -> None:
         )
 
     assert called is False
+
+
+
+@pytest.mark.asyncio
+async def test_fetch_accepts_catalog_backed_dynamic_kraken_symbol_mapping() -> None:
+    socket = FakeWebSocket(
+        [
+            _online(),
+            _ack(),
+            _ticker("SOL/USD", 150.0, "2026-10-01T19:30:00.100000Z"),
+        ]
+    )
+
+    def connect_factory(url: str, **kwargs):
+        return socket
+
+    batch = await fetch_kraken_public_tickers(
+        assets=("kraken:solusd",),
+        symbol_by_asset={"kraken:solusd": "SOL/USD"},
+        timeout_s=1.0,
+        connect_factory=connect_factory,
+    )
+    assert batch.requested_symbols == ("SOL/USD",)
+    assert tuple(row.asset_id for row in batch.quotes) == ("kraken:solusd",)
+    assert batch.quotes[0].bid == 149.0
+    assert batch.quotes[0].ask == 151.0
+    sent = json.loads(socket.sent[0])
+    assert sent["params"]["symbol"] == ["SOL/USD"]

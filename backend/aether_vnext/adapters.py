@@ -48,6 +48,25 @@ class KrakenPublicTickerV2:
         "ETH/USD": "eth",
     }
 
+    def __init__(
+        self,
+        *,
+        pair_to_asset: dict[str, str] | None = None,
+    ) -> None:
+        self._pair_to_asset = (
+            dict(self._PAIR_TO_ASSET)
+            if pair_to_asset is None
+            else {
+                str(symbol).strip(): str(asset_id).strip().lower()
+                for symbol, asset_id in pair_to_asset.items()
+            }
+        )
+        if not self._pair_to_asset or any(
+            not symbol or not asset_id
+            for symbol, asset_id in self._pair_to_asset.items()
+        ):
+            raise ValueError("Kraken ticker symbol mapping must be non-empty")
+
     def parse_quote(
         self,
         payload: Any,
@@ -64,7 +83,7 @@ class KrakenPublicTickerV2:
             if not isinstance(row, dict):
                 continue
             symbol = str(row.get("symbol") or "")
-            asset_id = self._PAIR_TO_ASSET.get(symbol)
+            asset_id = self._pair_to_asset.get(symbol)
             if asset_id is None:
                 continue
             try:
