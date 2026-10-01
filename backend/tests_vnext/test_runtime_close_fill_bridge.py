@@ -6,7 +6,7 @@ from datetime import timedelta
 import pytest
 import sqlalchemy as sa
 
-from aether_vnext.domain import ExitReason
+from aether_vnext.exit_plan import ExitReason
 from aether_vnext.runtime_close_execution_bridge import (
     submit_runtime_reserved_close,
 )
