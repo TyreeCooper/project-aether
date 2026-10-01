@@ -8,6 +8,7 @@ from aether_vnext.calendars import (
     CalendarException,
     CalendarExceptionKind,
 )
+from aether_vnext.dynamic_products import project_kraken_spot_product
 from aether_vnext.freeze import CONFIGURATION_HASH
 from aether_vnext.market_data import RawQuote
 from aether_vnext.market_ingress import (
@@ -302,3 +303,115 @@ def test_health_report_is_explicit_when_ingress_never_ran() -> None:
     assert health.latest_attempt_id is None
     assert health.latest_reason == "market_ingress_not_observed"
     assert health.fresh_now is False
+
+
+
+def test_dynamic_kraken_product_uses_same_canonical_market_ingress_gate() -> None:
+    engine, store = _store()
+    projection = project_kraken_spot_product(
+        {
+            "provider": "Kraken",
+            "symbol": "SOL/USD",
+            "execution_symbol": "SOLUSD",
+            "asset_class": "spot_crypto",
+            "base_currency": "SOL",
+            "quote_currency": "USD",
+            "quantity_step": 0.001,
+            "minimum_quantity": 0.02,
+            "minimum_notional": 0.5,
+            "tick_size": 0.0001,
+        },
+        primary_market_source_id="test.market.dynamic.sol",
+        stale_threshold_ms=1500,
+    )
+    assert projection.product is not None
+
+    with engine.begin() as conn:
+        product_hash = store.upsert_dynamic_product_state(
+            conn,
+            projection.product,
+            source_ref="kraken:AssetPairs:SOLUSD",
+            registry_version="dynamic-kraken-v1",
+            configuration_hash=CONFIGURATION_HASH,
+            updated_at_utc=T0,
+        )
+        result = ingest_market_quotes(
+            conn,
+            store,
+            asset_id=projection.asset_id,
+            quotes=(
+                _quote(
+                    projection.asset_id,
+                    source_id="test.market.dynamic.sol",
+                    exchange_ts=T0,
+                    venue="Kraken",
+                ),
+            ),
+            calendar_provider=None,
+            as_of_utc=T0 + timedelta(milliseconds=100),
+        )
+        health = assess_market_ingress_health(
+            conn,
+            store,
+            asset_id=projection.asset_id,
+            as_of_utc=T0 + timedelta(milliseconds=500),
+        )
+
+    assert result.executable is True
+    assert result.reason == "market_valid"
+    assert result.runtime_registry_binding_hash == product_hash
+    assert result.observation is not None
+    assert health.binding_present is True
+    assert health.binding_ready is True
+    assert health.fresh_now is True
+    assert health.observation_age_now_ms == 500
+
+
+def test_dynamic_product_still_rejects_stale_market_truth() -> None:
+    engine, store = _store()
+    projection = project_kraken_spot_product(
+        {
+            "provider": "Kraken",
+            "symbol": "SOL/USD",
+            "execution_symbol": "SOLUSD",
+            "asset_class": "spot_crypto",
+            "base_currency": "SOL",
+            "quote_currency": "USD",
+            "quantity_step": 0.001,
+            "minimum_quantity": 0.02,
+            "minimum_notional": 0.5,
+            "tick_size": 0.0001,
+        },
+        primary_market_source_id="test.market.dynamic.sol",
+        stale_threshold_ms=1500,
+    )
+    assert projection.product is not None
+
+    with engine.begin() as conn:
+        store.upsert_dynamic_product_state(
+            conn,
+            projection.product,
+            source_ref="kraken:AssetPairs:SOLUSD",
+            registry_version="dynamic-kraken-v1",
+            configuration_hash=CONFIGURATION_HASH,
+            updated_at_utc=T0,
+        )
+        result = ingest_market_quotes(
+            conn,
+            store,
+            asset_id=projection.asset_id,
+            quotes=(
+                _quote(
+                    projection.asset_id,
+                    source_id="test.market.dynamic.sol",
+                    exchange_ts=T0,
+                    venue="Kraken",
+                ),
+            ),
+            calendar_provider=None,
+            as_of_utc=T0 + timedelta(seconds=2),
+        )
+
+    assert result.executable is False
+    assert result.reason == "quote_stale"
+    assert result.observation is None

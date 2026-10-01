@@ -148,17 +148,32 @@ def ingest_market_quotes(
         raise ValueError("created_at_utc must be timezone-aware")
 
     aid = str(asset_id).strip().lower()
-    base = registry_row(aid)
     quote_rows = tuple(quotes)
     provider_id = _calendar_provider_id(calendar_provider)
 
     runtime = store.load_runtime_registry_binding(conn, asset_id=aid)
-    binding_hash = (
-        None if runtime is None else str(runtime["binding_hash"])
+    dynamic = (
+        None
+        if runtime is not None
+        else store.load_dynamic_product_state(conn, asset_id=aid)
     )
+    if runtime is not None:
+        base = registry_row(aid)
+        identity_hash = str(runtime["binding_hash"])
+    elif dynamic is not None:
+        base = dynamic["product"]
+        identity_hash = str(dynamic["product_hash"])
+    else:
+        # Existing seed assets may intentionally have no reviewed runtime binding.
+        # Unknown dynamic assets are not synthesized here.
+        try:
+            base = registry_row(aid)
+        except KeyError as exc:
+            raise KeyError(f"product registry state missing: {aid}") from exc
+        identity_hash = None
     attempt_id = _attempt_id(
         asset_id=aid,
-        binding_hash=binding_hash,
+        binding_hash=identity_hash,
         as_of_utc=as_of_utc,
         calendar_provider_id=provider_id,
         quote_ids=_quote_identity(quote_rows),
@@ -180,7 +195,7 @@ def ingest_market_quotes(
             attempt_id=attempt_id,
             asset_id=aid,
             configuration_hash=CONFIGURATION_HASH,
-            runtime_registry_binding_hash=binding_hash,
+            runtime_registry_binding_hash=identity_hash,
             as_of_utc=as_of_utc,
             calendar_id=base.calendar_id,
             calendar_provider_id=provider_id,
@@ -198,7 +213,7 @@ def ingest_market_quotes(
         return MarketIngressResult(
             attempt_id=attempt_id,
             asset_id=aid,
-            runtime_registry_binding_hash=binding_hash,
+            runtime_registry_binding_hash=identity_hash,
             observation=observation,
             executable=executable,
             reason=reason,
@@ -207,36 +222,60 @@ def ingest_market_quotes(
             rejection_reasons=rejection_reasons,
         )
 
-    if runtime is None:
+    if runtime is None and dynamic is None:
         return finish(
             observation=None,
             executable=False,
             reason="runtime_product_binding_missing",
             calendar_reason=None,
         )
-    if runtime["configuration_hash"] != CONFIGURATION_HASH:
-        return finish(
-            observation=None,
-            executable=False,
-            reason="runtime_product_binding_configuration_mismatch",
-            calendar_reason=None,
-        )
 
-    binding = runtime["binding"]
-    runtime_blockers = binding_blockers(binding, as_of_utc=as_of_utc)
-    if runtime_blockers:
-        return finish(
-            observation=None,
-            executable=False,
-            reason="runtime_product_binding_unready",
-            calendar_reason=None,
-            rejection_reasons=runtime_blockers,
-        )
-
-    row = materialize_bound_registry_row(binding, as_of_utc=as_of_utc)
+    expected_provider_id = ""
+    if runtime is not None:
+        if runtime["configuration_hash"] != CONFIGURATION_HASH:
+            return finish(
+                observation=None,
+                executable=False,
+                reason="runtime_product_binding_configuration_mismatch",
+                calendar_reason=None,
+            )
+        binding = runtime["binding"]
+        runtime_blockers = binding_blockers(binding, as_of_utc=as_of_utc)
+        if runtime_blockers:
+            return finish(
+                observation=None,
+                executable=False,
+                reason="runtime_product_binding_unready",
+                calendar_reason=None,
+                rejection_reasons=runtime_blockers,
+            )
+        row = materialize_bound_registry_row(binding, as_of_utc=as_of_utc)
+        expected_provider_id = str(binding.calendar_provider_id or "").strip()
+    else:
+        assert dynamic is not None
+        if dynamic["configuration_hash"] != CONFIGURATION_HASH:
+            return finish(
+                observation=None,
+                executable=False,
+                reason="runtime_product_binding_configuration_mismatch",
+                calendar_reason=None,
+            )
+        row = dynamic["product"]
+        dynamic_blockers: list[str] = []
+        if not row.market_data_ready():
+            dynamic_blockers.append("market_data_unbound")
+        if not row.lifecycle_fire_eligible(as_of_utc):
+            dynamic_blockers.append("lifecycle_ineligible")
+        if dynamic_blockers:
+            return finish(
+                observation=None,
+                executable=False,
+                reason="runtime_product_binding_unready",
+                calendar_reason=None,
+                rejection_reasons=tuple(dynamic_blockers),
+            )
 
     if calendar_requires_external_provider(base.calendar_id):
-        expected_provider_id = str(binding.calendar_provider_id or "").strip()
         if calendar_provider is None:
             return finish(
                 observation=None,
@@ -294,7 +333,12 @@ def assess_market_ingress_health(
     aid = str(asset_id).strip().lower()
 
     runtime = store.load_runtime_registry_binding(conn, asset_id=aid)
-    if runtime is None:
+    dynamic = (
+        None
+        if runtime is not None
+        else store.load_dynamic_product_state(conn, asset_id=aid)
+    )
+    if runtime is None and dynamic is None:
         return MarketIngressHealth(
             asset_id=aid,
             binding_present=False,
@@ -309,8 +353,20 @@ def assess_market_ingress_health(
             blockers=("runtime_product_binding_missing",),
         )
 
-    binding = runtime["binding"]
-    blockers = binding_blockers(binding, as_of_utc=as_of_utc)
+    if runtime is not None:
+        binding = runtime["binding"]
+        blockers = binding_blockers(binding, as_of_utc=as_of_utc)
+        stale_threshold_ms = binding.stale_threshold_ms
+    else:
+        assert dynamic is not None
+        row = dynamic["product"]
+        dynamic_blockers: list[str] = []
+        if not row.market_data_ready():
+            dynamic_blockers.append("market_data_unbound")
+        if not row.lifecycle_fire_eligible(as_of_utc):
+            dynamic_blockers.append("lifecycle_ineligible")
+        blockers = tuple(dynamic_blockers)
+        stale_threshold_ms = row.stale_threshold_ms
     latest = store.latest_market_ingress_attempt(conn, asset_id=aid)
     if latest is None:
         return MarketIngressHealth(
@@ -350,9 +406,9 @@ def assess_market_ingress_health(
         age_now_ms = int((as_of_utc - reference).total_seconds() * 1000)
         if age_now_ms < 0:
             health_blockers.append("observation_timestamp_in_future")
-        elif binding.stale_threshold_ms is None:
+        elif stale_threshold_ms is None:
             health_blockers.append("stale_threshold_missing")
-        elif age_now_ms > binding.stale_threshold_ms:
+        elif age_now_ms > stale_threshold_ms:
             health_blockers.append("latest_observation_stale_now")
         elif observation.quality_state is not QualityState.HEALTHY:
             health_blockers.append(
