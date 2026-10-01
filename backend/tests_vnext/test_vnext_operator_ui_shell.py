@@ -21,10 +21,10 @@ def test_vnext_ui_restores_familiar_operator_shell_without_legacy_routes() -> No
     assert "function ProviderFocusCard" in page
     assert "function feedClassLabel" in page
     assert "PUBLIC REF · DELAYED" in page
-    assert "REFERENCE ONLY" in page
+    assert "REFERENCE FEED" in page
     assert "SCOUT READY" in page
-    assert "DISCOVERY ONLY" in page
-    assert "Trade Readiness" in page
+    assert "SCOUT QUEUED" in page
+    assert "Scout Intake" in page
     assert "function pipelineBottleneck" in page
     assert "function DesktopCommandCenter" in page
     assert "function MobileCommandStrip" in page
@@ -48,10 +48,10 @@ def test_vnext_ui_restores_familiar_operator_shell_without_legacy_routes() -> No
     assert ".providerDiscoveryFunnel" in css
     assert ".providerFocusGrid" in css
     assert ".providerFeedClass" in css
-    assert ".providerTop25" in css
+    assert ".providerTop100" in css
     assert ".providerFeedLegend" in css
     assert ".focusReady" in css
-    assert ".focusDiscoveryOnly" in css
+    assert ".focusQueued" in css
     assert ".desktopCommandCenter" in css
     assert ".desktopCommandGrid" in css
     assert ".mobileCommandStrip" in css
