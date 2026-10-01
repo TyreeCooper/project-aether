@@ -447,11 +447,11 @@ function SettingsView({ ingress, strategy, discovery, operator, floor }) {
         </article>
         <article className="settingsCard">
           <span>Deep trading runtime</span><strong>BTC · ETH</strong>
-          <small>Current fully commissioned strategy/execution lane</small>
+          <small>Current commissioned execution lane · Top-100 priority cannot veto a valid setup</small>
         </article>
         <article className="settingsCard">
           <span>Provider discovery</span><strong>{text(discovery?.last_result?.focus_count, "0")} FOCUSED</strong>
-          <small>{text(discovery?.last_result?.scout_ready_count, "0")} Scout-ready · {text(discovery?.last_result?.discovery_only_count, "0")} discovery-only</small>
+          <small>{text(discovery?.last_result?.scout_ready_count, "0")} Scout-ready · {text(discovery?.last_result?.scout_queued_count, "0")} Scout-queued</small>
         </article>
         <article className="settingsCard">
           <span>Ingress interval</span><strong>{number(ingress?.interval_seconds, 0)}s</strong>
@@ -559,6 +559,38 @@ function pipelineBottleneck(queues) {
   };
 }
 
+function pipelineRuntimeMode({ ingress, strategy, discovery, queues, cockpits }) {
+  if (!ingress || !strategy || !discovery) {
+    return { label: "PIPELINE SYNCING", tone: "pipelineBusy" };
+  }
+
+  const governor = queueSummary(queues, "Governor");
+  const runtimeBlocked = Boolean(
+    ingress?.last_error
+    || strategy?.last_error
+    || discovery?.last_error
+    || ingress?.enabled === false
+    || strategy?.enabled === false
+    || discovery?.enabled === false
+    || !ingress?.running
+    || !strategy?.running
+    || !discovery?.running
+    || governor.blockers > 0
+  );
+  if (runtimeBlocked) {
+    return { label: "PIPELINE BLOCKED", tone: "pipelineBlocked" };
+  }
+
+  const queued = PIPELINE_QUEUE_SEATS.reduce(
+    (sum, row) => sum + queueSummary(queues, row.seat).count,
+    governor.count,
+  );
+  if (queued > 0 || (cockpits || []).length > 0) {
+    return { label: "PIPELINE IN FLIGHT", tone: "pipelineBusy" };
+  }
+  return { label: "PIPELINE ACTIVE", tone: "pipelineActive" };
+}
+
 function PipelineStage({ label, job, owned, metricLabel, count, blockers = 0, bottleneck = false, tone = "queue", states = [] }) {
   const active = Number(count || 0) > 0;
   const blocked = Number(blockers || 0) > 0;
@@ -663,7 +695,7 @@ function ProviderFocusCard({ row }) {
       </div>
       <div className="providerFeedClass">
         <span>{providerFeedSummary(row)}</span>
-        <b>{row.execution_binding_required ? "REFERENCE ONLY" : "NO EXECUTION AUTHORITY"}</b>
+        <b>{row.execution_binding_required ? "REFERENCE FEED" : "DISCOVERY FEED"}</b>
       </div>
       <div className="providerFunnelStats">
         <span><b>{number(row.catalog_count, 0)}</b> catalog</span>
@@ -672,8 +704,8 @@ function ProviderFocusCard({ row }) {
       </div>
       {online ? (
         top.length ? (
-          <div className="providerTop25">
-            <div className="providerTop25Header">
+          <div className="providerTop100">
+            <div className="providerTop100Header">
               <span>Rank</span><span>Instrument</span><span>Score</span><span>Move</span><span>Reference</span><span>Feed / Readiness</span>
             </div>
             {top.map((item) => (
@@ -691,11 +723,11 @@ function ProviderFocusCard({ row }) {
                     className={
                       item.handoff?.state === "SCOUT_READY"
                         ? "focusReady"
-                        : "focusDiscoveryOnly"
+                        : "focusQueued"
                     }
                     title={(item.handoff?.blockers || []).join(", ")}
                   >
-                    {item.handoff?.state === "SCOUT_READY" ? "SCOUT READY" : "DISCOVERY ONLY"}
+                    {item.handoff?.state === "SCOUT_READY" ? "SCOUT READY" : "SCOUT QUEUED"}
                   </em>
                 </div>
               </div>
@@ -718,7 +750,8 @@ function ProviderDiscoveryBoard({ discovery }) {
   const totalEligible = rows.reduce((sum, row) => sum + Number(row.eligible_count || 0), 0);
   const focusCount = Number(discovery?.last_result?.focus_count || 0);
   const scoutReadyCount = Number(discovery?.last_result?.scout_ready_count || 0);
-  const discoveryOnlyCount = Number(discovery?.last_result?.discovery_only_count || 0);
+  const scoutQueuedCount = Number(discovery?.last_result?.scout_queued_count || 0);
+  const scoutIntakeCount = scoutReadyCount + scoutQueuedCount;
   const running = Boolean(discovery?.running && !discovery?.last_error);
   return (
     <section className="floorSection providerDiscoveryBoard">
@@ -740,9 +773,9 @@ function ProviderDiscoveryBoard({ discovery }) {
         <i>→</i>
         <div><span>Focus pool</span><strong>{number(focusCount, 0)}</strong><small>max 100/provider</small></div>
         <i>→</i>
-        <div><span>Scout ready</span><strong>{number(scoutReadyCount, 0)}</strong><small>{number(discoveryOnlyCount, 0)} discovery-only</small></div>
+        <div><span>Scout intake</span><strong>{number(scoutIntakeCount, 0)}</strong><small>{number(scoutReadyCount, 0)} ready · {number(scoutQueuedCount, 0)} queued</small></div>
         <i>→</i>
-        <div><span>Next seat</span><strong>SCOUT</strong><small>natural setups only</small></div>
+        <div><span>Next seat</span><strong>SCOUT</strong><small>all focus items handed off</small></div>
       </div>
       <div className="providerFocusGrid">
         {rows.map((row) => <ProviderFocusCard row={row} key={row.provider} />)}
@@ -750,10 +783,10 @@ function ProviderDiscoveryBoard({ discovery }) {
       <div className="providerFeedLegend">
         <span><b>NATIVE PUBLIC</b> provider-hosted market reference</span>
         <span><b>PUBLIC REF</b> non-execution reference data; cadence shown per provider</span>
-        <span><b>DISCOVERY ONLY</b> catalog/ranking works, but product or playbook commissioning still blocks Scout</span>
+        <span><b>SCOUT QUEUED</b> handed into Scout intake; remaining product/playbook/execution requirements stay visible</span>
       </div>
       <p className="providerDiscoveryLaw">
-        Discovery ranking is pre-Scout attention selection only. Reference data never becomes a fill or execution authority.
+        Provider ranking sets attention priority only. It cannot veto an otherwise valid commissioned trade; normal market, strategy, Risk, Clerk, Portfolio and PAPER execution gates still apply.
       </p>
     </section>
   );
@@ -776,6 +809,8 @@ function PipelineView({ universe, queues, cockpits, operator, strategy, discover
   const discoveredEligible = discoveryProviders.reduce((sum, row) => sum + Number(row.eligible_count || 0), 0);
   const focusCount = Number(discovery?.last_result?.focus_count || 0);
   const scoutReadyCount = Number(discovery?.last_result?.scout_ready_count || 0);
+  const scoutQueuedCount = Number(discovery?.last_result?.scout_queued_count || 0);
+  const scoutIntakeCount = scoutReadyCount + scoutQueuedCount;
   const pipelineStatus = governor.count > 0 || governor.blockers > 0
     ? "GLOBAL HALT"
     : bottleneck
@@ -848,11 +883,11 @@ function PipelineView({ universe, queues, cockpits, operator, strategy, discover
             tone="context"
           />
           <PipelineStage
-            label="Trade Readiness"
-            owned="BIND"
-            job="Allows only focused instruments with safe product, market-data and playbook bindings to enter Scout."
-            metricLabel="Scout ready"
-            count={scoutReadyCount}
+            label="Scout Intake"
+            owned="HANDOFF"
+            job="Hands every Top-100 focus item to Scout intake. READY items can evaluate immediately; QUEUED items keep their remaining requirements visible."
+            metricLabel="in Scout intake"
+            count={scoutIntakeCount}
             tone="context"
           />
           {queueStages.map((stage) => (
@@ -1113,7 +1148,7 @@ function DesktopCommandCenter({ floor, queues, cockpits, operator, ingress, stra
             ))}
           </div>
           <div className="desktopPipelineFooter">
-            <span><b>{text(discovery?.last_result?.scout_ready_count, "0")}/{text(discovery?.last_result?.focus_count, "0")}</b> ready/focused</span>
+            <span><b>{Number(discovery?.last_result?.scout_ready_count || 0) + Number(discovery?.last_result?.scout_queued_count || 0)}/{text(discovery?.last_result?.focus_count, "0")}</b> Scout intake/focused</span>
             <span><b>{queued}</b> queued</span>
             <span><b>{blockers}</b> blockers</span>
             <span><b>{cockpits.length}</b> open positions</span>
@@ -1177,8 +1212,8 @@ function MobileCommandStrip({ queues, cockpits, operator, ingress, strategy, dis
       </div>
       <div>
         <span>Focus</span>
-        <strong>{text(discovery?.last_result?.scout_ready_count, "0")}/{text(discovery?.last_result?.focus_count, "0")}</strong>
-        <small>ready / focused</small>
+        <strong>{Number(discovery?.last_result?.scout_ready_count || 0) + Number(discovery?.last_result?.scout_queued_count || 0)}/{text(discovery?.last_result?.focus_count, "0")}</strong>
+        <small>Scout intake / focused</small>
       </div>
       <div>
         <span>Open</span>
@@ -1310,6 +1345,13 @@ export default function DashboardPage() {
   const top12 = floor?.top12_attention || [];
   const queues = floor?.seat_queues || [];
   const cockpits = floor?.open_cockpits || [];
+  const pipelineMode = pipelineRuntimeMode({
+    ingress,
+    strategy,
+    discovery,
+    queues,
+    cockpits,
+  });
 
   const selectedStation = useMemo(
     () => universe.find((row) => row.asset_id === selectedAsset) || null,
@@ -1349,8 +1391,11 @@ export default function DashboardPage() {
           </div>
         </div>
         <div className="modeStack">
-          <span className="mode paper">PAPER ONLY</span>
-          <span className="mode blocked">LIVE BLOCKED</span>
+          <div className="modeSafetyRow">
+            <span className="mode paper">PAPER ONLY</span>
+            <span className="mode blocked">LIVE BLOCKED</span>
+          </div>
+          <span className={"mode pipeline " + pipelineMode.tone}>{pipelineMode.label}</span>
         </div>
       </header>
 
