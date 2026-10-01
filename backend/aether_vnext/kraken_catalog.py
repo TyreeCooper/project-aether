@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
-from typing import Any, Mapping
+from typing import Mapping
 
 import httpx
 
@@ -13,7 +13,6 @@ from aether_vnext.provider_discovery import DiscoveryInstrument
 KRAKEN_REST_BASE = "https://api.kraken.com"
 ASSET_PAIRS_PATH = "/0/public/AssetPairs"
 TICKER_PATH = "/0/public/Ticker"
-USD_QUOTES = {"USD", "ZUSD"}
 
 
 def _num(value: object) -> float | None:
@@ -24,7 +23,7 @@ def _num(value: object) -> float | None:
     return result if result == result and abs(result) != float("inf") else None
 
 
-def parse_kraken_usd_catalog(payload: object) -> dict[str, dict[str, object]]:
+def parse_kraken_spot_catalog(payload: object) -> dict[str, dict[str, object]]:
     if not isinstance(payload, Mapping):
         raise ValueError("Kraken AssetPairs payload must be an object")
     errors = payload.get("error")
@@ -40,25 +39,51 @@ def parse_kraken_usd_catalog(payload: object) -> dict[str, dict[str, object]]:
             continue
         if str(raw.get("status") or "online").lower() != "online":
             continue
-        quote = str(raw.get("quote") or "").upper()
-        wsname = str(raw.get("wsname") or "").strip()
+        wsname = str(raw.get("wsname") or "").strip().upper()
         altname = str(raw.get("altname") or pair_key).strip()
-        if quote not in USD_QUOTES and not wsname.endswith("/USD"):
+        if not wsname or "/" not in wsname or ".d" in str(pair_key).lower():
             continue
-        if not wsname or ".d" in str(pair_key).lower():
-            continue
+        base_display, quote_display = wsname.split("/", 1)
         out[str(pair_key)] = {
             "pair_key": str(pair_key),
             "symbol": wsname,
             "altname": altname,
             "base": str(raw.get("base") or ""),
-            "quote": quote,
+            "quote": str(raw.get("quote") or ""),
+            "base_display": base_display,
+            "quote_display": quote_display,
             "ordermin": raw.get("ordermin"),
             "costmin": raw.get("costmin"),
             "pair_decimals": raw.get("pair_decimals"),
             "lot_decimals": raw.get("lot_decimals"),
         }
     return out
+
+
+def parse_kraken_usd_catalog(payload: object) -> dict[str, dict[str, object]]:
+    """Backward-compatible USD subset parser used by focused unit tests."""
+    full = parse_kraken_spot_catalog(payload)
+    return {
+        key: row
+        for key, row in full.items()
+        if str(row.get("quote_display") or "").upper() == "USD"
+    }
+
+
+def _ticker_row_for(
+    meta: Mapping[str, object],
+    ticker_rows: Mapping[str, Mapping[str, object]],
+) -> Mapping[str, object] | None:
+    pair_key = str(meta.get("pair_key") or "")
+    altname = str(meta.get("altname") or "")
+    return ticker_rows.get(pair_key) or ticker_rows.get(altname)
+
+
+def _last_price(raw: Mapping[str, object] | None) -> float | None:
+    if raw is None:
+        return None
+    last_arr = raw.get("c")
+    return _num(last_arr[0] if isinstance(last_arr, list) and last_arr else None)
 
 
 def parse_kraken_tickers(
@@ -82,12 +107,32 @@ def parse_kraken_tickers(
                 if isinstance(value, Mapping)
             })
 
+    cross_prices: dict[tuple[str, str], float] = {}
+    for meta in catalog.values():
+        raw = _ticker_row_for(meta, ticker_rows)
+        last = _last_price(raw)
+        if last is None or last <= 0:
+            continue
+        base = str(meta.get("base_display") or "").upper()
+        quote = str(meta.get("quote_display") or "").upper()
+        if base and quote:
+            cross_prices[(base, quote)] = last
+
+    def usd_per(currency: str) -> float | None:
+        code = currency.upper()
+        if code == "USD":
+            return 1.0
+        direct = cross_prices.get((code, "USD"))
+        if direct is not None and direct > 0:
+            return direct
+        inverse = cross_prices.get(("USD", code))
+        if inverse is not None and inverse > 0:
+            return 1.0 / inverse
+        return None
+
     out: list[DiscoveryInstrument] = []
-    for pair_key, meta in catalog.items():
-        raw = ticker_rows.get(pair_key)
-        if raw is None:
-            altname = str(meta.get("altname") or "")
-            raw = ticker_rows.get(altname)
+    for meta in catalog.values():
+        raw = _ticker_row_for(meta, ticker_rows)
         if raw is None:
             continue
         last_arr = raw.get("c")
@@ -101,13 +146,26 @@ def parse_kraken_tickers(
         open_price = _num(open_raw)
         high = _num(high_arr[-1] if isinstance(high_arr, list) and high_arr else None)
         low = _num(low_arr[-1] if isinstance(low_arr, list) and low_arr else None)
-        volume = _num(volume_arr[-1] if isinstance(volume_arr, list) and volume_arr else None)
+        base_volume = _num(
+            volume_arr[-1] if isinstance(volume_arr, list) and volume_arr else None
+        )
         bid = _num(bid_arr[0] if isinstance(bid_arr, list) and bid_arr else None)
         ask = _num(ask_arr[0] if isinstance(ask_arr, list) and ask_arr else None)
         change = (
             None
             if last is None or open_price is None or open_price <= 0
             else ((last - open_price) / open_price) * 100.0
+        )
+        quote = str(meta.get("quote_display") or "").upper()
+        quote_usd = usd_per(quote)
+        volume_usd = (
+            None
+            if (
+                base_volume is None
+                or last is None
+                or quote_usd is None
+            )
+            else base_volume * last * quote_usd
         )
         out.append(
             DiscoveryInstrument(
@@ -121,12 +179,14 @@ def parse_kraken_tickers(
                 open_price=open_price,
                 high_price=high,
                 low_price=low,
-                volume=volume,
+                volume=volume_usd,
                 bid=bid,
                 ask=ask,
                 change_pct=change,
                 observed_at_utc=observed_at_utc,
                 source="kraken_public_rest",
+                feed_class="NATIVE_PUBLIC",
+                execution_quality=False,
             )
         )
     return tuple(out)
@@ -142,12 +202,12 @@ async def fetch_kraken_discovery_universe(
     owned = client is None
     http = client or httpx.AsyncClient(
         base_url=KRAKEN_REST_BASE,
-        timeout=httpx.Timeout(15.0),
+        timeout=httpx.Timeout(20.0),
     )
     try:
         response = await http.get(ASSET_PAIRS_PATH)
         response.raise_for_status()
-        catalog = parse_kraken_usd_catalog(response.json())
+        catalog = parse_kraken_spot_catalog(response.json())
         keys = tuple(catalog)
         payloads: list[object] = []
         for start in range(0, len(keys), ticker_chunk_size):
@@ -156,7 +216,7 @@ async def fetch_kraken_discovery_universe(
             ticker.raise_for_status()
             payloads.append(ticker.json())
             if start + ticker_chunk_size < len(keys):
-                await asyncio.sleep(0)
+                await asyncio.sleep(0.05)
         return parse_kraken_tickers(
             catalog,
             payloads,

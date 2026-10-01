@@ -43,7 +43,7 @@ def test_focus_snapshot_has_top25_per_online_provider_and_explicit_missing_provi
     }
     snapshot = build_provider_focus_snapshot(
         universes,
-        provider_errors={"NinjaTrader": "massive_api_key_missing"},
+        provider_errors={"NinjaTrader": "public_reference_unavailable"},
         as_of_utc=NOW,
     )
     assert snapshot["focus_count"] == 75
@@ -55,7 +55,7 @@ def test_focus_snapshot_has_top25_per_online_provider_and_explicit_missing_provi
     assert len(snapshot["providers"]["tastyfx"]["top25"]) == 25
     assert snapshot["providers"]["NinjaTrader"]["status"] == "unavailable"
     assert snapshot["providers"]["Kraken"]["catalog_mode"] == "provider_native"
-    assert snapshot["providers"]["IBKR"]["catalog_mode"] == "market_universe_proxy"
+    assert snapshot["providers"]["IBKR"]["catalog_mode"] == "public_reference_proxy"
     assert snapshot["trading_authority"] is False
 
 

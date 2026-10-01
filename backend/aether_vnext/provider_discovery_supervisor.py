@@ -14,9 +14,10 @@ from typing import Awaitable, Callable, Mapping
 
 from aether_vnext.freeze import LIVE_BLOCKED, PAPER_ONLY
 from aether_vnext.kraken_catalog import fetch_kraken_discovery_universe
-from aether_vnext.massive_discovery import (
-    configured_massive_api_key,
-    fetch_massive_provider_universes,
+from aether_vnext.public_reference_discovery import (
+    fetch_ibkr_us_equity_public_universe,
+    fetch_ninjatrader_public_universe,
+    fetch_tastyfx_public_universe,
 )
 from aether_vnext.provider_discovery import (
     DiscoveryInstrument,
@@ -152,8 +153,11 @@ def build_provider_focus_snapshot(
         payload["status"] = "online"
         payload["reason"] = None
         payload["catalog_mode"] = (
-            "provider_native" if provider == "Kraken" else "market_universe_proxy"
+            "provider_native" if provider == "Kraken" else "public_reference_proxy"
         )
+        payload["feed_classes"] = sorted({
+            row.feed_class for row in rows if row.feed_class
+        })
         payload["execution_binding_required"] = provider != "Kraken"
         providers[provider] = payload
 
@@ -221,23 +225,21 @@ async def run_configured_provider_discovery_cycle() -> dict[str, object]:
     universes: dict[str, tuple[DiscoveryInstrument, ...]] = {}
     errors: dict[str, str] = {}
 
-    try:
-        universes["Kraken"] = await fetch_kraken_discovery_universe()
-    except Exception as exc:
-        errors["Kraken"] = f"{type(exc).__name__}:{exc}"
-
-    api_key = configured_massive_api_key()
-    if not api_key:
-        for provider in ("IBKR", "tastyfx", "NinjaTrader"):
-            errors[provider] = "massive_api_key_missing"
-    else:
-        try:
-            massive = await fetch_massive_provider_universes(api_key=api_key)
-            universes.update(massive)
-        except Exception as exc:
-            reason = f"{type(exc).__name__}:{exc}"
-            for provider in ("IBKR", "tastyfx", "NinjaTrader"):
-                errors[provider] = reason
+    providers = (
+        ("Kraken", fetch_kraken_discovery_universe()),
+        ("tastyfx", fetch_tastyfx_public_universe()),
+        ("NinjaTrader", fetch_ninjatrader_public_universe()),
+        ("IBKR", fetch_ibkr_us_equity_public_universe()),
+    )
+    results = await asyncio.gather(
+        *(awaitable for _, awaitable in providers),
+        return_exceptions=True,
+    )
+    for (provider, _), result in zip(providers, results, strict=True):
+        if isinstance(result, BaseException):
+            errors[provider] = f"{type(result).__name__}:{result}"
+        else:
+            universes[provider] = tuple(result)
 
     snapshot = build_provider_focus_snapshot(
         universes,

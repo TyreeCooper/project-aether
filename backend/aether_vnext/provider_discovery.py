@@ -40,11 +40,14 @@ class DiscoveryInstrument:
     high_price: float | None = None
     low_price: float | None = None
     volume: float | None = None
+    open_interest: float | None = None
     bid: float | None = None
     ask: float | None = None
     change_pct: float | None = None
     observed_at_utc: datetime | None = None
     source: str = ""
+    feed_class: str = "REFERENCE"
+    execution_quality: bool = False
 
     def __post_init__(self) -> None:
         for name in ("provider", "symbol", "market_data_symbol", "asset_class"):
@@ -55,7 +58,7 @@ class DiscoveryInstrument:
             raise ValueError("observed_at_utc must be timezone-aware")
         for name in (
             "price", "open_price", "high_price", "low_price",
-            "volume", "bid", "ask", "change_pct",
+            "volume", "open_interest", "bid", "ask", "change_pct",
         ):
             value = getattr(self, name)
             if value is not None and (
@@ -79,12 +82,15 @@ class RankedInstrument:
     liquidity_score: float
     spread_quality_score: float
     data_quality_score: float
-    price: float
+    price: float | None
     change_pct: float
     volume: float | None
+    open_interest: float | None
     spread_bps: float | None
     observed_at_utc: datetime | None
     source: str
+    feed_class: str
+    execution_quality: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,12 +102,20 @@ class ProviderFocus:
 
 
 def _eligible(row: DiscoveryInstrument) -> bool:
-    if not row.active or row.price is None:
+    if not row.active:
         return False
-    price = float(row.price)
-    if price <= 0.0:
+    price_available = row.price is not None and float(row.price) > 0.0
+    activity_available = any(
+        value is not None and float(value) > 0.0
+        for value in (row.volume, row.open_interest)
+    )
+    if not price_available and not activity_available:
+        return False
+    if row.price is not None and float(row.price) <= 0.0:
         return False
     if row.volume is not None and float(row.volume) < 0.0:
+        return False
+    if row.open_interest is not None and float(row.open_interest) < 0.0:
         return False
     if row.bid is not None and float(row.bid) <= 0.0:
         return False
@@ -159,6 +173,7 @@ def _quality(row: DiscoveryInstrument) -> float:
         row.high_price,
         row.low_price,
         row.volume,
+        row.open_interest,
         row.bid,
         row.ask,
     )
@@ -200,9 +215,15 @@ def rank_provider_catalog(
         for key, row in keys.items()
     })
     known_liquidity = {
-        key: math.log1p(max(0.0, float(row.volume)))
+        key: math.log1p(
+            max(
+                0.0,
+                float(row.volume or 0.0),
+                float(row.open_interest or 0.0),
+            )
+        )
         for key, row in keys.items()
-        if row.volume is not None
+        if row.volume is not None or row.open_interest is not None
     }
     liquidity_known_scores = _percentile_scores(known_liquidity)
     liquidity = {
@@ -243,7 +264,11 @@ def rank_provider_catalog(
         key=lambda item: (
             -item[1],
             -abs(_change_pct(item[0])),
-            -(0.0 if item[0].volume is None else float(item[0].volume)),
+            -max(
+                0.0,
+                float(item[0].volume or 0.0),
+                float(item[0].open_interest or 0.0),
+            ),
             item[0].symbol,
         )
     )
@@ -263,12 +288,17 @@ def rank_provider_catalog(
             liquidity_score=liquidity_score,
             spread_quality_score=spread_score,
             data_quality_score=data_quality,
-            price=float(row.price),
+            price=(None if row.price is None else float(row.price)),
             change_pct=_change_pct(row),
             volume=(None if row.volume is None else float(row.volume)),
+            open_interest=(
+                None if row.open_interest is None else float(row.open_interest)
+            ),
             spread_bps=_spread_bps(row),
             observed_at_utc=row.observed_at_utc,
             source=row.source,
+            feed_class=row.feed_class,
+            execution_quality=bool(row.execution_quality),
         )
         for index, (
             row,
@@ -310,6 +340,7 @@ def focus_payload(focus: ProviderFocus) -> dict[str, object]:
                 "price": row.price,
                 "change_pct": row.change_pct,
                 "volume": row.volume,
+                "open_interest": row.open_interest,
                 "spread_bps": row.spread_bps,
                 "observed_at_utc": (
                     None
@@ -317,6 +348,8 @@ def focus_payload(focus: ProviderFocus) -> dict[str, object]:
                     else row.observed_at_utc.astimezone(UTC).isoformat()
                 ),
                 "source": row.source,
+                "feed_class": row.feed_class,
+                "execution_quality": row.execution_quality,
             }
             for row in focus.top25
         ],

@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from aether_vnext.kraken_catalog import (
+    parse_kraken_spot_catalog,
     parse_kraken_tickers,
     parse_kraken_usd_catalog,
 )
@@ -97,6 +98,10 @@ def test_kraken_catalog_and_ticker_parser_cover_all_online_usd_pairs() -> None:
                 "altname": "XRPUSD", "wsname": "XRP/USD",
                 "base": "XXRP", "quote": "ZUSD", "status": "online",
             },
+            "XETHEUR": {
+                "altname": "ETHEUR", "wsname": "ETH/EUR",
+                "base": "XETH", "quote": "ZEUR", "status": "online",
+            },
             "OFFLINE": {
                 "altname": "OFFUSD", "wsname": "OFF/USD",
                 "base": "OFF", "quote": "ZUSD", "status": "cancel_only",
@@ -104,6 +109,20 @@ def test_kraken_catalog_and_ticker_parser_cover_all_online_usd_pairs() -> None:
         },
     })
     assert set(catalog) == {"XXBTZUSD", "XETHZUSD", "XXRPZUSD"}
+    full_catalog = parse_kraken_spot_catalog({
+        "error": [],
+        "result": {
+            "XXBTZUSD": {
+                "altname": "XBTUSD", "wsname": "BTC/USD",
+                "base": "XXBT", "quote": "ZUSD", "status": "online",
+            },
+            "XETHEUR": {
+                "altname": "ETHEUR", "wsname": "ETH/EUR",
+                "base": "XETH", "quote": "ZEUR", "status": "online",
+            },
+        },
+    })
+    assert set(full_catalog) == {"XXBTZUSD", "XETHEUR"}
 
     payload = {
         "error": [],
@@ -233,3 +252,71 @@ def test_massive_snapshot_parser_accepts_unified_and_futures_snake_case_shapes()
     assert futures[0].bid == 6039.75
     assert futures[0].ask == 6040.0
     assert futures[0].product_code == "MES"
+
+
+
+def test_ranker_accepts_activity_only_reference_instruments() -> None:
+    rows = tuple(
+        DiscoveryInstrument(
+            provider="NinjaTrader",
+            symbol=f"F{i:02d}",
+            market_data_symbol=f"F{i:02d}",
+            execution_symbol=f"F{i:02d}",
+            asset_class="future",
+            product_code=f"F{i:02d}",
+            price=None,
+            volume=1000.0 * i,
+            open_interest=2000.0 * i,
+            observed_at_utc=NOW,
+            source="public_reference",
+            feed_class="PUBLIC_REFERENCE_DELAYED",
+            execution_quality=False,
+        )
+        for i in range(1, 31)
+    )
+    focus = rank_provider_catalog(rows, provider="NinjaTrader")
+    assert focus.eligible_count == 30
+    assert len(focus.top25) == 25
+    assert focus.top25[0].symbol == "F30"
+    payload = focus_payload(focus)
+    assert payload["top25"][0]["price"] is None
+    assert payload["top25"][0]["open_interest"] == 60000.0
+    assert payload["top25"][0]["feed_class"] == "PUBLIC_REFERENCE_DELAYED"
+    assert payload["top25"][0]["execution_quality"] is False
+
+
+
+def test_kraken_full_catalog_normalizes_cross_pair_volume_to_usd() -> None:
+    catalog = parse_kraken_spot_catalog({
+        "error": [],
+        "result": {
+            "ZEURZUSD": {
+                "altname": "EURUSD", "wsname": "EUR/USD",
+                "base": "ZEUR", "quote": "ZUSD", "status": "online",
+            },
+            "XETHZEUR": {
+                "altname": "ETHEUR", "wsname": "ETH/EUR",
+                "base": "XETH", "quote": "ZEUR", "status": "online",
+            },
+        },
+    })
+    payload = {
+        "error": [],
+        "result": {
+            "ZEURZUSD": {
+                "a": ["1.201"], "b": ["1.199"], "c": ["1.20"],
+                "h": ["1.21", "1.22"], "l": ["1.18", "1.17"],
+                "o": "1.19", "v": ["1000", "2000"],
+            },
+            "XETHZEUR": {
+                "a": ["3001"], "b": ["2999"], "c": ["3000"],
+                "h": ["3050", "3100"], "l": ["2950", "2900"],
+                "o": "2970", "v": ["10", "20"],
+            },
+        },
+    }
+    rows = parse_kraken_tickers(catalog, [payload], observed_at_utc=NOW)
+    by_symbol = {row.symbol: row for row in rows}
+    assert set(by_symbol) == {"EUR/USD", "ETH/EUR"}
+    assert by_symbol["ETH/EUR"].volume == 72000.0
+    assert by_symbol["ETH/EUR"].feed_class == "NATIVE_PUBLIC"
