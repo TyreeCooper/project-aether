@@ -245,9 +245,14 @@ def test_runtime_fill_bridge_opens_verified_dynamic_kraken_asset() -> None:
                 == "trade-runtime-fill-sol"
             )
         ).mappings().one()
+        intent = store.load_order_intent(
+            conn,
+            order_intent_id="intent-runtime-portfolio-sol",
+        )
 
     assert result["state"] == "FILLED"
     assert trade["asset_id"] == "kraken:solusd"
-    assert trade["broker_account_id"] == "kraken_paper"
+    assert intent is not None
+    assert intent.broker_account_id == "kraken_paper"
     assert position["position_key"] == "kraken:solusd:daily_swing"
     assert position["horizon"] == "daily_swing"
