@@ -466,3 +466,49 @@ button { color: inherit; }
   .runtimeMetrics > div:nth-child(5) { display: none; }
   .attentionGrid { grid-template-columns: 1fr; }
 }
+
+
+/* Provider-wide discovery / Top-10 focus */
+.providerDiscoveryBoard { overflow: hidden; }
+.providerDiscoveryFunnel { display: grid; grid-template-columns: minmax(120px,1fr) 22px minmax(120px,1fr) 22px minmax(120px,1fr) 22px minmax(120px,1fr) 22px minmax(120px,1fr); gap: 6px; align-items: stretch; margin-bottom: 10px; }
+.providerDiscoveryFunnel > div { min-width: 0; display: grid; gap: 3px; align-content: center; padding: 9px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel-2); }
+.providerDiscoveryFunnel > i { display: grid; place-items: center; color: var(--muted); font-style: normal; font-weight: 800; }
+.providerDiscoveryFunnel span, .providerDiscoveryFunnel small { color: var(--muted); font-size: 8px; text-transform: uppercase; letter-spacing: .05em; }
+.providerDiscoveryFunnel strong { font-size: 15px; font-variant-numeric: tabular-nums; }
+
+.providerFocusGrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.providerFocusCard { min-width: 0; padding: 10px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel-2); }
+.providerFocusCard.online { border-color: color-mix(in srgb, var(--good) 24%, var(--line)); }
+.providerFocusCard.offline { border-color: color-mix(in srgb, var(--active) 26%, var(--line)); }
+.providerFocusHead { display: flex; align-items: start; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.providerFocusHead > div { min-width: 0; display: grid; gap: 2px; }
+.providerFocusHead span { color: var(--muted); font-size: 8px; letter-spacing: .06em; }
+.providerFocusHead h3 { margin: 0; font-size: 15px; }
+.providerFunnelStats { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 1px; margin-bottom: 8px; overflow: hidden; border: 1px solid var(--line); border-radius: 7px; background: var(--line); }
+.providerFunnelStats span { display: grid; gap: 2px; padding: 6px; background: #081522; color: var(--muted); font-size: 8px; }
+.providerFunnelStats b { color: var(--text); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+.providerTop10 { display: grid; gap: 3px; }
+.providerTop10 > div { display: grid; grid-template-columns: 24px minmax(64px,1fr) 42px 54px 70px; gap: 5px; align-items: center; min-width: 0; padding: 5px 6px; border-radius: 6px; background: #07121d; }
+.providerTop10 b { color: var(--muted); font-size: 8px; }
+.providerTop10 strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; }
+.providerTop10 span, .providerTop10 small { text-align: right; font-size: 8px; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.providerTop10 small { color: var(--muted); }
+.providerUnavailable { min-height: 132px; display: grid; place-content: center; gap: 5px; padding: 12px; border: 1px dashed var(--line); border-radius: 8px; text-align: center; }
+.providerUnavailable strong { font-size: 10px; overflow-wrap: anywhere; }
+.providerUnavailable span { color: var(--muted); font-size: 9px; }
+.providerDiscoveryLaw { margin: 9px 0 0; color: var(--muted); font-size: 9px; line-height: 1.45; }
+
+@media (max-width: 1180px) {
+  .providerFocusGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .providerDiscoveryFunnel { grid-template-columns: 1fr 18px 1fr 18px 1fr; }
+  .providerDiscoveryFunnel > div:nth-of-type(4),
+  .providerDiscoveryFunnel > div:nth-of-type(5) { margin-top: 6px; }
+}
+
+@media (max-width: 780px) {
+  .providerDiscoveryFunnel { display: flex; overflow-x: auto; align-items: stretch; padding-bottom: 4px; }
+  .providerDiscoveryFunnel > div { min-width: 145px; }
+  .providerFocusGrid { grid-template-columns: 1fr; }
+  .providerTop10 > div { grid-template-columns: 24px minmax(80px,1fr) 42px 54px 70px; }
+}

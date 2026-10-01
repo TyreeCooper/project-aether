@@ -9,6 +9,7 @@ def test_vnext_ui_restores_familiar_operator_shell_without_legacy_routes() -> No
     css = (root / "frontend" / "app" / "globals.css").read_text(encoding="utf-8")
 
     assert 'const operatorPath = "/api/v1/vnext/operator"' in page
+    assert 'const discoveryPath = "/api/v1/vnext/discovery-runtime"' in page
     assert "function BottomDock" in page
     assert "function AppMenu" in page
     assert "function LiveTradesView" in page
@@ -16,6 +17,8 @@ def test_vnext_ui_restores_familiar_operator_shell_without_legacy_routes() -> No
     assert "function SettingsView" in page
     assert "function BoothView" in page
     assert "function PipelineView" in page
+    assert "function ProviderDiscoveryBoard" in page
+    assert "function ProviderFocusCard" in page
     assert "function pipelineBottleneck" in page
     assert "function DesktopCommandCenter" in page
     assert "function MobileCommandStrip" in page
@@ -36,6 +39,8 @@ def test_vnext_ui_restores_familiar_operator_shell_without_legacy_routes() -> No
     assert ".pipelineFlow" in css
     assert ".pipelinePressure" in css
     assert ".governorGate" in css
+    assert ".providerDiscoveryFunnel" in css
+    assert ".providerFocusGrid" in css
     assert ".desktopCommandCenter" in css
     assert ".desktopCommandGrid" in css
     assert ".mobileCommandStrip" in css

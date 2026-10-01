@@ -7,6 +7,7 @@ const floorPath = process.env.NEXT_PUBLIC_AETHER_FLOOR_PATH || "/api/v1/vnext/fl
 const ingressPath = "/api/v1/vnext/ingress-runtime";
 const strategyPath = "/api/v1/vnext/strategy-runtime";
 const operatorPath = "/api/v1/vnext/operator";
+const discoveryPath = "/api/v1/vnext/discovery-runtime";
 
 async function getJson(path) {
   const response = await fetch(`${apiBase}${path}`, { cache: "no-store" });
@@ -427,7 +428,7 @@ function BoothView({ floor, ingress, strategy, operator }) {
   );
 }
 
-function SettingsView({ ingress, strategy, operator, floor }) {
+function SettingsView({ ingress, strategy, discovery, operator, floor }) {
   return (
     <section className="appView">
       <div className="pageLead">
@@ -445,8 +446,12 @@ function SettingsView({ ingress, strategy, operator, floor }) {
           <small>Cannot be enabled from this UI</small>
         </article>
         <article className="settingsCard">
-          <span>Commissioned assets</span><strong>BTC · ETH</strong>
-          <small>Kraken public market data</small>
+          <span>Deep trading runtime</span><strong>BTC · ETH</strong>
+          <small>Current fully commissioned strategy/execution lane</small>
+        </article>
+        <article className="settingsCard">
+          <span>Provider discovery</span><strong>{text(discovery?.last_result?.focus_count, "0")} FOCUSED</strong>
+          <small>{text(discovery?.last_result?.online_provider_count, "0")}/4 provider buckets online · max 10/provider</small>
         </article>
         <article className="settingsCard">
           <span>Ingress interval</span><strong>{number(ingress?.interval_seconds, 0)}s</strong>
@@ -592,7 +597,106 @@ function PipelineStage({ label, job, owned, metricLabel, count, blockers = 0, bo
   );
 }
 
-function PipelineView({ universe, queues, cockpits, operator, strategy }) {
+
+const DISCOVERY_PROVIDERS = ["Kraken", "tastyfx", "NinjaTrader", "IBKR"];
+
+function discoveryProviderRows(discovery) {
+  const providers = discovery?.last_result?.providers || {};
+  return DISCOVERY_PROVIDERS.map((provider) => ({
+    provider,
+    ...(providers[provider] || {
+      status: "waiting",
+      reason: "waiting_for_discovery_cycle",
+      catalog_count: 0,
+      eligible_count: 0,
+      focus_count: 0,
+      top10: [],
+    }),
+  }));
+}
+
+function ProviderFocusCard({ row }) {
+  const online = row.status === "online";
+  const top = row.top10 || [];
+  return (
+    <article className={"providerFocusCard " + (online ? "online" : "offline")}>
+      <div className="providerFocusHead">
+        <div>
+          <span>{row.catalog_mode === "provider_native" ? "NATIVE CATALOG" : "MARKET UNIVERSE"}</span>
+          <h3>{row.provider}</h3>
+        </div>
+        <b className={online ? "state good" : "state bad"}>{online ? "ONLINE" : "WAITING"}</b>
+      </div>
+      <div className="providerFunnelStats">
+        <span><b>{number(row.catalog_count, 0)}</b> catalog</span>
+        <span><b>{number(row.eligible_count, 0)}</b> eligible</span>
+        <span><b>{number(row.focus_count, 0)}</b> focus</span>
+      </div>
+      {online ? (
+        top.length ? (
+          <div className="providerTop10">
+            {top.map((item) => (
+              <div key={row.provider + ":" + item.market_data_symbol}>
+                <b>#{item.rank}</b>
+                <strong>{text(item.symbol)}</strong>
+                <span>{number(item.score, 1)}</span>
+                <span className={Number(item.change_pct) < 0 ? "lossText" : Number(item.change_pct) > 0 ? "gainText" : ""}>
+                  {Number(item.change_pct) >= 0 ? "+" : ""}{number(item.change_pct, 2)}%
+                </span>
+                <small>{money(item.price)}</small>
+              </div>
+            ))}
+          </div>
+        ) : <Empty>No eligible instruments in the current discovery cycle.</Empty>
+      ) : (
+        <div className="providerUnavailable">
+          <strong>{text(row.reason, "waiting for provider data")}</strong>
+          <span>No symbols are invented or substituted.</span>
+        </div>
+      )}
+    </article>
+  );
+}
+
+function ProviderDiscoveryBoard({ discovery }) {
+  const rows = discoveryProviderRows(discovery);
+  const totalCatalog = rows.reduce((sum, row) => sum + Number(row.catalog_count || 0), 0);
+  const totalEligible = rows.reduce((sum, row) => sum + Number(row.eligible_count || 0), 0);
+  const focusCount = Number(discovery?.last_result?.focus_count || 0);
+  const running = Boolean(discovery?.running && !discovery?.last_error);
+  return (
+    <section className="floorSection providerDiscoveryBoard">
+      <div className="sectionHead">
+        <div>
+          <p className="eyebrow">PROVIDER DISCOVERY</p>
+          <h2>Catalog → Top 10 per Provider</h2>
+        </div>
+        <span className={running ? "state good" : "state active"}>
+          DISCOVERY {running ? "RUNNING" : "WAITING"}
+        </span>
+      </div>
+      <div className="providerDiscoveryFunnel">
+        <div><span>Provider catalogs</span><strong>{number(totalCatalog, 0)}</strong></div>
+        <i>→</i>
+        <div><span>Eligible / priced</span><strong>{number(totalEligible, 0)}</strong></div>
+        <i>→</i>
+        <div><span>Provider ranking</span><strong>{number(totalEligible, 0)}</strong></div>
+        <i>→</i>
+        <div><span>Focus pool</span><strong>{number(focusCount, 0)}</strong><small>max 10/provider</small></div>
+        <i>→</i>
+        <div><span>Next seat</span><strong>SCOUT</strong><small>natural setups only</small></div>
+      </div>
+      <div className="providerFocusGrid">
+        {rows.map((row) => <ProviderFocusCard row={row} key={row.provider} />)}
+      </div>
+      <p className="providerDiscoveryLaw">
+        Discovery ranking is pre-Scout attention selection only. It cannot force a setup, Risk approval, or trade.
+      </p>
+    </section>
+  );
+}
+
+function PipelineView({ universe, queues, cockpits, operator, strategy, discovery }) {
   const queueStages = PIPELINE_QUEUE_SEATS.map((stage) => Object.assign(
     {},
     stage,
@@ -604,6 +708,10 @@ function PipelineView({ universe, queues, cockpits, operator, strategy }) {
   const blockerCount = queueStages.reduce((sum, row) => sum + row.blockers, 0) + governor.blockers;
   const maxQueue = Math.max(1, ...queueStages.map((row) => row.count));
   const completedTrades = Number(operator?.blotter?.length || 0);
+  const discoveryProviders = discoveryProviderRows(discovery);
+  const discoveredCatalog = discoveryProviders.reduce((sum, row) => sum + Number(row.catalog_count || 0), 0);
+  const discoveredEligible = discoveryProviders.reduce((sum, row) => sum + Number(row.eligible_count || 0), 0);
+  const focusCount = Number(discovery?.last_result?.focus_count || 0);
   const pipelineStatus = governor.count > 0 || governor.blockers > 0
     ? "GLOBAL HALT"
     : bottleneck
@@ -630,6 +738,8 @@ function PipelineView({ universe, queues, cockpits, operator, strategy }) {
         </div>
       </section>
 
+      <ProviderDiscoveryBoard discovery={discovery} />
+
       <section className="governorGate">
         <div>
           <p className="eyebrow">GLOBAL FIRM GATE</p>
@@ -650,11 +760,27 @@ function PipelineView({ universe, queues, cockpits, operator, strategy }) {
 
         <div className="pipelineFlow" aria-label="AETHER Firm pipeline">
           <PipelineStage
-            label="Universe"
-            owned="INPUT"
-            job="Maintains the supported asset universe before an opportunity can enter setup discovery."
-            metricLabel="assets"
-            count={universe.length}
+            label="Provider Catalogs"
+            owned="DISCOVER"
+            job="Reads the broad market universe for each execution-provider bucket."
+            metricLabel="symbols"
+            count={discoveredCatalog}
+            tone="context"
+          />
+          <PipelineStage
+            label="Eligibility"
+            owned="FILTER"
+            job="Removes unavailable, inactive, or unpriced instruments before ranking."
+            metricLabel="eligible"
+            count={discoveredEligible}
+            tone="context"
+          />
+          <PipelineStage
+            label="Top 10 Focus"
+            owned="RANK"
+            job="Keeps the ten strongest attention candidates per provider for deeper strategy work."
+            metricLabel="focused"
+            count={focusCount}
             tone="context"
           />
           {queueStages.map((stage) => (
@@ -748,12 +874,12 @@ function PipelineView({ universe, queues, cockpits, operator, strategy }) {
   );
 }
 
-function AppSubview({ activeView, universe, queues, selectedAsset, onSelectAsset, cockpits, strategyAssets, strategy, ingress, operator, floor, nowMs }) {
+function AppSubview({ activeView, universe, queues, selectedAsset, onSelectAsset, cockpits, strategyAssets, strategy, ingress, discovery, operator, floor, nowMs }) {
   if (activeView === "assets") {
     return <AssetsView universe={universe} selectedAsset={selectedAsset} onSelect={onSelectAsset} strategyAssets={strategyAssets} />;
   }
   if (activeView === "pipeline") {
-    return <PipelineView universe={universe} queues={queues} cockpits={cockpits} operator={operator} strategy={strategy} />;
+    return <PipelineView universe={universe} queues={queues} cockpits={cockpits} operator={operator} strategy={strategy} discovery={discovery} />;
   }
   if (activeView === "live") {
     return <LiveTradesView cockpits={cockpits} strategyAssets={strategyAssets} strategy={strategy} activity={operator?.activity || []} nowMs={nowMs} />;
@@ -765,7 +891,7 @@ function AppSubview({ activeView, universe, queues, selectedAsset, onSelectAsset
     return <BoothView floor={floor} ingress={ingress} strategy={strategy} operator={operator} />;
   }
   if (activeView === "settings") {
-    return <SettingsView ingress={ingress} strategy={strategy} operator={operator} floor={floor} />;
+    return <SettingsView ingress={ingress} strategy={strategy} discovery={discovery} operator={operator} floor={floor} />;
   }
   return null;
 }
@@ -867,7 +993,7 @@ function CompactBlotterPreview({ rows }) {
   );
 }
 
-function DesktopCommandCenter({ floor, queues, cockpits, operator, ingress, strategy, nowMs }) {
+function DesktopCommandCenter({ floor, queues, cockpits, operator, ingress, strategy, discovery, nowMs }) {
   const bottleneck = pipelineBottleneck(queues);
   const governor = queueSummary(queues, "Governor");
   const queueStages = PIPELINE_QUEUE_SEATS.map((stage) => Object.assign(
@@ -915,10 +1041,10 @@ function DesktopCommandCenter({ floor, queues, cockpits, operator, ingress, stra
             ))}
           </div>
           <div className="desktopPipelineFooter">
+            <span><b>{text(discovery?.last_result?.focus_count, "0")}</b> focused</span>
             <span><b>{queued}</b> queued</span>
             <span><b>{blockers}</b> blockers</span>
             <span><b>{cockpits.length}</b> open positions</span>
-            <span><b>{governor.count || governor.blockers ? "HALT" : "CLEAR"}</b> governor</span>
           </div>
         </section>
 
@@ -968,7 +1094,7 @@ function DesktopCommandCenter({ floor, queues, cockpits, operator, ingress, stra
   );
 }
 
-function MobileCommandStrip({ queues, cockpits, operator, ingress, strategy, nowMs }) {
+function MobileCommandStrip({ queues, cockpits, operator, ingress, strategy, discovery, nowMs }) {
   const bottleneck = pipelineBottleneck(queues);
   return (
     <section className="mobileOnly mobileCommandStrip" aria-label="Mobile command status">
@@ -976,6 +1102,11 @@ function MobileCommandStrip({ queues, cockpits, operator, ingress, strategy, now
         <span>Flow</span>
         <strong>{bottleneck ? bottleneck.seat : "CLEAR"}</strong>
         <small>{bottleneck ? bottleneck.reason : "no bottleneck"}</small>
+      </div>
+      <div>
+        <span>Focus</span>
+        <strong>{text(discovery?.last_result?.focus_count, "0")}</strong>
+        <small>Top 10/provider</small>
       </div>
       <div>
         <span>Open</span>
@@ -1001,9 +1132,11 @@ export default function DashboardPage() {
   const [ingress, setIngress] = useState(null);
   const [strategy, setStrategy] = useState(null);
   const [operator, setOperator] = useState(null);
+  const [discovery, setDiscovery] = useState(null);
   const [error, setError] = useState("");
   const [runtimeError, setRuntimeError] = useState("");
   const [operatorError, setOperatorError] = useState("");
+  const [discoveryError, setDiscoveryError] = useState("");
   const [selectedAsset, setSelectedAsset] = useState(null);
   const [activeView, setActiveView] = useState("floor");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -1020,11 +1153,12 @@ export default function DashboardPage() {
     let mounted = true;
     const load = async () => {
       try {
-        const [floorResult, ingressResult, strategyResult, operatorResult] = await Promise.allSettled([
+        const [floorResult, ingressResult, strategyResult, operatorResult, discoveryResult] = await Promise.allSettled([
           getJson(floorPath),
           getJson(ingressPath),
           getJson(strategyPath),
           getJson(operatorPath),
+          getJson(discoveryPath),
         ]);
         if (!mounted) return;
 
@@ -1072,6 +1206,12 @@ export default function DashboardPage() {
         } else {
           setOperatorError("vNext operator data is temporarily unavailable.");
         }
+        if (discoveryResult.status === "fulfilled") {
+          setDiscovery(discoveryResult.value);
+          setDiscoveryError("");
+        } else {
+          setDiscoveryError("Provider discovery telemetry is temporarily unavailable.");
+        }
         setRuntimeError(
           ingressResult.status === "rejected" || strategyResult.status === "rejected"
             ? "One or more autonomous runtime telemetry endpoints are unavailable."
@@ -1082,6 +1222,7 @@ export default function DashboardPage() {
           setError("Canonical vNext Floor endpoint unavailable.");
           setRuntimeError("Autonomous runtime telemetry unavailable.");
           setOperatorError("vNext operator data is temporarily unavailable.");
+          setDiscoveryError("Provider discovery telemetry is temporarily unavailable.");
         }
       }
     };
@@ -1188,6 +1329,7 @@ export default function DashboardPage() {
         operator={operator}
         ingress={ingress}
         strategy={strategy}
+        discovery={discovery}
         nowMs={nowMs}
       />
 
@@ -1198,6 +1340,7 @@ export default function DashboardPage() {
         operator={operator}
         ingress={ingress}
         strategy={strategy}
+        discovery={discovery}
         nowMs={nowMs}
       />
 
@@ -1321,11 +1464,20 @@ export default function DashboardPage() {
           strategyAssets={strategyAssets}
           strategy={strategy}
           ingress={ingress}
+          discovery={discovery}
           operator={operator}
           floor={floor}
           nowMs={nowMs}
         />
       )}
+
+      {discoveryError ? (
+        <section className="apiNotice">
+          <strong>PROVIDER DISCOVERY DEGRADED</strong>
+          <span>{discoveryError}</span>
+          <small>No catalog or Top-10 values are fabricated when the feed is unavailable.</small>
+        </section>
+      ) : null}
 
       {operatorError ? (
         <section className="apiNotice">
