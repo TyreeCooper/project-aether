@@ -22,7 +22,8 @@ import sqlalchemy as sa
 
 from aether_vnext.coinbase_prototype_history import COINBASE_SOURCE_ID
 from aether_vnext.db_runtime import VNextDatabaseConfig, open_vnext_engine
-from aether_vnext.freeze import LIVE_BLOCKED, PAPER_ONLY
+from aether_vnext.dynamic_products import project_kraken_spot_product
+from aether_vnext.freeze import CONFIGURATION_HASH, LIVE_BLOCKED, PAPER_ONLY
 from aether_vnext.prototype_crypto_entry_plan import build_prototype_crypto_entry_plan
 from aether_vnext.prototype_crypto_entry_runtime import advance_prototype_crypto_entry
 from aether_vnext.prototype_crypto_exit_runtime import advance_prototype_crypto_exit
@@ -42,7 +43,9 @@ from aether_vnext.prototype_market_history import (
 )
 from aether_vnext.provider_discovery_supervisor import (
     current_deep_trade_focus_asset_ids,
+    current_provider_focus_snapshot,
 )
+from aether_vnext.registry import SEED_REGISTRY
 from aether_vnext.store import VNextStore
 
 
@@ -208,6 +211,87 @@ def _setup_already_completed(
     ).first() is not None
 
 
+def _sync_dynamic_kraken_products(
+    sync_conn,
+    store: VNextStore,
+    *,
+    focus_snapshot: dict[str, object] | None,
+    as_of_utc: datetime,
+) -> dict[str, object]:
+    """Persist source-complete Kraken products using the existing provider policy."""
+    if focus_snapshot is None:
+        return {
+            "status": "waiting_for_discovery",
+            "received": 0,
+            "persisted": 0,
+            "requirements": {},
+        }
+
+    runtime = store.load_runtime_registry_binding(
+        sync_conn,
+        asset_id="btc",
+    )
+    if runtime is None:
+        return {
+            "status": "provider_policy_missing",
+            "received": 0,
+            "persisted": 0,
+            "requirements": {"provider_policy_missing": 1},
+        }
+    binding = runtime["binding"]
+    source_id = str(binding.primary_market_source_id or "").strip() or None
+    stale_threshold_ms = binding.stale_threshold_ms
+
+    providers = focus_snapshot.get("providers") or {}
+    kraken = providers.get("Kraken") if isinstance(providers, dict) else None
+    rows = (
+        kraken.get("top100") or []
+        if isinstance(kraken, dict)
+        else []
+    )
+
+    persisted = 0
+    requirement_counts: dict[str, int] = {}
+    for raw in rows:
+        if not isinstance(raw, dict):
+            continue
+        focus_row = {**raw, "provider": "Kraken"}
+        projection = project_kraken_spot_product(
+            focus_row,
+            primary_market_source_id=source_id,
+            stale_threshold_ms=stale_threshold_ms,
+        )
+        if projection.product is None:
+            for requirement in projection.requirements:
+                requirement_counts[requirement] = (
+                    requirement_counts.get(requirement, 0) + 1
+                )
+            continue
+        if projection.asset_id in SEED_REGISTRY:
+            # Frozen BTC/ETH continue using their canonical seed binding path.
+            continue
+        store.upsert_dynamic_product_state(
+            sync_conn,
+            projection.product,
+            source_ref=(
+                str(raw.get("source") or "kraken_public")
+                + ":"
+                + str(raw.get("execution_symbol") or raw.get("symbol") or "")
+            ),
+            registry_version="dynamic-kraken-v1",
+            configuration_hash=CONFIGURATION_HASH,
+            updated_at_utc=as_of_utc,
+        )
+        persisted += 1
+
+    return {
+        "status": "synced",
+        "received": len(rows),
+        "persisted": persisted,
+        "requirements": dict(sorted(requirement_counts.items())),
+    }
+
+
 async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
     """Run one crash-safe prototype strategy pass."""
     if not PAPER_ONLY or not LIVE_BLOCKED:
@@ -215,6 +299,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
 
     as_of_utc = datetime.now(UTC)
     focused_asset_ids = current_deep_trade_focus_asset_ids()
+    focus_snapshot = current_provider_focus_snapshot()
     fetched_hourly = {}
     fetched_daily = {}
     for asset_id in ASSETS:
@@ -248,6 +333,13 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     raise RuntimeError("prototype paper epoch is not the expected fresh epoch")
                 if not bool(epoch["paper_only"]) or not bool(epoch["live_blocked"]):
                     raise RuntimeError("prototype paper epoch safety flags changed")
+
+                result["dynamic_product_registry"] = _sync_dynamic_kraken_products(
+                    sync_conn,
+                    store,
+                    focus_snapshot=focus_snapshot,
+                    as_of_utc=as_of_utc,
+                )
 
                 inserted = 0
                 for asset_id in ASSETS:

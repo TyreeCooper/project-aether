@@ -8,6 +8,7 @@ from aether_vnext.provider_discovery import DiscoveryInstrument
 from aether_vnext.provider_discovery_supervisor import (
     ProviderDiscoverySupervisor,
     build_provider_focus_snapshot,
+    current_provider_focus_snapshot,
     discovery_progress_payload,
     run_configured_provider_discovery_cycle,
 )
@@ -216,6 +217,12 @@ def test_provider_cycle_times_out_one_source_and_completes(monkeypatch) -> None:
     assert snapshot["providers"]["NinjaTrader"]["status"] == "unavailable"
     assert "ninja_reference_unavailable" in snapshot["providers"]["NinjaTrader"]["reason"]
     assert snapshot["providers"]["IBKR"]["status"] == "online"
+
+    current = current_provider_focus_snapshot()
+    assert current is not None
+    assert current["providers"]["Kraken"]["status"] == "online"
+    current["providers"]["Kraken"]["status"] = "mutated-test-copy"
+    assert current_provider_focus_snapshot()["providers"]["Kraken"]["status"] == "online"
 
     progress = discovery_progress_payload()
     assert progress["cycle_state"] == "complete"

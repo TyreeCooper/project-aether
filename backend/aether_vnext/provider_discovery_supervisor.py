@@ -7,6 +7,7 @@ orders. Missing optional market-data credentials are reported explicitly.
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import os
@@ -260,6 +261,14 @@ def build_provider_focus_snapshot(
         "focus_limit_per_provider": FOCUS_LIMIT,
         "trading_authority": False,
     }
+
+
+def current_provider_focus_snapshot() -> dict[str, object] | None:
+    """Return an isolated copy of the latest provider focus snapshot."""
+    snapshot = _LATEST_FOCUS_SNAPSHOT
+    if snapshot is None:
+        return None
+    return deepcopy(snapshot)
 
 
 def current_deep_trade_focus_asset_ids() -> frozenset[str] | None:

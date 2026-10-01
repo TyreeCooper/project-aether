@@ -768,18 +768,28 @@ class VNextStore:
             "updated_at_utc": updated_at_utc,
         }
         existing = conn.execute(
-            sa.select(table.c.asset_id).where(
+            sa.select(table).where(
                 table.c.asset_id == product.asset_id
             )
-        ).first()
+        ).mappings().first()
         if existing is None:
             conn.execute(table.insert().values(**values))
         else:
-            conn.execute(
-                table.update()
-                .where(table.c.asset_id == product.asset_id)
-                .values(**values)
+            existing_payload = dict(existing["payload"] or {})
+            unchanged = (
+                existing_payload.get("payload_kind")
+                == DYNAMIC_PRODUCT_PAYLOAD_KIND
+                and str(existing_payload.get("product_hash") or "") == digest
+                and str(existing["registry_version"]) == str(registry_version)
+                and str(existing["configuration_hash"]) == str(configuration_hash)
+                and str(existing["lifecycle_state"]) == product.lifecycle_state.value
             )
+            if not unchanged:
+                conn.execute(
+                    table.update()
+                    .where(table.c.asset_id == product.asset_id)
+                    .values(**values)
+                )
         register_runtime_product(product)
         return digest
 

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 
 from aether_vnext.prototype_strategy_supervisor import (
     PrototypeStrategySupervisor,
     _entry_focus_block,
+    _sync_dynamic_kraken_products,
     configured_strategy_enabled,
     configured_strategy_interval_seconds,
     validate_configured_strategy_environment,
@@ -124,3 +127,68 @@ def test_entry_focus_gate_never_blocks_management_of_open_trade() -> None:
         focused_asset_ids=frozenset(),
         assets_open_at_start={"eth"},
     ) is None
+
+
+
+def test_dynamic_kraken_registry_sync_uses_existing_provider_policy_without_guessing() -> None:
+    class FakeStore:
+        def __init__(self):
+            self.rows = []
+
+        def load_runtime_registry_binding(self, conn, *, asset_id):
+            assert asset_id == "btc"
+            return {
+                "binding": SimpleNamespace(
+                    primary_market_source_id="kraken_public",
+                    stale_threshold_ms=15000,
+                )
+            }
+
+        def upsert_dynamic_product_state(self, conn, product, **kwargs):
+            self.rows.append((product, kwargs))
+            return "hash"
+
+    snapshot = {
+        "providers": {
+            "Kraken": {
+                "top100": [
+                    {
+                        "symbol": "SOL/USD",
+                        "execution_symbol": "SOLUSD",
+                        "asset_class": "spot_crypto",
+                        "base_currency": "SOL",
+                        "quote_currency": "USD",
+                        "quantity_step": 0.001,
+                        "minimum_quantity": 0.02,
+                        "minimum_notional": 0.5,
+                        "tick_size": 0.0001,
+                        "source": "kraken_public_rest",
+                    },
+                    {
+                        "symbol": "ETH/EUR",
+                        "execution_symbol": "ETHEUR",
+                        "asset_class": "spot_crypto",
+                        "base_currency": "ETH",
+                        "quote_currency": "EUR",
+                        "quantity_step": 0.001,
+                        "minimum_quantity": 0.01,
+                        "minimum_notional": 0.5,
+                        "tick_size": 0.01,
+                        "source": "kraken_public_rest",
+                    },
+                ]
+            }
+        }
+    }
+    store = FakeStore()
+    result = _sync_dynamic_kraken_products(
+        object(),
+        store,
+        focus_snapshot=snapshot,
+        as_of_utc=datetime(2026, 10, 1, 19, 0, tzinfo=timezone.utc),
+    )
+    assert result["received"] == 2
+    assert result["persisted"] == 1
+    assert result["requirements"]["usd_settlement_route_required"] == 1
+    assert store.rows[0][0].asset_id == "kraken:solusd"
+    assert store.rows[0][0].stale_threshold_ms == 15000
