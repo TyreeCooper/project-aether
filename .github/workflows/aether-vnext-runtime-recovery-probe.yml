@@ -1,0 +1,49 @@
+name: AETHER vNext Runtime Recovery Probe
+
+on:
+  push:
+    branches:
+      - aether-vnext-swapout
+    paths:
+      - ".github/workflows/aether-vnext-runtime-recovery-probe.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - name: Probe deployed prototype runtime
+        shell: bash
+        run: |
+          set -u
+          base="https://aether-vnext-nonprod-gpcrcme8czarbnfy.centralus-01.azurewebsites.net"
+          failed=0
+
+          probe () {
+            name="$1"
+            path="$2"
+            out="/tmp/$name.json"
+            code="$(curl --silent --show-error --max-time 45               -o "$out" -w '%{http_code}'               "$base$path" || true)"
+            echo "=== $name HTTP $code ==="
+            if [ -s "$out" ]; then
+              cat "$out"
+              echo
+            else
+              echo "<no response body>"
+            fi
+            if [ "$code" != "200" ]; then
+              failed=1
+            fi
+          }
+
+          probe health "/api/v1/health"
+          probe ingress "/api/v1/vnext/ingress-runtime"
+          probe strategy "/api/v1/vnext/strategy-runtime"
+          probe floor "/api/v1/vnext/floor"
+
+          exit "$failed"
