@@ -961,3 +961,28 @@ def test_phase17_paper_test_epoch_schema_is_current_and_immutable() -> None:
         "paper_only",
         "live_blocked",
     } <= set(epochs.c.keys())
+
+
+
+def test_revision_0034_repairs_postgresql_json_setup_trigger_and_activation_applies_head() -> None:
+    backend = Path(__file__).resolve().parents[1]
+    migration = (
+        backend
+        / "alembic"
+        / "versions"
+        / "0034_aether_vnext_setup_identity_trigger_json_fix.py"
+    ).read_text(encoding="utf-8")
+    workflow = (
+        backend.parent
+        / ".github"
+        / "workflows"
+        / "aether-vnext-activate-paper-prototype.yml"
+    ).read_text(encoding="utf-8")
+
+    assert 'revision: str = "0034"' in migration
+    assert 'down_revision: Union[str, None] = "0033"' in migration
+    assert "to_jsonb(OLD.asset_risk_hitches)" in migration
+    assert "to_jsonb(NEW.asset_risk_hitches)" in migration
+    assert "reject_setup_playbook_identity_mutation" in migration
+    assert "Upgrade protected burn-in schema to exact branch head" in workflow
+    assert 'command.upgrade(cfg, "head")' in workflow

@@ -120,6 +120,26 @@ jobs:
           set -euo pipefail
           test -n "$DATABASE_URL"
 
+      - name: Upgrade protected burn-in schema to exact branch head
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ secrets.AETHER_VNEXT_BURNIN_DATABASE_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          from alembic import command
+          from alembic.config import Config
+
+          url = os.environ["DATABASE_URL"]
+          if not url:
+              raise SystemExit("burn-in database URL missing")
+          cfg = Config("alembic.ini")
+          cfg.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
+          command.upgrade(cfg, "head")
+          PY
+
       - name: Login to Azure with dedicated vNext identity
         uses: azure/login@v2
         with:
