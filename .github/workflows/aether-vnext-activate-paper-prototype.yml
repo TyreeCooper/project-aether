@@ -6,6 +6,8 @@ on:
       - aether-vnext-swapout
     paths:
       - ".github/workflows/aether-vnext-activate-paper-prototype.yml"
+      - "backend/aether_vnext/prototype_strategy_supervisor.py"
+      - "backend/tests_vnext/test_prototype_crypto_exit_runtime.py"
   workflow_dispatch:
 
 permissions:

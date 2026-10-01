@@ -169,14 +169,17 @@ def _setup_already_completed(
     *,
     setup_id: str,
 ) -> bool:
+    """Return True once a setup has ever produced an OpenTrade.
+
+    OpenTrade is durable execution evidence and remains present after FLAT;
+    ClosedTrade references it by trade_id but intentionally does not duplicate
+    setup_id. Therefore OpenTrade alone is the canonical no-reentry lookup.
+    """
     open_trades = store.tables["open_trades"]
-    closed_trades = store.tables["closed_trades"]
-    if sync_conn.execute(
-        sa.select(open_trades.c.trade_id).where(open_trades.c.setup_id == setup_id)
-    ).first() is not None:
-        return True
     return sync_conn.execute(
-        sa.select(closed_trades.c.trade_id).where(closed_trades.c.setup_id == setup_id)
+        sa.select(open_trades.c.trade_id)
+        .where(open_trades.c.setup_id == setup_id)
+        .limit(1)
     ).first() is not None
 
 

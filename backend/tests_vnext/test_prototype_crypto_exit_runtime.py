@@ -9,6 +9,7 @@ from aether_vnext.prototype_crypto_entry_plan import build_prototype_crypto_entr
 from aether_vnext.prototype_crypto_entry_runtime import advance_prototype_crypto_entry
 from aether_vnext.prototype_crypto_exit_runtime import advance_prototype_crypto_exit
 from aether_vnext.prototype_history_sources import KRAKEN_DAILY_SOURCE_ID
+from aether_vnext.prototype_strategy_supervisor import _setup_already_completed
 from aether_vnext.prototype_market_history import PrototypeMarketBar
 from tests_vnext.test_prototype_crypto_entry_runtime import T0, _bar, _feature, _fixture, _obs
 
@@ -188,3 +189,56 @@ def test_no_exit_trigger_keeps_open_trade_without_close_intent() -> None:
     assert result.stage == "OPEN"
     assert result.reason == "hold"
     assert close_count == 0
+
+
+def test_closed_trade_setup_remains_completed_without_closed_trade_setup_column() -> None:
+    engine, store, plan, trade_id = _open_trade()
+    at1 = T0 + timedelta(hours=1)
+    base = _obs("base-completed-setup", at1)
+    obs1 = _market_observation(
+        base,
+        observation_id="obs-completed-setup-exit-1",
+        at=at1,
+    )
+    structure_bar = _closed_hour(
+        close=float(plan.geometry.structure_invalidation_level) - 1.0,
+        closed_at=at1,
+    )
+
+    with engine.begin() as conn:
+        store.record_market_observation(conn, obs1)
+        submitted = advance_prototype_crypto_exit(
+            conn,
+            store,
+            trade_id=str(trade_id),
+            current_observation=obs1,
+            latest_completed_hourly_bar=structure_bar,
+            as_of_utc=at1,
+        )
+        assert submitted.stage == "CLOSE_SUBMITTED"
+
+    at2 = at1 + timedelta(seconds=1)
+    obs2 = _market_observation(
+        base,
+        observation_id="obs-completed-setup-exit-2",
+        at=at2,
+    )
+    with engine.begin() as conn:
+        store.record_market_observation(conn, obs2)
+        flattened = advance_prototype_crypto_exit(
+            conn,
+            store,
+            trade_id=str(trade_id),
+            current_observation=obs2,
+            latest_completed_hourly_bar=structure_bar,
+            as_of_utc=at2,
+        )
+        assert flattened.stage == "FLAT"
+        assert _setup_already_completed(
+            conn,
+            store,
+            setup_id=plan.ids.setup_id,
+        ) is True
+        # ClosedTrade intentionally has no setup_id column. The canonical
+        # relationship is ClosedTrade.trade_id -> durable OpenTrade.setup_id.
+        assert "setup_id" not in store.tables["closed_trades"].c
