@@ -8,8 +8,8 @@ import json
 from pathlib import Path
 from statistics import median
 
+from aether_vnext.coinbase_prototype_history import fetch_coinbase_hourly_history
 from aether_vnext.prototype_history_sources import (
-    fetch_cryptocompare_kraken_hourly,
     fetch_kraken_completed_daily,
     fetch_kraken_completed_hourly,
 )
@@ -55,7 +55,7 @@ async def run_probe() -> dict[str, object]:
     assets: dict[str, object] = {}
 
     for asset_id in ("btc", "eth"):
-        warmup = await fetch_cryptocompare_kraken_hourly(
+        warmup = await fetch_coinbase_hourly_history(
             asset_id=asset_id,
             end_at_utc=as_of,
             minimum_bars=2200,
@@ -88,7 +88,7 @@ async def run_probe() -> dict[str, object]:
         }
 
     return {
-        "probe": "aether-vnext-prototype-history-warmup-v1",
+        "probe": "aether-vnext-prototype-history-warmup-v2",
         "as_of_utc": as_of.isoformat(),
         "assets": assets,
         "mutation_performed": False,
