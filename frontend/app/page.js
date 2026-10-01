@@ -446,8 +446,8 @@ function SettingsView({ ingress, strategy, discovery, operator, floor }) {
           <small>Cannot be enabled from this UI</small>
         </article>
         <article className="settingsCard">
-          <span>Deep trading runtime</span><strong>BTC · ETH</strong>
-          <small>Current commissioned execution lane · Top-100 priority cannot veto a valid setup</small>
+          <span>Deep trading runtime</span><strong>BTC · ETH + KRAKEN ROAMING</strong>
+          <small>Verified dynamic Kraken USD spot assets are scanned in bounded batches; Top-100 priority cannot veto a valid setup</small>
         </article>
         <article className="settingsCard">
           <span>Provider discovery</span><strong>{text(discovery?.last_result?.focus_count, "0")} FOCUSED</strong>
@@ -739,15 +739,18 @@ function ProviderFocusCard({ row }) {
   );
 }
 
-function ProviderDiscoveryBoard({ discovery }) {
+function ProviderDiscoveryBoard({ discovery, strategy }) {
   const rows = discoveryProviderRows(discovery);
   const totalCatalog = rows.reduce((sum, row) => sum + Number(row.catalog_count || 0), 0);
   const totalEligible = rows.reduce((sum, row) => sum + Number(row.eligible_count || 0), 0);
   const focusCount = Number(discovery?.last_result?.focus_count || 0);
   const scoutReceivedCount = Number(discovery?.last_result?.scout_received_count || 0);
-  const runtimeEvaluableCount = Number(discovery?.last_result?.runtime_evaluable_count || 0);
-  const runtimeRequirementsCount = Number(discovery?.last_result?.runtime_requirements_count || 0);
+  const strategyPipe = strategy?.last_result?.pipeline || {};
   const scoutIntakeCount = scoutReceivedCount;
+  const roamingBatch = Number(strategyPipe.roaming_batch || 0);
+  const marketReady = Number(strategyPipe.market_ready || 0);
+  const historyReady = Number(strategyPipe.history_ready || 0);
+  const strategyEvaluated = Number(strategyPipe.strategy_evaluated || 0);
   const running = Boolean(discovery?.running && !discovery?.last_error);
   return (
     <section className="floorSection providerDiscoveryBoard">
@@ -769,9 +772,15 @@ function ProviderDiscoveryBoard({ discovery }) {
         <i>→</i>
         <div><span>Focus pool</span><strong>{number(focusCount, 0)}</strong><small>max 100/provider</small></div>
         <i>→</i>
-        <div><span>Scout intake</span><strong>{number(scoutIntakeCount, 0)}</strong><small>all received · {number(runtimeEvaluableCount, 0)} immediately evaluable</small></div>
+        <div><span>Scout intake</span><strong>{number(scoutIntakeCount, 0)}</strong><small>all focused assets received</small></div>
         <i>→</i>
-        <div><span>Next seat</span><strong>SCOUT</strong><small>all focus items handed off</small></div>
+        <div><span>Roaming now</span><strong>{number(roamingBatch, 0)}</strong><small>bounded dynamic scan batch</small></div>
+        <i>→</i>
+        <div><span>Market ready</span><strong>{number(marketReady, 0)}</strong><small>current executable observation</small></div>
+        <i>→</i>
+        <div><span>History ready</span><strong>{number(historyReady, 0)}</strong><small>source-backed warm-up complete</small></div>
+        <i>→</i>
+        <div><span>Evaluated</span><strong>{number(strategyEvaluated, 0)}</strong><small>actual strategy pass this cycle</small></div>
       </div>
       <div className="providerFocusGrid">
         {rows.map((row) => <ProviderFocusCard row={row} key={row.provider} />)}
@@ -782,7 +791,7 @@ function ProviderDiscoveryBoard({ discovery }) {
         <span><b>SCOUT RECEIVED</b> handed into Scout immediately; missing runtime facts remain visible requirements, not holds</span>
       </div>
       <p className="providerDiscoveryLaw">
-        Provider ranking sets attention priority only. Every focused asset enters Scout. Only the intentional market, strategy, Risk, Clerk, Portfolio, instrument and PAPER-execution laws may stop downstream progression.
+        Provider ranking sets attention priority only. “Received” is not counted as “evaluated”: the live counters above show how many assets actually reached market, history and strategy evaluation this cycle. Intentional market, strategy, Risk, Clerk, Portfolio, instrument and PAPER-execution laws remain enforced.
       </p>
     </section>
   );
@@ -806,6 +815,13 @@ function PipelineView({ universe, queues, cockpits, operator, strategy, discover
   const focusCount = Number(discovery?.last_result?.focus_count || 0);
   const scoutReceivedCount = Number(discovery?.last_result?.scout_received_count || 0);
   const scoutIntakeCount = scoutReceivedCount;
+  const strategyPipe = strategy?.last_result?.pipeline || {};
+  const roamingBatch = Number(strategyPipe.roaming_batch || 0);
+  const marketReady = Number(strategyPipe.market_ready || 0);
+  const historyReady = Number(strategyPipe.history_ready || 0);
+  const strategyEvaluated = Number(strategyPipe.strategy_evaluated || 0);
+  const watchThisCycle = Number(strategyPipe.watch || 0);
+  const fireOrBeyond = Number(strategyPipe.fire_or_beyond || 0);
   const pipelineStatus = governor.count > 0 || governor.blockers > 0
     ? "GLOBAL HALT"
     : bottleneck
@@ -832,7 +848,7 @@ function PipelineView({ universe, queues, cockpits, operator, strategy, discover
         </div>
       </section>
 
-      <ProviderDiscoveryBoard discovery={discovery} />
+      <ProviderDiscoveryBoard discovery={discovery} strategy={strategy} />
 
       <section className="governorGate">
         <div>
@@ -880,9 +896,49 @@ function PipelineView({ universe, queues, cockpits, operator, strategy, discover
           <PipelineStage
             label="Scout Intake"
             owned="HANDOFF"
-            job="Hands every Top-100 focus item directly into Scout intake. Runtime requirements are reported separately and never act as a pre-Scout hold."
-            metricLabel="received by Scout"
+            job="Every focused asset reaches Scout intake. This is receipt only, not proof that the strategy evaluated the asset."
+            metricLabel="received"
             count={scoutIntakeCount}
+            tone="context"
+          />
+          <PipelineStage
+            label="Roaming Scan"
+            owned="SCOUT"
+            job="Bounded source-backed assets selected for real strategy work in the current cycle."
+            metricLabel="scanning now"
+            count={roamingBatch}
+            tone="context"
+          />
+          <PipelineStage
+            label="Market Ready"
+            owned="MARKET"
+            job="Assets in the roaming batch with a current executable canonical market observation."
+            metricLabel="market ready"
+            count={marketReady}
+            tone="context"
+          />
+          <PipelineStage
+            label="History Ready"
+            owned="HISTORY"
+            job="Assets with the required source-backed completed-bar warm-up for the unchanged strategy rules."
+            metricLabel="history ready"
+            count={historyReady}
+            tone="context"
+          />
+          <PipelineStage
+            label="Strategy Evaluated"
+            owned="SCOUT"
+            job="Assets that actually reached the crypto swing evaluator this cycle."
+            metricLabel="evaluated"
+            count={strategyEvaluated}
+            tone="context"
+          />
+          <PipelineStage
+            label="Natural Setup"
+            owned="WATCH/FIRE"
+            job="Natural setups produced by the configured strategy; no forced entries."
+            metricLabel="WATCH / FIRE+"
+            count={watchThisCycle + fireOrBeyond}
             tone="context"
           />
           {queueStages.map((stage) => (
@@ -965,10 +1021,13 @@ function PipelineView({ universe, queues, cockpits, operator, strategy, discover
         </section>
 
         <section className="floorSection">
-          <div className="sectionHead"><div><p className="eyebrow">SCANNER FEED</p><h2>Current BTC / ETH Decisions</h2></div></div>
+          <div className="sectionHead"><div><p className="eyebrow">SCANNER FEED</p><h2>Current Strategy Decisions</h2></div></div>
           <div className="strategyDecisionGrid">
             <StrategyDecision assetId="btc" row={strategy?.last_result?.assets?.btc} />
             <StrategyDecision assetId="eth" row={strategy?.last_result?.assets?.eth} />
+            {Object.entries(strategy?.last_result?.dynamic_assets || {}).slice(0, 8).map(([assetId, row]) => (
+              <StrategyDecision assetId={assetId} row={row} key={"dynamic-decision-" + assetId} />
+            ))}
           </div>
         </section>
       </section>
@@ -1143,7 +1202,8 @@ function DesktopCommandCenter({ floor, queues, cockpits, operator, ingress, stra
             ))}
           </div>
           <div className="desktopPipelineFooter">
-            <span><b>{Number(discovery?.last_result?.scout_received_count || 0)}/{text(discovery?.last_result?.focus_count, "0")}</b> Scout intake/focused</span>
+            <span><b>{Number(discovery?.last_result?.scout_received_count || 0)}/{text(discovery?.last_result?.focus_count, "0")}</b> received/focused</span>
+            <span><b>{Number(strategy?.last_result?.pipeline?.strategy_evaluated || 0)}</b> evaluated this cycle</span>
             <span><b>{queued}</b> queued</span>
             <span><b>{blockers}</b> blockers</span>
             <span><b>{cockpits.length}</b> open positions</span>
@@ -1167,12 +1227,15 @@ function DesktopCommandCenter({ floor, queues, cockpits, operator, ingress, stra
 
         <section className="desktopPanel strategyPanel">
           <div className="desktopPanelHead">
-            <div><span>SCANNER</span><strong>BTC / ETH now</strong></div>
+            <div><span>SCANNER</span><strong>Seed + dynamic roaming</strong></div>
             <b>NATURAL ONLY</b>
           </div>
           <div className="desktopStrategyStack">
             <StrategyDecision assetId="btc" row={strategyAssets.btc} />
             <StrategyDecision assetId="eth" row={strategyAssets.eth} />
+            {Object.entries(strategy?.last_result?.dynamic_assets || {}).slice(0, 6).map(([assetId, row]) => (
+              <StrategyDecision assetId={assetId} row={row} key={"desktop-dynamic-" + assetId} />
+            ))}
           </div>
         </section>
 
@@ -1206,9 +1269,9 @@ function MobileCommandStrip({ queues, cockpits, operator, ingress, strategy, dis
         <small>{bottleneck ? bottleneck.reason : "no bottleneck"}</small>
       </div>
       <div>
-        <span>Focus</span>
-        <strong>{Number(discovery?.last_result?.scout_ready_count || 0) + Number(discovery?.last_result?.scout_queued_count || 0)}/{text(discovery?.last_result?.focus_count, "0")}</strong>
-        <small>Scout intake / focused</small>
+        <span>Scout</span>
+        <strong>{Number(strategy?.last_result?.pipeline?.strategy_evaluated || 0)}/{text(discovery?.last_result?.scout_received_count, "0")}</strong>
+        <small>evaluated this cycle / received</small>
       </div>
       <div>
         <span>Open</span>
