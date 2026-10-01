@@ -6,13 +6,18 @@ authorize LIVE execution.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Iterable
 
 from sqlalchemy.engine import Connection
 
-from aether_vnext.playbooks import SEED_ASSET_CLUSTERS, cluster_for_asset
+from aether_vnext.playbooks import (
+    PlaybookSpec,
+    SEED_ASSET_CLUSTERS,
+    cluster_for_asset,
+    playbook,
+)
 from aether_vnext.registry import ProductRegistryRow, ProductType, SEED_REGISTRY
 from aether_vnext.registry_runtime import materialize_bound_registry_row
 from aether_vnext.seed_truth import BROKER_ACCOUNT_BY_BROKER
@@ -119,3 +124,40 @@ def runtime_cluster_map(
             continue
         mapping[asset_id] = runtime_cluster_for_product(product)
     return mapping
+
+
+
+def runtime_playbook_for_product(
+    product: ProductRegistryRow,
+    *,
+    playbook_id: str,
+) -> PlaybookSpec:
+    """Return an immutable runtime view of an existing playbook for a verified product.
+
+    The canonical playbook registry is never modified. Dynamic applicability is
+    deliberately narrow: source-backed Kraken USD spot crypto may use the existing
+    long-only crypto swing definition. All thresholds and risk laws remain unchanged.
+    """
+    spec = playbook(playbook_id)
+    asset_id = str(product.asset_id).strip().lower()
+    if asset_id in spec.allowed_assets:
+        return spec
+
+    if (
+        spec.playbook_id == "pb_crypto_swing_v1_2"
+        and product.product_type is ProductType.SPOT_CRYPTO
+        and product.broker == "Kraken"
+        and product.venue == "Kraken"
+        and str(product.quote_currency or "").upper() == "USD"
+        and str(product.settlement_currency or "").upper() == "USD"
+        and product.long_supported is True
+        and product.market_data_ready()
+    ):
+        return replace(
+            spec,
+            allowed_assets=(*spec.allowed_assets, asset_id),
+        )
+
+    raise RuntimeError(
+        f"playbook {spec.playbook_id} is not runtime-compatible with {asset_id}"
+    )

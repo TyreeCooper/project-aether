@@ -23,6 +23,7 @@ from aether_vnext.prototype_crypto_features import (
     PrototypeCryptoFeatureSnapshot,
     build_prototype_crypto_features,
 )
+from aether_vnext.playbooks import PlaybookSpec
 from aether_vnext.prototype_history_sources import KRAKEN_DAILY_SOURCE_ID
 from aether_vnext.prototype_market_history import PrototypeMarketBar
 from aether_vnext.volatility_percentile import (
@@ -74,10 +75,11 @@ def assemble_prototype_crypto_warmup(
     asset_kraken_daily: Sequence[PrototypeMarketBar],
     btc_kraken_daily: Sequence[PrototypeMarketBar],
     as_of_utc: datetime,
+    playbook_spec: PlaybookSpec | None = None,
 ) -> PrototypeCryptoWarmup:
     asset = str(asset_id).strip().lower()
-    if asset not in {"btc", "eth"}:
-        raise ValueError("prototype warm-up supports btc/eth only")
+    if not asset:
+        raise ValueError("asset_id is required")
     if as_of_utc.tzinfo is None:
         raise ValueError("as_of_utc must be timezone-aware")
 
@@ -156,6 +158,7 @@ def assemble_prototype_crypto_warmup(
         asset_daily_bars=asset_daily,
         btc_daily_bars=btc_daily,
         as_of_utc=trigger_close,
+        playbook_spec=playbook_spec,
     )
 
     return PrototypeCryptoWarmup(

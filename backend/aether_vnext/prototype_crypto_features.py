@@ -21,7 +21,7 @@ from typing import Sequence
 from aether_vnext.bar_features import PriorClosedBarRange, prior_closed_bar_range
 from aether_vnext.family_a import FamilyAEvaluation, FamilyAContext, evaluate_family_a_structure
 from aether_vnext.indicator_convention import atr14, ema20, ema50, realized_vol14
-from aether_vnext.playbooks import playbook
+from aether_vnext.playbooks import PlaybookSpec, playbook
 from aether_vnext.prototype_market_history import PrototypeMarketBar
 from aether_vnext.volatility_percentile import (
     VOLATILITY_PERCENTILE_CONVENTION_VERSION,
@@ -143,10 +143,16 @@ def build_prototype_crypto_features(
     asset_daily_bars: Sequence[PrototypeMarketBar],
     btc_daily_bars: Sequence[PrototypeMarketBar],
     as_of_utc: datetime,
+    playbook_spec: PlaybookSpec | None = None,
 ) -> PrototypeCryptoFeatureSnapshot:
     asset = str(asset_id).strip().lower()
-    if asset not in {"btc", "eth"}:
-        raise ValueError("prototype crypto features support btc/eth only")
+    if not asset:
+        raise ValueError("asset_id is required")
+    spec = playbook_spec or playbook(CRYPTO_PLAYBOOK_ID)
+    if spec.playbook_id != CRYPTO_PLAYBOOK_ID:
+        raise ValueError("prototype crypto features require crypto swing playbook")
+    if asset not in spec.allowed_assets:
+        raise ValueError("asset is not allowed by runtime crypto playbook")
 
     hourly = _pit_rows(
         hourly_bars,
@@ -183,7 +189,7 @@ def build_prototype_crypto_features(
     btc_close = float(btc_daily[-1].close)
 
     evaluation = evaluate_family_a_structure(
-        playbook(CRYPTO_PLAYBOOK_ID),
+        spec,
         asset_id=asset,
         side="long",
         context=FamilyAContext(

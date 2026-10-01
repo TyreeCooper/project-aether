@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+from aether_vnext.dynamic_products import project_kraken_spot_product
 from aether_vnext.domain import (
     CalendarState,
     MarketObservation,
@@ -15,6 +16,8 @@ from aether_vnext.prototype_crypto_entry_plan import (
     prototype_entry_ids,
 )
 from aether_vnext.prototype_crypto_features import PrototypeCryptoFeatureSnapshot
+from aether_vnext.registry import register_runtime_product, unregister_runtime_product
+from aether_vnext.runtime_product_policy import runtime_playbook_for_product
 from aether_vnext.volatility_percentile import VolatilityPercentileSnapshot
 
 
@@ -139,3 +142,99 @@ def test_entry_ids_are_deterministic_per_closed_bar() -> None:
     assert left == right
     assert left.setup_id != later.setup_id
     assert left.event_id("risk") == right.event_id("risk")
+
+
+
+def test_dynamic_kraken_entry_plan_reuses_same_crypto_swing_contract() -> None:
+    asset_id = "kraken:solusd"
+    projection = project_kraken_spot_product(
+        {
+            "provider": "Kraken",
+            "symbol": "SOL/USD",
+            "execution_symbol": "SOLUSD",
+            "asset_class": "spot_crypto",
+            "base_currency": "SOL",
+            "quote_currency": "USD",
+            "quantity_step": 0.001,
+            "minimum_quantity": 0.02,
+            "minimum_notional": 0.5,
+            "tick_size": 0.0001,
+        },
+        primary_market_source_id="kraken_public",
+        stale_threshold_ms=15000,
+    )
+    assert projection.product is not None
+    spec = runtime_playbook_for_product(
+        projection.product,
+        playbook_id="pb_crypto_swing_v1_2",
+    )
+    vol = VolatilityPercentileSnapshot(
+        asset_id=asset_id,
+        interval=timedelta(hours=1),
+        trigger_close_utc=T0,
+        window_start_utc=T0 - timedelta(days=90),
+        window_end_exclusive_utc=T0,
+        current_realized_vol14=0.01,
+        reference_count=2160,
+        less_count=1296,
+        equal_count=0,
+        percentile=60.0,
+    )
+    family = FamilyAEvaluation(
+        playbook_id="pb_crypto_swing_v1_2",
+        asset_id=asset_id,
+        side="long",
+        definition_enabled=True,
+        regime_eligible=True,
+        structure_rule=True,
+        dependency_ok=True,
+    )
+    feature = PrototypeCryptoFeatureSnapshot(
+        asset_id=asset_id,
+        trigger_close_utc=T0,
+        close=150.0,
+        atr14=5.0,
+        prior_20h_high=148.0,
+        prior_20h_low=135.0,
+        daily_ema20=145.0,
+        daily_ema50=140.0,
+        btc_daily_close=101_000.0,
+        btc_daily_ema50=98_000.0,
+        volatility=vol,
+        family_a=family,
+    )
+    obs = MarketObservation(
+        observation_id="obs-sol-plan",
+        asset_id=asset_id,
+        venue="Kraken",
+        bid=149.9,
+        ask=150.1,
+        last=150.0,
+        mark=150.0,
+        source="kraken_public",
+        exchange_ts=T0 + timedelta(seconds=1),
+        received_ts=T0 + timedelta(seconds=1),
+        age_ms=0,
+        spread_abs=0.2,
+        spread_bps=(0.2 / 150.0) * 10_000.0,
+        session_state=SessionState.ACTIVE,
+        quality_state=QualityState.HEALTHY,
+        fallback_reason=None,
+        calendar_state=CalendarState.ALWAYS_OPEN,
+        data_version="test",
+    )
+    register_runtime_product(projection.product)
+    try:
+        plan = build_prototype_crypto_entry_plan(
+            feature=feature,
+            current_observation=obs,
+            as_of_utc=T0 + timedelta(seconds=2),
+            playbook_spec=spec,
+        )
+    finally:
+        unregister_runtime_product(asset_id)
+    assert plan.eligible is True
+    assert plan.reason == "family_a_watch"
+    assert plan.runtime_decision.watch_candidates[0].asset_id == asset_id
+    assert plan.exit_plan is not None
+    assert plan.estimated_cost_per_unit is not None

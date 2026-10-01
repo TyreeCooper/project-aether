@@ -4,6 +4,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from aether_vnext.dynamic_products import project_kraken_spot_product
+from aether_vnext.runtime_product_policy import runtime_playbook_for_product
+
 from aether_vnext.prototype_crypto_features import (
     CRYPTO_BREAKOUT_LOOKBACK_BARS,
     build_prototype_crypto_features,
@@ -188,3 +191,66 @@ def test_feature_boundary_rejects_future_or_unavailable_bar() -> None:
             btc_daily_bars=daily,
             as_of_utc=hourly[-1].bucket_open_utc,
         )
+
+
+
+def test_dynamic_kraken_asset_uses_same_crypto_feature_parameters() -> None:
+    asset_id = "kraken:solusd"
+    hourly = _bars(
+        asset_id=asset_id,
+        interval=timedelta(hours=1),
+        count=(24 * 91) + 20,
+        start=START,
+        base=140.0,
+        drift=0.01,
+        last_jump=10.0,
+    )
+    asset_daily = _bars(
+        asset_id=asset_id,
+        interval=timedelta(days=1),
+        count=120,
+        start=START - timedelta(days=120),
+        base=100.0,
+        drift=0.5,
+    )
+    btc_daily = _bars(
+        asset_id="btc",
+        interval=timedelta(days=1),
+        count=120,
+        start=START - timedelta(days=120),
+        base=80_000.0,
+        drift=100.0,
+    )
+    projection = project_kraken_spot_product(
+        {
+            "provider": "Kraken",
+            "symbol": "SOL/USD",
+            "execution_symbol": "SOLUSD",
+            "asset_class": "spot_crypto",
+            "base_currency": "SOL",
+            "quote_currency": "USD",
+            "quantity_step": 0.001,
+            "minimum_quantity": 0.02,
+            "minimum_notional": 0.5,
+            "tick_size": 0.0001,
+        },
+        primary_market_source_id="kraken_public",
+        stale_threshold_ms=15000,
+    )
+    assert projection.product is not None
+    spec = runtime_playbook_for_product(
+        projection.product,
+        playbook_id=CRYPTO_PLAYBOOK_ID,
+    )
+    out = build_prototype_crypto_features(
+        asset_id=asset_id,
+        hourly_bars=hourly,
+        asset_daily_bars=asset_daily,
+        btc_daily_bars=btc_daily,
+        as_of_utc=hourly[-1].bucket_close_utc,
+        playbook_spec=spec,
+    )
+    assert out.asset_id == asset_id
+    assert out.prior_20h_high == max(bar.high for bar in hourly[-21:-1])
+    assert out.daily_ema20 > out.daily_ema50
+    assert out.btc_daily_close > out.btc_daily_ema50

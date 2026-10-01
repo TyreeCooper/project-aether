@@ -1,3 +1,4 @@
+from aether_vnext.playbooks import playbook
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -11,6 +12,7 @@ from aether_vnext.runtime_product_policy import (
     resolve_runtime_product,
     runtime_cluster_for_product,
     runtime_cluster_map,
+    runtime_playbook_for_product,
 )
 from aether_vnext.store import VNextStore
 from tests_vnext.runtime_registry_support import record_test_runtime_binding
@@ -142,3 +144,24 @@ def test_unknown_product_has_no_fabricated_runtime_policy() -> None:
         assert "paper broker account not bound" in str(exc)
     else:
         raise AssertionError("unsupported broker must not get a paper sleeve")
+
+
+
+def test_dynamic_kraken_spot_gets_transient_crypto_swing_view_without_registry_mutation() -> None:
+    projection = project_kraken_spot_product(
+        _dynamic_row(),
+        primary_market_source_id="kraken_public",
+        stale_threshold_ms=15000,
+    )
+    assert projection.product is not None
+    runtime = runtime_playbook_for_product(
+        projection.product,
+        playbook_id="pb_crypto_swing_v1_2",
+    )
+    canonical = playbook("pb_crypto_swing_v1_2")
+    assert "kraken:solusd" in runtime.allowed_assets
+    assert "kraken:solusd" not in canonical.allowed_assets
+    assert runtime.version == canonical.version
+    assert runtime.allowed_sides == canonical.allowed_sides
+    assert runtime.horizon == canonical.horizon
+    assert runtime.mechanism_class == canonical.mechanism_class

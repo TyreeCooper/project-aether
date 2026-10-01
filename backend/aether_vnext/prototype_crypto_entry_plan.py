@@ -19,7 +19,7 @@ from aether_vnext.freeze import CONFIGURATION_HASH
 from aether_vnext.playbook_engine import ClosedBarRuntimeDecision, resolve_closed_bar_runtime
 from aether_vnext.playbook_exits import ExitGeometry, build_exit_geometry
 from aether_vnext.playbook_runtime import volatility_band
-from aether_vnext.playbooks import playbook
+from aether_vnext.playbooks import PlaybookSpec, playbook
 from aether_vnext.prototype_crypto_features import PrototypeCryptoFeatureSnapshot
 from aether_vnext.regime import RegimeTags
 from aether_vnext.registry import registry_row
@@ -94,8 +94,8 @@ def prototype_entry_ids(
     if trigger_close_utc.tzinfo is None:
         raise ValueError("trigger_close_utc must be timezone-aware")
     asset = str(asset_id).strip().lower()
-    if asset not in {"btc", "eth"}:
-        raise ValueError("prototype entry IDs support btc/eth only")
+    if not asset:
+        raise ValueError("asset_id is required")
     return PrototypeEntryIds(
         firm_event_id=_stable_id("firm", asset_id=asset, trigger_close_utc=trigger_close_utc),
         setup_id=_stable_id("setup", asset_id=asset, trigger_close_utc=trigger_close_utc),
@@ -170,12 +170,18 @@ def build_prototype_crypto_entry_plan(
     feature: PrototypeCryptoFeatureSnapshot,
     current_observation: MarketObservation,
     as_of_utc: datetime,
+    playbook_spec: PlaybookSpec | None = None,
 ) -> PrototypeCryptoEntryPlan:
     if as_of_utc.tzinfo is None:
         raise ValueError("as_of_utc must be timezone-aware")
-    asset = feature.asset_id
-    if asset not in {"btc", "eth"}:
-        raise ValueError("prototype entry supports btc/eth only")
+    asset = str(feature.asset_id).strip().lower()
+    if not asset:
+        raise ValueError("asset_id is required")
+    spec = playbook_spec or playbook(PROTOTYPE_CRYPTO_PLAYBOOK_ID)
+    if spec.playbook_id != PROTOTYPE_CRYPTO_PLAYBOOK_ID:
+        raise ValueError("prototype entry requires crypto swing playbook")
+    if asset not in spec.allowed_assets:
+        raise ValueError("asset is not allowed by runtime crypto playbook")
     if current_observation.asset_id != asset:
         raise ValueError("current observation asset mismatch")
     if feature.trigger_close_utc > as_of_utc:
@@ -253,7 +259,7 @@ def build_prototype_crypto_entry_plan(
         position_side="long",
     )
     geometry = build_exit_geometry(
-        playbook(PROTOTYPE_CRYPTO_PLAYBOOK_ID),
+        spec,
         side="long",
         entry_price=entry,
         atr=feature.atr14,
