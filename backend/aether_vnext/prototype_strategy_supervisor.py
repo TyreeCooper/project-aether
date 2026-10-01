@@ -1002,20 +1002,28 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                             product,
                             playbook_id="pb_crypto_swing_v1_2",
                         )
-                        hourly = load_prototype_market_bars(
-                            sync_conn,
-                            store,
-                            asset_id=asset_id,
-                            interval_seconds=3600,
-                            end_at_utc=decision_at_utc,
-                        )
-                        asset_daily = load_prototype_market_bars(
-                            sync_conn,
-                            store,
-                            asset_id=asset_id,
-                            interval_seconds=86400,
-                            end_at_utc=decision_at_utc,
-                        )
+                    except Exception as exc:
+                        dynamic_results[asset_id] = {
+                            "stage": "EVALUATION_ERROR",
+                            "reason": f"playbook:{type(exc).__name__}:{exc}",
+                        }
+                        continue
+
+                    hourly = load_prototype_market_bars(
+                        sync_conn,
+                        store,
+                        asset_id=asset_id,
+                        interval_seconds=3600,
+                        end_at_utc=decision_at_utc,
+                    )
+                    asset_daily = load_prototype_market_bars(
+                        sync_conn,
+                        store,
+                        asset_id=asset_id,
+                        interval_seconds=86400,
+                        end_at_utc=decision_at_utc,
+                    )
+                    try:
                         warmup = assemble_prototype_crypto_warmup(
                             asset_id=asset_id,
                             coinbase_hourly=tuple(
@@ -1041,7 +1049,15 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                             as_of_utc=decision_at_utc,
                             playbook_spec=spec,
                         )
-                        feature = warmup.feature_snapshot
+                    except Exception as exc:
+                        dynamic_results[asset_id] = {
+                            "stage": "HISTORY_NOT_READY",
+                            "reason": f"warmup:{type(exc).__name__}:{exc}",
+                        }
+                        continue
+
+                    feature = warmup.feature_snapshot
+                    try:
                         plan = build_prototype_crypto_entry_plan(
                             feature=feature,
                             current_observation=observation,
@@ -1051,7 +1067,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     except Exception as exc:
                         dynamic_results[asset_id] = {
                             "stage": "EVALUATION_ERROR",
-                            "reason": f"{type(exc).__name__}:{exc}",
+                            "reason": f"plan:{type(exc).__name__}:{exc}",
                         }
                         continue
 
@@ -1080,7 +1096,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                             current_observations=observations,
                             as_of_utc=decision_at_utc,
                         )
-                        dynamic_results[asset_id] = {
+                        dynamic_result = {
                             **asdict(advanced),
                             "watch_eligible": feature.watch_eligible,
                             "volatility_percentile": (
@@ -1088,6 +1104,39 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                             ),
                             "coinbase_product": history.coinbase_product,
                         }
+                        if advanced.stage == "NO_SETUP":
+                            observation_new = (
+                                persist_prototype_no_setup_observation(
+                                    sync_conn,
+                                    store,
+                                    paper_epoch_id=EXPECTED_EPOCH,
+                                    asset_id=asset_id,
+                                    trigger_close_utc=(
+                                        feature.trigger_close_utc
+                                    ),
+                                    evaluated_at_utc=decision_at_utc,
+                                    market_observation_id=(
+                                        observation.observation_id
+                                    ),
+                                    reason=advanced.reason,
+                                    watch_eligible=feature.watch_eligible,
+                                    volatility_percentile=(
+                                        feature.volatility.percentile
+                                    ),
+                                    setup_id=advanced.setup_id,
+                                    ticket_id=advanced.ticket_id,
+                                    order_intent_id=(
+                                        advanced.order_intent_id
+                                    ),
+                                )
+                            )
+                            dynamic_result[
+                                "forward_paper_observation_recorded"
+                            ] = True
+                            dynamic_result[
+                                "forward_paper_observation_new"
+                            ] = observation_new
+                        dynamic_results[asset_id] = dynamic_result
                     except Exception as exc:
                         dynamic_results[asset_id] = {
                             "stage": "PIPELINE_ERROR",
