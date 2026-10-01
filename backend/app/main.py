@@ -31,6 +31,7 @@ from app.vnext_runtime_mode import (
     configured_vnext_runtime_only,
     validate_vnext_runtime_only_environment,
 )
+from app.vnext_operator import mount_configured_vnext_operator
 from app.vnext_ingress import (
     mount_vnext_ingress_status,
     start_configured_vnext_ingress,
@@ -106,6 +107,7 @@ app.add_middleware(
 mount_configured_vnext_shadow_floor(app)
 mount_vnext_ingress_status(app)
 mount_vnext_strategy_status(app)
+mount_configured_vnext_operator(app)
 
 
 @app.middleware("http")

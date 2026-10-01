@@ -6,6 +6,7 @@ const apiBase = process.env.NEXT_PUBLIC_API_BASE || "";
 const floorPath = process.env.NEXT_PUBLIC_AETHER_FLOOR_PATH || "/api/v1/vnext/floor";
 const ingressPath = "/api/v1/vnext/ingress-runtime";
 const strategyPath = "/api/v1/vnext/strategy-runtime";
+const operatorPath = "/api/v1/vnext/operator";
 
 async function getJson(path) {
   const response = await fetch(`${apiBase}${path}`, { cache: "no-store" });
@@ -195,13 +196,374 @@ function Cockpit({ cockpit }) {
   );
 }
 
+
+const VIEW_META = {
+  floor: { title: "Unified Firm Floor", subtitle: "Command central for the autonomous PAPER firm." },
+  assets: { title: "Assets", subtitle: "Live stations, strategy state and canonical blockers." },
+  live: { title: "Live Trades", subtitle: "Open PAPER positions, setup watch and runtime activity." },
+  blotter: { title: "Blotter", subtitle: "Completed round trips in the current paper-test epoch." },
+  booth: { title: "Booth", subtitle: "Operator visibility, system health and safety state." },
+  settings: { title: "Settings", subtitle: "Prototype runtime, data and safety configuration." },
+};
+
+function durationLabel(openedAt, nowMs) {
+  const started = Date.parse(openedAt || "");
+  if (!Number.isFinite(started)) return "—";
+  const seconds = Math.max(0, Math.floor((nowMs - started) / 1000));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainder = seconds % 60;
+  if (hours > 0) return hours + "h " + minutes + "m " + remainder + "s";
+  if (minutes > 0) return minutes + "m " + remainder + "s";
+  return remainder + "s";
+}
+
+function money(value, fallback = "—") {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  const sign = parsed < 0 ? "-$" : "$";
+  return sign + Math.abs(parsed).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function BankStrip({ operator }) {
+  const bank = operator?.bank || {};
+  const test = operator?.paper_test || {};
+  return (
+    <section className="bankStrip" aria-label="Paper bank">
+      <div><span>Starting bank</span><strong>{money(test.seed_bank_usd)}</strong></div>
+      <div><span>Book cash</span><strong>{money(bank.book_cash_usd)}</strong></div>
+      <div><span>Available</span><strong>{money(bank.cash_available_usd)}</strong></div>
+      <div><span>Reserved</span><strong>{money(bank.cash_reserved_usd)}</strong></div>
+      <div><span>Realized P&amp;L</span><strong className={Number(bank.realized_pnl_usd) < 0 ? "lossText" : Number(bank.realized_pnl_usd) > 0 ? "gainText" : ""}>{money(bank.realized_pnl_usd, "$0.00")}</strong></div>
+      <div><span>Fees</span><strong>{money(bank.fees_accrued_usd, "$0.00")}</strong></div>
+    </section>
+  );
+}
+
+function ActivityFeed({ rows, limit = 30 }) {
+  const items = (rows || []).slice(0, limit);
+  if (!items.length) return <Empty>No vNext Firm events in the current test epoch yet.</Empty>;
+  return (
+    <div className="activityFeed">
+      {items.map((row) => (
+        <article className="activityRow" key={row.event_id}>
+          <time>{timestamp(row.created_at_utc, "—")}</time>
+          <div>
+            <strong>{text(row.seat, "Firm")} · {text(row.new_state, "EVENT")}</strong>
+            <span>{text(row.aggregate_type, "event")} · {text(row.reason_code, "recorded")}</span>
+          </div>
+          <small>{text(row.aggregate_id)}</small>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function AssetsView({ universe, selectedAsset, onSelect, strategyAssets }) {
+  return (
+    <section className="appView">
+      <div className="pageLead">
+        <p className="eyebrow">ASSET DESKS</p>
+        <h2>Prototype Stations</h2>
+        <p>BTC and ETH are the commissioned autonomous prototype assets. Other Firm stations remain fail-closed until their providers are commissioned.</p>
+      </div>
+      <div className="universeGrid">
+        {universe.map((station) => (
+          <div className="assetStationWrap" key={station.asset_id}>
+            <UniverseCard
+              station={station}
+              selected={station.asset_id === selectedAsset}
+              onSelect={onSelect}
+            />
+            {strategyAssets?.[station.asset_id] ? (
+              <div className="assetStrategyLine">
+                <span>Strategy</span>
+                <b>{text(strategyAssets[station.asset_id].stage, "WAITING")}</b>
+                <small>{text(strategyAssets[station.asset_id].reason, "—")}</small>
+              </div>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function LiveTradesView({ cockpits, strategyAssets, strategy, activity, nowMs }) {
+  return (
+    <section className="appView">
+      <div className="heroGrid compactHero">
+        <article><span>Open trades</span><strong>{cockpits.length}</strong></article>
+        <article><span>Strategy cycle</span><strong>#{text(strategy?.cycle_count, "0")}</strong></article>
+        <article><span>Last scan</span><strong>{timestamp(strategy?.last_cycle_finished_at_utc, "waiting")}</strong></article>
+        <article><span>Execution</span><strong>PAPER</strong><small>LIVE BLOCKED</small></article>
+      </div>
+
+      <section className="floorSection">
+        <div className="sectionHead">
+          <div><p className="eyebrow">IN-FLIGHT EXECUTION</p><h2>Active Trade Cockpits</h2></div>
+          <span>Timers update every second</span>
+        </div>
+        {cockpits.length ? (
+          <div className="liveCockpitGrid">
+            {cockpits.map((row) => (
+              <article className="liveTradeCard" key={row.position_key}>
+                <div className="tradeCardHead">
+                  <div><strong>{row.asset_id?.toUpperCase()}</strong><span>{text(row.horizon)} · {text(row.side)}</span></div>
+                  <span className="state good">OPEN</span>
+                </div>
+                <div className="tradeTimer">{durationLabel(row.opened_at_utc, nowMs)}</div>
+                <dl className="tradeMetrics">
+                  <div><dt>Entry</dt><dd>{number(row.average_entry_price, 8)}</dd></div>
+                  <div><dt>Mark</dt><dd>{number(row.mark_price, 8)}</dd></div>
+                  <div><dt>Qty</dt><dd>{number(row.quantity, 8)}</dd></div>
+                  <div><dt>Hard stop</dt><dd>{number(row.hard_stop_price, 8)}</dd></div>
+                </dl>
+              </article>
+            ))}
+          </div>
+        ) : <Empty>No open PAPER trades. AETHER is scanning for a natural setup.</Empty>}
+      </section>
+
+      <section className="split">
+        <section className="floorSection">
+          <div className="sectionHead"><div><p className="eyebrow">SETUP WATCH</p><h2>What AETHER Sees Now</h2></div></div>
+          <div className="strategyDecisionGrid">
+            <StrategyDecision assetId="btc" row={strategyAssets.btc} />
+            <StrategyDecision assetId="eth" row={strategyAssets.eth} />
+          </div>
+        </section>
+        <section className="floorSection">
+          <div className="sectionHead"><div><p className="eyebrow">BOT ACTIVITY</p><h2>Firm Event Stream</h2></div></div>
+          <ActivityFeed rows={activity} limit={16} />
+        </section>
+      </section>
+    </section>
+  );
+}
+
+function BlotterView({ rows }) {
+  return (
+    <section className="appView">
+      <div className="pageLead">
+        <p className="eyebrow">COMPLETED ROUND TRIPS</p>
+        <h2>Blotter</h2>
+        <p>Current paper-test epoch only. One row per completed trade.</p>
+      </div>
+      {rows?.length ? (
+        <div className="blotterWrap">
+          <table className="blotterTable">
+            <thead>
+              <tr>
+                <th>Closed</th><th>Asset</th><th>Side</th><th>Qty</th><th>Entry</th><th>Exit</th><th>Duration</th><th>Gross</th><th>Fees</th><th>Net</th><th>MFE</th><th>MAE</th><th>Exit reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.trade_id}>
+                  <td>{timestamp(row.closed_at_utc, "—")}</td>
+                  <td><strong>{text(row.asset_id).toUpperCase()}</strong></td>
+                  <td>{text(row.side)}</td>
+                  <td>{number(row.quantity, 8)}</td>
+                  <td>{number(row.avg_entry_price, 8)}</td>
+                  <td>{number(row.exit_price, 8)}</td>
+                  <td>{durationLabel(row.closed_at_utc ? new Date(Date.parse(row.closed_at_utc) - Number(row.duration_s || 0) * 1000).toISOString() : null, Date.parse(row.closed_at_utc || ""))}</td>
+                  <td>{money(row.gross_pnl_usd)}</td>
+                  <td>{money(row.fees_usd)}</td>
+                  <td className={Number(row.net_pnl_usd) < 0 ? "lossText" : Number(row.net_pnl_usd) > 0 ? "gainText" : ""}>{money(row.net_pnl_usd)}</td>
+                  <td>{money(row.mfe_usd)}</td>
+                  <td>{money(row.mae_usd)}</td>
+                  <td>{text(row.exit_reason)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : <Empty>No completed trades in the new-system test epoch yet.</Empty>}
+    </section>
+  );
+}
+
+function BoothView({ floor, ingress, strategy, operator }) {
+  const build = floor?.build || {};
+  return (
+    <section className="appView">
+      <div className="pageLead">
+        <p className="eyebrow">OPERATOR CONTROL ROOM</p>
+        <h2>Booth</h2>
+        <p>Read-only prototype operations. Trade authority remains server-side.</p>
+      </div>
+      <div className="settingsGrid">
+        <article className="settingsCard">
+          <span>Market ingress</span><strong>{ingress?.running ? "RUNNING" : "OFF"}</strong>
+          <small>Cycle #{text(ingress?.cycle_count, "0")} · {text(ingress?.last_error, "no error")}</small>
+        </article>
+        <article className="settingsCard">
+          <span>Strategy worker</span><strong>{strategy?.running ? "RUNNING" : "OFF"}</strong>
+          <small>Cycle #{text(strategy?.cycle_count, "0")} · {text(strategy?.last_error, "no error")}</small>
+        </article>
+        <article className="settingsCard">
+          <span>Execution mode</span><strong>PAPER ONLY</strong>
+          <small>LIVE execution hard blocked</small>
+        </article>
+        <article className="settingsCard">
+          <span>Build</span><strong>{text(build.source_revision?.slice(0, 12), "local")}</strong>
+          <small>App restarted {timestamp(floor?.runtime_started_at_utc, "waiting")}</small>
+        </article>
+        <article className="settingsCard">
+          <span>Paper epoch</span><strong>{text(operator?.paper_test?.epoch_id, "not started")}</strong>
+          <small>Seed {money(operator?.paper_test?.seed_bank_usd)}</small>
+        </article>
+        <article className="settingsCard">
+          <span>Authority</span><strong>READ ONLY UI</strong>
+          <small>No legacy fallback · no order mutation controls</small>
+        </article>
+      </div>
+    </section>
+  );
+}
+
+function SettingsView({ ingress, strategy, operator, floor }) {
+  return (
+    <section className="appView">
+      <div className="pageLead">
+        <p className="eyebrow">APP CONFIGURATION</p>
+        <h2>Settings</h2>
+        <p>Current prototype configuration. Locked safety laws are intentionally not editable.</p>
+      </div>
+      <div className="settingsGrid">
+        <article className="settingsCard">
+          <span>Trading mode</span><strong>PAPER</strong>
+          <small>Natural setups only · forced entries OFF</small>
+        </article>
+        <article className="settingsCard">
+          <span>Live execution</span><strong className="lossText">HARD BLOCKED</strong>
+          <small>Cannot be enabled from this UI</small>
+        </article>
+        <article className="settingsCard">
+          <span>Commissioned assets</span><strong>BTC · ETH</strong>
+          <small>Kraken public market data</small>
+        </article>
+        <article className="settingsCard">
+          <span>Ingress interval</span><strong>{number(ingress?.interval_seconds, 0)}s</strong>
+          <small>UI polls runtime telemetry every 5s</small>
+        </article>
+        <article className="settingsCard">
+          <span>Strategy interval</span><strong>{number(strategy?.interval_seconds, 0)}s</strong>
+          <small>Completed-bar strategy evaluation</small>
+        </article>
+        <article className="settingsCard">
+          <span>Forward-paper observations</span><strong>{text(strategy?.last_result?.forward_paper_observation_count, "0")}</strong>
+          <small>Operational audit only · Phase 18 false</small>
+        </article>
+        <article className="settingsCard">
+          <span>Database</span><strong>vNext BURN-IN</strong>
+          <small>{text(operator?.bank?.ledger_count, "0")} isolated sleeve ledger(s)</small>
+        </article>
+        <article className="settingsCard">
+          <span>Source revision</span><strong>{text(floor?.build?.source_revision?.slice(0, 12), "local")}</strong>
+          <small>No legacy trading-state fallback</small>
+        </article>
+      </div>
+      <section className="lockedLaw">
+        <strong>LOCKED SAFETY LAWS</strong>
+        <span>Valid market data · capital/risk admission · instrument caps · PAPER-only execution · LIVE hard block.</span>
+      </section>
+    </section>
+  );
+}
+
+function AppSubview({ activeView, universe, selectedAsset, onSelectAsset, cockpits, strategyAssets, strategy, ingress, operator, floor, nowMs }) {
+  if (activeView === "assets") {
+    return <AssetsView universe={universe} selectedAsset={selectedAsset} onSelect={onSelectAsset} strategyAssets={strategyAssets} />;
+  }
+  if (activeView === "live") {
+    return <LiveTradesView cockpits={cockpits} strategyAssets={strategyAssets} strategy={strategy} activity={operator?.activity || []} nowMs={nowMs} />;
+  }
+  if (activeView === "blotter") {
+    return <BlotterView rows={operator?.blotter || []} />;
+  }
+  if (activeView === "booth") {
+    return <BoothView floor={floor} ingress={ingress} strategy={strategy} operator={operator} />;
+  }
+  if (activeView === "settings") {
+    return <SettingsView ingress={ingress} strategy={strategy} operator={operator} floor={floor} />;
+  }
+  return null;
+}
+
+function BottomDock({ activeView, onNavigate }) {
+  const items = [
+    ["floor", "⌂", "Floor"],
+    ["assets", "◉", "Assets"],
+    ["live", "⌁", "Live"],
+    ["blotter", "≡", "Blotter"],
+    ["booth", "◇", "Booth"],
+  ];
+  return (
+    <nav className="bottomDock" aria-label="Primary">
+      {items.map(([id, icon, label]) => (
+        <button type="button" className={activeView === id ? "on" : ""} onClick={() => onNavigate(id)} key={id}>
+          <span className="dockIcon" aria-hidden="true">{icon}</span>
+          <span>{label}</span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+function AppMenu({ open, activeView, onClose, onNavigate, floor, ingress, strategy }) {
+  return (
+    <>
+      <button type="button" className={"menuScrim " + (open ? "open" : "")} onClick={onClose} aria-label="Close menu" />
+      <aside className={"appMenu " + (open ? "open" : "")} aria-label="AETHER menu">
+        <div className="appMenuHead">
+          <div><p className="eyebrow">AETHER</p><h2>Menu</h2></div>
+          <button type="button" onClick={onClose} aria-label="Close menu">×</button>
+        </div>
+        {[
+          ["settings", "⚙", "Settings", "Runtime, data and safety"],
+          ["floor", "⌂", "The Floor", "Portfolio command overview"],
+          ["live", "●", "Live Trades", "Positions, setup watch and activity"],
+          ["blotter", "≡", "Blotter", "Completed PAPER trades"],
+          ["assets", "◉", "Assets", "Prototype trading stations"],
+          ["booth", "◇", "Booth", "System health and operator visibility"],
+        ].map(([id, icon, label, description]) => (
+          <button
+            type="button"
+            className={"appMenuItem " + (activeView === id ? "on" : "")}
+            key={id}
+            onClick={() => { onNavigate(id); onClose(); }}
+          >
+            <span>{icon}</span>
+            <span><b>{label}</b><small>{description}</small></span>
+            <span>›</span>
+          </button>
+        ))}
+        <div className="appMenuStatus">
+          <span className={ingress?.running ? "state good" : "state bad"}>INGRESS {ingress?.running ? "RUNNING" : "OFF"}</span>
+          <span className={strategy?.running ? "state good" : "state bad"}>STRATEGY {strategy?.running ? "RUNNING" : "OFF"}</span>
+          <small>Build {text(floor?.build?.source_revision?.slice(0, 8), "local")}</small>
+        </div>
+      </aside>
+    </>
+  );
+}
+
 export default function DashboardPage() {
   const [floor, setFloor] = useState(null);
   const [ingress, setIngress] = useState(null);
   const [strategy, setStrategy] = useState(null);
+  const [operator, setOperator] = useState(null);
   const [error, setError] = useState("");
   const [runtimeError, setRuntimeError] = useState("");
+  const [operatorError, setOperatorError] = useState("");
   const [selectedAsset, setSelectedAsset] = useState(null);
+  const [activeView, setActiveView] = useState("floor");
+  const [menuOpen, setMenuOpen] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [quoteMoves, setQuoteMoves] = useState({});
   const previousQuotePrices = useRef({});
@@ -215,10 +577,11 @@ export default function DashboardPage() {
     let mounted = true;
     const load = async () => {
       try {
-        const [floorResult, ingressResult, strategyResult] = await Promise.allSettled([
+        const [floorResult, ingressResult, strategyResult, operatorResult] = await Promise.allSettled([
           getJson(floorPath),
           getJson(ingressPath),
           getJson(strategyPath),
+          getJson(operatorPath),
         ]);
         if (!mounted) return;
 
@@ -260,6 +623,12 @@ export default function DashboardPage() {
           setIngress(nextIngress);
         }
         if (strategyResult.status === "fulfilled") setStrategy(strategyResult.value);
+        if (operatorResult.status === "fulfilled") {
+          setOperator(operatorResult.value);
+          setOperatorError("");
+        } else {
+          setOperatorError("vNext operator data is temporarily unavailable.");
+        }
         setRuntimeError(
           ingressResult.status === "rejected" || strategyResult.status === "rejected"
             ? "One or more autonomous runtime telemetry endpoints are unavailable."
@@ -269,6 +638,7 @@ export default function DashboardPage() {
         if (mounted) {
           setError("Canonical vNext Floor endpoint unavailable.");
           setRuntimeError("Autonomous runtime telemetry unavailable.");
+          setOperatorError("vNext operator data is temporarily unavailable.");
         }
       }
     };
@@ -303,14 +673,23 @@ export default function DashboardPage() {
   );
   const marketRunning = Boolean(ingress?.enabled && ingress?.running && !ingress?.last_error);
   const nextStrategyScan = strategyCountdown(strategy, nowMs);
+  const viewMeta = VIEW_META[activeView] || VIEW_META.floor;
+  const navigate = (view) => {
+    setActiveView(view);
+    if (view !== "assets") setSelectedAsset(null);
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+  };
 
   return (
     <main className="floorShell">
       <header className="floorHeader">
-        <div>
-          <p className="eyebrow">PROJECT AETHER · FIRM</p>
-          <h1>Unified Firm Floor</h1>
-          <p className="subtle">One Firm. Full universe. Canonical seat ownership.</p>
+        <div className="headerIdentity">
+          <button type="button" className="menuButton" onClick={() => setMenuOpen(true)} aria-label="Open AETHER menu">☰</button>
+          <div>
+            <p className="eyebrow">PROJECT AETHER · FIRM</p>
+            <h1>{viewMeta.title}</h1>
+            <p className="subtle">{viewMeta.subtitle}</p>
+          </div>
         </div>
         <div className="modeStack">
           <span className="mode paper">PAPER ONLY</span>
@@ -318,6 +697,8 @@ export default function DashboardPage() {
         </div>
       </header>
 
+      {activeView === "floor" ? (
+        <>
       <section className="marketHeartbeat" aria-label="Live market heartbeat">
         <div className="heartbeatLead">
           <span className={`heartbeatDot ${marketRunning ? "running" : ""}`} aria-hidden="true" />
@@ -354,6 +735,8 @@ export default function DashboardPage() {
         <span><b>Starting bank</b> ${number(floor?.paper_test?.seed_bank_usd, 2)}</span>
         <span><b>Blotter</b> {text(floor?.paper_test?.blotter_trade_count, "0")} trade(s)</span>
       </section>
+
+      <BankStrip operator={operator} />
 
       <section className="runtimeMonitor" aria-label="Autonomous prototype runtime">
         <div className="runtimeMonitorHead">
@@ -463,6 +846,30 @@ export default function DashboardPage() {
           ) : <Empty>No open positions.</Empty>}
         </section>
       </section>
+        </>
+      ) : (
+        <AppSubview
+          activeView={activeView}
+          universe={universe}
+          selectedAsset={selectedAsset}
+          onSelectAsset={setSelectedAsset}
+          cockpits={cockpits}
+          strategyAssets={strategyAssets}
+          strategy={strategy}
+          ingress={ingress}
+          operator={operator}
+          floor={floor}
+          nowMs={nowMs}
+        />
+      )}
+
+      {operatorError ? (
+        <section className="apiNotice">
+          <strong>OPERATOR DATA DEGRADED</strong>
+          <span>{operatorError}</span>
+          <small>The app never substitutes legacy trading state.</small>
+        </section>
+      ) : null}
 
       <aside className={`inspectionDrawer ${drawerOpen ? "open" : ""}`} aria-label="Inspection Drawer">
         <div className="drawerHead">
@@ -495,6 +902,17 @@ export default function DashboardPage() {
           </>
         ) : <Empty>Select an asset station to inspect it.</Empty>}
       </aside>
+
+      <AppMenu
+        open={menuOpen}
+        activeView={activeView}
+        onClose={() => setMenuOpen(false)}
+        onNavigate={navigate}
+        floor={floor}
+        ingress={ingress}
+        strategy={strategy}
+      />
+      <BottomDock activeView={activeView} onNavigate={navigate} />
     </main>
   );
 }

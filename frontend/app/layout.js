@@ -1,8 +1,8 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "AETHER — Unified Firm Floor",
-  description: "Read-only AETHER vNext paper-trading Firm Floor",
+  title: "AETHER — Autonomous Paper Firm",
+  description: "AETHER vNext autonomous PAPER trading operator console",
 };
 
 export default function RootLayout({ children }) {
