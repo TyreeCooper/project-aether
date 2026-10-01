@@ -22,7 +22,7 @@ UTC = timezone.utc
 NOW = datetime(2026, 10, 1, 6, 30, tzinfo=UTC)
 
 
-def test_provider_ranker_returns_only_top_ten_with_deterministic_scores() -> None:
+def test_provider_ranker_returns_only_top_twenty_five_with_deterministic_scores() -> None:
     rows = tuple(
         DiscoveryInstrument(
             provider="IBKR",
@@ -40,17 +40,17 @@ def test_provider_ranker_returns_only_top_ten_with_deterministic_scores() -> Non
             observed_at_utc=NOW,
             source="test",
         )
-        for i in range(1, 16)
+        for i in range(1, 36)
     )
     focus = rank_provider_catalog(rows, provider="IBKR")
-    assert focus.catalog_count == 15
-    assert focus.eligible_count == 15
-    assert len(focus.top10) == 10
-    assert [row.rank for row in focus.top10] == list(range(1, 11))
-    assert focus.top10[0].symbol == "S15"
+    assert focus.catalog_count == 35
+    assert focus.eligible_count == 35
+    assert len(focus.top25) == 25
+    assert [row.rank for row in focus.top25] == list(range(1, 26))
+    assert focus.top25[0].symbol == "S35"
     payload = focus_payload(focus)
-    assert payload["focus_count"] == 10
-    assert payload["top10"][0]["provider"] if "provider" in payload["top10"][0] else True
+    assert payload["focus_count"] == 25
+    assert payload["top25"][0]["provider"] if "provider" in payload["top25"][0] else True
 
 
 def test_ranker_filters_inactive_or_unpriced_rows() -> None:
@@ -78,7 +78,7 @@ def test_ranker_filters_inactive_or_unpriced_rows() -> None:
     focus = rank_provider_catalog(rows, provider="tastyfx")
     assert focus.catalog_count == 2
     assert focus.eligible_count == 1
-    assert focus.top10[0].symbol == "C:EURUSD"
+    assert focus.top25[0].symbol == "C:EURUSD"
 
 
 def test_kraken_catalog_and_ticker_parser_cover_all_online_usd_pairs() -> None:

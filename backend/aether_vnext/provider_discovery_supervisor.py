@@ -143,11 +143,11 @@ def build_provider_focus_snapshot(
                 "catalog_count": len(rows),
                 "eligible_count": 0,
                 "focus_count": 0,
-                "top10": [],
+                "top25": [],
             }
             continue
 
-        focus = rank_provider_catalog(rows, provider=provider, limit=10)
+        focus = rank_provider_catalog(rows, provider=provider, limit=25)
         payload = focus_payload(focus)
         payload["status"] = "online"
         payload["reason"] = None
@@ -157,7 +157,7 @@ def build_provider_focus_snapshot(
         payload["execution_binding_required"] = provider != "Kraken"
         providers[provider] = payload
 
-        for row in payload["top10"]:
+        for row in payload["top25"]:
             focus_pool.append({
                 **row,
                 "provider": provider,

@@ -35,24 +35,24 @@ def _row(provider: str, symbol: str, move: float, volume: float) -> DiscoveryIns
     )
 
 
-def test_focus_snapshot_has_top10_per_online_provider_and_explicit_missing_provider() -> None:
+def test_focus_snapshot_has_top25_per_online_provider_and_explicit_missing_provider() -> None:
     universes = {
-        "Kraken": tuple(_row("Kraken", f"K{i}", i, 1000 * i) for i in range(1, 13)),
-        "IBKR": tuple(_row("IBKR", f"S{i}", i / 10, 100000 * i) for i in range(1, 15)),
-        "tastyfx": tuple(_row("tastyfx", f"FX{i}", i / 100, 0) for i in range(1, 12)),
+        "Kraken": tuple(_row("Kraken", f"K{i}", i, 1000 * i) for i in range(1, 31)),
+        "IBKR": tuple(_row("IBKR", f"S{i}", i / 10, 100000 * i) for i in range(1, 31)),
+        "tastyfx": tuple(_row("tastyfx", f"FX{i}", i / 100, 0) for i in range(1, 31)),
     }
     snapshot = build_provider_focus_snapshot(
         universes,
         provider_errors={"NinjaTrader": "massive_api_key_missing"},
         as_of_utc=NOW,
     )
-    assert snapshot["focus_count"] == 30
+    assert snapshot["focus_count"] == 75
     assert snapshot["scout_ready_count"] >= 0
-    assert snapshot["scout_ready_count"] + snapshot["discovery_only_count"] == 30
-    assert len(snapshot["scout_handoff"]) == 30
-    assert len(snapshot["providers"]["Kraken"]["top10"]) == 10
-    assert len(snapshot["providers"]["IBKR"]["top10"]) == 10
-    assert len(snapshot["providers"]["tastyfx"]["top10"]) == 10
+    assert snapshot["scout_ready_count"] + snapshot["discovery_only_count"] == 75
+    assert len(snapshot["scout_handoff"]) == 75
+    assert len(snapshot["providers"]["Kraken"]["top25"]) == 25
+    assert len(snapshot["providers"]["IBKR"]["top25"]) == 25
+    assert len(snapshot["providers"]["tastyfx"]["top25"]) == 25
     assert snapshot["providers"]["NinjaTrader"]["status"] == "unavailable"
     assert snapshot["providers"]["Kraken"]["catalog_mode"] == "provider_native"
     assert snapshot["providers"]["IBKR"]["catalog_mode"] == "market_universe_proxy"

@@ -613,12 +613,12 @@ function discoveryProviderRows(discovery) {
       catalog_count: 0,
       eligible_count: 0,
       focus_count: 0,
-      top10: [],
+      top25: [],
     };
     return {
       provider,
       ...source,
-      top10: (source.top10 || []).map((item) => {
+      top25: (source.top25 || []).map((item) => {
         const focusKey = provider + ":" + String(item?.market_data_symbol || "");
         return {
           ...item,
@@ -631,7 +631,7 @@ function discoveryProviderRows(discovery) {
 
 function ProviderFocusCard({ row }) {
   const online = row.status === "online";
-  const top = row.top10 || [];
+  const top = row.top25 || [];
   return (
     <article className={"providerFocusCard " + (online ? "online" : "offline")}>
       <div className="providerFocusHead">
@@ -695,7 +695,7 @@ function ProviderDiscoveryBoard({ discovery }) {
       <div className="sectionHead">
         <div>
           <p className="eyebrow">PROVIDER DISCOVERY</p>
-          <h2>Catalog → Top 10 per Provider</h2>
+          <h2>Catalog → Top 25 per Provider</h2>
         </div>
         <span className={running ? "state good" : "state active"}>
           DISCOVERY {running ? "RUNNING" : "WAITING"}
@@ -708,7 +708,7 @@ function ProviderDiscoveryBoard({ discovery }) {
         <i>→</i>
         <div><span>Provider ranking</span><strong>{number(totalEligible, 0)}</strong></div>
         <i>→</i>
-        <div><span>Focus pool</span><strong>{number(focusCount, 0)}</strong><small>max 10/provider</small></div>
+        <div><span>Focus pool</span><strong>{number(focusCount, 0)}</strong><small>max 25/provider</small></div>
         <i>→</i>
         <div><span>Scout ready</span><strong>{number(scoutReadyCount, 0)}</strong><small>{number(discoveryOnlyCount, 0)} discovery-only</small></div>
         <i>→</i>
@@ -805,9 +805,9 @@ function PipelineView({ universe, queues, cockpits, operator, strategy, discover
             tone="context"
           />
           <PipelineStage
-            label="Top 10 Focus"
+            label="Top 25 Focus"
             owned="RANK"
-            job="Keeps the ten strongest attention candidates per provider for deeper strategy work."
+            job="Keeps the twenty-five strongest attention candidates per provider for deeper strategy work."
             metricLabel="focused"
             count={focusCount}
             tone="context"

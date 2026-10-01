@@ -312,7 +312,7 @@ jobs:
               and result.get("trading_authority") is False
               and int(result.get("provider_count") or 0) == 4
               and kraken.get("status") == "online"
-              and int(kraken.get("focus_count") or 0) <= 10
+              and int(kraken.get("focus_count") or 0) <= 25
           )
           if key_present:
               ok = ok and all(

@@ -1,7 +1,7 @@
-"""Provider-wide discovery and Top-10 focus ranking for AETHER vNext.
+"""Provider-wide discovery and Top-25 focus ranking for AETHER vNext.
 
 This module is deliberately pre-Scout. It ranks market opportunity only; it cannot
-create setups, tickets, Risk decisions, fills, or live orders. Provider Top 10 means
+create setups, tickets, Risk decisions, fills, or live orders. Provider Top 25 means
 "deserves deeper attention", never "must trade".
 """
 from __future__ import annotations
@@ -13,7 +13,7 @@ from typing import Iterable
 
 
 UTC = timezone.utc
-FOCUS_LIMIT = 10
+FOCUS_LIMIT = 25
 
 # Transparent prototype focus weights. These are provider-relative discovery
 # weights, not trading-strategy or Risk weights.
@@ -92,7 +92,7 @@ class ProviderFocus:
     provider: str
     catalog_count: int
     eligible_count: int
-    top10: tuple[RankedInstrument, ...]
+    top25: tuple[RankedInstrument, ...]
 
 
 def _eligible(row: DiscoveryInstrument) -> bool:
@@ -185,7 +185,7 @@ def rank_provider_catalog(
             provider=provider_name,
             catalog_count=len(catalog),
             eligible_count=0,
-            top10=(),
+            top25=(),
         )
 
     keys = {
@@ -283,7 +283,7 @@ def rank_provider_catalog(
         provider=provider_name,
         catalog_count=len(catalog),
         eligible_count=len(eligible),
-        top10=ranked,
+        top25=ranked,
     )
 
 
@@ -292,8 +292,8 @@ def focus_payload(focus: ProviderFocus) -> dict[str, object]:
         "provider": focus.provider,
         "catalog_count": focus.catalog_count,
         "eligible_count": focus.eligible_count,
-        "focus_count": len(focus.top10),
-        "top10": [
+        "focus_count": len(focus.top25),
+        "top25": [
             {
                 "rank": row.rank,
                 "symbol": row.symbol,
@@ -318,6 +318,6 @@ def focus_payload(focus: ProviderFocus) -> dict[str, object]:
                 ),
                 "source": row.source,
             }
-            for row in focus.top10
+            for row in focus.top25
         ],
     }
