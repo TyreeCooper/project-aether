@@ -49,5 +49,8 @@ def test_activation_keeps_prototype_safety_invariants() -> None:
     assert 'body.get("paper_mode") is True' in workflow
     assert 'body.get("live_blocked") is True' in workflow
     assert 'result.get("phase18_evidence") is False' in workflow
+    assert 'row.get("forward_paper_observation_recorded") is True' in workflow
+    assert 'int(result.get("forward_paper_observation_count") or 0)' in workflow
+    assert ">= len(no_setup)" in workflow
     assert "aether-vnext-nonprod" in workflow
     assert 'test "$app" != "aether-prod-api"' in workflow

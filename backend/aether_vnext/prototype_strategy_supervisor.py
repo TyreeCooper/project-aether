@@ -358,8 +358,13 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         current_observations=observations,
                         as_of_utc=as_of_utc,
                     )
+                    asset_result = {
+                        **asdict(advanced),
+                        "watch_eligible": feature.watch_eligible,
+                        "volatility_percentile": feature.volatility.percentile,
+                    }
                     if advanced.stage == "NO_SETUP":
-                        persist_prototype_no_setup_observation(
+                        observation_new = persist_prototype_no_setup_observation(
                             sync_conn,
                             store,
                             paper_epoch_id=EXPECTED_EPOCH,
@@ -374,11 +379,9 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                             ticket_id=advanced.ticket_id,
                             order_intent_id=advanced.order_intent_id,
                         )
-                    asset_results[asset_id] = {
-                        **asdict(advanced),
-                        "watch_eligible": feature.watch_eligible,
-                        "volatility_percentile": feature.volatility.percentile,
-                    }
+                        asset_result["forward_paper_observation_recorded"] = True
+                        asset_result["forward_paper_observation_new"] = observation_new
+                    asset_results[asset_id] = asset_result
 
                 result["inserted_market_bars"] = inserted
                 result["current_observation_asset_ids"] = sorted(observations)

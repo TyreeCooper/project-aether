@@ -268,6 +268,10 @@ jobs:
           body=json.load(open("/tmp/strategy.json", encoding="utf-8"))
           result=body.get("last_result") or {}
           assets=result.get("assets") or {}
+          no_setup=[
+              row for row in assets.values()
+              if isinstance(row, dict) and row.get("stage") == "NO_SETUP"
+          ]
           ok=(
               body.get("enabled") is True
               and body.get("running") is True
@@ -281,6 +285,12 @@ jobs:
               and result.get("paper_epoch_id") == "aether-prototype-new-system-test-001"
               and "btc" in assets
               and "eth" in assets
+              and all(
+                  row.get("forward_paper_observation_recorded") is True
+                  for row in no_setup
+              )
+              and int(result.get("forward_paper_observation_count") or 0)
+              >= len(no_setup)
           )
           sys.exit(0 if ok else 1)
           PY
