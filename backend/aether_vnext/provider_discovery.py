@@ -131,16 +131,31 @@ def _eligible(row: DiscoveryInstrument) -> bool:
 
 
 def _percentile_scores(values: dict[str, float]) -> dict[str, float]:
+    """Return tie-aware percentile scores in O(n log n), not O(n²).
+
+    Equal values receive the average rank of their contiguous tie group. The
+    previous implementation rescanned the full ordered universe for every
+    instrument, which becomes prohibitive for 10k+ equity catalogs.
+    """
     if not values:
         return {}
-    ordered = sorted(values.values())
-    if len(ordered) == 1:
+    if len(values) == 1:
         return {key: 50.0 for key in values}
+
+    ordered = sorted(values.items(), key=lambda item: (item[1], item[0]))
+    denominator = len(ordered) - 1
     scores: dict[str, float] = {}
-    for key, value in values.items():
-        positions = [i for i, candidate in enumerate(ordered) if candidate == value]
-        avg = sum(positions) / len(positions)
-        scores[key] = (avg / (len(ordered) - 1)) * 100.0
+    start = 0
+    while start < len(ordered):
+        value = ordered[start][1]
+        end = start + 1
+        while end < len(ordered) and ordered[end][1] == value:
+            end += 1
+        average_position = (start + (end - 1)) / 2.0
+        percentile = (average_position / denominator) * 100.0
+        for index in range(start, end):
+            scores[ordered[index][0]] = percentile
+        start = end
     return scores
 
 

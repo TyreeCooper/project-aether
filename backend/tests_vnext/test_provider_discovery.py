@@ -14,6 +14,7 @@ from aether_vnext.massive_discovery import (
 )
 from aether_vnext.provider_discovery import (
     DiscoveryInstrument,
+    _percentile_scores,
     focus_payload,
     rank_provider_catalog,
 )
@@ -320,3 +321,41 @@ def test_kraken_full_catalog_normalizes_cross_pair_volume_to_usd() -> None:
     assert set(by_symbol) == {"EUR/USD", "ETH/EUR"}
     assert by_symbol["ETH/EUR"].volume == 72000.0
     assert by_symbol["ETH/EUR"].feed_class == "NATIVE_PUBLIC"
+
+
+
+def test_percentile_scores_preserve_tie_average_rank() -> None:
+    scores = _percentile_scores({
+        "low": 1.0,
+        "tie_a": 2.0,
+        "tie_b": 2.0,
+        "high": 4.0,
+    })
+    assert scores["low"] == 0.0
+    assert scores["tie_a"] == 50.0
+    assert scores["tie_b"] == 50.0
+    assert scores["high"] == 100.0
+
+
+def test_ranker_handles_large_equity_catalog_without_quadratic_rank_scan() -> None:
+    rows = tuple(
+        DiscoveryInstrument(
+            provider="IBKR",
+            symbol=f"S{i:05d}",
+            market_data_symbol=f"S{i:05d}",
+            execution_symbol=f"S{i:05d}",
+            asset_class="equity",
+            price=100.0 + (i % 50),
+            open_price=100.0,
+            volume=float((i % 1000) + 1),
+            bid=99.99,
+            ask=100.01,
+            observed_at_utc=NOW,
+            source="scale-test",
+        )
+        for i in range(5000)
+    )
+    focus = rank_provider_catalog(rows, provider="IBKR")
+    assert focus.catalog_count == 5000
+    assert focus.eligible_count == 5000
+    assert len(focus.top25) == 25

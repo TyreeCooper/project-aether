@@ -654,22 +654,41 @@ async def _fetch_cme_activity(client: httpx.AsyncClient) -> dict[str, CmeActivit
             CME_PRODUCT_SLATE_V2_URL,
             params={
                 "pageNumber": 1,
-                "pageSize": 5000,
+                # CME's public Product Slate UI is capped at 500 rows. Asking
+                # for 5,000 caused Azure-side read timeouts and is unnecessary:
+                # Top-25 focus only needs the most active supported futures.
+                "pageSize": 500,
                 "sortAsc": "false",
-                "sortField": "rank",
+                "sortField": "oi",
                 "searchString": "",
+            },
+            headers={
+                "Accept": "application/json,text/plain,*/*",
+                "Accept-Language": "en-US,en;q=0.8",
+                "Referer": CME_PRODUCT_SLATE_PAGE_URL,
             },
         )
         response.raise_for_status()
         activity = parse_cme_product_slate_json(response.json())
-        if activity:
+        if len(activity) >= 25:
             return activity
     except (httpx.HTTPError, json.JSONDecodeError, ValueError):
         pass
 
-    response = await client.get(CME_PRODUCT_SLATE_PAGE_URL)
+    response = await client.get(
+        CME_PRODUCT_SLATE_PAGE_URL,
+        headers={
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.8",
+        },
+    )
     response.raise_for_status()
-    return parse_cme_product_slate_html(response.text)
+    activity = parse_cme_product_slate_html(response.text)
+    if len(activity) < 25:
+        raise RuntimeError(
+            f"cme_public_activity_too_small:{len(activity)}"
+        )
+    return activity
 
 
 async def fetch_ninjatrader_public_universe(
@@ -692,11 +711,20 @@ async def fetch_ninjatrader_public_universe(
             raise RuntimeError(
                 f"ninjatrader_public_catalog_too_small:{len(catalog)}"
             )
-        return build_ninjatrader_reference_universe(
+        rows = build_ninjatrader_reference_universe(
             catalog,
             activity,
             observed_at_utc=datetime.now(UTC),
         )
+        activity_rows = sum(
+            1 for row in rows
+            if row.volume is not None or row.open_interest is not None
+        )
+        if activity_rows < 25:
+            raise RuntimeError(
+                f"ninjatrader_reference_activity_too_small:{activity_rows}"
+            )
+        return rows
     finally:
         if owned:
             await http.aclose()
