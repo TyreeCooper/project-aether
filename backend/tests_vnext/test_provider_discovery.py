@@ -276,7 +276,7 @@ def test_ranker_accepts_activity_only_reference_instruments() -> None:
         for i in range(1, 131)
     )
     focus = rank_provider_catalog(rows, provider="NinjaTrader")
-    assert focus.eligible_count == 30
+    assert focus.eligible_count == 130
     assert len(focus.top100) == 100
     assert focus.top100[0].symbol == "F130"
     payload = focus_payload(focus)
