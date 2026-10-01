@@ -822,6 +822,28 @@ class VNextStore:
             "updated_at_utc": _stored_utc(row["updated_at_utc"]),
         }
 
+    def list_dynamic_product_states(
+        self,
+        conn: Connection,
+    ) -> tuple[dict[str, Any], ...]:
+        """Load every verified dynamic product projection in stable asset order."""
+        table = self.tables["product_registry_state"]
+        asset_ids = tuple(
+            str(row[0])
+            for row in conn.execute(
+                sa.select(table.c.asset_id).order_by(table.c.asset_id.asc())
+            )
+        )
+        out: list[dict[str, Any]] = []
+        for asset_id in asset_ids:
+            loaded = self.load_dynamic_product_state(
+                conn,
+                asset_id=asset_id,
+            )
+            if loaded is not None:
+                out.append(loaded)
+        return tuple(out)
+
     def list_runtime_registry_bindings(
         self,
         conn: Connection,

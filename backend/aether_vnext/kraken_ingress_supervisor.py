@@ -14,12 +14,13 @@ import asyncio
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import os
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Mapping, Sequence
 
 from aether_vnext.db_runtime import VNextDatabaseConfig, open_vnext_engine
 from aether_vnext.freeze import LIVE_BLOCKED, PAPER_ONLY
 from aether_vnext.kraken_public import (
     CRYPTO_ASSET_TO_KRAKEN_V2_SYMBOL,
+    KRAKEN_PUBLIC_TICKER_SOURCE_ID,
     fetch_kraken_public_tickers,
 )
 from aether_vnext.market_ingress import ingest_market_quotes
@@ -134,14 +135,24 @@ class KrakenIngressSupervisor:
                 continue
 
 
-def _quote_telemetry(quote: object) -> dict[str, object]:
+def _quote_telemetry(
+    quote: object,
+    *,
+    symbol_by_asset: Mapping[str, str] | None = None,
+) -> dict[str, object]:
     asset_id = str(getattr(quote, "asset_id")).strip().lower()
     exchange_ts = getattr(quote, "exchange_ts")
     received_ts = getattr(quote, "received_ts")
     reference_ts = exchange_ts or received_ts
+    symbols = dict(CRYPTO_ASSET_TO_KRAKEN_V2_SYMBOL)
+    if symbol_by_asset is not None:
+        symbols.update({
+            str(key).strip().lower(): str(value).strip()
+            for key, value in symbol_by_asset.items()
+        })
     return {
         "asset_id": asset_id,
-        "symbol": CRYPTO_ASSET_TO_KRAKEN_V2_SYMBOL[asset_id],
+        "symbol": symbols.get(asset_id),
         "bid": getattr(quote, "bid"),
         "ask": getattr(quote, "ask"),
         "last": getattr(quote, "last"),
@@ -156,25 +167,106 @@ def _quote_telemetry(quote: object) -> dict[str, object]:
     }
 
 
-async def run_configured_kraken_ingress_cycle() -> dict[str, object]:
-    """Fetch one public Kraken BBO batch and persist canonical ingress attempts."""
-    batch = await fetch_kraken_public_tickers(
-        assets=CRYPTO_ASSETS,
-        timeout_s=10.0,
+def _dynamic_kraken_symbol_map(
+    states: Sequence[Mapping[str, object]],
+) -> dict[str, str]:
+    """Select only verified Kraken-public USD spot products for ticker ingress."""
+    out: dict[str, str] = {}
+    seen_symbols: set[str] = set()
+    for state in states:
+        product = state.get("product")
+        if product is None:
+            continue
+        asset_id = str(getattr(product, "asset_id", "") or "").strip().lower()
+        symbol = str(getattr(product, "canonical_symbol", "") or "").strip()
+        if (
+            not asset_id
+            or not symbol
+            or asset_id in CRYPTO_ASSETS
+            or str(getattr(product, "broker", "") or "") != "Kraken"
+            or str(getattr(product, "venue", "") or "") != "Kraken"
+            or str(getattr(product, "quote_currency", "") or "").upper() != "USD"
+            or str(getattr(product, "settlement_currency", "") or "").upper() != "USD"
+            or str(getattr(product, "primary_market_source_id", "") or "")
+                != KRAKEN_PUBLIC_TICKER_SOURCE_ID
+            or not bool(product.market_data_ready())
+        ):
+            continue
+        if symbol in seen_symbols:
+            raise RuntimeError(f"duplicate dynamic Kraken symbol: {symbol}")
+        seen_symbols.add(symbol)
+        out[asset_id] = symbol
+    return dict(sorted(out.items()))
+
+
+def _chunks(values: tuple[str, ...], size: int) -> tuple[tuple[str, ...], ...]:
+    if size <= 0:
+        raise ValueError("chunk size must be positive")
+    return tuple(
+        values[start:start + size]
+        for start in range(0, len(values), size)
     )
+
+
+async def run_configured_kraken_ingress_cycle() -> dict[str, object]:
+    """Ingest seed plus verified dynamic Kraken BBO using bounded subscriptions."""
     as_of_utc = datetime.now(timezone.utc)
     store = VNextStore(schema="aether_vnext")
     results: list[dict[str, object]] = []
+    all_quotes: list[object] = []
+    batch_errors: list[dict[str, object]] = []
 
     async with open_vnext_engine() as engine:
         async with engine.begin() as connection:
-            for asset_id in CRYPTO_ASSETS:
+            dynamic_states = await connection.run_sync(
+                lambda sync_conn: store.list_dynamic_product_states(sync_conn)
+            )
+
+        dynamic_symbols = _dynamic_kraken_symbol_map(dynamic_states)
+        symbol_by_asset = {
+            **CRYPTO_ASSET_TO_KRAKEN_V2_SYMBOL,
+            **dynamic_symbols,
+        }
+
+        # Keep the canonical seed lane isolated so a dynamic subscription problem
+        # can never starve BTC/ETH market truth.
+        seed_batch = await fetch_kraken_public_tickers(
+            assets=CRYPTO_ASSETS,
+            timeout_s=10.0,
+        )
+        all_quotes.extend(seed_batch.quotes)
+
+        dynamic_assets = tuple(dynamic_symbols)
+        for chunk in _chunks(
+            dynamic_assets,
+            configured_dynamic_ingress_batch_size(),
+        ):
+            chunk_symbols = {asset: dynamic_symbols[asset] for asset in chunk}
+            try:
+                dynamic_batch = await fetch_kraken_public_tickers(
+                    assets=chunk,
+                    symbol_by_asset=chunk_symbols,
+                    timeout_s=10.0,
+                )
+                all_quotes.extend(dynamic_batch.quotes)
+            except Exception as exc:
+                # A failed dynamic batch becomes explicit quote_missing attempts;
+                # the seed lane and every other dynamic batch keep running.
+                batch_errors.append({
+                    "assets": list(chunk),
+                    "error": f"{type(exc).__name__}:{exc}",
+                })
+
+        attempted_assets = CRYPTO_ASSETS + dynamic_assets
+        quote_rows = tuple(all_quotes)
+        async with engine.begin() as connection:
+            for asset_id in attempted_assets:
                 result = await connection.run_sync(
                     lambda sync_conn, aid=asset_id: ingest_market_quotes(
                         sync_conn,
                         store,
                         asset_id=aid,
-                        quotes=batch.quotes,
+                        quotes=quote_rows,
                         calendar_provider=None,
                         as_of_utc=as_of_utc,
                     )
@@ -195,13 +287,34 @@ async def run_configured_kraken_ingress_cycle() -> dict[str, object]:
 
     return {
         "provider": "kraken_public",
-        "status_system": batch.status_system,
-        "subscription_acknowledged": batch.subscription_acknowledged,
+        "status_system": seed_batch.status_system,
+        "subscription_acknowledged": seed_batch.subscription_acknowledged,
+        "seed_asset_count": len(CRYPTO_ASSETS),
+        "dynamic_asset_count": len(dynamic_assets),
+        "attempted_asset_count": len(CRYPTO_ASSETS) + len(dynamic_assets),
+        "quoted_asset_count": len({
+            str(getattr(quote, "asset_id")).strip().lower()
+            for quote in all_quotes
+        }),
+        "batch_errors": batch_errors,
         "asset_results": results,
-        "quotes": [_quote_telemetry(quote) for quote in batch.quotes],
+        "quotes": [
+            _quote_telemetry(quote, symbol_by_asset=symbol_by_asset)
+            for quote in all_quotes
+        ],
         "paper_only": PAPER_ONLY,
         "live_blocked": LIVE_BLOCKED,
     }
+
+
+def configured_dynamic_ingress_batch_size() -> int:
+    raw = os.getenv("AETHER_VNEXT_KRAKEN_DYNAMIC_BATCH_SIZE", "20").strip()
+    value = int(raw)
+    if value < 1 or value > 50:
+        raise ValueError(
+            "AETHER_VNEXT_KRAKEN_DYNAMIC_BATCH_SIZE must be between 1 and 50"
+        )
+    return value
 
 
 def configured_ingress_enabled() -> bool:

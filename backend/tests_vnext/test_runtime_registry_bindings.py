@@ -466,3 +466,46 @@ def test_dynamic_product_state_round_trip_does_not_replace_seed_registry() -> No
     assert loaded["product"] == projection.product
     assert loaded["product_hash"] == digest
     assert runtime_binding is None
+
+
+
+def test_list_dynamic_product_states_returns_only_dynamic_products() -> None:
+    engine, store = _store()
+    projection = project_kraken_spot_product(
+        {
+            "provider": "Kraken",
+            "symbol": "SOL/USD",
+            "execution_symbol": "SOLUSD",
+            "asset_class": "spot_crypto",
+            "base_currency": "SOL",
+            "quote_currency": "USD",
+            "quantity_step": 0.001,
+            "minimum_quantity": 0.02,
+            "minimum_notional": 0.5,
+            "tick_size": 0.0001,
+        },
+        primary_market_source_id="kraken_public",
+        stale_threshold_ms=15000,
+    )
+    assert projection.product is not None
+
+    with engine.begin() as conn:
+        store.upsert_runtime_registry_binding(
+            conn,
+            make_runtime_binding("btc", now=T0),
+            registry_version="registry-runtime-test-v1",
+            configuration_hash=CONFIGURATION_HASH,
+            updated_at_utc=T0,
+        )
+        store.upsert_dynamic_product_state(
+            conn,
+            projection.product,
+            source_ref="kraken:AssetPairs:SOLUSD",
+            registry_version="dynamic-kraken-v1",
+            configuration_hash=CONFIGURATION_HASH,
+            updated_at_utc=T0,
+        )
+        rows = store.list_dynamic_product_states(conn)
+
+    assert len(rows) == 1
+    assert rows[0]["product"].asset_id == "kraken:solusd"

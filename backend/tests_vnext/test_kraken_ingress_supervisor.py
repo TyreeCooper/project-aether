@@ -5,9 +5,13 @@ from datetime import datetime, timezone
 
 import pytest
 
+from aether_vnext.dynamic_products import project_kraken_spot_product
 from aether_vnext.kraken_ingress_supervisor import (
     KrakenIngressSupervisor,
+    _chunks,
+    _dynamic_kraken_symbol_map,
     _quote_telemetry,
+    configured_dynamic_ingress_batch_size,
     configured_ingress_enabled,
     configured_ingress_interval_seconds,
     validate_configured_ingress_environment,
@@ -118,3 +122,62 @@ async def test_supervisor_records_cycle_failure_without_dying() -> None:
     assert status.last_error is None
     assert status.last_result == {"ok": True}
     await supervisor.stop()
+
+
+
+def test_dynamic_ingress_batch_size_is_bounded(monkeypatch) -> None:
+    monkeypatch.setenv("AETHER_VNEXT_KRAKEN_DYNAMIC_BATCH_SIZE", "20")
+    assert configured_dynamic_ingress_batch_size() == 20
+    assert _chunks(tuple(str(i) for i in range(45)), 20) == (
+        tuple(str(i) for i in range(20)),
+        tuple(str(i) for i in range(20, 40)),
+        tuple(str(i) for i in range(40, 45)),
+    )
+    monkeypatch.setenv("AETHER_VNEXT_KRAKEN_DYNAMIC_BATCH_SIZE", "51")
+    with pytest.raises(ValueError, match="between 1 and 50"):
+        configured_dynamic_ingress_batch_size()
+
+
+def test_dynamic_kraken_symbol_map_uses_only_verified_usd_kraken_products() -> None:
+    projection = project_kraken_spot_product(
+        {
+            "provider": "Kraken",
+            "symbol": "SOL/USD",
+            "execution_symbol": "SOLUSD",
+            "asset_class": "spot_crypto",
+            "base_currency": "SOL",
+            "quote_currency": "USD",
+            "quantity_step": 0.001,
+            "minimum_quantity": 0.02,
+            "minimum_notional": 0.5,
+            "tick_size": 0.0001,
+        },
+        primary_market_source_id="kraken_public",
+        stale_threshold_ms=15000,
+    )
+    assert projection.product is not None
+    assert _dynamic_kraken_symbol_map(
+        ({"product": projection.product},)
+    ) == {"kraken:solusd": "SOL/USD"}
+
+
+def test_quote_telemetry_accepts_dynamic_provider_symbol() -> None:
+    ts = datetime(2026, 10, 1, 4, 0, tzinfo=timezone.utc)
+    quote = RawQuote(
+        asset_id="kraken:solusd",
+        venue="Kraken",
+        source_id="kraken_public",
+        bid=149.0,
+        ask=151.0,
+        last=150.0,
+        mark=150.0,
+        exchange_ts=ts,
+        received_ts=ts,
+        adapter_version="test",
+    )
+    payload = _quote_telemetry(
+        quote,
+        symbol_by_asset={"kraken:solusd": "SOL/USD"},
+    )
+    assert payload["asset_id"] == "kraken:solusd"
+    assert payload["symbol"] == "SOL/USD"
