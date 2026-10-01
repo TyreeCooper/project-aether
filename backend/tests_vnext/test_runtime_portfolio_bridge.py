@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 
 import pytest
 import sqlalchemy as sa
 
+from aether_vnext.dynamic_products import project_kraken_spot_product
 from aether_vnext.domain import (
     CalendarState,
     MarketObservation,
@@ -246,3 +248,157 @@ def test_runtime_portfolio_bridge_fails_closed_without_runtime_binding() -> None
 
     assert ticket is not None
     assert ticket.state.value == "READY"
+
+
+
+def _dynamic_fixture():
+    engine, store, seed_obs = _fixture()
+    asset_id = "kraken:solusd"
+    obs = replace(
+        seed_obs,
+        observation_id="obs-runtime-portfolio-sol",
+        asset_id=asset_id,
+        bid=149.90,
+        ask=150.10,
+        last=150.00,
+        mark=150.00,
+        source="kraken_public",
+        spread_abs=0.20,
+        spread_bps=(0.20 / 150.00) * 10_000.0,
+    )
+    projection = project_kraken_spot_product(
+        {
+            "provider": "Kraken",
+            "symbol": "SOL/USD",
+            "execution_symbol": "SOLUSD",
+            "asset_class": "spot_crypto",
+            "base_currency": "SOL",
+            "quote_currency": "USD",
+            "quantity_step": 0.001,
+            "minimum_quantity": 0.02,
+            "minimum_notional": 0.5,
+            "tick_size": 0.0001,
+        },
+        primary_market_source_id="kraken_public",
+        stale_threshold_ms=15_000,
+    )
+    assert projection.product is not None
+
+    with engine.begin() as conn:
+        store.upsert_dynamic_product_state(
+            conn,
+            projection.product,
+            source_ref="kraken:AssetPairs:SOLUSD",
+            registry_version="dynamic-kraken-v1",
+            configuration_hash="cfg-runtime-portfolio",
+            updated_at_utc=T0,
+        )
+        store.record_market_observation(conn, obs)
+        conn.execute(
+            store.tables["exit_plans"].insert().values(
+                exit_plan_id="exit-runtime-portfolio-sol",
+                version="runtime-exit-v1",
+                hard_stop_price=140.0,
+                structure_rule_id=None,
+                time_stop_deadline_utc=None,
+                trailing_policy={
+                    "enabled": False,
+                    "start_condition": None,
+                    "ratchet_rule": None,
+                    "never_loosen": True,
+                },
+                profit_take_policy={"enabled": False, "rule_id": None},
+                session_close_policy="hold",
+                stale_mark_policy="hold",
+                governor_halt_behavior="hold",
+                created_from_playbook_version="1.2",
+                payload_hash="hash-runtime-portfolio-sol",
+                created_at_utc=T0,
+            )
+        )
+        conn.execute(
+            store.tables["decision_lineage"].insert().values(
+                firm_event_id="firm-runtime-portfolio-sol",
+                setup_id="setup-runtime-portfolio-sol",
+                ticket_id="ticket-runtime-portfolio-sol",
+                order_intent_id=None,
+                trade_id=None,
+                asset_id=asset_id,
+                route_id=f"{asset_id}:daily_swing:long",
+                playbook_id="pb_crypto_swing_v1_2",
+                playbook_version="1.2",
+                risk_cluster_id="crypto",
+                asset_risk_hitches={},
+                policy_version="policy-runtime-portfolio",
+                configuration_hash="cfg-runtime-portfolio",
+                market_observation_id=obs.observation_id,
+                first_killed_by=None,
+                first_kill_reason=None,
+                created_at_utc=T0,
+                row_version=1,
+            )
+        )
+        conn.execute(
+            store.tables["tickets"].insert().values(
+                ticket_id="ticket-runtime-portfolio-sol",
+                exit_plan_id="exit-runtime-portfolio-sol",
+                setup_id="setup-runtime-portfolio-sol",
+                firm_event_id="firm-runtime-portfolio-sol",
+                asset_id=asset_id,
+                route_id=f"{asset_id}:daily_swing:long",
+                state="READY",
+                signal_key="signal-runtime-portfolio-sol",
+                side="long",
+                horizon="daily_swing",
+                stop_price=140.0,
+                quantity=1.0,
+                modeled_round_trip_cost_pct=0.62,
+                reject_code=None,
+                policy_version="policy-runtime-portfolio",
+                configuration_hash="cfg-runtime-portfolio",
+                market_observation_id=obs.observation_id,
+                first_killed_by=None,
+                first_kill_reason=None,
+                created_at_utc=T0,
+            )
+        )
+    return engine, store, obs
+
+
+def _reserve_dynamic(conn, store, obs):
+    return reserve_runtime_ready_ticket(
+        conn,
+        store,
+        ticket_id="ticket-runtime-portfolio-sol",
+        order_intent_id="intent-runtime-portfolio-sol",
+        current_observation=obs,
+        current_observations={"kraken:solusd": obs},
+        created_at_utc=T0,
+        event_id="evt-runtime-portfolio-sol",
+    )
+
+
+def test_runtime_portfolio_bridge_reserves_verified_dynamic_kraken_asset() -> None:
+    engine, store, obs = _dynamic_fixture()
+    with engine.begin() as conn:
+        result = _reserve_dynamic(conn, store, obs)
+        intent = store.load_order_intent(
+            conn,
+            order_intent_id="intent-runtime-portfolio-sol",
+        )
+        reservation = conn.execute(
+            sa.select(store.tables["risk_admission_reservations"]).where(
+                store.tables["risk_admission_reservations"].c.order_intent_id
+                == "intent-runtime-portfolio-sol"
+            )
+        ).mappings().one()
+
+    assert result["state"] == "RESERVED"
+    assert intent is not None
+    assert intent.broker_account_id == "kraken_paper"
+    assert intent.broker == "Kraken"
+    assert intent.venue == "Kraken"
+    assert intent.symbol_executed == "SOLUSD"
+    assert intent.position_key == "kraken:solusd:daily_swing"
+    assert reservation["cluster_id"] == "crypto"
+    assert reservation["stop_risk_usd"] > 0

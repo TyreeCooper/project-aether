@@ -101,6 +101,7 @@ from aether_vnext.registry_runtime import (
     binding_payload,
 )
 from aether_vnext.reservations import reservation_requirement
+from aether_vnext.runtime_product_policy import runtime_cluster_map
 from aether_vnext.risk import (
     BookRiskPosition,
     BookRiskSnapshot,
@@ -349,10 +350,10 @@ def _reduce_cash_inventory(
 
 
 def _horizon_from_position_key(value: str) -> str:
-    parts = str(value).split(":")
-    if len(parts) != 2 or not parts[1]:
+    asset, separator, horizon = str(value).rpartition(":")
+    if not separator or not asset or not horizon:
         raise ValueError("position_key must be asset:horizon")
-    return parts[1]
+    return horizon
 
 
 class VNextStore:
@@ -1629,7 +1630,22 @@ class VNextStore:
             raise RuntimeError("FIRE ticket missing durable playbook identity")
 
         asset_id = str(ticket["asset_id"])
-        canonical_cluster = cluster_for_asset(asset_id)
+        dynamic_products = tuple(
+            row["product"]
+            for row in self.list_dynamic_product_states(conn)
+        )
+        cluster_by_asset = runtime_cluster_map(dynamic_products)
+        canonical_cluster = cluster_by_asset.get(asset_id)
+        if canonical_cluster is None:
+            raise RuntimeError(
+                f"FIRE ticket runtime risk cluster missing: {asset_id}"
+            )
+        try:
+            product = registry_row(asset_id)
+        except KeyError as exc:
+            raise RuntimeError(
+                f"FIRE ticket runtime product missing: {asset_id}"
+            ) from exc
         if str(lineage["risk_cluster_id"]) != canonical_cluster:
             raise RuntimeError("FIRE ticket canonical cluster drift")
 
@@ -1706,7 +1722,7 @@ class VNextStore:
 
             open_snapshot = self.project_open_risk(
                 conn,
-                cluster_by_asset=SEED_ASSET_CLUSTERS,
+                cluster_by_asset=cluster_by_asset,
             )
             open_exposure = open_snapshot.exposure_for(
                 asset_id=asset_id,
@@ -1737,7 +1753,11 @@ class VNextStore:
             )
             cross_remaining: dict[str, float] = {}
             for target_asset in hitches:
-                target_cluster = cluster_for_asset(target_asset)
+                target_cluster = cluster_by_asset.get(target_asset)
+                if target_cluster is None:
+                    raise RuntimeError(
+                        f"Risk hitch target cluster missing: {target_asset}"
+                    )
                 target_open = open_snapshot.exposure_for(
                     asset_id=target_asset,
                     cluster_id=target_cluster,
@@ -1757,7 +1777,7 @@ class VNextStore:
                 )
 
             result = size_candidate_to_risk(
-                registry_row(asset_id),
+                product,
                 side=str(ticket["side"]),
                 entry_price=entry_price,
                 stop_price=float(ticket["stop_price"]),
@@ -4634,7 +4654,11 @@ class VNextStore:
             for target_asset, fraction in sorted(
                 candidate_hitches.items()
             ):
-                target_cluster = cluster_for_asset(target_asset)
+                target_cluster = cluster_by_asset.get(target_asset)
+                if target_cluster is None:
+                    raise RuntimeError(
+                        f"READY ticket hitch target cluster missing: {target_asset}"
+                    )
                 target_open = open_snapshot.exposure_for(
                     asset_id=target_asset,
                     cluster_id=target_cluster,

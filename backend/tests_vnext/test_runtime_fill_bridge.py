@@ -8,14 +8,25 @@ import sqlalchemy as sa
 
 from aether_vnext.runtime_execution_bridge import submit_runtime_reserved_open
 from aether_vnext.runtime_fill_bridge import fill_runtime_submitted_open
-from tests_vnext.test_runtime_portfolio_bridge import T0, _fixture, _reserve
+from tests_vnext.test_runtime_portfolio_bridge import (
+    T0,
+    _dynamic_fixture,
+    _fixture,
+    _reserve,
+    _reserve_dynamic,
+)
 
 
-def _submit(conn, store) -> None:
+def _submit(
+    conn,
+    store,
+    *,
+    order_intent_id: str = "intent-runtime-portfolio",
+) -> None:
     result = submit_runtime_reserved_open(
         conn,
         store,
-        order_intent_id="intent-runtime-portfolio",
+        order_intent_id=order_intent_id,
         submitted_at_utc=T0,
         event_id="evt-runtime-fill-submit",
     )
@@ -192,3 +203,51 @@ def test_runtime_fill_bridge_waits_for_250ms_paper_latency() -> None:
     assert intent is not None
     assert intent.state.value == "SUBMITTED"
     assert pending_risk == 1
+
+
+
+def test_runtime_fill_bridge_opens_verified_dynamic_kraken_asset() -> None:
+    engine, store, obs = _dynamic_fixture()
+    fill_at = T0 + timedelta(milliseconds=250)
+    fill_obs = replace(
+        obs,
+        observation_id="obs-runtime-fill-sol",
+        exchange_ts=fill_at,
+        received_ts=fill_at,
+    )
+
+    with engine.begin() as conn:
+        assert _reserve_dynamic(conn, store, obs)["state"] == "RESERVED"
+        _submit(
+            conn,
+            store,
+            order_intent_id="intent-runtime-portfolio-sol",
+        )
+        store.record_market_observation(conn, fill_obs)
+        result = fill_runtime_submitted_open(
+            conn,
+            store,
+            order_intent_id="intent-runtime-portfolio-sol",
+            trade_id="trade-runtime-fill-sol",
+            fill_market_observation_id=fill_obs.observation_id,
+            filled_at_utc=fill_at,
+            event_id="evt-runtime-fill-sol",
+        )
+        trade = conn.execute(
+            sa.select(store.tables["open_trades"]).where(
+                store.tables["open_trades"].c.trade_id
+                == "trade-runtime-fill-sol"
+            )
+        ).mappings().one()
+        position = conn.execute(
+            sa.select(store.tables["active_positions"]).where(
+                store.tables["active_positions"].c.trade_id
+                == "trade-runtime-fill-sol"
+            )
+        ).mappings().one()
+
+    assert result["state"] == "FILLED"
+    assert trade["asset_id"] == "kraken:solusd"
+    assert trade["broker_account_id"] == "kraken_paper"
+    assert position["position_key"] == "kraken:solusd:daily_swing"
+    assert position["horizon"] == "daily_swing"

@@ -15,7 +15,7 @@ from sqlalchemy.engine import Connection
 from aether_vnext.domain import OrderIntentState
 from aether_vnext.execution import fill_submitted_paper_intent
 from aether_vnext.freeze import LIVE_BLOCKED, PAPER_ONLY
-from aether_vnext.registry_runtime import materialize_bound_registry_row
+from aether_vnext.runtime_product_policy import resolve_runtime_product
 from aether_vnext.risk import stop_risk_usd
 from aether_vnext.store import VNextStore
 
@@ -103,17 +103,17 @@ def fill_runtime_submitted_open(
     if observation.asset_id != asset_id:
         raise ValueError("fill market observation asset mismatch")
 
-    runtime = store.load_runtime_registry_binding(conn, asset_id=asset_id)
-    if runtime is None:
-        raise RuntimeError("SUBMITTED intent runtime product binding missing")
-    if runtime["configuration_hash"] != intent.lineage.configuration_hash:
+    resolved = resolve_runtime_product(
+        conn,
+        store,
+        asset_id=asset_id,
+        as_of_utc=filled_at_utc,
+    )
+    if resolved.configuration_hash != intent.lineage.configuration_hash:
         raise RuntimeError(
             "SUBMITTED intent runtime product binding configuration mismatch"
         )
-    bound_row = materialize_bound_registry_row(
-        runtime["binding"],
-        as_of_utc=filled_at_utc,
-    )
+    bound_row = resolved.product
     if (
         intent.broker != bound_row.broker
         or intent.venue != bound_row.venue

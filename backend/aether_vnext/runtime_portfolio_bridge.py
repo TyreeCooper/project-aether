@@ -13,9 +13,12 @@ from typing import Mapping
 from sqlalchemy.engine import Connection
 
 from aether_vnext.domain import MarketObservation, TicketState
-from aether_vnext.playbooks import SEED_ASSET_CLUSTERS, cluster_for_asset
-from aether_vnext.registry_runtime import materialize_bound_registry_row
-from aether_vnext.seed_truth import ASSET_BROKER_ACCOUNT
+from aether_vnext.runtime_product_policy import (
+    paper_broker_account_for_product,
+    resolve_runtime_product,
+    runtime_cluster_for_product,
+    runtime_cluster_map,
+)
 from aether_vnext.store import VNextStore, open_intent_idempotency_key
 
 
@@ -69,32 +72,40 @@ def reserve_runtime_ready_ticket(
             "current_observations asset entry must match current observation"
         )
 
-    runtime = store.load_runtime_registry_binding(conn, asset_id=asset_id)
-    if runtime is None:
-        raise RuntimeError("READY ticket runtime product binding missing")
-    if runtime["configuration_hash"] != ticket.lineage.configuration_hash:
+    resolved = resolve_runtime_product(
+        conn,
+        store,
+        asset_id=asset_id,
+        as_of_utc=created_at_utc,
+    )
+    if resolved.configuration_hash != ticket.lineage.configuration_hash:
         raise RuntimeError(
             "READY ticket runtime product binding configuration mismatch"
         )
 
-    bound_row = materialize_bound_registry_row(
-        runtime["binding"],
-        as_of_utc=created_at_utc,
-    )
-    if bound_row.asset_id != asset_id:
-        raise RuntimeError("runtime product binding asset mismatch")
+    bound_row = resolved.product
+    if not bound_row.market_data_ready():
+        raise RuntimeError("READY ticket runtime market data binding unready")
+    if not bound_row.lifecycle_fire_eligible(created_at_utc):
+        raise RuntimeError("READY ticket runtime product lifecycle ineligible")
+    if not bound_row.product_side_supported(ticket.side, locate_ok=False):
+        raise RuntimeError("READY ticket runtime product side unsupported")
+
     symbol = str(bound_row.broker_symbol or "").strip()
     if not symbol:
         raise RuntimeError("runtime product binding missing broker symbol")
 
-    broker_account_id = ASSET_BROKER_ACCOUNT.get(asset_id)
-    if broker_account_id is None:
-        raise RuntimeError("READY ticket has no canonical paper broker account")
-
+    broker_account_id = paper_broker_account_for_product(bound_row)
     risk_cluster_id = str(ticket.lineage.risk_cluster_id or "").strip()
-    canonical_cluster = cluster_for_asset(asset_id)
+    canonical_cluster = runtime_cluster_for_product(bound_row)
     if risk_cluster_id != canonical_cluster:
         raise RuntimeError("READY ticket canonical cluster drift")
+
+    dynamic_products = tuple(
+        row["product"]
+        for row in store.list_dynamic_product_states(conn)
+    )
+    cluster_by_asset = runtime_cluster_map(dynamic_products)
 
     quantity = float(ticket.quantity)
     idempotency_key = open_intent_idempotency_key(
@@ -139,7 +150,7 @@ def reserve_runtime_ready_ticket(
         event_id=event_id,
         actor="Portfolio",
         risk_cluster_id=risk_cluster_id,
-        cluster_by_asset=SEED_ASSET_CLUSTERS,
+        cluster_by_asset=cluster_by_asset,
         current_observations=current_observations,
         desk_scope_id=desk_scope_id,
     )
