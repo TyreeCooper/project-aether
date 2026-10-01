@@ -200,6 +200,7 @@ function Cockpit({ cockpit }) {
 const VIEW_META = {
   floor: { title: "Unified Firm Floor", subtitle: "Command central for the autonomous PAPER firm." },
   assets: { title: "Assets", subtitle: "Live stations, strategy state and canonical blockers." },
+  pipeline: { title: "Pipeline", subtitle: "See each Firm seat working and where flow is backing up." },
   live: { title: "Live Trades", subtitle: "Open PAPER positions, setup watch and runtime activity." },
   blotter: { title: "Blotter", subtitle: "Completed round trips in the current paper-test epoch." },
   booth: { title: "Booth", subtitle: "Operator visibility, system health and safety state." },
@@ -476,9 +477,283 @@ function SettingsView({ ingress, strategy, operator, floor }) {
   );
 }
 
-function AppSubview({ activeView, universe, selectedAsset, onSelectAsset, cockpits, strategyAssets, strategy, ingress, operator, floor, nowMs }) {
+
+const PIPELINE_QUEUE_SEATS = [
+  {
+    seat: "Scout",
+    owned: "WATCH",
+    job: "Finds real setups worth watching and passes only qualified opportunities forward.",
+  },
+  {
+    seat: "Sniper",
+    owned: "FIRE",
+    job: "Confirms trigger timing and converts a watched setup into an actionable entry candidate.",
+  },
+  {
+    seat: "Risk",
+    owned: "SIZE / REJECT",
+    job: "Sizes risk or rejects the trade when Firm risk laws are not satisfied.",
+  },
+  {
+    seat: "Clerk",
+    owned: "READY / REJECT",
+    job: "Builds the execution-ready ticket and refuses incomplete or invalid orders.",
+  },
+  {
+    seat: "Portfolio",
+    owned: "ORDER",
+    job: "Checks portfolio admission and routes an approved PAPER order into the book.",
+  },
+];
+
+function queueSummary(queues, seat) {
+  const rows = (queues || []).filter((row) => row.seat === seat);
+  return {
+    seat,
+    count: rows.reduce((sum, row) => sum + Number(row.count || 0), 0),
+    blockers: rows.reduce((sum, row) => sum + Number(row.blocker_count || 0), 0),
+    states: rows.map((row) => ({
+      state: text(row.state),
+      count: Number(row.count || 0),
+      blockerCount: Number(row.blocker_count || 0),
+      itemIds: row.item_ids || [],
+    })),
+    itemIds: rows.flatMap((row) => row.item_ids || []),
+  };
+}
+
+function pipelineBottleneck(queues) {
+  const governor = queueSummary(queues, "Governor");
+  if (governor.count > 0 || governor.blockers > 0) {
+    return {
+      seat: "Governor",
+      count: governor.count,
+      blockers: governor.blockers,
+      reason: "Global HALT pressure",
+    };
+  }
+
+  const candidates = PIPELINE_QUEUE_SEATS
+    .map((row) => Object.assign({}, row, queueSummary(queues, row.seat)))
+    .filter((row) => row.count > 0 || row.blockers > 0)
+    .sort((a, b) => (
+      b.blockers - a.blockers
+      || b.count - a.count
+      || a.seat.localeCompare(b.seat)
+    ));
+
+  if (!candidates.length) return null;
+  const row = candidates[0];
+  return {
+    seat: row.seat,
+    count: row.count,
+    blockers: row.blockers,
+    reason: row.blockers > 0
+      ? row.blockers + " blocker" + (row.blockers === 1 ? "" : "s")
+      : row.count + " item" + (row.count === 1 ? "" : "s") + " waiting",
+  };
+}
+
+function PipelineStage({ label, job, owned, metricLabel, count, blockers = 0, bottleneck = false, tone = "queue", states = [] }) {
+  const active = Number(count || 0) > 0;
+  const blocked = Number(blockers || 0) > 0;
+  const className = [
+    "pipelineStage",
+    tone,
+    active ? "busy" : "clear",
+    blocked ? "blocked" : "",
+    bottleneck ? "bottleneck" : "",
+  ].filter(Boolean).join(" ");
+
+  return (
+    <article className={className}>
+      <div className="pipelineStageTop">
+        <span>{owned}</span>
+        {bottleneck ? <b>BOTTLENECK</b> : blocked ? <b>BLOCKED</b> : active ? <b>WORKING</b> : <b>CLEAR</b>}
+      </div>
+      <h3>{label}</h3>
+      <p>{job}</p>
+      <div className="pipelineMetric">
+        <strong>{number(count, 0)}</strong>
+        <span>{metricLabel}</span>
+      </div>
+      {tone === "queue" ? (
+        <div className="pipelineStateList">
+          {states.map((row) => (
+            <span key={label + "-" + row.state}>
+              <b>{row.state}</b> {row.count}
+              {row.blockerCount ? <em>{row.blockerCount} blocked</em> : null}
+            </span>
+          ))}
+          {!states.length ? <span><b>QUEUE</b> 0</span> : null}
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+function PipelineView({ universe, queues, cockpits, operator, strategy }) {
+  const queueStages = PIPELINE_QUEUE_SEATS.map((stage) => Object.assign(
+    {},
+    stage,
+    queueSummary(queues, stage.seat),
+  ));
+  const governor = queueSummary(queues, "Governor");
+  const bottleneck = pipelineBottleneck(queues);
+  const queuedItems = queueStages.reduce((sum, row) => sum + row.count, 0);
+  const blockerCount = queueStages.reduce((sum, row) => sum + row.blockers, 0) + governor.blockers;
+  const maxQueue = Math.max(1, ...queueStages.map((row) => row.count));
+  const completedTrades = Number(operator?.blotter?.length || 0);
+  const pipelineStatus = governor.count > 0 || governor.blockers > 0
+    ? "GLOBAL HALT"
+    : bottleneck
+      ? "PRESSURE"
+      : "FLOW CLEAR";
+
+  return (
+    <section className="appView pipelineView">
+      <section className={"pipelineHero " + (bottleneck ? "pressure" : "clear")}>
+        <div>
+          <p className="eyebrow">LIVE FIRM FLOW</p>
+          <h2>{bottleneck ? bottleneck.seat + " is the current pressure point" : "No queue bottleneck detected"}</h2>
+          <p>
+            {bottleneck
+              ? bottleneck.reason + ". This is calculated from current vNext queue and blocker telemetry."
+              : "All canonical seat queues are currently clear. AETHER is still scanning for natural setups."}
+          </p>
+        </div>
+        <div className="pipelineHeroStats">
+          <span><b>{pipelineStatus}</b> status</span>
+          <span><b>{queuedItems}</b> queued</span>
+          <span><b>{blockerCount}</b> blockers</span>
+          <span><b>{cockpits.length}</b> open positions</span>
+        </div>
+      </section>
+
+      <section className="governorGate">
+        <div>
+          <p className="eyebrow">GLOBAL FIRM GATE</p>
+          <h3>Governor</h3>
+          <p>Can stop downstream flow when a Firm-wide hard condition is active.</p>
+        </div>
+        <div className={governor.count || governor.blockers ? "governorStatus halted" : "governorStatus clear"}>
+          <strong>{governor.count || governor.blockers ? "HALT ACTIVE" : "CLEAR"}</strong>
+          <span>{governor.count} queued · {governor.blockers} blockers</span>
+        </div>
+      </section>
+
+      <section className="floorSection pipelineSection">
+        <div className="sectionHead">
+          <div><p className="eyebrow">END-TO-END PIPELINE</p><h2>Firm Seats</h2></div>
+          <span>Live vNext telemetry · no synthetic work</span>
+        </div>
+
+        <div className="pipelineFlow" aria-label="AETHER Firm pipeline">
+          <PipelineStage
+            label="Universe"
+            owned="INPUT"
+            job="Maintains the supported asset universe before an opportunity can enter setup discovery."
+            metricLabel="assets"
+            count={universe.length}
+            tone="context"
+          />
+          {queueStages.map((stage) => (
+            <PipelineStage
+              key={stage.seat}
+              label={stage.seat}
+              owned={stage.owned}
+              job={stage.job}
+              metricLabel="in queue"
+              count={stage.count}
+              blockers={stage.blockers}
+              bottleneck={bottleneck?.seat === stage.seat}
+              states={stage.states}
+            />
+          ))}
+          <PipelineStage
+            label="Open Position"
+            owned="OPEN"
+            job="A PAPER trade that passed admission and is now in the managed book."
+            metricLabel="open"
+            count={cockpits.length}
+            tone="context"
+          />
+          <PipelineStage
+            label="Exit"
+            owned="MANAGE"
+            job="Applies horizon, stop and exit management to the positions currently open."
+            metricLabel="managed"
+            count={cockpits.length}
+            tone="context"
+          />
+          <PipelineStage
+            label="Review"
+            owned="CLOSED"
+            job="Completed PAPER round trips land in the epoch blotter for post-trade review."
+            metricLabel="closed this epoch"
+            count={completedTrades}
+            tone="context"
+          />
+        </div>
+      </section>
+
+      <section className="floorSection">
+        <div className="sectionHead">
+          <div><p className="eyebrow">BOTTLENECK LENS</p><h2>Queue Pressure</h2></div>
+          <span>Longer bars = more work waiting at that seat</span>
+        </div>
+        <div className="pipelinePressure">
+          {queueStages.map((stage) => {
+            const width = stage.count > 0 ? Math.max(8, Math.round((stage.count / maxQueue) * 100)) : 0;
+            return (
+              <div className={"pressureRow " + (bottleneck?.seat === stage.seat ? "hot" : "")} key={"pressure-" + stage.seat}>
+                <div className="pressureLabel">
+                  <strong>{stage.seat}</strong>
+                  <span>{stage.count} queued · {stage.blockers} blockers</span>
+                </div>
+                <div className="pressureTrack">
+                  <span style={{ width: width + "%" }} />
+                </div>
+                <b>{stage.count}</b>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="split">
+        <section className="floorSection">
+          <div className="sectionHead"><div><p className="eyebrow">QUEUE CONTENTS</p><h2>What Is Waiting</h2></div></div>
+          <div className="pipelineQueueInspector">
+            {queueStages.map((stage) => (
+              <article key={"inspect-" + stage.seat}>
+                <div><strong>{stage.seat}</strong><span>{stage.count} item(s)</span></div>
+                {stage.itemIds.length
+                  ? <div className="pipelineItemIds">{stage.itemIds.slice(0, 8).map((id) => <code key={id}>{id}</code>)}</div>
+                  : <small>Queue clear</small>}
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="floorSection">
+          <div className="sectionHead"><div><p className="eyebrow">SCANNER FEED</p><h2>Current BTC / ETH Decisions</h2></div></div>
+          <div className="strategyDecisionGrid">
+            <StrategyDecision assetId="btc" row={strategy?.last_result?.assets?.btc} />
+            <StrategyDecision assetId="eth" row={strategy?.last_result?.assets?.eth} />
+          </div>
+        </section>
+      </section>
+    </section>
+  );
+}
+
+function AppSubview({ activeView, universe, queues, selectedAsset, onSelectAsset, cockpits, strategyAssets, strategy, ingress, operator, floor, nowMs }) {
   if (activeView === "assets") {
     return <AssetsView universe={universe} selectedAsset={selectedAsset} onSelect={onSelectAsset} strategyAssets={strategyAssets} />;
+  }
+  if (activeView === "pipeline") {
+    return <PipelineView universe={universe} queues={queues} cockpits={cockpits} operator={operator} strategy={strategy} />;
   }
   if (activeView === "live") {
     return <LiveTradesView cockpits={cockpits} strategyAssets={strategyAssets} strategy={strategy} activity={operator?.activity || []} nowMs={nowMs} />;
@@ -498,6 +773,7 @@ function AppSubview({ activeView, universe, selectedAsset, onSelectAsset, cockpi
 function BottomDock({ activeView, onNavigate }) {
   const items = [
     ["floor", "⌂", "Floor"],
+    ["pipeline", "⇢", "Pipeline"],
     ["assets", "◉", "Assets"],
     ["live", "⌁", "Live"],
     ["blotter", "≡", "Blotter"],
@@ -530,6 +806,7 @@ function AppMenu({ open, activeView, onClose, onNavigate, floor, ingress, strate
         {[
           ["settings", "⚙", "Settings", "Runtime, data and safety"],
           ["floor", "⌂", "The Floor", "Portfolio command overview"],
+          ["pipeline", "⇢", "Pipeline", "Seat flow and bottleneck visibility"],
           ["live", "●", "Live Trades", "Positions, setup watch and activity"],
           ["blotter", "≡", "Blotter", "Completed PAPER trades"],
           ["assets", "◉", "Assets", "Prototype trading stations"],
@@ -690,7 +967,7 @@ export default function DashboardPage() {
           <button type="button" className="menuButton" onClick={() => setMenuOpen(true)} aria-label="Open AETHER menu">☰</button>
           <img className="brandMark" src="/vnext/aether-mark.png" alt="AETHER" />
           <div>
-            <p className="eyebrow">PROJECT AETHER · FIRM</p>
+            <p className="eyebrow">AETHER PROP FIRM</p>
             <h1>{viewMeta.title}</h1>
             <p className="subtle">{viewMeta.subtitle}</p>
           </div>
@@ -855,6 +1132,7 @@ export default function DashboardPage() {
         <AppSubview
           activeView={activeView}
           universe={universe}
+          queues={queues}
           selectedAsset={selectedAsset}
           onSelectAsset={setSelectedAsset}
           cockpits={cockpits}

@@ -1,7 +1,7 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "AETHER — Autonomous Paper Firm",
+  title: "AETHER PROP FIRM",
   description: "AETHER vNext autonomous PAPER trading operator console",
   icons: {
     icon: "/vnext/favicon.png",
