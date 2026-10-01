@@ -293,7 +293,7 @@ jobs:
           ui_ready=0
           for attempt in $(seq 1 12); do
             code="$(curl --silent --show-error --max-time 30 \
-              -o /tmp/index.html -w '%{http_code}' "$base/" || true)"
+              -o /tmp/index.html -w '%{http_code}' "$base/vnext/" || true)"
             if [ "$code" = "200" ] \
               && grep -q "Live Strategy Monitor" /tmp/index.html \
               && grep -q "AUTONOMOUS PAPER ENGINE" /tmp/index.html
