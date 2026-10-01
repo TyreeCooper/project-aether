@@ -249,6 +249,16 @@ def test_current_dynamic_products_require_current_focus_and_runtime_compatibilit
     )
     assert tuple(row.asset_id for row in rows) == ("kraken:solusd",)
 
+    rows_with_open = _current_dynamic_kraken_products(
+        states,
+        focus_snapshot=focus,
+        include_asset_ids=("kraken:adausd",),
+    )
+    assert tuple(row.asset_id for row in rows_with_open) == (
+        "kraken:adausd",
+        "kraken:solusd",
+    )
+
 
 def test_dynamic_strategy_rotation_prioritizes_open_assets_and_roams() -> None:
     products = tuple(
@@ -276,3 +286,27 @@ def test_dynamic_strategy_rotation_prioritizes_open_assets_and_roams() -> None:
     assert {row.asset_id for row in first[1:]} != {
         row.asset_id for row in later[1:]
     }
+
+
+
+def test_dynamic_strategy_rotation_never_drops_open_assets_over_batch_limit() -> None:
+    products = tuple(
+        _dynamic_product(symbol)
+        for symbol in ("ADA/USD", "AVAX/USD", "DOT/USD", "LINK/USD", "SOL/USD")
+    )
+    selected = _rotating_dynamic_strategy_batch(
+        products,
+        as_of_utc=datetime(2026, 10, 1, 22, 0, tzinfo=timezone.utc),
+        interval_seconds=15.0,
+        batch_size=2,
+        priority_asset_ids=(
+            "kraken:adausd",
+            "kraken:avaxusd",
+            "kraken:dotusd",
+        ),
+    )
+    assert tuple(row.asset_id for row in selected) == (
+        "kraken:adausd",
+        "kraken:avaxusd",
+        "kraken:dotusd",
+    )
