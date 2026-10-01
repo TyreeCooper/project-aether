@@ -19,6 +19,9 @@ def test_vnext_ui_restores_familiar_operator_shell_without_legacy_routes() -> No
     assert "function PipelineView" in page
     assert "function ProviderDiscoveryBoard" in page
     assert "function ProviderFocusCard" in page
+    assert "function feedClassLabel" in page
+    assert "PUBLIC REF · DELAYED" in page
+    assert "REFERENCE ONLY" in page
     assert "SCOUT READY" in page
     assert "DISCOVERY ONLY" in page
     assert "Trade Readiness" in page
@@ -44,6 +47,9 @@ def test_vnext_ui_restores_familiar_operator_shell_without_legacy_routes() -> No
     assert ".governorGate" in css
     assert ".providerDiscoveryFunnel" in css
     assert ".providerFocusGrid" in css
+    assert ".providerFeedClass" in css
+    assert ".providerTop25" in css
+    assert ".providerFeedLegend" in css
     assert ".focusReady" in css
     assert ".focusDiscoveryOnly" in css
     assert ".desktopCommandCenter" in css

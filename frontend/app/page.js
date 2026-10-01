@@ -629,6 +629,25 @@ function discoveryProviderRows(discovery) {
   });
 }
 
+
+function feedClassLabel(value) {
+  const raw = String(value || "REFERENCE").toUpperCase();
+  if (raw === "NATIVE_PUBLIC") return "NATIVE PUBLIC";
+  if (raw === "PUBLIC_REFERENCE_INTRADAY") return "PUBLIC REF · INTRADAY";
+  if (raw === "PUBLIC_REFERENCE_DELAYED") return "PUBLIC REF · DELAYED";
+  if (raw === "PUBLIC_REFERENCE_DAILY") return "PUBLIC REF · DAILY";
+  if (raw === "PUBLIC_CATALOG") return "PUBLIC CATALOG";
+  return raw.replaceAll("_", " ");
+}
+
+function providerFeedSummary(row) {
+  const values = Array.isArray(row?.feed_classes) ? row.feed_classes : [];
+  if (!values.length) {
+    return row?.catalog_mode === "provider_native" ? "NATIVE PUBLIC" : "PUBLIC REFERENCE";
+  }
+  return values.map(feedClassLabel).join(" · ");
+}
+
 function ProviderFocusCard({ row }) {
   const online = row.status === "online";
   const top = row.top25 || [];
@@ -636,10 +655,14 @@ function ProviderFocusCard({ row }) {
     <article className={"providerFocusCard " + (online ? "online" : "offline")}>
       <div className="providerFocusHead">
         <div>
-          <span>{row.catalog_mode === "provider_native" ? "NATIVE CATALOG" : "MARKET UNIVERSE"}</span>
+          <span>{row.catalog_mode === "provider_native" ? "PROVIDER-NATIVE CATALOG" : "PUBLIC REFERENCE CATALOG"}</span>
           <h3>{row.provider}</h3>
         </div>
         <b className={online ? "state good" : "state bad"}>{online ? "ONLINE" : "WAITING"}</b>
+      </div>
+      <div className="providerFeedClass">
+        <span>{providerFeedSummary(row)}</span>
+        <b>{row.execution_binding_required ? "REFERENCE ONLY" : "NO EXECUTION AUTHORITY"}</b>
       </div>
       <div className="providerFunnelStats">
         <span><b>{number(row.catalog_count, 0)}</b> catalog</span>
@@ -648,7 +671,10 @@ function ProviderFocusCard({ row }) {
       </div>
       {online ? (
         top.length ? (
-          <div className="providerTop10">
+          <div className="providerTop25">
+            <div className="providerTop25Header">
+              <span>Rank</span><span>Instrument</span><span>Score</span><span>Move</span><span>Reference</span><span>Feed / Readiness</span>
+            </div>
             {top.map((item) => (
               <div key={row.provider + ":" + item.market_data_symbol}>
                 <b>#{item.rank}</b>
@@ -658,16 +684,19 @@ function ProviderFocusCard({ row }) {
                   {Number(item.change_pct) >= 0 ? "+" : ""}{number(item.change_pct, 2)}%
                 </span>
                 <small>{money(item.price)}</small>
-                <em
-                  className={
-                    item.handoff?.state === "SCOUT_READY"
-                      ? "focusReady"
-                      : "focusDiscoveryOnly"
-                  }
-                  title={(item.handoff?.blockers || []).join(", ")}
-                >
-                  {item.handoff?.state === "SCOUT_READY" ? "SCOUT READY" : "DISCOVERY ONLY"}
-                </em>
+                <div className="focusFeedState">
+                  <small>{feedClassLabel(item.feed_class)}</small>
+                  <em
+                    className={
+                      item.handoff?.state === "SCOUT_READY"
+                        ? "focusReady"
+                        : "focusDiscoveryOnly"
+                    }
+                    title={(item.handoff?.blockers || []).join(", ")}
+                  >
+                    {item.handoff?.state === "SCOUT_READY" ? "SCOUT READY" : "DISCOVERY ONLY"}
+                  </em>
+                </div>
               </div>
             ))}
           </div>
@@ -717,8 +746,13 @@ function ProviderDiscoveryBoard({ discovery }) {
       <div className="providerFocusGrid">
         {rows.map((row) => <ProviderFocusCard row={row} key={row.provider} />)}
       </div>
+      <div className="providerFeedLegend">
+        <span><b>NATIVE PUBLIC</b> provider-hosted market reference</span>
+        <span><b>PUBLIC REF</b> non-execution reference data; cadence shown per provider</span>
+        <span><b>DISCOVERY ONLY</b> catalog/ranking works, but product or playbook commissioning still blocks Scout</span>
+      </div>
       <p className="providerDiscoveryLaw">
-        Discovery ranking is pre-Scout attention selection only. It cannot force a setup, Risk approval, or trade.
+        Discovery ranking is pre-Scout attention selection only. Reference data never becomes a fill or execution authority.
       </p>
     </section>
   );
@@ -799,7 +833,7 @@ function PipelineView({ universe, queues, cockpits, operator, strategy, discover
           <PipelineStage
             label="Eligibility"
             owned="FILTER"
-            job="Removes unavailable, inactive, or unpriced instruments before ranking."
+            job="Keeps active instruments with usable reference price or market-activity evidence before ranking."
             metricLabel="eligible"
             count={discoveredEligible}
             tone="context"
