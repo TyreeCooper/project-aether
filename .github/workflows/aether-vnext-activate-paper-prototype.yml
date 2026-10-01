@@ -7,6 +7,8 @@ on:
     paths:
       - ".github/workflows/aether-vnext-activate-paper-prototype.yml"
       - "backend/aether_vnext/prototype_strategy_supervisor.py"
+      - "backend/aether_vnext/prototype_forward_paper_evidence.py"
+      - "backend/tests_vnext/test_prototype_forward_paper_evidence.py"
       - "backend/tests_vnext/test_prototype_crypto_exit_runtime.py"
       - "frontend/app/page.js"
       - "frontend/app/globals.css"

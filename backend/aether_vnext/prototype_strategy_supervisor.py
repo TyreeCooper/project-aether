@@ -26,6 +26,9 @@ from aether_vnext.freeze import LIVE_BLOCKED, PAPER_ONLY
 from aether_vnext.prototype_crypto_entry_plan import build_prototype_crypto_entry_plan
 from aether_vnext.prototype_crypto_entry_runtime import advance_prototype_crypto_entry
 from aether_vnext.prototype_crypto_exit_runtime import advance_prototype_crypto_exit
+from aether_vnext.prototype_forward_paper_evidence import (
+    persist_prototype_no_setup_observation,
+)
 from aether_vnext.prototype_crypto_warmup import assemble_prototype_crypto_warmup
 from aether_vnext.prototype_history_sources import (
     KRAKEN_DAILY_SOURCE_ID,
@@ -354,6 +357,22 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         current_observations=observations,
                         as_of_utc=as_of_utc,
                     )
+                    if advanced.stage == "NO_SETUP":
+                        persist_prototype_no_setup_observation(
+                            sync_conn,
+                            store,
+                            paper_epoch_id=EXPECTED_EPOCH,
+                            asset_id=asset_id,
+                            trigger_close_utc=feature.trigger_close_utc,
+                            evaluated_at_utc=as_of_utc,
+                            market_observation_id=observation.observation_id,
+                            reason=advanced.reason,
+                            watch_eligible=feature.watch_eligible,
+                            volatility_percentile=feature.volatility.percentile,
+                            setup_id=advanced.setup_id,
+                            ticket_id=advanced.ticket_id,
+                            order_intent_id=advanced.order_intent_id,
+                        )
                     asset_results[asset_id] = {
                         **asdict(advanced),
                         "watch_eligible": feature.watch_eligible,
