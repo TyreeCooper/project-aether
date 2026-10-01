@@ -47,6 +47,9 @@ def test_focus_snapshot_has_top10_per_online_provider_and_explicit_missing_provi
         as_of_utc=NOW,
     )
     assert snapshot["focus_count"] == 30
+    assert snapshot["scout_ready_count"] >= 0
+    assert snapshot["scout_ready_count"] + snapshot["discovery_only_count"] == 30
+    assert len(snapshot["scout_handoff"]) == 30
     assert len(snapshot["providers"]["Kraken"]["top10"]) == 10
     assert len(snapshot["providers"]["IBKR"]["top10"]) == 10
     assert len(snapshot["providers"]["tastyfx"]["top10"]) == 10

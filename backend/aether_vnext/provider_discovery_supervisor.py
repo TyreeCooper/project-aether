@@ -23,11 +23,16 @@ from aether_vnext.provider_discovery import (
     focus_payload,
     rank_provider_catalog,
 )
+from aether_vnext.provider_focus_handoff import (
+    focus_handoff_rows,
+    handoff_payload,
+)
 
 
 UTC = timezone.utc
 PROVIDERS = ("Kraken", "tastyfx", "NinjaTrader", "IBKR")
 CycleRunner = Callable[[], Awaitable[dict[str, object]]]
+_LATEST_FOCUS_SNAPSHOT: dict[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,6 +166,8 @@ def build_provider_focus_snapshot(
             })
 
     focus_pool.sort(key=lambda row: (str(row["provider"]), int(row["rank"])))
+    handoff = focus_handoff_rows(focus_pool)
+    handoff_rows = handoff_payload(handoff)
     return {
         "as_of_utc": as_of_utc.astimezone(UTC).isoformat(),
         "paper_only": PAPER_ONLY,
@@ -171,6 +178,13 @@ def build_provider_focus_snapshot(
         "providers": providers,
         "focus_pool": focus_pool,
         "focus_count": len(focus_pool),
+        "scout_handoff": handoff_rows,
+        "scout_ready_count": sum(
+            1 for row in handoff_rows if row["state"] == "SCOUT_READY"
+        ),
+        "discovery_only_count": sum(
+            1 for row in handoff_rows if row["state"] == "DISCOVERY_ONLY"
+        ),
         "provider_count": len(PROVIDERS),
         "online_provider_count": sum(
             1 for row in providers.values()
@@ -180,7 +194,27 @@ def build_provider_focus_snapshot(
     }
 
 
+def current_deep_trade_focus_asset_ids() -> frozenset[str] | None:
+    """Return latest safe deep-runtime focus IDs, or None before first cycle."""
+    snapshot = _LATEST_FOCUS_SNAPSHOT
+    if snapshot is None:
+        return None
+    handoff = snapshot.get("scout_handoff")
+    if not isinstance(handoff, list):
+        return frozenset()
+    return frozenset(
+        str(row["canonical_asset_id"])
+        for row in handoff
+        if (
+            isinstance(row, Mapping)
+            and row.get("state") == "SCOUT_READY"
+            and row.get("canonical_asset_id")
+        )
+    )
+
+
 async def run_configured_provider_discovery_cycle() -> dict[str, object]:
+    global _LATEST_FOCUS_SNAPSHOT
     if not PAPER_ONLY or not LIVE_BLOCKED:
         raise RuntimeError("provider discovery safety invariant failed")
 
@@ -205,11 +239,13 @@ async def run_configured_provider_discovery_cycle() -> dict[str, object]:
             for provider in ("IBKR", "tastyfx", "NinjaTrader"):
                 errors[provider] = reason
 
-    return build_provider_focus_snapshot(
+    snapshot = build_provider_focus_snapshot(
         universes,
         provider_errors=errors,
         as_of_utc=datetime.now(UTC),
     )
+    _LATEST_FOCUS_SNAPSHOT = dict(snapshot)
+    return snapshot
 
 
 def configured_discovery_enabled() -> bool:

@@ -40,6 +40,9 @@ from aether_vnext.prototype_market_history import (
     load_prototype_market_bars,
     persist_prototype_market_bars,
 )
+from aether_vnext.provider_discovery_supervisor import (
+    current_deep_trade_focus_asset_ids,
+)
 from aether_vnext.store import VNextStore
 
 
@@ -169,6 +172,30 @@ def _latest_observation(
     )
 
 
+def _entry_focus_block(
+    *,
+    asset_id: str,
+    focused_asset_ids: frozenset[str] | None,
+    assets_open_at_start: set[str],
+) -> dict[str, object] | None:
+    """Fail closed for new entries while never abandoning an existing trade."""
+    if asset_id in assets_open_at_start:
+        return None
+    if focused_asset_ids is None:
+        return {
+            "stage": "NO_FOCUS",
+            "reason": "provider_focus_unavailable",
+            "focus_selected": None,
+        }
+    if asset_id not in focused_asset_ids:
+        return {
+            "stage": "OUT_OF_FOCUS",
+            "reason": "provider_top10_not_selected",
+            "focus_selected": False,
+        }
+    return None
+
+
 def _setup_already_completed(
     sync_conn,
     store: VNextStore,
@@ -195,6 +222,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
         raise RuntimeError("prototype strategy safety invariant failed")
 
     as_of_utc = datetime.now(UTC)
+    focused_asset_ids = current_deep_trade_focus_asset_ids()
     fetched_hourly = {}
     fetched_daily = {}
     for asset_id in ASSETS:
@@ -213,6 +241,10 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
         "live_blocked": LIVE_BLOCKED,
         "phase18_evidence": False,
         "as_of_utc": as_of_utc.isoformat(),
+        "provider_focus_available": focused_asset_ids is not None,
+        "deep_trade_focus_asset_ids": (
+            None if focused_asset_ids is None else sorted(focused_asset_ids)
+        ),
         "assets": {},
     }
 
@@ -286,6 +318,27 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         }
                         continue
 
+                    if asset_id in assets_open_at_start:
+                        asset_results[asset_id] = {
+                            "stage": "MANAGE_OPEN",
+                            "reason": "trade_was_open_at_cycle_start",
+                            "focus_selected": (
+                                None
+                                if focused_asset_ids is None
+                                else asset_id in focused_asset_ids
+                            ),
+                        }
+                        continue
+
+                    focus_block = _entry_focus_block(
+                        asset_id=asset_id,
+                        focused_asset_ids=focused_asset_ids,
+                        assets_open_at_start=assets_open_at_start,
+                    )
+                    if focus_block is not None:
+                        asset_results[asset_id] = focus_block
+                        continue
+
                     hourly = load_prototype_market_bars(
                         sync_conn,
                         store,
@@ -330,14 +383,6 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         as_of_utc=as_of_utc,
                     )
 
-                    if asset_id in assets_open_at_start:
-                        asset_results[asset_id] = {
-                            "stage": "MANAGE_OPEN",
-                            "reason": "trade_was_open_at_cycle_start",
-                            "trigger_close_utc": feature.trigger_close_utc.isoformat(),
-                            "watch_eligible": feature.watch_eligible,
-                        }
-                        continue
                     if _setup_already_completed(
                         sync_conn,
                         store,
@@ -362,6 +407,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     )
                     asset_result = {
                         **asdict(advanced),
+                        "focus_selected": True,
                         "watch_eligible": feature.watch_eligible,
                         "volatility_percentile": feature.volatility.percentile,
                     }
