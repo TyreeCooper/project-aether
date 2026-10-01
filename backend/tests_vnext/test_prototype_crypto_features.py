@@ -240,7 +240,7 @@ def test_dynamic_kraken_asset_uses_same_crypto_feature_parameters() -> None:
     assert projection.product is not None
     spec = runtime_playbook_for_product(
         projection.product,
-        playbook_id=CRYPTO_PLAYBOOK_ID,
+        playbook_id="pb_crypto_swing_v1_2",
     )
     out = build_prototype_crypto_features(
         asset_id=asset_id,
