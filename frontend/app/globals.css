@@ -264,3 +264,36 @@ button { color: inherit; }
 @media (prefers-reduced-motion: reduce) {
   .menuScrim, .appMenu { transition: none; }
 }
+
+.brandMark {
+  width: 46px;
+  height: 46px;
+  flex: 0 0 46px;
+  border-radius: 13px;
+  object-fit: cover;
+  box-shadow: 0 7px 24px rgba(0,0,0,.28), 0 0 22px rgba(233, 178, 70, .08);
+}
+.menuBrand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.menuBrand > img {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  border-radius: 12px;
+  object-fit: cover;
+  box-shadow: 0 7px 20px rgba(0,0,0,.3);
+}
+.menuBrand > div { min-width: 0; }
+
+@media (max-width: 560px) {
+  .brandMark {
+    width: 38px;
+    height: 38px;
+    flex-basis: 38px;
+    border-radius: 10px;
+  }
+}

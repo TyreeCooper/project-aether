@@ -521,7 +521,10 @@ function AppMenu({ open, activeView, onClose, onNavigate, floor, ingress, strate
       <button type="button" className={"menuScrim " + (open ? "open" : "")} onClick={onClose} aria-label="Close menu" />
       <aside className={"appMenu " + (open ? "open" : "")} aria-label="AETHER menu">
         <div className="appMenuHead">
-          <div><p className="eyebrow">AETHER</p><h2>Menu</h2></div>
+          <div className="menuBrand">
+            <img src="/vnext/aether-mark.png" alt="" aria-hidden="true" />
+            <div><p className="eyebrow">AETHER</p><h2>Menu</h2></div>
+          </div>
           <button type="button" onClick={onClose} aria-label="Close menu">×</button>
         </div>
         {[
@@ -685,6 +688,7 @@ export default function DashboardPage() {
       <header className="floorHeader">
         <div className="headerIdentity">
           <button type="button" className="menuButton" onClick={() => setMenuOpen(true)} aria-label="Open AETHER menu">☰</button>
+          <img className="brandMark" src="/vnext/aether-mark.png" alt="AETHER" />
           <div>
             <p className="eyebrow">PROJECT AETHER · FIRM</p>
             <h1>{viewMeta.title}</h1>
