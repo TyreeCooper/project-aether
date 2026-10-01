@@ -136,3 +136,22 @@ AAPL,2000,1900,100,200,199.95,300,200.05,200.01
     assert by_symbol["AAPL"].volume == 3000.0
     assert by_symbol["AAPL"].feed_class == "PUBLIC_REFERENCE_INTRADAY"
     assert by_symbol["AAPL"].execution_quality is False
+
+
+
+def test_cboe_incremental_merge_keeps_one_aggregate_per_symbol() -> None:
+    first = parse_cboe_symbol_csv(
+        "Symbol,Volume,Bid Price,Ask Price,Last Price\n"
+        "AAPL,1000,199.90,200.10,200.00\n"
+        "MSFT,500,399.90,400.10,400.00\n"
+    )
+    second = parse_cboe_symbol_csv(
+        "Symbol,Volume,Bid Price,Ask Price,Last Price\n"
+        "AAPL,2000,199.95,200.05,200.01\n"
+    )
+    merged = merge_cboe_symbol_quotes((first, second))
+    assert set(merged) == {"AAPL", "MSFT"}
+    assert merged["AAPL"].volume == 3000.0
+    assert merged["AAPL"].bid == 199.95
+    assert merged["AAPL"].ask == 200.05
+    assert merged["AAPL"].last == 200.01

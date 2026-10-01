@@ -91,6 +91,66 @@ def test_discovery_supervisor_cycles_without_execution_authority() -> None:
     assert calls >= 2
 
 
+def test_discovery_supervisor_isolates_blocking_cycle_from_event_loop() -> None:
+    async def cycle():
+        import time
+        time.sleep(0.05)
+        return {
+            "paper_only": True,
+            "live_blocked": True,
+            "trading_authority": False,
+            "focus_count": 0,
+        }
+
+    async def scenario():
+        supervisor = ProviderDiscoverySupervisor(
+            cycle_runner=cycle,
+            interval_seconds=60.0,
+        )
+        await supervisor.start()
+        started = asyncio.get_running_loop().time()
+        await asyncio.sleep(0.005)
+        elapsed = asyncio.get_running_loop().time() - started
+        # If the blocking cycle ran on the ASGI loop, this sleep would take
+        # roughly the full 50ms blocking interval instead of returning promptly.
+        assert elapsed < 0.03
+        await asyncio.sleep(0.07)
+        assert supervisor.status().cycle_count == 1
+        await supervisor.stop()
+
+    asyncio.run(scenario())
+
+
+def test_discovery_supervisor_honors_initial_startup_delay() -> None:
+    calls = 0
+
+    async def cycle():
+        nonlocal calls
+        calls += 1
+        return {
+            "paper_only": True,
+            "live_blocked": True,
+            "trading_authority": False,
+            "focus_count": 0,
+        }
+
+    async def scenario():
+        supervisor = ProviderDiscoverySupervisor(
+            cycle_runner=cycle,
+            interval_seconds=60.0,
+            initial_delay_seconds=0.04,
+        )
+        await supervisor.start()
+        await asyncio.sleep(0.01)
+        assert calls == 0
+        assert supervisor.status().initial_delay_seconds == 0.04
+        await asyncio.sleep(0.05)
+        assert calls == 1
+        await supervisor.stop()
+
+    asyncio.run(scenario())
+
+
 def test_discovery_status_route_is_get_only(monkeypatch) -> None:
     monkeypatch.setenv("AETHER_VNEXT_PROVIDER_DISCOVERY_ENABLED", "false")
     app = FastAPI()

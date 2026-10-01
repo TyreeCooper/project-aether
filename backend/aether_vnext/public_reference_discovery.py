@@ -545,38 +545,22 @@ def parse_cboe_symbol_csv(raw_text: str) -> tuple[CboeSymbolQuote, ...]:
 def merge_cboe_symbol_quotes(
     groups: Iterable[Iterable[CboeSymbolQuote]],
 ) -> dict[str, CboeSymbolQuote]:
-    totals: dict[str, float] = {}
-    best: dict[str, CboeSymbolQuote] = {}
+    """Merge venue rows while retaining only one aggregate object per symbol."""
+    merged: dict[str, CboeSymbolQuote] = {}
     for group in groups:
         for row in group:
-            totals[row.symbol] = totals.get(row.symbol, 0.0) + float(row.volume)
-            current = best.get(row.symbol)
-            current_quality = (
-                0
-                if current is None
-                else sum(v is not None for v in (current.bid, current.ask, current.last))
+            current = merged.get(row.symbol)
+            if current is None:
+                merged[row.symbol] = row
+                continue
+            merged[row.symbol] = CboeSymbolQuote(
+                symbol=row.symbol,
+                volume=float(current.volume) + float(row.volume),
+                bid=row.bid if row.bid is not None else current.bid,
+                ask=row.ask if row.ask is not None else current.ask,
+                last=row.last if row.last is not None else current.last,
             )
-            row_quality = sum(v is not None for v in (row.bid, row.ask, row.last))
-            if (
-                current is None
-                or row_quality > current_quality
-                or (
-                    row_quality == current_quality
-                    and row.volume > current.volume
-                )
-            ):
-                best[row.symbol] = row
-
-    return {
-        symbol: CboeSymbolQuote(
-            symbol=symbol,
-            volume=totals.get(symbol, 0.0),
-            bid=row.bid,
-            ask=row.ask,
-            last=row.last,
-        )
-        for symbol, row in best.items()
-    }
+    return merged
 
 
 def build_ibkr_us_equity_reference_universe(
@@ -729,23 +713,21 @@ async def fetch_ibkr_us_equity_public_universe(
         follow_redirects=True,
     )
     try:
-        urls = [
-            NASDAQ_LISTED_URL,
-            NASDAQ_OTHER_LISTED_URL,
-            *[
-                CBOE_SYMBOL_CSV_TEMPLATE.format(market=market)
-                for market in CBOE_MARKETS
-            ],
-        ]
-        payloads = await asyncio.gather(*(_get_text(http, url) for url in urls))
+        # The two symbol directories are modest; fetch them together.
+        listed_text, other_text = await asyncio.gather(
+            _get_text(http, NASDAQ_LISTED_URL),
+            _get_text(http, NASDAQ_OTHER_LISTED_URL),
+        )
         nasdaq = parse_nasdaq_listed_file(
-            payloads[0],
+            listed_text,
             source_exchange="NASDAQ",
         )
         other = parse_nasdaq_listed_file(
-            payloads[1],
+            other_text,
             source_exchange="OTHER",
         )
+        del listed_text, other_text
+
         by_symbol: dict[str, UsListedSecurity] = {
             row.symbol: row for row in (*nasdaq, *other)
         }
@@ -753,11 +735,22 @@ async def fetch_ibkr_us_equity_public_universe(
             raise RuntimeError(
                 f"us_equity_public_catalog_too_small:{len(by_symbol)}"
             )
-        quote_groups = [
-            parse_cboe_symbol_csv(text)
-            for text in payloads[2:]
-        ]
-        quotes = merge_cboe_symbol_quotes(quote_groups)
+
+        # Cboe all-symbol files can be large. Process one venue at a time and
+        # discard each raw CSV immediately instead of buffering all four.
+        quotes: dict[str, CboeSymbolQuote] = {}
+        for market in CBOE_MARKETS:
+            text = await _get_text(
+                http,
+                CBOE_SYMBOL_CSV_TEMPLATE.format(market=market),
+            )
+            venue_rows = parse_cboe_symbol_csv(text)
+            del text
+            quotes = merge_cboe_symbol_quotes(
+                (quotes.values(), venue_rows),
+            )
+            del venue_rows
+
         return build_ibkr_us_equity_reference_universe(
             tuple(by_symbol[symbol] for symbol in sorted(by_symbol)),
             quotes,

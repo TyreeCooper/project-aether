@@ -44,18 +44,33 @@ class ProviderDiscoveryStatus:
     live_blocked: bool
     cycle_count: int
     interval_seconds: float
+    initial_delay_seconds: float
     last_cycle_started_at_utc: str | None
     last_cycle_finished_at_utc: str | None
     last_error: str | None
     last_result: dict[str, object] | None
 
 
+def _run_cycle_in_worker(cycle_runner: CycleRunner) -> dict[str, object]:
+    """Run one async discovery cycle on a private event loop in a worker thread."""
+    return dict(asyncio.run(cycle_runner()))
+
+
 class ProviderDiscoverySupervisor:
-    def __init__(self, *, cycle_runner: CycleRunner, interval_seconds: float = 300.0) -> None:
+    def __init__(
+        self,
+        *,
+        cycle_runner: CycleRunner,
+        interval_seconds: float = 300.0,
+        initial_delay_seconds: float = 0.0,
+    ) -> None:
         if interval_seconds <= 0:
             raise ValueError("interval_seconds must be positive")
+        if initial_delay_seconds < 0:
+            raise ValueError("initial_delay_seconds must be non-negative")
         self._cycle_runner = cycle_runner
         self._interval_seconds = float(interval_seconds)
+        self._initial_delay_seconds = float(initial_delay_seconds)
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
         self._cycle_count = 0
@@ -76,6 +91,7 @@ class ProviderDiscoverySupervisor:
             live_blocked=LIVE_BLOCKED,
             cycle_count=self._cycle_count,
             interval_seconds=self._interval_seconds,
+            initial_delay_seconds=self._initial_delay_seconds,
             last_cycle_started_at_utc=None if self._last_started is None else self._last_started.isoformat(),
             last_cycle_finished_at_utc=None if self._last_finished is None else self._last_finished.isoformat(),
             last_error=self._last_error,
@@ -104,10 +120,24 @@ class ProviderDiscoverySupervisor:
             self._task = None
 
     async def _run(self) -> None:
+        if self._initial_delay_seconds > 0:
+            try:
+                await asyncio.wait_for(
+                    self._stop.wait(),
+                    timeout=self._initial_delay_seconds,
+                )
+            except TimeoutError:
+                pass
+            if self._stop.is_set():
+                return
+
         while not self._stop.is_set():
             self._last_started = datetime.now(UTC)
             try:
-                self._last_result = dict(await self._cycle_runner())
+                self._last_result = await asyncio.to_thread(
+                    _run_cycle_in_worker,
+                    self._cycle_runner,
+                )
                 self._last_error = None
                 self._cycle_count += 1
             except asyncio.CancelledError:
@@ -226,20 +256,18 @@ async def run_configured_provider_discovery_cycle() -> dict[str, object]:
     errors: dict[str, str] = {}
 
     providers = (
-        ("Kraken", fetch_kraken_discovery_universe()),
-        ("tastyfx", fetch_tastyfx_public_universe()),
-        ("NinjaTrader", fetch_ninjatrader_public_universe()),
-        ("IBKR", fetch_ibkr_us_equity_public_universe()),
+        ("Kraken", fetch_kraken_discovery_universe),
+        ("tastyfx", fetch_tastyfx_public_universe),
+        ("NinjaTrader", fetch_ninjatrader_public_universe),
+        ("IBKR", fetch_ibkr_us_equity_public_universe),
     )
-    results = await asyncio.gather(
-        *(awaitable for _, awaitable in providers),
-        return_exceptions=True,
-    )
-    for (provider, _), result in zip(providers, results, strict=True):
-        if isinstance(result, BaseException):
-            errors[provider] = f"{type(result).__name__}:{result}"
-        else:
-            universes[provider] = tuple(result)
+    # Resource-bound by design: one provider universe at a time. This avoids
+    # multiplying network buffers and parser memory on the small nonprod worker.
+    for provider, fetcher in providers:
+        try:
+            universes[provider] = tuple(await fetcher())
+        except Exception as exc:
+            errors[provider] = f"{type(exc).__name__}:{exc}"
 
     snapshot = build_provider_focus_snapshot(
         universes,
@@ -265,6 +293,19 @@ def configured_discovery_interval_seconds() -> float:
     value = float(raw)
     if value < 60.0:
         raise ValueError("AETHER_VNEXT_PROVIDER_DISCOVERY_INTERVAL_SECONDS must be >= 60")
+    return value
+
+
+def configured_discovery_initial_delay_seconds() -> float:
+    raw = os.getenv(
+        "AETHER_VNEXT_PROVIDER_DISCOVERY_INITIAL_DELAY_SECONDS",
+        "15",
+    ).strip()
+    value = float(raw)
+    if value < 0.0 or value > 120.0:
+        raise ValueError(
+            "AETHER_VNEXT_PROVIDER_DISCOVERY_INITIAL_DELAY_SECONDS must be between 0 and 120"
+        )
     return value
 
 
