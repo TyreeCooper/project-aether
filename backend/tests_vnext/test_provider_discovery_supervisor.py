@@ -8,6 +8,8 @@ from aether_vnext.provider_discovery import DiscoveryInstrument
 from aether_vnext.provider_discovery_supervisor import (
     ProviderDiscoverySupervisor,
     build_provider_focus_snapshot,
+    discovery_progress_payload,
+    run_configured_provider_discovery_cycle,
 )
 from app.vnext_discovery import mount_vnext_discovery_status
 
@@ -160,3 +162,53 @@ def test_discovery_status_route_is_get_only(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json()["running"] is False
     assert client.post("/api/v1/vnext/discovery-runtime").status_code == 405
+
+
+
+def test_provider_cycle_times_out_one_source_and_completes(monkeypatch) -> None:
+    async def fast_kraken():
+        return (_row("Kraken", "BTC/USD", 1.0, 1000.0),)
+
+    async def slow_tastyfx():
+        await asyncio.sleep(0.05)
+        return (_row("tastyfx", "EUR/USD", 0.1, 100.0),)
+
+    async def fast_ninja():
+        return (_row("NinjaTrader", "MES", 0.2, 500.0),)
+
+    async def fast_ibkr():
+        return (_row("IBKR", "AAPL", 0.3, 10000.0),)
+
+    monkeypatch.setattr(
+        "aether_vnext.provider_discovery_supervisor.fetch_kraken_discovery_universe",
+        fast_kraken,
+    )
+    monkeypatch.setattr(
+        "aether_vnext.provider_discovery_supervisor.fetch_tastyfx_public_universe",
+        slow_tastyfx,
+    )
+    monkeypatch.setattr(
+        "aether_vnext.provider_discovery_supervisor.fetch_ninjatrader_public_universe",
+        fast_ninja,
+    )
+    monkeypatch.setattr(
+        "aether_vnext.provider_discovery_supervisor.fetch_ibkr_us_equity_public_universe",
+        fast_ibkr,
+    )
+    monkeypatch.setattr(
+        "aether_vnext.provider_discovery_supervisor.configured_provider_fetch_timeout_seconds",
+        lambda: 0.01,
+    )
+
+    snapshot = asyncio.run(run_configured_provider_discovery_cycle())
+    assert snapshot["providers"]["Kraken"]["status"] == "online"
+    assert snapshot["providers"]["tastyfx"]["status"] == "unavailable"
+    assert "provider_fetch_timeout" in snapshot["providers"]["tastyfx"]["reason"]
+    assert snapshot["providers"]["NinjaTrader"]["status"] == "online"
+    assert snapshot["providers"]["IBKR"]["status"] == "online"
+
+    progress = discovery_progress_payload()
+    assert progress["cycle_state"] == "complete"
+    assert progress["current_provider"] is None
+    assert progress["providers"]["tastyfx"]["state"] == "timeout"
+    assert progress["providers"]["IBKR"]["state"] == "online"

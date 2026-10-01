@@ -621,7 +621,7 @@ async def fetch_tastyfx_public_universe(
 ) -> tuple[DiscoveryInstrument, ...]:
     owned = client is None
     http = client or httpx.AsyncClient(
-        timeout=httpx.Timeout(30.0),
+        timeout=httpx.Timeout(12.0),
         headers={"User-Agent": USER_AGENT},
         follow_redirects=True,
     )
@@ -678,7 +678,7 @@ async def fetch_ninjatrader_public_universe(
 ) -> tuple[DiscoveryInstrument, ...]:
     owned = client is None
     http = client or httpx.AsyncClient(
-        timeout=httpx.Timeout(30.0),
+        timeout=httpx.Timeout(12.0),
         headers={"User-Agent": USER_AGENT},
         follow_redirects=True,
     )
@@ -708,7 +708,7 @@ async def fetch_ibkr_us_equity_public_universe(
 ) -> tuple[DiscoveryInstrument, ...]:
     owned = client is None
     http = client or httpx.AsyncClient(
-        timeout=httpx.Timeout(30.0),
+        timeout=httpx.Timeout(12.0),
         headers={"User-Agent": USER_AGENT},
         follow_redirects=True,
     )

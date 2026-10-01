@@ -34,6 +34,24 @@ UTC = timezone.utc
 PROVIDERS = ("Kraken", "tastyfx", "NinjaTrader", "IBKR")
 CycleRunner = Callable[[], Awaitable[dict[str, object]]]
 _LATEST_FOCUS_SNAPSHOT: dict[str, object] | None = None
+_DISCOVERY_PROGRESS: dict[str, object] = {
+    "cycle_state": "idle",
+    "current_provider": None,
+    "provider_deadline_seconds": None,
+    "providers": {},
+}
+
+
+def _publish_progress(**updates: object) -> None:
+    global _DISCOVERY_PROGRESS
+    _DISCOVERY_PROGRESS = {**_DISCOVERY_PROGRESS, **updates}
+
+
+def discovery_progress_payload() -> dict[str, object]:
+    return {
+        **_DISCOVERY_PROGRESS,
+        "providers": dict(_DISCOVERY_PROGRESS.get("providers") or {}),
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +63,8 @@ class ProviderDiscoveryStatus:
     cycle_count: int
     interval_seconds: float
     initial_delay_seconds: float
+    provider_timeout_seconds: float
+    progress: dict[str, object]
     last_cycle_started_at_utc: str | None
     last_cycle_finished_at_utc: str | None
     last_error: str | None
@@ -92,6 +112,8 @@ class ProviderDiscoverySupervisor:
             cycle_count=self._cycle_count,
             interval_seconds=self._interval_seconds,
             initial_delay_seconds=self._initial_delay_seconds,
+            provider_timeout_seconds=configured_provider_fetch_timeout_seconds(),
+            progress=discovery_progress_payload(),
             last_cycle_started_at_utc=None if self._last_started is None else self._last_started.isoformat(),
             last_cycle_finished_at_utc=None if self._last_finished is None else self._last_finished.isoformat(),
             last_error=self._last_error,
@@ -261,13 +283,70 @@ async def run_configured_provider_discovery_cycle() -> dict[str, object]:
         ("NinjaTrader", fetch_ninjatrader_public_universe),
         ("IBKR", fetch_ibkr_us_equity_public_universe),
     )
-    # Resource-bound by design: one provider universe at a time. This avoids
-    # multiplying network buffers and parser memory on the small nonprod worker.
+    timeout_s = configured_provider_fetch_timeout_seconds()
+    provider_progress: dict[str, object] = {}
+    _publish_progress(
+        cycle_state="running",
+        current_provider=None,
+        provider_deadline_seconds=timeout_s,
+        providers=provider_progress,
+    )
+
+    # Resource-bound by design: one provider universe at a time. Each provider
+    # also has a hard deadline so a slow public source cannot freeze the whole
+    # discovery cycle or starve the strategy focus gate indefinitely.
     for provider, fetcher in providers:
+        started = datetime.now(UTC)
+        provider_progress = {
+            **provider_progress,
+            provider: {
+                "state": "fetching",
+                "started_at_utc": started.isoformat(),
+            },
+        }
+        _publish_progress(
+            current_provider=provider,
+            providers=provider_progress,
+        )
         try:
-            universes[provider] = tuple(await fetcher())
+            async with asyncio.timeout(timeout_s):
+                rows = tuple(await fetcher())
+            universes[provider] = rows
+            provider_progress = {
+                **provider_progress,
+                provider: {
+                    "state": "online",
+                    "started_at_utc": started.isoformat(),
+                    "finished_at_utc": datetime.now(UTC).isoformat(),
+                    "catalog_count": len(rows),
+                },
+            }
+        except TimeoutError:
+            reason = f"provider_fetch_timeout:{timeout_s:g}s"
+            errors[provider] = reason
+            provider_progress = {
+                **provider_progress,
+                provider: {
+                    "state": "timeout",
+                    "started_at_utc": started.isoformat(),
+                    "finished_at_utc": datetime.now(UTC).isoformat(),
+                    "reason": reason,
+                },
+            }
         except Exception as exc:
-            errors[provider] = f"{type(exc).__name__}:{exc}"
+            reason = f"{type(exc).__name__}:{exc}"
+            errors[provider] = reason
+            provider_progress = {
+                **provider_progress,
+                provider: {
+                    "state": "error",
+                    "started_at_utc": started.isoformat(),
+                    "finished_at_utc": datetime.now(UTC).isoformat(),
+                    "reason": reason,
+                },
+            }
+        finally:
+            _publish_progress(providers=provider_progress)
 
     snapshot = build_provider_focus_snapshot(
         universes,
@@ -275,6 +354,12 @@ async def run_configured_provider_discovery_cycle() -> dict[str, object]:
         as_of_utc=datetime.now(UTC),
     )
     _LATEST_FOCUS_SNAPSHOT = dict(snapshot)
+    _publish_progress(
+        cycle_state="complete",
+        current_provider=None,
+        providers=provider_progress,
+        finished_at_utc=datetime.now(UTC).isoformat(),
+    )
     return snapshot
 
 
@@ -293,6 +378,19 @@ def configured_discovery_interval_seconds() -> float:
     value = float(raw)
     if value < 60.0:
         raise ValueError("AETHER_VNEXT_PROVIDER_DISCOVERY_INTERVAL_SECONDS must be >= 60")
+    return value
+
+
+def configured_provider_fetch_timeout_seconds() -> float:
+    raw = os.getenv(
+        "AETHER_VNEXT_PROVIDER_FETCH_TIMEOUT_SECONDS",
+        "60",
+    ).strip()
+    value = float(raw)
+    if value < 10.0 or value > 180.0:
+        raise ValueError(
+            "AETHER_VNEXT_PROVIDER_FETCH_TIMEOUT_SECONDS must be between 10 and 180"
+        )
     return value
 
 

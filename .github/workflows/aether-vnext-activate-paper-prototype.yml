@@ -155,6 +155,7 @@ jobs:
             AETHER_VNEXT_PROVIDER_DISCOVERY_ENABLED=true
             AETHER_VNEXT_PROVIDER_DISCOVERY_INTERVAL_SECONDS=300
             AETHER_VNEXT_PROVIDER_DISCOVERY_INITIAL_DELAY_SECONDS=15
+            AETHER_VNEXT_PROVIDER_FETCH_TIMEOUT_SECONDS=60
             AETHER_VNEXT_PROTOTYPE_TRADING_ENABLED=true
             AETHER_VNEXT_PROTOTYPE_TRADING_INTERVAL_SECONDS=60
           )
@@ -346,6 +347,20 @@ jobs:
               discovery_ready=1
               break
             fi
+            python - <<'PY'
+          import json
+          try:
+              body=json.load(open("/tmp/discovery.json", encoding="utf-8"))
+          except Exception:
+              body={}
+          progress=body.get("progress") or {}
+          print("Discovery wait:", {
+              "cycle_count": body.get("cycle_count"),
+              "cycle_state": progress.get("cycle_state"),
+              "current_provider": progress.get("current_provider"),
+              "providers": progress.get("providers"),
+          })
+          PY
             sleep 10
           done
           test "$discovery_ready" = "1"
@@ -442,6 +457,14 @@ jobs:
               "strategy_monitor_ui": True,
           }, indent=2, sort_keys=True))
           PY
+
+      - name: Refresh Azure login for failure diagnostics
+        if: failure()
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_E2CE53939F2D406CBA8FB39DB4948C7B }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_0E83D5CA9CF543228DA7FA7818D7C998 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_B530D2ECBF5549A39B4758868409068A }}
 
       - name: Diagnose Azure runtime on activation failure
         if: failure()
