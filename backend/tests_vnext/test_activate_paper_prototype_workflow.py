@@ -17,15 +17,17 @@ def test_activation_waits_for_exact_revision_before_runtime_proof() -> None:
     workflow = _workflow()
 
     assert "revision_ready=0" in workflow
-    assert "for attempt in $(seq 1 48); do" in workflow
+    assert "for attempt in $(seq 1 24); do" in workflow
     assert 'build.get("source_revision") == os.environ["EXPECTED_SHA"]' in workflow
     assert 'test "$revision_ready" = "1"' in workflow
 
-    revision_gate = workflow.index("revision_ready=0")
     health_gate = workflow.index("health_ready=0")
+    revision_gate = workflow.index("revision_ready=0")
     ingress_gate = workflow.index("ingress_ready=0")
     strategy_gate = workflow.index("strategy_ready=0")
-    assert revision_gate < health_gate < ingress_gate < strategy_gate
+    assert health_gate < revision_gate < ingress_gate < strategy_gate
+    assert "Diagnose Azure runtime on activation failure" in workflow
+    assert "az webapp log startup show" in workflow
 
 
 def test_activation_proves_strategy_monitor_ui_after_exact_head_cutover() -> None:
