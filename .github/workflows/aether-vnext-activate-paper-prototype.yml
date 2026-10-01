@@ -131,12 +131,19 @@ jobs:
           import os
           from alembic import command
           from alembic.config import Config
+          from sqlalchemy.engine import make_url
 
-          url = os.environ["DATABASE_URL"]
-          if not url:
+          raw_url = os.environ["DATABASE_URL"]
+          if not raw_url:
               raise SystemExit("burn-in database URL missing")
+          url = make_url(raw_url)
+          if url.drivername in {"postgresql", "postgres"}:
+              url = url.set(drivername="postgresql+asyncpg")
+          elif url.drivername != "postgresql+asyncpg":
+              raise SystemExit(f"unsupported burn-in database driver: {url.drivername}")
           cfg = Config("alembic.ini")
-          cfg.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
+          rendered = url.render_as_string(hide_password=False).replace("%", "%%")
+          cfg.set_main_option("sqlalchemy.url", rendered)
           command.upgrade(cfg, "head")
           PY
 
