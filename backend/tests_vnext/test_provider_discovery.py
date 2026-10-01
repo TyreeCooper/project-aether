@@ -359,3 +359,85 @@ def test_ranker_handles_large_equity_catalog_without_quadratic_rank_scan() -> No
     assert focus.catalog_count == 5000
     assert focus.eligible_count == 5000
     assert len(focus.top100) == 100
+
+
+
+def test_focus_payload_preserves_provider_product_truth_without_invention() -> None:
+    row = DiscoveryInstrument(
+        provider="Kraken",
+        symbol="SOL/USD",
+        market_data_symbol="SOL/USD",
+        execution_symbol="SOLUSD",
+        asset_class="spot_crypto",
+        base_currency="SOL",
+        quote_currency="USD",
+        quantity_step=0.001,
+        minimum_quantity=0.02,
+        minimum_notional=0.5,
+        tick_size=0.0001,
+        price=150.0,
+        open_price=145.0,
+        high_price=151.0,
+        low_price=144.0,
+        volume=1_000_000.0,
+        bid=149.99,
+        ask=150.01,
+        observed_at_utc=NOW,
+        source="kraken_public_rest",
+        feed_class="NATIVE_PUBLIC",
+    )
+    payload = focus_payload(rank_provider_catalog((row,), provider="Kraken"))
+    item = payload["top100"][0]
+    assert item["execution_symbol"] == "SOLUSD"
+    assert item["base_currency"] == "SOL"
+    assert item["quote_currency"] == "USD"
+    assert item["quantity_step"] == 0.001
+    assert item["minimum_quantity"] == 0.02
+    assert item["minimum_notional"] == 0.5
+    assert item["tick_size"] == 0.0001
+    assert item["bid"] == 149.99
+    assert item["ask"] == 150.01
+
+
+def test_kraken_discovery_carries_assetpairs_product_math() -> None:
+    catalog = parse_kraken_spot_catalog({
+        "error": [],
+        "result": {
+            "SOLUSD": {
+                "altname": "SOLUSD",
+                "wsname": "SOL/USD",
+                "base": "SOL",
+                "quote": "ZUSD",
+                "status": "online",
+                "ordermin": "0.02",
+                "costmin": "0.5",
+                "pair_decimals": 4,
+                "lot_decimals": 3,
+            }
+        },
+    })
+    payload = {
+        "error": [],
+        "result": {
+            "SOLUSD": {
+                "c": ["150.00", "1"],
+                "o": "145.00",
+                "h": ["151.00", "151.00"],
+                "l": ["144.00", "144.00"],
+                "v": ["1000", "2000"],
+                "b": ["149.99", "1", "1"],
+                "a": ["150.01", "1", "1"],
+            }
+        },
+    }
+    rows = parse_kraken_tickers(catalog, [payload], observed_at_utc=NOW)
+    assert len(rows) == 1
+    item = rows[0]
+    assert item.base_currency == "SOL"
+    assert item.quote_currency == "USD"
+    assert item.quantity_step == 0.001
+    assert item.minimum_quantity == 0.02
+    assert item.minimum_notional == 0.5
+    assert item.tick_size == 0.0001
+    assert item.bid == 149.99
+    assert item.ask == 150.01

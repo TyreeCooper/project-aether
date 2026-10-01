@@ -34,6 +34,12 @@ class DiscoveryInstrument:
     name: str | None = None
     execution_symbol: str | None = None
     product_code: str | None = None
+    base_currency: str | None = None
+    quote_currency: str | None = None
+    quantity_step: float | None = None
+    minimum_quantity: float | None = None
+    minimum_notional: float | None = None
+    tick_size: float | None = None
     active: bool = True
     price: float | None = None
     open_price: float | None = None
@@ -59,6 +65,7 @@ class DiscoveryInstrument:
         for name in (
             "price", "open_price", "high_price", "low_price",
             "volume", "open_interest", "bid", "ask", "change_pct",
+            "quantity_step", "minimum_quantity", "minimum_notional", "tick_size",
         ):
             value = getattr(self, name)
             if value is not None and (
@@ -77,12 +84,20 @@ class RankedInstrument:
     asset_class: str
     name: str | None
     product_code: str | None
+    base_currency: str | None
+    quote_currency: str | None
+    quantity_step: float | None
+    minimum_quantity: float | None
+    minimum_notional: float | None
+    tick_size: float | None
     score: float
     movement_score: float
     liquidity_score: float
     spread_quality_score: float
     data_quality_score: float
     price: float | None
+    bid: float | None
+    ask: float | None
     change_pct: float
     volume: float | None
     open_interest: float | None
@@ -298,12 +313,20 @@ def rank_provider_catalog(
             asset_class=row.asset_class,
             name=row.name,
             product_code=row.product_code,
+            base_currency=row.base_currency,
+            quote_currency=row.quote_currency,
+            quantity_step=row.quantity_step,
+            minimum_quantity=row.minimum_quantity,
+            minimum_notional=row.minimum_notional,
+            tick_size=row.tick_size,
             score=score,
             movement_score=movement_score,
             liquidity_score=liquidity_score,
             spread_quality_score=spread_score,
             data_quality_score=data_quality,
             price=(None if row.price is None else float(row.price)),
+            bid=(None if row.bid is None else float(row.bid)),
+            ask=(None if row.ask is None else float(row.ask)),
             change_pct=_change_pct(row),
             volume=(None if row.volume is None else float(row.volume)),
             open_interest=(
@@ -347,6 +370,14 @@ def focus_payload(focus: ProviderFocus) -> dict[str, object]:
                 "asset_class": row.asset_class,
                 "name": row.name,
                 "product_code": row.product_code,
+                "base_currency": row.base_currency,
+                "quote_currency": row.quote_currency,
+                "quantity_step": row.quantity_step,
+                "minimum_quantity": row.minimum_quantity,
+                "minimum_notional": row.minimum_notional,
+                "tick_size": row.tick_size,
+                "bid": row.bid,
+                "ask": row.ask,
                 "score": row.score,
                 "movement_score": row.movement_score,
                 "liquidity_score": row.liquidity_score,

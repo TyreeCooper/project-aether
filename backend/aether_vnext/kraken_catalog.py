@@ -23,6 +23,16 @@ def _num(value: object) -> float | None:
     return result if result == result and abs(result) != float("inf") else None
 
 
+def _precision_step(value: object) -> float | None:
+    try:
+        decimals = int(value)
+    except (TypeError, ValueError):
+        return None
+    if decimals < 0 or decimals > 18:
+        return None
+    return 10.0 ** (-decimals)
+
+
 def parse_kraken_spot_catalog(payload: object) -> dict[str, dict[str, object]]:
     if not isinstance(payload, Mapping):
         raise ValueError("Kraken AssetPairs payload must be an object")
@@ -174,6 +184,12 @@ def parse_kraken_tickers(
                 market_data_symbol=str(meta["symbol"]),
                 execution_symbol=str(meta["altname"]),
                 asset_class="spot_crypto",
+                base_currency=str(meta.get("base_display") or "").upper() or None,
+                quote_currency=str(meta.get("quote_display") or "").upper() or None,
+                quantity_step=_precision_step(meta.get("lot_decimals")),
+                minimum_quantity=_num(meta.get("ordermin")),
+                minimum_notional=_num(meta.get("costmin")),
+                tick_size=_precision_step(meta.get("pair_decimals")),
                 active=True,
                 price=last,
                 open_price=open_price,
