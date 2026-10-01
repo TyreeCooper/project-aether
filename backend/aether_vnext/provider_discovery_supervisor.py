@@ -33,7 +33,6 @@ from aether_vnext.provider_focus_handoff import (
 
 UTC = timezone.utc
 PROVIDERS = ("Kraken", "tastyfx", "NinjaTrader", "IBKR")
-HELD_PROVIDERS = frozenset({"NinjaTrader"})
 CycleRunner = Callable[[], Awaitable[dict[str, object]]]
 _LATEST_FOCUS_SNAPSHOT: dict[str, object] | None = None
 _DISCOVERY_PROGRESS: dict[str, object] = {
@@ -190,20 +189,6 @@ def build_provider_focus_snapshot(
 
     for provider in PROVIDERS:
         rows = tuple(universes.get(provider, ()))
-        if provider in HELD_PROVIDERS:
-            providers[provider] = {
-                "provider": provider,
-                "status": "on_hold",
-                "reason": "operator_hold",
-                "catalog_count": 0,
-                "eligible_count": 0,
-                "focus_count": 0,
-                "top100": [],
-                "catalog_mode": "held",
-                "feed_classes": [],
-                "execution_binding_required": True,
-            }
-            continue
         if provider in errors:
             providers[provider] = {
                 "provider": provider,
@@ -306,10 +291,7 @@ async def run_configured_provider_discovery_cycle() -> dict[str, object]:
         ("IBKR", fetch_ibkr_us_equity_public_universe),
     )
     timeout_s = configured_provider_fetch_timeout_seconds()
-    provider_progress: dict[str, object] = {
-        provider: {"state": "on_hold", "reason": "operator_hold"}
-        for provider in HELD_PROVIDERS
-    }
+    provider_progress: dict[str, object] = {}
     _publish_progress(
         cycle_state="running",
         current_provider=None,
@@ -321,8 +303,6 @@ async def run_configured_provider_discovery_cycle() -> dict[str, object]:
     # also has a hard deadline so a slow public source cannot freeze the whole
     # discovery cycle or stall provider-priority telemetry indefinitely.
     for provider, fetcher in providers:
-        if provider in HELD_PROVIDERS:
-            continue
         started = datetime.now(UTC)
         provider_progress = {
             **provider_progress,
