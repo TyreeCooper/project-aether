@@ -17,6 +17,9 @@ def test_vnext_ui_restores_familiar_operator_shell_without_legacy_routes() -> No
     assert "function BoothView" in page
     assert "function PipelineView" in page
     assert "function pipelineBottleneck" in page
+    assert "function DesktopCommandCenter" in page
+    assert "function MobileCommandStrip" in page
+    assert "function CompactBlotterPreview" in page
     assert "AETHER PROP FIRM" in page
     assert "NATURAL SETUPS ONLY" in page
     assert "LIVE BLOCKED" in page
@@ -33,3 +36,7 @@ def test_vnext_ui_restores_familiar_operator_shell_without_legacy_routes() -> No
     assert ".pipelineFlow" in css
     assert ".pipelinePressure" in css
     assert ".governorGate" in css
+    assert ".desktopCommandCenter" in css
+    assert ".desktopCommandGrid" in css
+    assert ".mobileCommandStrip" in css
+    assert "@media (max-width: 900px)" in css

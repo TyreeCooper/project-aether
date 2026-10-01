@@ -833,6 +833,169 @@ function AppMenu({ open, activeView, onClose, onNavigate, floor, ingress, strate
   );
 }
 
+
+function CompactBlotterPreview({ rows }) {
+  const items = (rows || []).slice(0, 6);
+  if (!items.length) {
+    return <Empty>No completed PAPER trades in this epoch yet.</Empty>;
+  }
+  return (
+    <div className="desktopBlotterPreview">
+      {items.map((row) => (
+        <article key={"desktop-blotter-" + row.trade_id}>
+          <div>
+            <strong>{text(row.asset_id).toUpperCase()}</strong>
+            <span>{text(row.side)} · {timestamp(row.closed_at_utc, "—")}</span>
+          </div>
+          <div>
+            <small>Net</small>
+            <b className={Number(row.net_pnl_usd) < 0 ? "lossText" : Number(row.net_pnl_usd) > 0 ? "gainText" : ""}>
+              {money(row.net_pnl_usd)}
+            </b>
+          </div>
+          <div>
+            <small>Exit</small>
+            <b>{number(row.exit_price, 8)}</b>
+          </div>
+          <div>
+            <small>Reason</small>
+            <b>{text(row.exit_reason)}</b>
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function DesktopCommandCenter({ floor, queues, cockpits, operator, ingress, strategy, nowMs }) {
+  const bottleneck = pipelineBottleneck(queues);
+  const governor = queueSummary(queues, "Governor");
+  const queueStages = PIPELINE_QUEUE_SEATS.map((stage) => Object.assign(
+    {},
+    stage,
+    queueSummary(queues, stage.seat),
+  ));
+  const queued = queueStages.reduce((sum, row) => sum + row.count, 0);
+  const blockers = queueStages.reduce((sum, row) => sum + row.blockers, 0) + governor.blockers;
+  const strategyAssets = strategy?.last_result?.assets || {};
+
+  return (
+    <section className="desktopOnly desktopCommandCenter" aria-label="Desktop command center">
+      <div className="desktopCommandHead">
+        <div>
+          <p className="eyebrow">DESKTOP COMMAND CENTER</p>
+          <h2>Everything on the Firm floor</h2>
+        </div>
+        <div className="desktopCommandBadges">
+          <span className={ingress?.running && !ingress?.last_error ? "state good" : "state bad"}>
+            DATA {ingress?.running && !ingress?.last_error ? "LIVE" : "FAULT"}
+          </span>
+          <span className={strategy?.running && !strategy?.last_error ? "state good" : "state bad"}>
+            STRATEGY {strategy?.running && !strategy?.last_error ? "RUNNING" : "FAULT"}
+          </span>
+          <span className="state active">PAPER ONLY</span>
+        </div>
+      </div>
+
+      <div className="desktopCommandGrid">
+        <section className="desktopPanel pipelinePanel">
+          <div className="desktopPanelHead">
+            <div><span>PIPELINE</span><strong>Firm flow & bottleneck</strong></div>
+            <b className={bottleneck ? "pressureTag" : "clearTag"}>
+              {bottleneck ? bottleneck.seat + " PRESSURE" : "FLOW CLEAR"}
+            </b>
+          </div>
+          <div className="desktopPipelineSummary">
+            {queueStages.map((stage) => (
+              <div className={"desktopPipelineSeat " + (bottleneck?.seat === stage.seat ? "hot" : "")} key={"desktop-seat-" + stage.seat}>
+                <span>{stage.seat}</span>
+                <strong>{stage.count}</strong>
+                <small>{stage.blockers} blocked</small>
+              </div>
+            ))}
+          </div>
+          <div className="desktopPipelineFooter">
+            <span><b>{queued}</b> queued</span>
+            <span><b>{blockers}</b> blockers</span>
+            <span><b>{cockpits.length}</b> open positions</span>
+            <span><b>{governor.count || governor.blockers ? "HALT" : "CLEAR"}</b> governor</span>
+          </div>
+        </section>
+
+        <section className="desktopPanel systemPanel">
+          <div className="desktopPanelHead">
+            <div><span>SYSTEM</span><strong>Runtime health</strong></div>
+            <b>{text(floor?.build?.source_revision?.slice(0, 8), "local")}</b>
+          </div>
+          <dl className="desktopSystemList">
+            <div><dt>App restarted</dt><dd>{timestamp(floor?.runtime_started_at_utc, "waiting")}</dd></div>
+            <div><dt>Floor refreshed</dt><dd>{timestamp(floor?.as_of_utc, "waiting")}</dd></div>
+            <div><dt>Ingress</dt><dd>#{text(ingress?.cycle_count, "0")} · {text(ingress?.last_error, "healthy")}</dd></div>
+            <div><dt>Strategy</dt><dd>#{text(strategy?.cycle_count, "0")} · next {strategyCountdown(strategy, nowMs)}</dd></div>
+            <div><dt>Observations</dt><dd>{text(strategy?.last_result?.forward_paper_observation_count, "0")}</dd></div>
+            <div><dt>Epoch</dt><dd>{text(operator?.paper_test?.epoch_id, "not started")}</dd></div>
+          </dl>
+        </section>
+
+        <section className="desktopPanel strategyPanel">
+          <div className="desktopPanelHead">
+            <div><span>SCANNER</span><strong>BTC / ETH now</strong></div>
+            <b>NATURAL ONLY</b>
+          </div>
+          <div className="desktopStrategyStack">
+            <StrategyDecision assetId="btc" row={strategyAssets.btc} />
+            <StrategyDecision assetId="eth" row={strategyAssets.eth} />
+          </div>
+        </section>
+
+        <section className="desktopPanel activityPanel">
+          <div className="desktopPanelHead">
+            <div><span>ACTIVITY</span><strong>Latest Firm events</strong></div>
+            <b>{(operator?.activity || []).length}</b>
+          </div>
+          <ActivityFeed rows={operator?.activity || []} limit={10} />
+        </section>
+
+        <section className="desktopPanel blotterPanel">
+          <div className="desktopPanelHead">
+            <div><span>BLOTTER</span><strong>Latest completed trades</strong></div>
+            <b>{(operator?.blotter || []).length}</b>
+          </div>
+          <CompactBlotterPreview rows={operator?.blotter || []} />
+        </section>
+      </div>
+    </section>
+  );
+}
+
+function MobileCommandStrip({ queues, cockpits, operator, ingress, strategy, nowMs }) {
+  const bottleneck = pipelineBottleneck(queues);
+  return (
+    <section className="mobileOnly mobileCommandStrip" aria-label="Mobile command status">
+      <div>
+        <span>Flow</span>
+        <strong>{bottleneck ? bottleneck.seat : "CLEAR"}</strong>
+        <small>{bottleneck ? bottleneck.reason : "no bottleneck"}</small>
+      </div>
+      <div>
+        <span>Open</span>
+        <strong>{cockpits.length}</strong>
+        <small>PAPER trade(s)</small>
+      </div>
+      <div>
+        <span>Next scan</span>
+        <strong>{strategyCountdown(strategy, nowMs)}</strong>
+        <small>strategy #{text(strategy?.cycle_count, "0")}</small>
+      </div>
+      <div>
+        <span>Bank</span>
+        <strong>{money(operator?.bank?.book_cash_usd, "$0.00")}</strong>
+        <small>{ingress?.running ? "market live" : "feed waiting"}</small>
+      </div>
+    </section>
+  );
+}
+
 export default function DashboardPage() {
   const [floor, setFloor] = useState(null);
   const [ingress, setIngress] = useState(null);
@@ -1018,6 +1181,25 @@ export default function DashboardPage() {
       </section>
 
       <BankStrip operator={operator} />
+
+      <MobileCommandStrip
+        queues={queues}
+        cockpits={cockpits}
+        operator={operator}
+        ingress={ingress}
+        strategy={strategy}
+        nowMs={nowMs}
+      />
+
+      <DesktopCommandCenter
+        floor={floor}
+        queues={queues}
+        cockpits={cockpits}
+        operator={operator}
+        ingress={ingress}
+        strategy={strategy}
+        nowMs={nowMs}
+      />
 
       <section className="runtimeMonitor" aria-label="Autonomous prototype runtime">
         <div className="runtimeMonitorHead">

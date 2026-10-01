@@ -14,7 +14,7 @@
 html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; }
 button, input, select { font: inherit; }
 button { color: inherit; }
-.floorShell { width: min(1480px, 100%); margin: 0 auto; padding: 16px 16px 126px; }
+.floorShell { width: min(1720px, 100%); margin: 0 auto; padding: 16px 16px 126px; }
 .floorHeader { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; position: sticky; top: 0; z-index: 20; padding: 14px 0 12px; background: color-mix(in srgb, var(--bg) 94%, transparent); backdrop-filter: blur(12px); }
 .floorHeader h1 { margin: 2px 0 4px; font-size: clamp(24px, 4vw, 40px); letter-spacing: -0.03em; }
 .eyebrow { margin: 0; color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
@@ -375,4 +375,94 @@ button { color: inherit; }
 }
 @media (prefers-reduced-motion: reduce) {
   .pressureTrack > span { transition: none; }
+}
+
+
+/* Desktop-first command center / strong mobile cockpit */
+.desktopOnly { display: block; }
+.mobileOnly { display: none; }
+
+.desktopCommandCenter { margin-top: 10px; }
+.desktopCommandHead { display: flex; justify-content: space-between; align-items: end; gap: 16px; margin-bottom: 8px; padding: 0 2px; }
+.desktopCommandHead h2 { margin: 3px 0 0; font-size: 18px; }
+.desktopCommandBadges { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
+
+.desktopCommandGrid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(300px, .75fr) minmax(300px, .75fr); grid-template-areas: "pipeline system strategy" "activity activity blotter"; gap: 9px; }
+.desktopPanel { min-width: 0; padding: 11px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.pipelinePanel { grid-area: pipeline; }
+.systemPanel { grid-area: system; }
+.strategyPanel { grid-area: strategy; }
+.activityPanel { grid-area: activity; }
+.blotterPanel { grid-area: blotter; }
+
+.desktopPanelHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 9px; }
+.desktopPanelHead > div { display: grid; gap: 2px; min-width: 0; }
+.desktopPanelHead span { color: var(--muted); font-size: 8px; font-weight: 850; letter-spacing: .08em; }
+.desktopPanelHead strong { font-size: 12px; }
+.desktopPanelHead > b { max-width: 50%; color: var(--muted); font-size: 9px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desktopPanelHead .pressureTag { color: var(--active); }
+.desktopPanelHead .clearTag { color: var(--good); }
+
+.desktopPipelineSummary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; }
+.desktopPipelineSeat { display: grid; gap: 2px; min-width: 0; padding: 9px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
+.desktopPipelineSeat.hot { border-color: var(--active); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--active) 25%, transparent); }
+.desktopPipelineSeat span, .desktopPipelineSeat small { color: var(--muted); font-size: 8px; }
+.desktopPipelineSeat strong { font-size: 20px; font-variant-numeric: tabular-nums; }
+.desktopPipelineSeat.hot strong { color: var(--active); }
+.desktopPipelineFooter { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin-top: 7px; overflow: hidden; border: 1px solid var(--line); border-radius: 7px; background: var(--line); }
+.desktopPipelineFooter span { display: grid; gap: 2px; padding: 7px 8px; background: #081522; color: var(--muted); font-size: 8px; }
+.desktopPipelineFooter b { color: var(--text); font-size: 11px; }
+
+.desktopSystemList { display: grid; gap: 0; margin: 0; }
+.desktopSystemList div { display: grid; grid-template-columns: auto 1fr; gap: 8px; padding: 7px 0; border-top: 1px solid color-mix(in srgb, var(--line) 65%, transparent); }
+.desktopSystemList div:first-child { border-top: 0; }
+.desktopSystemList dt { color: var(--muted); font-size: 8px; }
+.desktopSystemList dd { margin: 0; text-align: right; font-size: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.desktopStrategyStack { display: grid; gap: 7px; }
+.desktopStrategyStack .strategyDecision { padding: 8px; }
+.desktopStrategyStack .mini { grid-template-columns: 1fr; }
+
+.desktopCommandGrid .activityFeed { max-height: 285px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.desktopCommandGrid .activityRow { grid-template-columns: 94px minmax(0, 1fr); }
+.desktopCommandGrid .activityRow > small { display: none; }
+
+.desktopBlotterPreview { display: grid; gap: 6px; max-height: 285px; overflow: auto; }
+.desktopBlotterPreview article { display: grid; grid-template-columns: minmax(120px, 1.5fr) repeat(3, minmax(70px, .7fr)); gap: 8px; align-items: center; min-width: 0; padding: 8px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
+.desktopBlotterPreview article > div { min-width: 0; display: grid; gap: 2px; }
+.desktopBlotterPreview span, .desktopBlotterPreview small { color: var(--muted); font-size: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desktopBlotterPreview b, .desktopBlotterPreview strong { min-width: 0; font-size: 9px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.mobileCommandStrip { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 8px; }
+.mobileCommandStrip > div { display: grid; gap: 2px; min-width: 0; padding: 9px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); }
+.mobileCommandStrip span, .mobileCommandStrip small { color: var(--muted); font-size: 8px; }
+.mobileCommandStrip strong { min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (min-width: 1500px) {
+  .attentionGrid, .universeGrid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .split { grid-template-columns: minmax(0, 1.25fr) minmax(0, .75fr); }
+  .runtimeMetrics { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .liveCockpitGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .settingsGrid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+@media (max-width: 1180px) {
+  .desktopCommandGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-areas: "pipeline pipeline" "system strategy" "activity blotter"; }
+}
+
+@media (max-width: 900px) {
+  .desktopOnly { display: none !important; }
+  .mobileOnly { display: grid; }
+  .floorShell { width: 100%; }
+}
+
+@media (max-width: 560px) {
+  .mobileCommandStrip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .statusStrip span:nth-child(3),
+  .statusStrip span:nth-child(4),
+  .statusStrip span:nth-child(5) { display: none; }
+  .testStatus span:first-child { display: none; }
+  .runtimeMetrics > div:nth-child(3),
+  .runtimeMetrics > div:nth-child(5) { display: none; }
+  .attentionGrid { grid-template-columns: 1fr; }
 }
