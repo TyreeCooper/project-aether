@@ -16,7 +16,7 @@ import asyncio
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import os
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Mapping, Sequence
 
 import sqlalchemy as sa
 
@@ -45,7 +45,8 @@ from aether_vnext.provider_discovery_supervisor import (
     current_deep_trade_focus_asset_ids,
     current_provider_focus_snapshot,
 )
-from aether_vnext.registry import SEED_REGISTRY
+from aether_vnext.registry import ProductRegistryRow, SEED_REGISTRY
+from aether_vnext.runtime_product_policy import runtime_playbook_for_product
 from aether_vnext.store import VNextStore
 
 
@@ -290,6 +291,106 @@ def _sync_dynamic_kraken_products(
         "persisted": persisted,
         "requirements": dict(sorted(requirement_counts.items())),
     }
+
+
+def configured_dynamic_strategy_scan_batch_size() -> int:
+    raw = os.getenv(
+        "AETHER_VNEXT_DYNAMIC_STRATEGY_SCAN_BATCH_SIZE",
+        "4",
+    ).strip()
+    value = int(raw)
+    if value < 1 or value > 20:
+        raise ValueError(
+            "AETHER_VNEXT_DYNAMIC_STRATEGY_SCAN_BATCH_SIZE must be between 1 and 20"
+        )
+    return value
+
+
+def _current_dynamic_kraken_products(
+    states: Sequence[Mapping[str, object]],
+    *,
+    focus_snapshot: Mapping[str, object] | None,
+) -> tuple[ProductRegistryRow, ...]:
+    """Return verified dynamic Kraken products still present in current Top-100 focus."""
+    providers = (
+        focus_snapshot.get("providers")
+        if isinstance(focus_snapshot, Mapping)
+        else None
+    )
+    kraken = providers.get("Kraken") if isinstance(providers, Mapping) else None
+    focus_rows = kraken.get("top100") if isinstance(kraken, Mapping) else None
+    focused_symbols = {
+        str(row.get("execution_symbol") or "").strip()
+        for row in (focus_rows or ())
+        if isinstance(row, Mapping)
+        and str(row.get("execution_symbol") or "").strip()
+    }
+
+    products: list[ProductRegistryRow] = []
+    for state in states:
+        product = state.get("product")
+        if not isinstance(product, ProductRegistryRow):
+            continue
+        asset_id = str(product.asset_id).strip().lower()
+        if asset_id in SEED_REGISTRY:
+            continue
+        symbol = str(product.broker_symbol or "").strip()
+        if not symbol or symbol not in focused_symbols:
+            continue
+        try:
+            runtime_playbook_for_product(
+                product,
+                playbook_id="pb_crypto_swing_v1_2",
+            )
+        except RuntimeError:
+            continue
+        products.append(product)
+    return tuple(sorted(products, key=lambda row: row.asset_id))
+
+
+def _rotating_dynamic_strategy_batch(
+    products: Sequence[ProductRegistryRow],
+    *,
+    as_of_utc: datetime,
+    interval_seconds: float,
+    batch_size: int,
+    priority_asset_ids: Sequence[str] = (),
+) -> tuple[ProductRegistryRow, ...]:
+    """Choose a bounded deterministic slice while always including OPEN assets."""
+    if as_of_utc.tzinfo is None:
+        raise ValueError("as_of_utc must be timezone-aware")
+    if interval_seconds <= 0:
+        raise ValueError("interval_seconds must be positive")
+    if batch_size < 1:
+        raise ValueError("batch_size must be positive")
+
+    rows = tuple(sorted(products, key=lambda row: row.asset_id))
+    if not rows:
+        return ()
+
+    by_id = {row.asset_id: row for row in rows}
+    priority = tuple(
+        by_id[asset_id]
+        for asset_id in dict.fromkeys(
+            str(value).strip().lower() for value in priority_asset_ids
+        )
+        if asset_id in by_id
+    )
+    remaining = tuple(
+        row for row in rows
+        if row.asset_id not in {item.asset_id for item in priority}
+    )
+    capacity = max(batch_size - len(priority), 0)
+    if capacity == 0 or not remaining:
+        return priority[:batch_size]
+
+    slot = int(as_of_utc.timestamp() // interval_seconds)
+    start = (slot * capacity) % len(remaining)
+    selected = tuple(
+        remaining[(start + offset) % len(remaining)]
+        for offset in range(min(capacity, len(remaining)))
+    )
+    return (*priority, *selected)
 
 
 async def run_configured_prototype_strategy_cycle() -> dict[str, object]:

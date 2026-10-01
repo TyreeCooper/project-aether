@@ -4,12 +4,17 @@ import asyncio
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+from aether_vnext.dynamic_products import project_kraken_spot_product
+
 import pytest
 
 from aether_vnext.prototype_strategy_supervisor import (
     PrototypeStrategySupervisor,
+    _current_dynamic_kraken_products,
     _entry_focus_block,
+    _rotating_dynamic_strategy_batch,
     _sync_dynamic_kraken_products,
+    configured_dynamic_strategy_scan_batch_size,
     configured_strategy_enabled,
     configured_strategy_interval_seconds,
     validate_configured_strategy_environment,
@@ -192,3 +197,82 @@ def test_dynamic_kraken_registry_sync_uses_existing_provider_policy_without_gues
     assert result["requirements"]["usd_settlement_route_required"] == 1
     assert store.rows[0][0].asset_id == "kraken:solusd"
     assert store.rows[0][0].stale_threshold_ms == 15000
+
+
+
+def _dynamic_product(symbol: str):
+    base = symbol.split("/", 1)[0]
+    projection = project_kraken_spot_product(
+        {
+            "provider": "Kraken",
+            "symbol": symbol,
+            "execution_symbol": symbol.replace("/", ""),
+            "asset_class": "spot_crypto",
+            "base_currency": base,
+            "quote_currency": "USD",
+            "quantity_step": 0.001,
+            "minimum_quantity": 0.01,
+            "minimum_notional": 0.5,
+            "tick_size": 0.0001,
+        },
+        primary_market_source_id="kraken_public",
+        stale_threshold_ms=15000,
+    )
+    assert projection.product is not None
+    return projection.product
+
+
+def test_dynamic_strategy_scan_batch_size_is_bounded(monkeypatch) -> None:
+    monkeypatch.setenv("AETHER_VNEXT_DYNAMIC_STRATEGY_SCAN_BATCH_SIZE", "4")
+    assert configured_dynamic_strategy_scan_batch_size() == 4
+    monkeypatch.setenv("AETHER_VNEXT_DYNAMIC_STRATEGY_SCAN_BATCH_SIZE", "21")
+    with pytest.raises(ValueError, match="between 1 and 20"):
+        configured_dynamic_strategy_scan_batch_size()
+
+
+def test_current_dynamic_products_require_current_focus_and_runtime_compatibility() -> None:
+    sol = _dynamic_product("SOL/USD")
+    ada = _dynamic_product("ADA/USD")
+    states = ({"product": sol}, {"product": ada})
+    focus = {
+        "providers": {
+            "Kraken": {
+                "top100": [
+                    {"execution_symbol": "SOLUSD"},
+                ]
+            }
+        }
+    }
+    rows = _current_dynamic_kraken_products(
+        states,
+        focus_snapshot=focus,
+    )
+    assert tuple(row.asset_id for row in rows) == ("kraken:solusd",)
+
+
+def test_dynamic_strategy_rotation_prioritizes_open_assets_and_roams() -> None:
+    products = tuple(
+        _dynamic_product(symbol)
+        for symbol in ("ADA/USD", "AVAX/USD", "DOT/USD", "LINK/USD", "SOL/USD")
+    )
+    first = _rotating_dynamic_strategy_batch(
+        products,
+        as_of_utc=datetime(2026, 10, 1, 22, 0, tzinfo=timezone.utc),
+        interval_seconds=15.0,
+        batch_size=3,
+        priority_asset_ids=("kraken:solusd",),
+    )
+    later = _rotating_dynamic_strategy_batch(
+        products,
+        as_of_utc=datetime(2026, 10, 1, 22, 0, 15, tzinfo=timezone.utc),
+        interval_seconds=15.0,
+        batch_size=3,
+        priority_asset_ids=("kraken:solusd",),
+    )
+    assert first[0].asset_id == "kraken:solusd"
+    assert later[0].asset_id == "kraken:solusd"
+    assert len(first) == 3
+    assert len(later) == 3
+    assert {row.asset_id for row in first[1:]} != {
+        row.asset_id for row in later[1:]
+    }
