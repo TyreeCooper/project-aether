@@ -10,7 +10,7 @@ No database mutation occurs in this module.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Final, Sequence
+from typing import Any, Final, Mapping, Sequence
 
 import httpx
 
@@ -18,7 +18,8 @@ from aether_vnext.prototype_market_history import PrototypeMarketBar
 
 
 UTC = timezone.utc
-COINBASE_CANDLES_BASE: Final = "https://api.exchange.coinbase.com/products"
+COINBASE_PRODUCTS_URL: Final = "https://api.exchange.coinbase.com/products"
+COINBASE_CANDLES_BASE: Final = COINBASE_PRODUCTS_URL
 COINBASE_SOURCE_ID: Final = "coinbase_exchange_public_candles"
 COINBASE_PRODUCT: Final = {"btc": "BTC-USD", "eth": "ETH-USD"}
 HOUR = timedelta(hours=1)
@@ -39,6 +40,63 @@ def _coinbase_product(asset: str, explicit: str | None) -> str:
             "dynamic Coinbase warm-up requires an explicit Coinbase product"
         )
     return product
+
+
+def parse_coinbase_public_products(
+    payload: Sequence[Mapping[str, object]],
+) -> dict[tuple[str, str], str]:
+    """Index currently online public Coinbase products by provider-authored currencies."""
+    if not isinstance(payload, Sequence):
+        raise ValueError("Coinbase products response must be a sequence")
+    out: dict[tuple[str, str], str] = {}
+    for raw in payload:
+        if not isinstance(raw, Mapping):
+            raise ValueError("Coinbase product row must be an object")
+        product_id = str(raw.get("id") or "").strip().upper()
+        base = str(raw.get("base_currency") or "").strip().upper()
+        quote = str(raw.get("quote_currency") or "").strip().upper()
+        status = str(raw.get("status") or "").strip().lower()
+        disabled = raw.get("trading_disabled")
+        if not product_id or not base or not quote:
+            continue
+        if status and status != "online":
+            continue
+        if disabled is True:
+            continue
+        key = (base, quote)
+        prior = out.get(key)
+        if prior is not None and prior != product_id:
+            raise ValueError(
+                f"duplicate Coinbase product identity for {base}/{quote}"
+            )
+        out[key] = product_id
+    return out
+
+
+async def fetch_coinbase_public_products(
+    *,
+    timeout_s: float = 20.0,
+    client: httpx.AsyncClient | None = None,
+) -> dict[tuple[str, str], str]:
+    """Fetch the public Coinbase product catalog without guessing product IDs."""
+    owns_client = client is None
+    http = client or httpx.AsyncClient(timeout=timeout_s)
+    try:
+        response = await http.get(
+            COINBASE_PRODUCTS_URL,
+            headers={
+                "Accept": "application/json",
+                "User-Agent": "project-aether-prototype-history-probe",
+            },
+        )
+        response.raise_for_status()
+        payload: Any = response.json()
+        if not isinstance(payload, list):
+            raise RuntimeError("Coinbase products response was not a list")
+        return parse_coinbase_public_products(payload)
+    finally:
+        if owns_client:
+            await http.aclose()
 
 
 def _utc_epoch(value: object) -> datetime:

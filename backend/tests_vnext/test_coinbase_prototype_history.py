@@ -7,6 +7,7 @@ import pytest
 from aether_vnext.coinbase_prototype_history import (
     COINBASE_SOURCE_ID,
     parse_coinbase_hourly_candles,
+    parse_coinbase_public_products,
 )
 
 
@@ -73,3 +74,53 @@ def test_dynamic_coinbase_history_requires_explicit_product_identity() -> None:
     assert len(rows) == 1
     assert rows[0].asset_id == "kraken:solusd"
     assert "/products/SOL-USD/candles" in rows[0].source_ref
+
+
+
+def test_coinbase_product_catalog_binds_provider_authored_base_quote() -> None:
+    products = parse_coinbase_public_products(
+        [
+            {
+                "id": "SOL-USD",
+                "base_currency": "SOL",
+                "quote_currency": "USD",
+                "status": "online",
+                "trading_disabled": False,
+            },
+            {
+                "id": "ADA-USD",
+                "base_currency": "ADA",
+                "quote_currency": "USD",
+                "status": "offline",
+                "trading_disabled": False,
+            },
+            {
+                "id": "DOT-USD",
+                "base_currency": "DOT",
+                "quote_currency": "USD",
+                "status": "online",
+                "trading_disabled": True,
+            },
+        ]
+    )
+    assert products == {("SOL", "USD"): "SOL-USD"}
+
+
+def test_coinbase_product_catalog_rejects_ambiguous_currency_identity() -> None:
+    with pytest.raises(ValueError, match="duplicate Coinbase product identity"):
+        parse_coinbase_public_products(
+            [
+                {
+                    "id": "SOL-USD",
+                    "base_currency": "SOL",
+                    "quote_currency": "USD",
+                    "status": "online",
+                },
+                {
+                    "id": "SOL-USD-ALT",
+                    "base_currency": "SOL",
+                    "quote_currency": "USD",
+                    "status": "online",
+                },
+            ]
+        )
