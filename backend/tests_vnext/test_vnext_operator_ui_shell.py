@@ -49,7 +49,7 @@ def test_vnext_ui_restores_familiar_operator_shell_without_legacy_routes() -> No
     assert ".providerFeedClass" in css
     assert ".providerTop100" in css
     assert ".providerFeedLegend" in css
-        assert ".focusReceived" in css
+    assert ".focusReceived" in css
     assert ".desktopCommandCenter" in css
     assert ".desktopCommandGrid" in css
     assert ".mobileCommandStrip" in css
