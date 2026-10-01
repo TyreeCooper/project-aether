@@ -50,3 +50,26 @@ def test_coinbase_parser_rejects_bad_ohlc() -> None:
             asset_id="btc",
             end_at_utc=END,
         )
+
+
+
+def test_dynamic_coinbase_history_requires_explicit_product_identity() -> None:
+    payload = [
+        [1790802000, 99.0, 105.0, 100.0, 104.0, 12.5],
+    ]
+    with pytest.raises(ValueError, match="explicit Coinbase product"):
+        parse_coinbase_hourly_candles(
+            payload,
+            asset_id="kraken:solusd",
+            end_at_utc=END,
+        )
+
+    rows = parse_coinbase_hourly_candles(
+        payload,
+        asset_id="kraken:solusd",
+        end_at_utc=END,
+        coinbase_product="SOL-USD",
+    )
+    assert len(rows) == 1
+    assert rows[0].asset_id == "kraken:solusd"
+    assert "/products/SOL-USD/candles" in rows[0].source_ref

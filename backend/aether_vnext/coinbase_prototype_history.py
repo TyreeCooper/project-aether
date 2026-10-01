@@ -1,7 +1,7 @@
 """Public Coinbase Exchange candle transport for prototype warm-up comparison.
 
 This source is NOT Kraken evidence and is NOT Phase-18 evidence. It exists only so
-the BTC/ETH PAPER prototype can evaluate whether a temporary cross-venue warm-up
+the PAPER prototype can evaluate whether a temporary cross-venue warm-up
 source is technically usable while canonical Kraken market ingress remains the
 execution-market authority.
 
@@ -27,9 +27,18 @@ MAX_CANDLES_PER_REQUEST: Final = 300
 
 def _asset(value: str) -> str:
     asset = str(value).strip().lower()
-    if asset not in COINBASE_PRODUCT:
-        raise ValueError("Coinbase prototype history supports btc/eth only")
+    if not asset:
+        raise ValueError("asset_id is required")
     return asset
+
+
+def _coinbase_product(asset: str, explicit: str | None) -> str:
+    product = str(explicit or COINBASE_PRODUCT.get(asset) or "").strip().upper()
+    if not product:
+        raise ValueError(
+            "dynamic Coinbase warm-up requires an explicit Coinbase product"
+        )
+    return product
 
 
 def _utc_epoch(value: object) -> datetime:
@@ -73,15 +82,16 @@ def parse_coinbase_hourly_candles(
     *,
     asset_id: str,
     end_at_utc: datetime,
+    coinbase_product: str | None = None,
 ) -> tuple[PrototypeMarketBar, ...]:
     asset = _asset(asset_id)
+    product = _coinbase_product(asset, coinbase_product)
     if end_at_utc.tzinfo is None:
         raise ValueError("end_at_utc must be timezone-aware")
     if not isinstance(payload, Sequence):
         raise ValueError("Coinbase candle response must be a sequence")
 
     rows: dict[datetime, PrototypeMarketBar] = {}
-    product = COINBASE_PRODUCT[asset]
     for raw in payload:
         if not isinstance(raw, Sequence) or len(raw) < 6:
             raise ValueError("Coinbase candle row must contain six values")
@@ -131,6 +141,7 @@ async def fetch_coinbase_hourly_history(
     *,
     asset_id: str,
     end_at_utc: datetime,
+    coinbase_product: str | None = None,
     minimum_bars: int = 2200,
     timeout_s: float = 20.0,
     client: httpx.AsyncClient | None = None,
@@ -141,13 +152,13 @@ async def fetch_coinbase_hourly_history(
     backward without overlap and the result is deduplicated/content checked.
     """
     asset = _asset(asset_id)
+    product = _coinbase_product(asset, coinbase_product)
     if end_at_utc.tzinfo is None:
         raise ValueError("end_at_utc must be timezone-aware")
     if minimum_bars < 1:
         raise ValueError("minimum_bars must be positive")
 
     end = _floor_hour(end_at_utc)
-    product = COINBASE_PRODUCT[asset]
     owns_client = client is None
     http = client or httpx.AsyncClient(timeout=timeout_s)
     by_open: dict[datetime, PrototypeMarketBar] = {}
@@ -179,6 +190,7 @@ async def fetch_coinbase_hourly_history(
                 payload,
                 asset_id=asset,
                 end_at_utc=end,
+                coinbase_product=product,
             )
             for row in rows:
                 existing = by_open.get(row.bucket_open_utc)
