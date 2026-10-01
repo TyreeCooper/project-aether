@@ -376,9 +376,37 @@ SEED_REGISTRY: Final = MappingProxyType(
     {asset_id: _seed_row(asset_id) for asset_id in SEED_PRODUCT_MATH}
 )
 
+# Runtime-only provider products. Frozen seed rows remain immutable and always win.
+_DYNAMIC_RUNTIME_REGISTRY: dict[str, ProductRegistryRow] = {}
+
+
+def register_runtime_product(row: ProductRegistryRow) -> None:
+    asset_id = str(row.asset_id).strip().lower()
+    if not asset_id:
+        raise ValueError("runtime product asset_id is required")
+    if asset_id in SEED_REGISTRY:
+        if row != SEED_REGISTRY[asset_id]:
+            raise ValueError("runtime product cannot replace frozen seed row")
+        return
+    _DYNAMIC_RUNTIME_REGISTRY[asset_id] = row
+
+
+def unregister_runtime_product(asset_id: str) -> None:
+    _DYNAMIC_RUNTIME_REGISTRY.pop(str(asset_id).strip().lower(), None)
+
+
+def runtime_product_rows() -> tuple[ProductRegistryRow, ...]:
+    return tuple(
+        _DYNAMIC_RUNTIME_REGISTRY[key]
+        for key in sorted(_DYNAMIC_RUNTIME_REGISTRY)
+    )
+
 
 def registry_row(asset_id: str) -> ProductRegistryRow:
-    return SEED_REGISTRY[str(asset_id).strip().lower()]
+    key = str(asset_id).strip().lower()
+    if key in SEED_REGISTRY:
+        return SEED_REGISTRY[key]
+    return _DYNAMIC_RUNTIME_REGISTRY[key]
 
 
 def bind_market_data(

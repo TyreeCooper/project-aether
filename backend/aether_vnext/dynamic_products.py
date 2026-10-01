@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import hashlib
+import json
 import re
 from typing import Mapping
 
@@ -201,4 +203,209 @@ def project_kraken_spot_product(
         product=row,
         requirements=(),
         source_backed=True,
+    )
+
+
+
+DYNAMIC_PRODUCT_PAYLOAD_KIND = "dynamic_product_v1"
+
+
+def dynamic_product_payload(
+    row: ProductRegistryRow,
+    *,
+    source_ref: str,
+) -> dict[str, object]:
+    if row.futures_lifecycle is not None:
+        raise ValueError("dynamic product codec currently supports non-futures products")
+    source = str(source_ref).strip()
+    if not source:
+        raise ValueError("dynamic product source_ref is required")
+
+    payload: dict[str, object] = {
+        "payload_kind": DYNAMIC_PRODUCT_PAYLOAD_KIND,
+        "source_ref": source,
+        "asset_id": row.asset_id,
+        "canonical_symbol": row.canonical_symbol,
+        "broker_symbol": row.broker_symbol,
+        "venue": row.venue,
+        "broker": row.broker,
+        "product_type": row.product_type.value,
+        "base_currency": row.base_currency,
+        "quote_currency": row.quote_currency,
+        "settlement_currency": row.settlement_currency,
+        "long_supported": row.long_supported,
+        "short_supported": row.short_supported,
+        "borrow_required": row.borrow_required,
+        "shortability_state": row.shortability_state.value,
+        "unit": row.unit,
+        "quantity_step": row.quantity_step,
+        "minimum_quantity": row.minimum_quantity,
+        "maximum_quantity": row.maximum_quantity,
+        "minimum_notional": row.minimum_notional,
+        "tick_size": row.tick_size,
+        "pip_size": row.pip_size,
+        "point_value": row.point_value,
+        "quote_precision": row.quote_precision,
+        "price_precision": row.price_precision,
+        "margin_model": row.margin_model,
+        "initial_margin": row.initial_margin,
+        "maintenance_margin": row.maintenance_margin,
+        "cash_settlement_behavior": row.cash_settlement_behavior,
+        "fee_schedule_id": row.fee_schedule_id,
+        "spread_model_id": row.spread_model_id,
+        "slippage_model_id": row.slippage_model_id,
+        "exchange_regulatory_fee_model_id": row.exchange_regulatory_fee_model_id,
+        "calendar_id": row.calendar_id,
+        "timezone": row.timezone,
+        "maintenance_rule_id": row.maintenance_rule_id,
+        "early_close_rule_id": row.early_close_rule_id,
+        "lifecycle_state": row.lifecycle_state.value,
+        "order_types_supported": list(row.order_types_supported),
+        "paper_adapter_id": row.paper_adapter_id,
+        "live_adapter_status": row.live_adapter_status.value,
+        "venue_constraints": list(row.venue_constraints),
+        "primary_market_source_id": row.primary_market_source_id,
+        "fallback_market_source_id": row.fallback_market_source_id,
+        "market_data_binding_state": row.market_data_binding_state.value,
+        "stale_threshold_ms": row.stale_threshold_ms,
+    }
+    raw = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+    payload["product_hash"] = hashlib.sha256(raw).hexdigest()
+    return payload
+
+
+def product_from_dynamic_payload(
+    payload: Mapping[str, object],
+) -> ProductRegistryRow:
+    if payload.get("payload_kind") != DYNAMIC_PRODUCT_PAYLOAD_KIND:
+        raise ValueError("not a dynamic product payload")
+    supplied_hash = str(payload.get("product_hash") or "")
+    unhashed = {key: value for key, value in payload.items() if key != "product_hash"}
+    expected = hashlib.sha256(
+        json.dumps(
+            unhashed,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    if not supplied_hash or supplied_hash != expected:
+        raise ValueError("dynamic product payload hash mismatch")
+
+    return ProductRegistryRow(
+        asset_id=str(payload["asset_id"]),
+        canonical_symbol=str(payload["canonical_symbol"]),
+        broker_symbol=(
+            None if payload.get("broker_symbol") is None
+            else str(payload["broker_symbol"])
+        ),
+        venue=str(payload["venue"]),
+        broker=str(payload["broker"]),
+        product_type=ProductType(str(payload["product_type"])),
+        base_currency=(
+            None if payload.get("base_currency") is None
+            else str(payload["base_currency"])
+        ),
+        quote_currency=(
+            None if payload.get("quote_currency") is None
+            else str(payload["quote_currency"])
+        ),
+        settlement_currency=str(payload["settlement_currency"]),
+        long_supported=bool(payload["long_supported"]),
+        short_supported=bool(payload["short_supported"]),
+        borrow_required=bool(payload["borrow_required"]),
+        shortability_state=ShortabilityState(str(payload["shortability_state"])),
+        unit=str(payload["unit"]),
+        quantity_step=float(payload["quantity_step"]),
+        minimum_quantity=float(payload["minimum_quantity"]),
+        maximum_quantity=(
+            None if payload.get("maximum_quantity") is None
+            else float(payload["maximum_quantity"])
+        ),
+        minimum_notional=(
+            None if payload.get("minimum_notional") is None
+            else float(payload["minimum_notional"])
+        ),
+        tick_size=(
+            None if payload.get("tick_size") is None
+            else float(payload["tick_size"])
+        ),
+        pip_size=(
+            None if payload.get("pip_size") is None
+            else float(payload["pip_size"])
+        ),
+        point_value=(
+            None if payload.get("point_value") is None
+            else float(payload["point_value"])
+        ),
+        quote_precision=(
+            None if payload.get("quote_precision") is None
+            else int(payload["quote_precision"])
+        ),
+        price_precision=(
+            None if payload.get("price_precision") is None
+            else int(payload["price_precision"])
+        ),
+        margin_model=str(payload["margin_model"]),
+        initial_margin=(
+            None if payload.get("initial_margin") is None
+            else float(payload["initial_margin"])
+        ),
+        maintenance_margin=(
+            None if payload.get("maintenance_margin") is None
+            else float(payload["maintenance_margin"])
+        ),
+        cash_settlement_behavior=str(payload["cash_settlement_behavior"]),
+        fee_schedule_id=str(payload["fee_schedule_id"]),
+        spread_model_id=str(payload["spread_model_id"]),
+        slippage_model_id=str(payload["slippage_model_id"]),
+        exchange_regulatory_fee_model_id=(
+            None
+            if payload.get("exchange_regulatory_fee_model_id") is None
+            else str(payload["exchange_regulatory_fee_model_id"])
+        ),
+        calendar_id=str(payload["calendar_id"]),
+        timezone=str(payload["timezone"]),
+        maintenance_rule_id=str(payload["maintenance_rule_id"]),
+        early_close_rule_id=str(payload["early_close_rule_id"]),
+        lifecycle_state=LifecycleState(str(payload["lifecycle_state"])),
+        active_from=None,
+        active_to=None,
+        symbol_change=None,
+        corporate_action_flags=(),
+        expiry_utc=None,
+        roll_to=None,
+        retirement_reason=None,
+        futures_lifecycle=None,
+        order_types_supported=tuple(
+            str(value) for value in payload.get("order_types_supported") or ()
+        ),
+        paper_adapter_id=str(payload["paper_adapter_id"]),
+        live_adapter_status=LiveAdapterStatus(str(payload["live_adapter_status"])),
+        venue_constraints=tuple(
+            str(value) for value in payload.get("venue_constraints") or ()
+        ),
+        primary_market_source_id=(
+            None
+            if payload.get("primary_market_source_id") is None
+            else str(payload["primary_market_source_id"])
+        ),
+        fallback_market_source_id=(
+            None
+            if payload.get("fallback_market_source_id") is None
+            else str(payload["fallback_market_source_id"])
+        ),
+        market_data_binding_state=BindingState(
+            str(payload["market_data_binding_state"])
+        ),
+        stale_threshold_ms=(
+            None
+            if payload.get("stale_threshold_ms") is None
+            else int(payload["stale_threshold_ms"])
+        ),
     )

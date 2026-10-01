@@ -1,5 +1,7 @@
 from aether_vnext.dynamic_products import (
     canonical_provider_asset_id,
+    dynamic_product_payload,
+    product_from_dynamic_payload,
     project_kraken_spot_product,
 )
 
@@ -77,3 +79,27 @@ def test_non_usd_kraken_pair_is_received_but_not_mispriced_as_usd() -> None:
     )
     assert out.product is None
     assert "usd_settlement_route_required" in out.requirements
+
+
+
+def test_dynamic_product_payload_round_trip_is_hash_verified() -> None:
+    projected = project_kraken_spot_product(
+        _sol_row(),
+        primary_market_source_id="kraken_public",
+        stale_threshold_ms=15_000,
+    )
+    assert projected.product is not None
+    payload = dynamic_product_payload(
+        projected.product,
+        source_ref="kraken:AssetPairs:SOLUSD",
+    )
+    assert product_from_dynamic_payload(payload) == projected.product
+
+    tampered = dict(payload)
+    tampered["tick_size"] = 99.0
+    try:
+        product_from_dynamic_payload(tampered)
+    except ValueError as exc:
+        assert "hash mismatch" in str(exc)
+    else:
+        raise AssertionError("tampered dynamic product payload must fail")

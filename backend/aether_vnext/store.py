@@ -82,7 +82,18 @@ from aether_vnext.evidence import (
 )
 from aether_vnext.decay import DecayAssessment, DecayCohort, assess_decay
 from aether_vnext.freeze import EvidenceState, ResearchState
-from aether_vnext.registry import ProductType, registry_row
+from aether_vnext.dynamic_products import (
+    DYNAMIC_PRODUCT_PAYLOAD_KIND,
+    dynamic_product_payload,
+    product_from_dynamic_payload,
+)
+from aether_vnext.registry import (
+    ProductRegistryRow,
+    ProductType,
+    SEED_REGISTRY,
+    register_runtime_product,
+    registry_row,
+)
 from aether_vnext.registry_runtime import (
     RuntimeRegistryBinding,
     binding_from_payload,
@@ -696,6 +707,8 @@ class VNextStore:
         if row is None:
             return None
         payload = dict(row["payload"] or {})
+        if payload.get("payload_kind") == DYNAMIC_PRODUCT_PAYLOAD_KIND:
+            return None
         binding = binding_from_payload(payload)
         digest = str(payload.get("binding_hash") or "")
         expected = binding_hash(binding)
@@ -710,6 +723,89 @@ class VNextStore:
         return {
             "binding": binding,
             "binding_hash": digest,
+            "registry_version": str(row["registry_version"]),
+            "configuration_hash": str(row["configuration_hash"]),
+            "lifecycle_state": str(row["lifecycle_state"]),
+            "updated_at_utc": _stored_utc(row["updated_at_utc"]),
+        }
+
+    def upsert_dynamic_product_state(
+        self,
+        conn: Connection,
+        product: ProductRegistryRow,
+        *,
+        source_ref: str,
+        registry_version: str,
+        configuration_hash: str,
+        updated_at_utc: datetime,
+    ) -> str:
+        """Persist one source-backed dynamic product without mutating seed truth."""
+        if product.asset_id in SEED_REGISTRY:
+            raise ValueError(
+                "seed products must use the frozen runtime binding path"
+            )
+        if updated_at_utc.tzinfo is None:
+            raise ValueError("updated_at_utc must be timezone-aware")
+        if not str(registry_version).strip():
+            raise ValueError("registry_version is required")
+        policies = self.tables["policy_snapshots"]
+        if conn.execute(
+            sa.select(policies.c.configuration_hash).where(
+                policies.c.configuration_hash == configuration_hash
+            )
+        ).first() is None:
+            raise KeyError(f"unknown configuration_hash: {configuration_hash}")
+
+        payload = dynamic_product_payload(product, source_ref=source_ref)
+        digest = str(payload["product_hash"])
+        table = self.tables["product_registry_state"]
+        values = {
+            "asset_id": product.asset_id,
+            "registry_version": str(registry_version),
+            "configuration_hash": str(configuration_hash),
+            "lifecycle_state": product.lifecycle_state.value,
+            "payload": payload,
+            "updated_at_utc": updated_at_utc,
+        }
+        existing = conn.execute(
+            sa.select(table.c.asset_id).where(
+                table.c.asset_id == product.asset_id
+            )
+        ).first()
+        if existing is None:
+            conn.execute(table.insert().values(**values))
+        else:
+            conn.execute(
+                table.update()
+                .where(table.c.asset_id == product.asset_id)
+                .values(**values)
+            )
+        register_runtime_product(product)
+        return digest
+
+    def load_dynamic_product_state(
+        self,
+        conn: Connection,
+        *,
+        asset_id: str,
+    ) -> dict[str, Any] | None:
+        table = self.tables["product_registry_state"]
+        row = conn.execute(
+            sa.select(table).where(
+                table.c.asset_id == str(asset_id).strip().lower()
+            )
+        ).mappings().first()
+        if row is None:
+            return None
+        payload = dict(row["payload"] or {})
+        if payload.get("payload_kind") != DYNAMIC_PRODUCT_PAYLOAD_KIND:
+            return None
+        product = product_from_dynamic_payload(payload)
+        register_runtime_product(product)
+        return {
+            "product": product,
+            "product_hash": str(payload["product_hash"]),
+            "source_ref": str(payload["source_ref"]),
             "registry_version": str(row["registry_version"]),
             "configuration_hash": str(row["configuration_hash"]),
             "lifecycle_state": str(row["lifecycle_state"]),
