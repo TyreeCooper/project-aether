@@ -22,7 +22,7 @@ def test_vnext_ui_restores_familiar_operator_shell_without_legacy_routes() -> No
     assert "function feedClassLabel" in page
     assert "PUBLIC REF · DELAYED" in page
     assert "REFERENCE FEED" in page
-        assert "SCOUT RECEIVED" in page
+    assert "SCOUT RECEIVED" in page
     assert "Scout Intake" in page
     assert "function pipelineBottleneck" in page
     assert "function DesktopCommandCenter" in page
