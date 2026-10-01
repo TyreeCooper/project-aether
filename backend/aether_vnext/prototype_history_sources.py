@@ -1,4 +1,4 @@
-"""Prototype-only BTC/ETH historical warm-up transports.
+"""Prototype-only Kraken crypto historical warm-up transports.
 
 Two deliberately separated sources are supported:
 - hourly: CryptoCompare's historical endpoint explicitly scoped to exchange=Kraken
@@ -34,9 +34,27 @@ DAY = timedelta(days=1)
 
 def _asset(value: str) -> str:
     asset = str(value).strip().lower()
-    if asset not in ASSET_SYMBOL:
-        raise ValueError("prototype historical warm-up supports btc/eth only")
+    if not asset:
+        raise ValueError("asset_id is required")
     return asset
+
+
+def _asset_symbol(asset: str, explicit: str | None) -> str:
+    value = str(explicit or ASSET_SYMBOL.get(asset) or "").strip().upper()
+    if not value:
+        raise ValueError(
+            "dynamic Kraken history requires an explicit base asset symbol"
+        )
+    return value
+
+
+def _kraken_pair(asset: str, explicit: str | None) -> str:
+    value = str(explicit or KRAKEN_PAIR.get(asset) or "").strip().upper()
+    if not value:
+        raise ValueError(
+            "dynamic Kraken history requires an explicit Kraken pair symbol"
+        )
+    return value
 
 
 def _aware_utc_from_epoch(value: object) -> datetime:
@@ -80,12 +98,14 @@ def parse_cryptocompare_kraken_hourly_payload(
     *,
     asset_id: str,
     end_at_utc: datetime,
+    asset_symbol: str | None = None,
 ) -> tuple[PrototypeMarketBar, ...]:
     """Parse one CryptoCompare single-exchange hourly response.
 
     Zero-price placeholder rows are treated as absent intervals, never synthesized.
     """
     asset = _asset(asset_id)
+    symbol = _asset_symbol(asset, asset_symbol)
     if end_at_utc.tzinfo is None:
         raise ValueError("end_at_utc must be timezone-aware")
     if str(payload.get("Response") or "") != "Success":
@@ -101,7 +121,7 @@ def parse_cryptocompare_kraken_hourly_payload(
 
     source_ref = (
         f"cryptocompare:/data/v2/histohour:"
-        f"e=Kraken:{ASSET_SYMBOL[asset]}/USD:tryConversion=false"
+        f"e=Kraken:{symbol}/USD:tryConversion=false"
     )
     out: list[PrototypeMarketBar] = []
     seen: set[datetime] = set()
@@ -162,6 +182,7 @@ def parse_kraken_completed_daily_payload(
     *,
     asset_id: str,
     end_at_utc: datetime,
+    kraken_pair: str | None = None,
 ) -> tuple[PrototypeMarketBar, ...]:
     """Parse completed daily bars from Kraken REST.
 
@@ -169,6 +190,7 @@ def parse_kraken_completed_daily_payload(
     so the final provider row is always excluded.
     """
     asset = _asset(asset_id)
+    pair = _kraken_pair(asset, kraken_pair)
     if end_at_utc.tzinfo is None:
         raise ValueError("end_at_utc must be timezone-aware")
     errors = payload.get("error")
@@ -190,7 +212,7 @@ def parse_kraken_completed_daily_payload(
         raise ValueError("Kraken OHLC series is missing")
 
     source_ref = (
-        f"kraken:/0/public/OHLC:pair={KRAKEN_PAIR[asset]}:"
+        f"kraken:/0/public/OHLC:pair={pair}:"
         "interval=1440:completed-only"
     )
     out: list[PrototypeMarketBar] = []
@@ -232,6 +254,7 @@ async def fetch_cryptocompare_kraken_hourly(
     *,
     asset_id: str,
     end_at_utc: datetime,
+    asset_symbol: str | None = None,
     minimum_bars: int = 2200,
     timeout_s: float = 20.0,
     client: httpx.AsyncClient | None = None,
@@ -243,6 +266,7 @@ async def fetch_cryptocompare_kraken_hourly(
     rather than silently routing through another symbol.
     """
     asset = _asset(asset_id)
+    symbol = _asset_symbol(asset, asset_symbol)
     if end_at_utc.tzinfo is None:
         raise ValueError("end_at_utc must be timezone-aware")
     if minimum_bars < 1:
@@ -259,7 +283,7 @@ async def fetch_cryptocompare_kraken_hourly(
             response = await http.get(
                 CRYPTOCOMPARE_HISTOHOUR_URL,
                 params={
-                    "fsym": ASSET_SYMBOL[asset],
+                    "fsym": symbol,
                     "tsym": "USD",
                     "limit": limit,
                     "aggregate": 1,
@@ -274,6 +298,7 @@ async def fetch_cryptocompare_kraken_hourly(
                 response.json(),
                 asset_id=asset,
                 end_at_utc=end_at_utc,
+                asset_symbol=symbol,
             )
             if not rows:
                 break
@@ -303,17 +328,19 @@ async def fetch_kraken_completed_daily(
     *,
     asset_id: str,
     end_at_utc: datetime,
+    kraken_pair: str | None = None,
     timeout_s: float = 20.0,
     client: httpx.AsyncClient | None = None,
 ) -> tuple[PrototypeMarketBar, ...]:
     asset = _asset(asset_id)
+    pair = _kraken_pair(asset, kraken_pair)
     owns_client = client is None
     http = client or httpx.AsyncClient(timeout=timeout_s)
     try:
         response = await http.get(
             KRAKEN_REST_OHLC_URL,
             params={
-                "pair": KRAKEN_PAIR[asset],
+                "pair": pair,
                 "interval": 1440,
                 "assetVersion": 1,
             },
@@ -323,6 +350,7 @@ async def fetch_kraken_completed_daily(
             response.json(),
             asset_id=asset,
             end_at_utc=end_at_utc,
+            kraken_pair=pair,
         )
     finally:
         if owns_client:
@@ -334,9 +362,11 @@ def parse_kraken_completed_hourly_payload(
     *,
     asset_id: str,
     end_at_utc: datetime,
+    kraken_pair: str | None = None,
 ) -> tuple[PrototypeMarketBar, ...]:
     """Parse completed 1h bars from Kraken REST, excluding the forming final row."""
     asset = _asset(asset_id)
+    pair = _kraken_pair(asset, kraken_pair)
     if end_at_utc.tzinfo is None:
         raise ValueError("end_at_utc must be timezone-aware")
     errors = payload.get("error")
@@ -357,7 +387,7 @@ def parse_kraken_completed_hourly_payload(
         raise ValueError("Kraken OHLC series is missing")
 
     source_ref = (
-        f"kraken:/0/public/OHLC:pair={KRAKEN_PAIR[asset]}:"
+        f"kraken:/0/public/OHLC:pair={pair}:"
         "interval=60:completed-only"
     )
     out: list[PrototypeMarketBar] = []
@@ -398,17 +428,19 @@ async def fetch_kraken_completed_hourly(
     *,
     asset_id: str,
     end_at_utc: datetime,
+    kraken_pair: str | None = None,
     timeout_s: float = 20.0,
     client: httpx.AsyncClient | None = None,
 ) -> tuple[PrototypeMarketBar, ...]:
     asset = _asset(asset_id)
+    pair = _kraken_pair(asset, kraken_pair)
     owns_client = client is None
     http = client or httpx.AsyncClient(timeout=timeout_s)
     try:
         response = await http.get(
             KRAKEN_REST_OHLC_URL,
             params={
-                "pair": KRAKEN_PAIR[asset],
+                "pair": pair,
                 "interval": 60,
                 "assetVersion": 1,
             },
@@ -418,6 +450,7 @@ async def fetch_kraken_completed_hourly(
             response.json(),
             asset_id=asset,
             end_at_utc=end_at_utc,
+            kraken_pair=pair,
         )
     finally:
         if owns_client:

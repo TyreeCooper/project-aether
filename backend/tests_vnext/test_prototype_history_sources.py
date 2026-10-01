@@ -140,3 +140,67 @@ def test_kraken_hourly_parser_drops_forming_final_row() -> None:
     )
     assert len(rows) == 2
     assert rows[-1].bucket_close_utc.isoformat() == "2026-09-30T22:00:00+00:00"
+
+
+
+def test_dynamic_kraken_history_requires_explicit_provider_identity() -> None:
+    payload = {
+        "error": [],
+        "result": {
+            "SOLUSD": [
+                [1790798400, "100", "105", "99", "104", "102", "12.5", 7],
+                [1790802000, "104", "108", "103", "107", "106", "8.0", 4],
+                [1790805600, "107", "109", "106", "108", "108", "3.0", 2],
+            ],
+            "last": 1790805600,
+        },
+    }
+    with pytest.raises(ValueError, match="explicit Kraken pair"):
+        parse_kraken_completed_hourly_payload(
+            payload,
+            asset_id="kraken:solusd",
+            end_at_utc=END,
+        )
+
+    rows = parse_kraken_completed_hourly_payload(
+        payload,
+        asset_id="kraken:solusd",
+        end_at_utc=END,
+        kraken_pair="SOLUSD",
+    )
+    assert len(rows) == 2
+    assert all(row.asset_id == "kraken:solusd" for row in rows)
+    assert all("pair=SOLUSD" in row.source_ref for row in rows)
+
+
+def test_dynamic_cryptocompare_history_uses_explicit_base_symbol() -> None:
+    payload = {
+        "Response": "Success",
+        "Data": {
+            "Data": [{
+                "time": 1790802000,
+                "open": 100.0,
+                "high": 105.0,
+                "low": 99.0,
+                "close": 104.0,
+                "volumefrom": 12.5,
+                "volumeto": 1300.0,
+            }]
+        },
+    }
+    with pytest.raises(ValueError, match="explicit base asset symbol"):
+        parse_cryptocompare_kraken_hourly_payload(
+            payload,
+            asset_id="kraken:solusd",
+            end_at_utc=END,
+        )
+
+    rows = parse_cryptocompare_kraken_hourly_payload(
+        payload,
+        asset_id="kraken:solusd",
+        end_at_utc=END,
+        asset_symbol="SOL",
+    )
+    assert len(rows) == 1
+    assert rows[0].asset_id == "kraken:solusd"
+    assert "e=Kraken:SOL/USD" in rows[0].source_ref
