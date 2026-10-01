@@ -236,12 +236,17 @@ def build_provider_focus_snapshot(
         "focus_pool": focus_pool,
         "focus_count": len(focus_pool),
         "scout_handoff": handoff_rows,
+        "scout_received_count": len(handoff_rows),
+        "runtime_evaluable_count": sum(
+            1 for row in handoff_rows if row["runtime_evaluable"] is True
+        ),
+        "runtime_requirements_count": sum(
+            1 for row in handoff_rows if row["requirements"]
+        ),
         "scout_ready_count": sum(
-            1 for row in handoff_rows if row["state"] == "SCOUT_READY"
+            1 for row in handoff_rows if row["runtime_evaluable"] is True
         ),
-        "scout_queued_count": sum(
-            1 for row in handoff_rows if row["state"] == "SCOUT_QUEUED"
-        ),
+        "scout_queued_count": 0,
         "discovery_only_count": 0,
         "provider_count": len(PROVIDERS),
         "online_provider_count": sum(
@@ -270,7 +275,7 @@ def current_deep_trade_focus_asset_ids() -> frozenset[str] | None:
         for row in handoff
         if (
             isinstance(row, Mapping)
-            and row.get("state") == "SCOUT_READY"
+            and row.get("runtime_evaluable") is True
             and row.get("canonical_asset_id")
         )
     )

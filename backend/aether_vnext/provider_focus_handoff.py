@@ -1,8 +1,7 @@
 """Safe Top-100 discovery handoff into Scout intake and the deep trading runtime.
 
-Every focused instrument advances to Scout intake. Instruments already commissioned
-for the autonomous deep runtime are SCOUT_READY; the rest are SCOUT_QUEUED while
-their product/playbook/execution requirements are completed. Provider ranking is an
+Every focused instrument advances to Scout intake as SCOUT_RECEIVED. Runtime
+requirements remain visible as facts, but they do not create a pre-Scout hold. Provider ranking is an
 attention priority, never an execution veto for an otherwise commissioned strategy.
 """
 from __future__ import annotations
@@ -42,7 +41,8 @@ class FocusHandoff:
     provider_rank: int
     canonical_asset_id: str | None
     state: str
-    blockers: tuple[str, ...]
+    runtime_evaluable: bool
+    requirements: tuple[str, ...]
 
 
 def canonical_seed_asset(
@@ -78,23 +78,25 @@ def focus_handoff_rows(
             ),
         )
 
-        blockers: list[str] = []
+        requirements: list[str] = []
         if canonical is None:
-            blockers.append("dynamic_product_registry_binding_required")
+            requirements.append("dynamic_product_registry_binding_required")
             if provider == "Kraken":
-                blockers.append("dynamic_crypto_playbook_binding_required")
+                requirements.append("dynamic_crypto_playbook_binding_required")
             elif provider == "IBKR":
-                blockers.append("dynamic_equity_playbook_binding_required")
+                requirements.append("dynamic_equity_playbook_binding_required")
             elif provider == "tastyfx":
-                blockers.append("dynamic_fx_playbook_binding_required")
+                requirements.append("dynamic_fx_playbook_binding_required")
             elif provider == "NinjaTrader":
-                blockers.append("dynamic_futures_product_economics_required")
+                requirements.append("dynamic_futures_product_economics_required")
         elif canonical not in _AUTONOMOUS_DEEP_ASSETS:
-            blockers.append("strategy_supervisor_not_commissioned_for_asset")
+            requirements.append("strategy_supervisor_not_commissioned_for_asset")
             if provider != "Kraken":
-                blockers.append("execution_provider_binding_pending")
+                requirements.append("execution_provider_binding_pending")
 
-        state = "SCOUT_READY" if not blockers else "SCOUT_QUEUED"
+        runtime_evaluable = (
+            canonical is not None and canonical in _AUTONOMOUS_DEEP_ASSETS
+        )
         out.append(
             FocusHandoff(
                 provider=provider,
@@ -102,8 +104,9 @@ def focus_handoff_rows(
                 focus_key=focus_key,
                 provider_rank=rank,
                 canonical_asset_id=canonical,
-                state=state,
-                blockers=tuple(blockers),
+                state="SCOUT_RECEIVED",
+                runtime_evaluable=runtime_evaluable,
+                requirements=tuple(requirements),
             )
         )
     return tuple(out)
@@ -118,7 +121,8 @@ def handoff_payload(rows: tuple[FocusHandoff, ...]) -> list[dict[str, object]]:
             "provider_rank": row.provider_rank,
             "canonical_asset_id": row.canonical_asset_id,
             "state": row.state,
-            "blockers": list(row.blockers),
+            "runtime_evaluable": row.runtime_evaluable,
+            "requirements": list(row.requirements),
         }
         for row in rows
     ]

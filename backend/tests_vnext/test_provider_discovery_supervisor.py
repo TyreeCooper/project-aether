@@ -50,11 +50,13 @@ def test_focus_snapshot_has_top100_per_online_provider_and_explicit_missing_prov
         as_of_utc=NOW,
     )
     assert snapshot["focus_count"] == 300
-    assert snapshot["scout_ready_count"] >= 0
-    assert snapshot["scout_queued_count"] >= 0
-    assert snapshot["scout_ready_count"] + snapshot["scout_queued_count"] == 300
+    assert snapshot["scout_received_count"] == 300
+    assert snapshot["runtime_evaluable_count"] >= 0
+    assert snapshot["runtime_requirements_count"] >= 0
+    assert snapshot["scout_queued_count"] == 0
     assert snapshot["discovery_only_count"] == 0
     assert len(snapshot["scout_handoff"]) == 300
+    assert all(row["state"] == "SCOUT_RECEIVED" for row in snapshot["scout_handoff"])
     assert len(snapshot["providers"]["Kraken"]["top100"]) == 100
     assert len(snapshot["providers"]["IBKR"]["top100"]) == 100
     assert len(snapshot["providers"]["tastyfx"]["top100"]) == 100
