@@ -451,7 +451,7 @@ function SettingsView({ ingress, strategy, discovery, operator, floor }) {
         </article>
         <article className="settingsCard">
           <span>Provider discovery</span><strong>{text(discovery?.last_result?.focus_count, "0")} FOCUSED</strong>
-          <small>{text(discovery?.last_result?.online_provider_count, "0")}/4 provider buckets online · max 10/provider</small>
+          <small>{text(discovery?.last_result?.scout_ready_count, "0")} Scout-ready · {text(discovery?.last_result?.discovery_only_count, "0")} discovery-only</small>
         </article>
         <article className="settingsCard">
           <span>Ingress interval</span><strong>{number(ingress?.interval_seconds, 0)}s</strong>
@@ -602,17 +602,31 @@ const DISCOVERY_PROVIDERS = ["Kraken", "tastyfx", "NinjaTrader", "IBKR"];
 
 function discoveryProviderRows(discovery) {
   const providers = discovery?.last_result?.providers || {};
-  return DISCOVERY_PROVIDERS.map((provider) => ({
-    provider,
-    ...(providers[provider] || {
+  const handoff = discovery?.last_result?.scout_handoff || [];
+  const handoffByKey = Object.fromEntries(
+    handoff.map((row) => [String(row?.focus_key || ""), row]),
+  );
+  return DISCOVERY_PROVIDERS.map((provider) => {
+    const source = providers[provider] || {
       status: "waiting",
       reason: "waiting_for_discovery_cycle",
       catalog_count: 0,
       eligible_count: 0,
       focus_count: 0,
       top10: [],
-    }),
-  }));
+    };
+    return {
+      provider,
+      ...source,
+      top10: (source.top10 || []).map((item) => {
+        const focusKey = provider + ":" + String(item?.market_data_symbol || "");
+        return {
+          ...item,
+          handoff: handoffByKey[focusKey] || null,
+        };
+      }),
+    };
+  });
 }
 
 function ProviderFocusCard({ row }) {
@@ -644,6 +658,16 @@ function ProviderFocusCard({ row }) {
                   {Number(item.change_pct) >= 0 ? "+" : ""}{number(item.change_pct, 2)}%
                 </span>
                 <small>{money(item.price)}</small>
+                <em
+                  className={
+                    item.handoff?.state === "SCOUT_READY"
+                      ? "focusReady"
+                      : "focusDiscoveryOnly"
+                  }
+                  title={(item.handoff?.blockers || []).join(", ")}
+                >
+                  {item.handoff?.state === "SCOUT_READY" ? "SCOUT READY" : "DISCOVERY ONLY"}
+                </em>
               </div>
             ))}
           </div>
@@ -663,6 +687,8 @@ function ProviderDiscoveryBoard({ discovery }) {
   const totalCatalog = rows.reduce((sum, row) => sum + Number(row.catalog_count || 0), 0);
   const totalEligible = rows.reduce((sum, row) => sum + Number(row.eligible_count || 0), 0);
   const focusCount = Number(discovery?.last_result?.focus_count || 0);
+  const scoutReadyCount = Number(discovery?.last_result?.scout_ready_count || 0);
+  const discoveryOnlyCount = Number(discovery?.last_result?.discovery_only_count || 0);
   const running = Boolean(discovery?.running && !discovery?.last_error);
   return (
     <section className="floorSection providerDiscoveryBoard">
@@ -683,6 +709,8 @@ function ProviderDiscoveryBoard({ discovery }) {
         <div><span>Provider ranking</span><strong>{number(totalEligible, 0)}</strong></div>
         <i>→</i>
         <div><span>Focus pool</span><strong>{number(focusCount, 0)}</strong><small>max 10/provider</small></div>
+        <i>→</i>
+        <div><span>Scout ready</span><strong>{number(scoutReadyCount, 0)}</strong><small>{number(discoveryOnlyCount, 0)} discovery-only</small></div>
         <i>→</i>
         <div><span>Next seat</span><strong>SCOUT</strong><small>natural setups only</small></div>
       </div>
@@ -712,6 +740,7 @@ function PipelineView({ universe, queues, cockpits, operator, strategy, discover
   const discoveredCatalog = discoveryProviders.reduce((sum, row) => sum + Number(row.catalog_count || 0), 0);
   const discoveredEligible = discoveryProviders.reduce((sum, row) => sum + Number(row.eligible_count || 0), 0);
   const focusCount = Number(discovery?.last_result?.focus_count || 0);
+  const scoutReadyCount = Number(discovery?.last_result?.scout_ready_count || 0);
   const pipelineStatus = governor.count > 0 || governor.blockers > 0
     ? "GLOBAL HALT"
     : bottleneck
@@ -781,6 +810,14 @@ function PipelineView({ universe, queues, cockpits, operator, strategy, discover
             job="Keeps the ten strongest attention candidates per provider for deeper strategy work."
             metricLabel="focused"
             count={focusCount}
+            tone="context"
+          />
+          <PipelineStage
+            label="Trade Readiness"
+            owned="BIND"
+            job="Allows only focused instruments with safe product, market-data and playbook bindings to enter Scout."
+            metricLabel="Scout ready"
+            count={scoutReadyCount}
             tone="context"
           />
           {queueStages.map((stage) => (
@@ -1041,7 +1078,7 @@ function DesktopCommandCenter({ floor, queues, cockpits, operator, ingress, stra
             ))}
           </div>
           <div className="desktopPipelineFooter">
-            <span><b>{text(discovery?.last_result?.focus_count, "0")}</b> focused</span>
+            <span><b>{text(discovery?.last_result?.scout_ready_count, "0")}/{text(discovery?.last_result?.focus_count, "0")}</b> ready/focused</span>
             <span><b>{queued}</b> queued</span>
             <span><b>{blockers}</b> blockers</span>
             <span><b>{cockpits.length}</b> open positions</span>
@@ -1105,8 +1142,8 @@ function MobileCommandStrip({ queues, cockpits, operator, ingress, strategy, dis
       </div>
       <div>
         <span>Focus</span>
-        <strong>{text(discovery?.last_result?.focus_count, "0")}</strong>
-        <small>Top 10/provider</small>
+        <strong>{text(discovery?.last_result?.scout_ready_count, "0")}/{text(discovery?.last_result?.focus_count, "0")}</strong>
+        <small>ready / focused</small>
       </div>
       <div>
         <span>Open</span>
