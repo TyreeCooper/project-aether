@@ -169,25 +169,67 @@ jobs:
           set -euo pipefail
           base="https://$prototype_host"
 
-          for attempt in $(seq 1 30); do
-            code="$(curl --silent --show-error --max-time 30               -o /tmp/health.json -w '%{http_code}'               "$base/api/v1/health" || true)"
-            if [ "$code" = "200" ]; then
+          # Azure App Service may continue serving the previous healthy worker
+          # for several minutes while the newly deployed worker cold-starts.
+          # Do not prove runtime behavior until the exact deployed revision is
+          # visible from the canonical Floor build manifest.
+          revision_ready=0
+          for attempt in $(seq 1 48); do
+            code="$(curl --silent --show-error --max-time 45 \
+              -o /tmp/floor.json -w '%{http_code}' \
+              "$base/api/v1/vnext/floor" || true)"
+            if [ "$code" = "200" ] && EXPECTED_SHA="$EXPECTED_SHA" python - <<'PY'
+          import json, os, sys
+          body=json.load(open("/tmp/floor.json", encoding="utf-8"))
+          mode=body.get("mode") or {}
+          build=body.get("build") or {}
+          paper=body.get("paper_test") or {}
+          ok=(
+              mode.get("paper_only") is True
+              and mode.get("live_blocked") is True
+              and build.get("source_revision") == os.environ["EXPECTED_SHA"]
+              and paper.get("epoch_id") == "aether-prototype-new-system-test-001"
+              and paper.get("seed_bank_usd") == 10000.0
+          )
+          sys.exit(0 if ok else 1)
+          PY
+            then
+              revision_ready=1
               break
             fi
-            test "$attempt" -lt 30
+            echo "Waiting for exact revision $EXPECTED_SHA (attempt $attempt/48)"
             sleep 10
           done
+          test "$revision_ready" = "1"
 
-          python - <<'PY'
-          import json
-          body=json.load(open("/tmp/health.json", encoding="utf-8"))
-          assert body.get("ok") is True, body
-          assert body.get("paper_mode") is True, body
-          assert body.get("live_blocked") is True, body
-          PY
-
+          health_ready=0
           for attempt in $(seq 1 18); do
-            code="$(curl --silent --show-error --max-time 45               -o /tmp/ingress.json -w '%{http_code}'               "$base/api/v1/vnext/ingress-runtime" || true)"
+            code="$(curl --silent --show-error --max-time 30 \
+              -o /tmp/health.json -w '%{http_code}' \
+              "$base/api/v1/health" || true)"
+            if [ "$code" = "200" ] && python - <<'PY'
+          import json, sys
+          body=json.load(open("/tmp/health.json", encoding="utf-8"))
+          ok=(
+              body.get("ok") is True
+              and body.get("paper_mode") is True
+              and body.get("live_blocked") is True
+          )
+          sys.exit(0 if ok else 1)
+          PY
+            then
+              health_ready=1
+              break
+            fi
+            sleep 10
+          done
+          test "$health_ready" = "1"
+
+          ingress_ready=0
+          for attempt in $(seq 1 24); do
+            code="$(curl --silent --show-error --max-time 45 \
+              -o /tmp/ingress.json -w '%{http_code}' \
+              "$base/api/v1/vnext/ingress-runtime" || true)"
             if [ "$code" = "200" ] && python - <<'PY'
           import json, sys
           body=json.load(open("/tmp/ingress.json", encoding="utf-8"))
@@ -207,14 +249,18 @@ jobs:
           sys.exit(0 if ok else 1)
           PY
             then
+              ingress_ready=1
               break
             fi
-            test "$attempt" -lt 18
             sleep 10
           done
+          test "$ingress_ready" = "1"
 
-          for attempt in $(seq 1 24); do
-            code="$(curl --silent --show-error --max-time 60               -o /tmp/strategy.json -w '%{http_code}'               "$base/api/v1/vnext/strategy-runtime" || true)"
+          strategy_ready=0
+          for attempt in $(seq 1 30); do
+            code="$(curl --silent --show-error --max-time 60 \
+              -o /tmp/strategy.json -w '%{http_code}' \
+              "$base/api/v1/vnext/strategy-runtime" || true)"
             if [ "$code" = "200" ] && python - <<'PY'
           import json, sys
           body=json.load(open("/tmp/strategy.json", encoding="utf-8"))
@@ -237,11 +283,27 @@ jobs:
           sys.exit(0 if ok else 1)
           PY
             then
+              strategy_ready=1
               break
             fi
-            test "$attempt" -lt 24
             sleep 10
           done
+          test "$strategy_ready" = "1"
+
+          ui_ready=0
+          for attempt in $(seq 1 12); do
+            code="$(curl --silent --show-error --max-time 30 \
+              -o /tmp/index.html -w '%{http_code}' "$base/" || true)"
+            if [ "$code" = "200" ] \
+              && grep -q "Live Strategy Monitor" /tmp/index.html \
+              && grep -q "AUTONOMOUS PAPER ENGINE" /tmp/index.html
+            then
+              ui_ready=1
+              break
+            fi
+            sleep 5
+          done
+          test "$ui_ready" = "1"
 
           echo "=== Kraken ingress runtime ==="
           cat /tmp/ingress.json
@@ -250,24 +312,15 @@ jobs:
           cat /tmp/strategy.json
           echo
 
-          for attempt in $(seq 1 12); do
-            code="$(curl --silent --show-error --max-time 60               -o /tmp/floor.json -w '%{http_code}'               "$base/api/v1/vnext/floor" || true)"
-            if [ "$code" = "200" ]; then
-              break
-            fi
-            test "$attempt" -lt 12
-            sleep 10
-          done
-
           python - <<'PY'
           import json, os
           body=json.load(open("/tmp/floor.json", encoding="utf-8"))
           mode=body.get("mode") or {}
+          build=body.get("build") or {}
+          paper=body.get("paper_test") or {}
           assert mode.get("paper_only") is True, body
           assert mode.get("live_blocked") is True, body
-          build=body.get("build") or {}
           assert build.get("source_revision") == os.environ["EXPECTED_SHA"], build
-          paper=body.get("paper_test") or {}
           assert paper.get("epoch_id") == "aether-prototype-new-system-test-001", paper
           assert paper.get("seed_bank_usd") == 10000.0, paper
           print(json.dumps({
@@ -277,6 +330,7 @@ jobs:
               "blotter_trade_count": paper.get("blotter_trade_count"),
               "paper_only": mode.get("paper_only"),
               "live_blocked": mode.get("live_blocked"),
+              "strategy_monitor_ui": True,
           }, indent=2, sort_keys=True))
           PY
 
@@ -285,8 +339,10 @@ jobs:
         with:
           name: aether-vnext-autonomous-paper-activation-${{ github.run_id }}
           path: |
+            /tmp/health.json
             /tmp/ingress.json
             /tmp/strategy.json
             /tmp/floor.json
+            /tmp/index.html
           if-no-files-found: error
           retention-days: 90
