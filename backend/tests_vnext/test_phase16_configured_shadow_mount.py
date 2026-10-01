@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.vnext_shadow import (
+    load_configured_vnext_shadow_snapshot,
     mount_configured_vnext_shadow_floor,
     mount_vnext_shadow_floor,
 )
@@ -71,3 +72,47 @@ def test_phase16_main_mounts_shadow_floor_without_legacy_fallback() -> None:
     assert "desk.floor_snapshot" not in bridge
     assert "legacy_fallback_allowed" in bridge
     assert "engine.start_loop" not in bridge
+
+
+
+def test_configured_shadow_floor_times_out_as_503(monkeypatch) -> None:
+    import asyncio
+    from contextlib import asynccontextmanager
+
+    from fastapi import HTTPException
+    from app import vnext_shadow
+
+    monkeypatch.setenv("AETHER_VNEXT_ENVIRONMENT", "burnin")
+    monkeypatch.setenv(
+        "AETHER_VNEXT_DATABASE_URL",
+        "postgresql+asyncpg://user:pass@example.invalid/aether",
+    )
+
+    @asynccontextmanager
+    async def stalled_engine(_config):
+        class Engine:
+            @asynccontextmanager
+            async def connect(self):
+                await asyncio.sleep(20.0)
+                yield None
+
+            async def dispose(self):
+                return None
+
+        yield Engine()
+
+    monkeypatch.setattr(vnext_shadow, "open_vnext_engine", stalled_engine)
+
+    async def scenario() -> None:
+        try:
+            await asyncio.wait_for(
+                load_configured_vnext_shadow_snapshot(),
+                timeout=13.0,
+            )
+        except HTTPException as exc:
+            assert exc.status_code == 503
+            assert "timed out" in str(exc.detail)
+        else:
+            raise AssertionError("expected bounded 503 timeout")
+
+    asyncio.run(scenario())

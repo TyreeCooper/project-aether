@@ -15,12 +15,16 @@ on:
       - "backend/aether_vnext/public_reference_discovery.py"
       - "backend/aether_vnext/prototype_forward_paper_evidence.py"
       - "backend/app/vnext_discovery.py"
+      - "backend/app/vnext_shadow.py"
+      - "backend/aether_vnext/db_runtime.py"
       - "backend/app/main.py"
       - "backend/tests_vnext/test_prototype_forward_paper_evidence.py"
       - "backend/tests_vnext/test_provider_discovery.py"
       - "backend/tests_vnext/test_provider_discovery_supervisor.py"
       - "backend/tests_vnext/test_public_reference_discovery.py"
       - "backend/tests_vnext/test_provider_focus_handoff.py"
+      - "backend/tests_vnext/test_phase16_configured_shadow_mount.py"
+      - "backend/tests_vnext/test_vnext_db_runtime_timeouts.py"
       - "backend/tests_vnext/test_prototype_crypto_exit_runtime.py"
       - "frontend/app/page.js"
       - "frontend/app/globals.css"
@@ -105,8 +109,8 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          python -m pytest -q             tests_vnext/test_vnext_runtime_mode.py             tests_vnext/test_kraken_ingress_supervisor.py             tests_vnext/test_prototype_crypto_features.py             tests_vnext/test_prototype_crypto_entry_plan.py             tests_vnext/test_prototype_crypto_entry_runtime.py             tests_vnext/test_prototype_crypto_exit.py             tests_vnext/test_prototype_crypto_exit_runtime.py             tests_vnext/test_prototype_strategy_supervisor.py             tests_vnext/test_provider_discovery.py             tests_vnext/test_provider_discovery_supervisor.py             tests_vnext/test_public_reference_discovery.py             tests_vnext/test_provider_focus_handoff.py             tests_vnext/test_phase17_floor_test_status.py
-          python -m py_compile             app/main.py             app/vnext_ingress.py             app/vnext_strategy.py             app/vnext_discovery.py             app/vnext_runtime_mode.py             aether_vnext/kraken_ingress_supervisor.py             aether_vnext/provider_discovery.py             aether_vnext/provider_discovery_supervisor.py             aether_vnext/provider_focus_handoff.py             aether_vnext/kraken_catalog.py             aether_vnext/massive_discovery.py             aether_vnext/public_reference_discovery.py             aether_vnext/prototype_strategy_supervisor.py
+          python -m pytest -q             tests_vnext/test_vnext_runtime_mode.py             tests_vnext/test_kraken_ingress_supervisor.py             tests_vnext/test_prototype_crypto_features.py             tests_vnext/test_prototype_crypto_entry_plan.py             tests_vnext/test_prototype_crypto_entry_runtime.py             tests_vnext/test_prototype_crypto_exit.py             tests_vnext/test_prototype_crypto_exit_runtime.py             tests_vnext/test_prototype_strategy_supervisor.py             tests_vnext/test_provider_discovery.py             tests_vnext/test_provider_discovery_supervisor.py             tests_vnext/test_public_reference_discovery.py             tests_vnext/test_provider_focus_handoff.py             tests_vnext/test_phase16_configured_shadow_mount.py             tests_vnext/test_vnext_db_runtime_timeouts.py             tests_vnext/test_phase17_floor_test_status.py
+          python -m py_compile             app/main.py             app/vnext_ingress.py             app/vnext_strategy.py             app/vnext_discovery.py             app/vnext_shadow.py             app/vnext_runtime_mode.py             aether_vnext/kraken_ingress_supervisor.py             aether_vnext/provider_discovery.py             aether_vnext/provider_discovery_supervisor.py             aether_vnext/provider_focus_handoff.py             aether_vnext/db_runtime.py             aether_vnext/kraken_catalog.py             aether_vnext/massive_discovery.py             aether_vnext/public_reference_discovery.py             aether_vnext/prototype_strategy_supervisor.py
 
       - name: Require protected burn-in database URL
         env:
@@ -161,6 +165,14 @@ jobs:
 
           az webapp config appsettings set             --name "$app"             --resource-group "$rg"             --settings "${settings[@]}" >/dev/null
 
+          # Capture Linux App Service stdout/stderr so a failed cold start is
+          # diagnosable from the same activation run instead of requiring a blind retry.
+          az webapp log config \
+            --name "$app" \
+            --resource-group "$rg" \
+            --docker-container-logging filesystem \
+            --level information >/dev/null || true
+
           echo "app_name=$app" >> "$GITHUB_ENV"
           echo "resource_group=$rg" >> "$GITHUB_ENV"
           echo "prototype_host=$host" >> "$GITHUB_ENV"
@@ -201,13 +213,37 @@ jobs:
           set -euo pipefail
           base="https://$prototype_host"
 
-          # Azure App Service may continue serving the previous healthy worker
-          # for several minutes while the newly deployed worker cold-starts.
-          # Do not prove runtime behavior until the exact deployed revision is
-          # visible from the canonical Floor build manifest.
+          # Prove the web process independently of the DB-backed Floor.
+          # This distinguishes app startup failure from a burn-in DB read stall.
+          health_ready=0
+          for attempt in $(seq 1 24); do
+            code="$(curl --silent --show-error --max-time 10 \
+              -o /tmp/health.json -w '%{http_code}' \
+              "$base/api/v1/health" || true)"
+            if [ "$code" = "200" ] && python - <<'PY'
+          import json, sys
+          body=json.load(open("/tmp/health.json", encoding="utf-8"))
+          ok=(
+              body.get("ok") is True
+              and body.get("paper_mode") is True
+              and body.get("live_blocked") is True
+          )
+          sys.exit(0 if ok else 1)
+          PY
+            then
+              health_ready=1
+              break
+            fi
+            echo "Waiting for web health (attempt $attempt/24, http=$code)"
+            sleep 5
+          done
+          test "$health_ready" = "1"
+
+          # Only after HTTP liveness is proven, require the exact revision from
+          # the canonical Floor. Floor has its own bounded database timeout.
           revision_ready=0
-          for attempt in $(seq 1 48); do
-            code="$(curl --silent --show-error --max-time 45 \
+          for attempt in $(seq 1 24); do
+            code="$(curl --silent --show-error --max-time 20 \
               -o /tmp/floor.json -w '%{http_code}' \
               "$base/api/v1/vnext/floor" || true)"
             if [ "$code" = "200" ] && EXPECTED_SHA="$EXPECTED_SHA" python - <<'PY'
@@ -229,33 +265,10 @@ jobs:
               revision_ready=1
               break
             fi
-            echo "Waiting for exact revision $EXPECTED_SHA (attempt $attempt/48)"
+            echo "Waiting for exact revision $EXPECTED_SHA (attempt $attempt/24, http=$code)"
             sleep 10
           done
           test "$revision_ready" = "1"
-
-          health_ready=0
-          for attempt in $(seq 1 18); do
-            code="$(curl --silent --show-error --max-time 30 \
-              -o /tmp/health.json -w '%{http_code}' \
-              "$base/api/v1/health" || true)"
-            if [ "$code" = "200" ] && python - <<'PY'
-          import json, sys
-          body=json.load(open("/tmp/health.json", encoding="utf-8"))
-          ok=(
-              body.get("ok") is True
-              and body.get("paper_mode") is True
-              and body.get("live_blocked") is True
-          )
-          sys.exit(0 if ok else 1)
-          PY
-            then
-              health_ready=1
-              break
-            fi
-            sleep 10
-          done
-          test "$health_ready" = "1"
 
           ingress_ready=0
           for attempt in $(seq 1 24); do
@@ -429,6 +442,49 @@ jobs:
               "strategy_monitor_ui": True,
           }, indent=2, sort_keys=True))
           PY
+
+      - name: Diagnose Azure runtime on activation failure
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          echo "=== App state ==="
+          az webapp show \
+            --name "$app_name" \
+            --resource-group "$resource_group" \
+            --query '{state:state,host:defaultHostName,availabilityState:availabilityState}' \
+            -o json
+
+          echo "=== Runtime configuration ==="
+          az webapp config show \
+            --name "$app_name" \
+            --resource-group "$resource_group" \
+            --query '{startup:appCommandLine,alwaysOn:alwaysOn,linuxFxVersion:linuxFxVersion,http20Enabled:http20Enabled}' \
+            -o json
+
+          echo "=== Logging configuration ==="
+          az webapp log show \
+            --name "$app_name" \
+            --resource-group "$resource_group" \
+            -o json
+
+          echo "=== Container startup logs ==="
+          az webapp log startup list \
+            --name "$app_name" \
+            --resource-group "$resource_group" \
+            -o json || true
+          az webapp log startup show \
+            --name "$app_name" \
+            --resource-group "$resource_group" || true
+
+          echo "=== Last probe bodies ==="
+          for file in /tmp/health.json /tmp/floor.json /tmp/ingress.json /tmp/discovery.json /tmp/strategy.json; do
+            if [ -f "$file" ]; then
+              echo "--- $file ---"
+              cat "$file"
+              echo
+            fi
+          done
 
       - name: Upload activation proof
         uses: actions/upload-artifact@v4

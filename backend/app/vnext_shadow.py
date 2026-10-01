@@ -7,6 +7,7 @@ second trading runtime.
 """
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 
@@ -53,20 +54,29 @@ async def load_configured_vnext_shadow_snapshot() -> UnifiedFirmFloorSnapshot:
         ) from exc
 
     try:
-        async with open_vnext_engine(config) as engine:
-            async with engine.connect() as conn:
-                as_of_utc = datetime.now(timezone.utc)
+        async with asyncio.timeout(12.0):
+            async with open_vnext_engine(config) as engine:
+                async with engine.connect() as conn:
+                    as_of_utc = datetime.now(timezone.utc)
 
-                def _read(sync_conn):
-                    return build_shadow_floor_snapshot(
-                        sync_conn,
-                        store=VNextStore(),
-                        as_of_utc=as_of_utc,
-                    )
+                    def _read(sync_conn):
+                        return build_shadow_floor_snapshot(
+                            sync_conn,
+                            store=VNextStore(),
+                            as_of_utc=as_of_utc,
+                        )
 
-                return await conn.run_sync(_read)
+                    return await conn.run_sync(_read)
     except HTTPException:
         raise
+    except TimeoutError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "vNext shadow Floor unavailable: dedicated burn-in database "
+                "read timed out"
+            ),
+        ) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=503,

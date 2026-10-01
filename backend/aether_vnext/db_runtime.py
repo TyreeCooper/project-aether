@@ -90,6 +90,10 @@ async def open_vnext_engine(
         engine = create_async_engine(
             normalize_async_database_url(cfg.database_url),
             poolclass=NullPool,
+            connect_args={
+                "timeout": 8.0,
+                "command_timeout": 12.0,
+            },
         )
     else:
         assert cfg.azure_connection_string is not None
@@ -120,7 +124,11 @@ async def open_vnext_engine(
         engine = create_async_engine(
             url,
             poolclass=NullPool,
-            connect_args={"ssl": "require"},
+            connect_args={
+                "ssl": "require",
+                "timeout": 8.0,
+                "command_timeout": 12.0,
+            },
         )
 
     try:
