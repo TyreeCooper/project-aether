@@ -29,6 +29,21 @@ button { color: inherit; }
 .testStatus { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; margin-top: 6px; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--line); }
 .testStatus span { min-width: 0; background: var(--panel-2); padding: 8px 12px; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .testStatus b { color: var(--text); margin-right: 5px; }
+
+.runtimeMonitor { margin-top: 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); padding: 12px; }
+.runtimeMonitorHead { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.runtimeMonitorHead h2 { margin: 3px 0 0; font-size: 16px; }
+.runtimeBadges { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.runtimeMetrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin-top: 10px; overflow: hidden; border: 1px solid var(--line); border-radius: 9px; background: var(--line); }
+.runtimeMetrics div { display: grid; gap: 4px; min-width: 0; background: var(--panel-2); padding: 9px 10px; }
+.runtimeMetrics span { color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: .05em; }
+.runtimeMetrics b { min-width: 0; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.runtimeFault { color: var(--bad); }
+.strategyDecisionGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+.strategyDecision { border: 1px solid var(--line); border-radius: 9px; background: var(--panel-2); padding: 10px; }
+.strategyDecisionHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 9px; }
+.runtimeLaw { margin: 8px 0 0; color: var(--muted); font-size: 10px; }
+
 .apiNotice { display: grid; gap: 3px; margin-top: 12px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--active) 45%, var(--line)); border-radius: 10px; background: color-mix(in srgb, var(--active) 7%, var(--panel)); }
 .apiNotice strong { color: var(--active); font-size: 11px; letter-spacing: .09em; }
 .apiNotice span { font-size: 13px; }
@@ -91,6 +106,7 @@ button { color: inherit; }
   .subtle { display: none; }
   .statusStrip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .testStatus { grid-template-columns: 1fr; }
+  .runtimeMetrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .attentionGrid, .universeGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .split { grid-template-columns: 1fr; gap: 0; }
   .cockpitGrid { grid-template-columns: repeat(2, 1fr); }
@@ -99,6 +115,9 @@ button { color: inherit; }
   .floorHeader h1 { font-size: 22px; }
   .modeStack { max-width: 118px; }
   .attentionGrid, .universeGrid { grid-template-columns: 1fr; }
+  .runtimeMonitorHead { align-items: flex-start; flex-direction: column; }
+  .runtimeBadges { justify-content: flex-start; }
+  .strategyDecisionGrid, .runtimeMetrics { grid-template-columns: 1fr; }
   .sectionHead { align-items: flex-start; }
   .sectionHead > span { display: none; }
   .inspectionDrawer { top: auto; left: 0; width: 100%; height: min(72vh, 620px); border-left: 0; border-top: 1px solid var(--line); transform: translateY(102%); }

@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 
 const apiBase = process.env.NEXT_PUBLIC_API_BASE || "";
 const floorPath = process.env.NEXT_PUBLIC_AETHER_FLOOR_PATH || "/api/v1/vnext/floor";
+const ingressPath = "/api/v1/vnext/ingress-runtime";
+const strategyPath = "/api/v1/vnext/strategy-runtime";
 
 async function getJson(path) {
   const response = await fetch(`${apiBase}${path}`, { cache: "no-store" });
@@ -49,6 +51,32 @@ function stateClass(state) {
 
 function Empty({ children }) {
   return <div className="empty">{children}</div>;
+}
+
+function runtimeState(enabled, running, lastError) {
+  if (lastError) return { label: "FAULT", className: "state bad" };
+  if (enabled && running) return { label: "RUNNING", className: "state good" };
+  if (enabled) return { label: "STARTING", className: "state active" };
+  return { label: "OFF", className: "state" };
+}
+
+function StrategyDecision({ assetId, row }) {
+  const stage = text(row?.stage, "WAITING");
+  const reason = text(row?.reason, "waiting for first cycle");
+  return (
+    <article className="strategyDecision">
+      <div className="strategyDecisionHead">
+        <strong>{assetId.toUpperCase()}</strong>
+        <span className={stateClass(stage)}>{stage}</span>
+      </div>
+      <dl className="mini">
+        <div><dt>Reason</dt><dd>{reason}</dd></div>
+        <div><dt>Trigger close</dt><dd>{timestamp(row?.trigger_close_utc, "waiting")}</dd></div>
+        <div><dt>Vol percentile</dt><dd>{number(row?.volatility_percentile, 2)}</dd></div>
+        <div><dt>Watch eligible</dt><dd>{row?.watch_eligible === true ? "YES" : row?.watch_eligible === false ? "NO" : "—"}</dd></div>
+      </dl>
+    </article>
+  );
 }
 
 function UniverseCard({ station, selected, onSelect }) {
@@ -117,25 +145,49 @@ function Cockpit({ cockpit }) {
 
 export default function DashboardPage() {
   const [floor, setFloor] = useState(null);
+  const [ingress, setIngress] = useState(null);
+  const [strategy, setStrategy] = useState(null);
   const [error, setError] = useState("");
+  const [runtimeError, setRuntimeError] = useState("");
   const [selectedAsset, setSelectedAsset] = useState(null);
 
   useEffect(() => {
     let mounted = true;
     const load = async () => {
       try {
-        const data = await getJson(floorPath);
+        const [floorResult, ingressResult, strategyResult] = await Promise.allSettled([
+          getJson(floorPath),
+          getJson(ingressPath),
+          getJson(strategyPath),
+        ]);
         if (!mounted) return;
-        setFloor(data);
-        setError("");
-        setSelectedAsset((current) => {
-          if (current && (data.full_universe || []).some((row) => row.asset_id === current)) {
-            return current;
-          }
-          return null;
-        });
+
+        if (floorResult.status === "fulfilled") {
+          const data = floorResult.value;
+          setFloor(data);
+          setError("");
+          setSelectedAsset((current) => {
+            if (current && (data.full_universe || []).some((row) => row.asset_id === current)) {
+              return current;
+            }
+            return null;
+          });
+        } else {
+          setError("Canonical vNext Floor endpoint unavailable.");
+        }
+
+        if (ingressResult.status === "fulfilled") setIngress(ingressResult.value);
+        if (strategyResult.status === "fulfilled") setStrategy(strategyResult.value);
+        setRuntimeError(
+          ingressResult.status === "rejected" || strategyResult.status === "rejected"
+            ? "One or more autonomous runtime telemetry endpoints are unavailable."
+            : "",
+        );
       } catch {
-        if (mounted) setError("Canonical vNext Floor endpoint unavailable.");
+        if (mounted) {
+          setError("Canonical vNext Floor endpoint unavailable.");
+          setRuntimeError("Autonomous runtime telemetry unavailable.");
+        }
       }
     };
     load();
@@ -160,6 +212,9 @@ export default function DashboardPage() {
     ? floor.inspection_drawer
     : null;
   const drawerOpen = Boolean(selectedStation);
+  const ingressState = runtimeState(ingress?.enabled, ingress?.running, ingress?.last_error);
+  const strategyState = runtimeState(strategy?.enabled, strategy?.running, strategy?.last_error);
+  const strategyAssets = strategy?.last_result?.assets || {};
 
   return (
     <main className="floorShell">
@@ -189,6 +244,42 @@ export default function DashboardPage() {
         <span><b>Starting bank</b> ${number(floor?.paper_test?.seed_bank_usd, 2)}</span>
         <span><b>Blotter</b> {text(floor?.paper_test?.blotter_trade_count, "0")} trade(s)</span>
       </section>
+
+      <section className="runtimeMonitor" aria-label="Autonomous prototype runtime">
+        <div className="runtimeMonitorHead">
+          <div>
+            <p className="eyebrow">AUTONOMOUS PAPER ENGINE</p>
+            <h2>Live Strategy Monitor</h2>
+          </div>
+          <div className="runtimeBadges">
+            <span className={ingressState.className}>INGRESS {ingressState.label}</span>
+            <span className={strategyState.className}>STRATEGY {strategyState.label}</span>
+          </div>
+        </div>
+
+        <div className="runtimeMetrics">
+          <div><span>Ingress cycles</span><b>{text(ingress?.cycle_count, "0")}</b></div>
+          <div><span>Strategy cycles</span><b>{text(strategy?.cycle_count, "0")}</b></div>
+          <div><span>Last strategy cycle</span><b>{timestamp(strategy?.last_cycle_finished_at_utc, "waiting")}</b></div>
+          <div><span>Last error</span><b className={strategy?.last_error ? "runtimeFault" : ""}>{text(strategy?.last_error, "none")}</b></div>
+        </div>
+
+        <div className="strategyDecisionGrid">
+          <StrategyDecision assetId="btc" row={strategyAssets.btc} />
+          <StrategyDecision assetId="eth" row={strategyAssets.eth} />
+        </div>
+        <p className="runtimeLaw">
+          Read-only telemetry. Natural setups only. PAPER execution only. LIVE remains hard blocked.
+        </p>
+      </section>
+
+      {runtimeError ? (
+        <section className="apiNotice">
+          <strong>RUNTIME TELEMETRY DEGRADED</strong>
+          <span>{runtimeError}</span>
+          <small>Trading controls remain server-side; this panel is inspection only.</small>
+        </section>
+      ) : null}
 
       {error ? (
         <section className="apiNotice">
