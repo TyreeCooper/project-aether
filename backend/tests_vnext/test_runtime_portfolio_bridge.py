@@ -394,6 +394,7 @@ def test_runtime_portfolio_bridge_reserves_verified_dynamic_kraken_asset() -> No
         ).mappings().one()
 
     assert result["state"] == "RESERVED"
+    assert result.get("reject_code") is None
     assert intent is not None
     assert intent.broker_account_id == "kraken_paper"
     assert intent.broker == "Kraken"

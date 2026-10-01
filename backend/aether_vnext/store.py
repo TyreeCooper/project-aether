@@ -101,7 +101,11 @@ from aether_vnext.registry_runtime import (
     binding_payload,
 )
 from aether_vnext.reservations import reservation_requirement
-from aether_vnext.runtime_product_policy import runtime_cluster_map
+from aether_vnext.runtime_product_policy import (
+    paper_broker_account_for_product,
+    resolve_runtime_product,
+    runtime_cluster_map,
+)
 from aether_vnext.risk import (
     BookRiskPosition,
     BookRiskSnapshot,
@@ -5169,14 +5173,14 @@ class VNextStore:
             )
         canonical_broker_account_id = ASSET_BROKER_ACCOUNT.get(asset_id)
         if canonical_broker_account_id is None:
-            return self.reject_ticket_pre_reserve(
+            runtime_product = resolve_runtime_product(
                 conn,
-                ticket_id=ticket_id,
-                reason_code="unsupported_product",
-                at_utc=created_at_utc,
-                event_id=event_id,
-                actor=actor,
-                market_observation_id=market_observation_id,
+                self,
+                asset_id=asset_id,
+                as_of_utc=created_at_utc,
+            ).product
+            canonical_broker_account_id = paper_broker_account_for_product(
+                runtime_product
             )
         if broker_account_id != canonical_broker_account_id:
             return self.reject_ticket_pre_reserve(

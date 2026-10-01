@@ -362,6 +362,24 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     ) is not None
                 }
 
+                # Network/history work can take seconds. Decision time must be
+                # captured after the current market observations are loaded,
+                # never before them.
+                decision_at_utc = datetime.now(UTC)
+                for observation in observations.values():
+                    market_times = (
+                        observation.exchange_ts,
+                        observation.received_ts,
+                    )
+                    if any(
+                        stamp is not None and stamp > decision_at_utc
+                        for stamp in market_times
+                    ):
+                        raise ValueError(
+                            "market timestamp cannot be after decision time"
+                        )
+                result["decision_at_utc"] = decision_at_utc.isoformat()
+
                 open_table = store.tables["open_trades"]
                 open_rows = tuple(
                     sync_conn.execute(
@@ -388,7 +406,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         trade_id=str(trade["trade_id"]),
                         current_observation=observation,
                         latest_completed_hourly_bar=latest_bar,
-                        as_of_utc=as_of_utc,
+                        as_of_utc=decision_at_utc,
                     )
                     exit_results[asset_id] = asdict(advanced)
 
@@ -433,21 +451,21 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         store,
                         asset_id=asset_id,
                         interval_seconds=3600,
-                        end_at_utc=as_of_utc,
+                        end_at_utc=decision_at_utc,
                     )
                     asset_daily = load_prototype_market_bars(
                         sync_conn,
                         store,
                         asset_id=asset_id,
                         interval_seconds=86400,
-                        end_at_utc=as_of_utc,
+                        end_at_utc=decision_at_utc,
                     )
                     btc_daily = load_prototype_market_bars(
                         sync_conn,
                         store,
                         asset_id="btc",
                         interval_seconds=86400,
-                        end_at_utc=as_of_utc,
+                        end_at_utc=decision_at_utc,
                     )
                     warmup = assemble_prototype_crypto_warmup(
                         asset_id=asset_id,
@@ -463,13 +481,13 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         btc_kraken_daily=tuple(
                             row for row in btc_daily if row.source_id == KRAKEN_DAILY_SOURCE_ID
                         ),
-                        as_of_utc=as_of_utc,
+                        as_of_utc=decision_at_utc,
                     )
                     feature = warmup.feature_snapshot
                     plan = build_prototype_crypto_entry_plan(
                         feature=feature,
                         current_observation=observation,
-                        as_of_utc=as_of_utc,
+                        as_of_utc=decision_at_utc,
                     )
 
                     if _setup_already_completed(
@@ -492,7 +510,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         completed_bar=warmup.hourly_bars[-1],
                         current_observation=observation,
                         current_observations=observations,
-                        as_of_utc=as_of_utc,
+                        as_of_utc=decision_at_utc,
                     )
                     asset_result = {
                         **asdict(advanced),
@@ -507,7 +525,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                             paper_epoch_id=EXPECTED_EPOCH,
                             asset_id=asset_id,
                             trigger_close_utc=feature.trigger_close_utc,
-                            evaluated_at_utc=as_of_utc,
+                            evaluated_at_utc=decision_at_utc,
                             market_observation_id=observation.observation_id,
                             reason=advanced.reason,
                             watch_eligible=feature.watch_eligible,
