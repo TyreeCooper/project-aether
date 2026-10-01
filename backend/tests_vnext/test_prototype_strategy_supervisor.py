@@ -96,37 +96,26 @@ async def test_strategy_supervisor_records_fault_and_recovers() -> None:
 
 
 
-def test_entry_focus_gate_requires_top10_for_new_entries() -> None:
+def test_entry_focus_is_advisory_for_new_entries() -> None:
     focused = frozenset({"btc"})
     assert _entry_focus_block(
         asset_id="btc",
         focused_asset_ids=focused,
         assets_open_at_start=set(),
     ) is None
-
-    blocked = _entry_focus_block(
+    assert _entry_focus_block(
         asset_id="eth",
         focused_asset_ids=focused,
         assets_open_at_start=set(),
-    )
-    assert blocked == {
-        "stage": "OUT_OF_FOCUS",
-        "reason": "provider_top10_not_selected",
-        "focus_selected": False,
-    }
+    ) is None
 
 
-def test_entry_focus_gate_fails_closed_before_first_discovery_cycle() -> None:
-    blocked = _entry_focus_block(
+def test_entry_focus_unavailable_does_not_block_commissioned_strategy() -> None:
+    assert _entry_focus_block(
         asset_id="btc",
         focused_asset_ids=None,
         assets_open_at_start=set(),
-    )
-    assert blocked == {
-        "stage": "NO_FOCUS",
-        "reason": "provider_focus_unavailable",
-        "focus_selected": None,
-    }
+    ) is None
 
 
 def test_entry_focus_gate_never_blocks_management_of_open_trade() -> None:

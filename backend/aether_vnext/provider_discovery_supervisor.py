@@ -254,9 +254,10 @@ def build_provider_focus_snapshot(
         "scout_ready_count": sum(
             1 for row in handoff_rows if row["state"] == "SCOUT_READY"
         ),
-        "discovery_only_count": sum(
-            1 for row in handoff_rows if row["state"] == "DISCOVERY_ONLY"
+        "scout_queued_count": sum(
+            1 for row in handoff_rows if row["state"] == "SCOUT_QUEUED"
         ),
+        "discovery_only_count": 0,
         "provider_count": len(PROVIDERS),
         "online_provider_count": sum(
             1 for row in providers.values()
@@ -318,7 +319,7 @@ async def run_configured_provider_discovery_cycle() -> dict[str, object]:
 
     # Resource-bound by design: one provider universe at a time. Each provider
     # also has a hard deadline so a slow public source cannot freeze the whole
-    # discovery cycle or starve the strategy focus gate indefinitely.
+    # discovery cycle or stall provider-priority telemetry indefinitely.
     for provider, fetcher in providers:
         if provider in HELD_PROVIDERS:
             continue

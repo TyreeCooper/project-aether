@@ -178,21 +178,13 @@ def _entry_focus_block(
     focused_asset_ids: frozenset[str] | None,
     assets_open_at_start: set[str],
 ) -> dict[str, object] | None:
-    """Fail closed for new entries while never abandoning an existing trade."""
-    if asset_id in assets_open_at_start:
-        return None
-    if focused_asset_ids is None:
-        return {
-            "stage": "NO_FOCUS",
-            "reason": "provider_focus_unavailable",
-            "focus_selected": None,
-        }
-    if asset_id not in focused_asset_ids:
-        return {
-            "stage": "OUT_OF_FOCUS",
-            "reason": "provider_top10_not_selected",
-            "focus_selected": False,
-        }
+    """Compatibility hook: provider focus is priority telemetry, not a trade veto.
+
+    Commissioned strategies must still pass their normal market, setup, Risk, Clerk,
+    Portfolio, and PAPER execution gates. A missing or out-of-focus provider ranking
+    alone must never suppress an otherwise valid strategy entry.
+    """
+    _ = (asset_id, focused_asset_ids, assets_open_at_start)
     return None
 
 
@@ -330,6 +322,11 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         }
                         continue
 
+                    focus_selected = (
+                        None
+                        if focused_asset_ids is None
+                        else asset_id in focused_asset_ids
+                    )
                     focus_block = _entry_focus_block(
                         asset_id=asset_id,
                         focused_asset_ids=focused_asset_ids,
@@ -407,7 +404,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     )
                     asset_result = {
                         **asdict(advanced),
-                        "focus_selected": True,
+                        "focus_selected": focus_selected,
                         "watch_eligible": feature.watch_eligible,
                         "volatility_percentile": feature.volatility.percentile,
                     }

@@ -1,9 +1,9 @@
-"""Safe handoff from provider Top-10 discovery into the current deep trading runtime.
+"""Safe Top-100 discovery handoff into Scout intake and the deep trading runtime.
 
-Discovery may contain any market symbol. The current canonical trading runtime is
-still the frozen seed universe, and the autonomous prototype supervisor is presently
-commissioned only for BTC/ETH. This module makes that boundary explicit so discovery
-can broaden without inventing product economics or playbook evidence.
+Every focused instrument advances to Scout intake. Instruments already commissioned
+for the autonomous deep runtime are SCOUT_READY; the rest are SCOUT_QUEUED while
+their product/playbook/execution requirements are completed. Provider ranking is an
+attention priority, never an execution veto for an otherwise commissioned strategy.
 """
 from __future__ import annotations
 
@@ -94,7 +94,7 @@ def focus_handoff_rows(
             if provider != "Kraken":
                 blockers.append("execution_provider_binding_pending")
 
-        state = "SCOUT_READY" if not blockers else "DISCOVERY_ONLY"
+        state = "SCOUT_READY" if not blockers else "SCOUT_QUEUED"
         out.append(
             FocusHandoff(
                 provider=provider,
