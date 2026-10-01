@@ -65,23 +65,63 @@ def _snapshot_instrument(
     day = _bar(raw.get("day"))
     prev = _bar(raw.get("prevDay"))
     quote = _bar(raw.get("lastQuote"))
+    if not quote:
+        quote = _bar(raw.get("last_quote"))
     trade = _bar(raw.get("lastTrade"))
+    if not trade:
+        trade = _bar(raw.get("last_trade"))
     minute = _bar(raw.get("min"))
+    if not minute:
+        minute = _bar(raw.get("last_minute"))
+    session = _bar(raw.get("session"))
 
     price = (
         _num(trade.get("p"))
+        or _num(trade.get("price"))
+        or _num(session.get("price"))
+        or _num(session.get("close"))
         or _num(minute.get("c"))
+        or _num(minute.get("close"))
         or _num(day.get("c"))
         or _num(raw.get("last_price"))
         or _num(raw.get("price"))
     )
-    open_price = _num(day.get("o")) or _num(raw.get("open"))
-    high = _num(day.get("h")) or _num(raw.get("high"))
-    low = _num(day.get("l")) or _num(raw.get("low"))
-    volume = _num(day.get("v")) or _num(raw.get("volume"))
-    bid = _num(quote.get("p")) or _num(quote.get("bid")) or _num(raw.get("bid"))
-    ask = _num(quote.get("P")) or _num(quote.get("ask")) or _num(raw.get("ask"))
-    change_pct = _num(raw.get("todaysChangePerc"))
+    open_price = (
+        _num(session.get("open"))
+        or _num(day.get("o"))
+        or _num(raw.get("open"))
+    )
+    high = (
+        _num(session.get("high"))
+        or _num(day.get("h"))
+        or _num(raw.get("high"))
+    )
+    low = (
+        _num(session.get("low"))
+        or _num(day.get("l"))
+        or _num(raw.get("low"))
+    )
+    volume = (
+        _num(session.get("volume"))
+        or _num(day.get("v"))
+        or _num(raw.get("volume"))
+    )
+    bid = (
+        _num(quote.get("p"))
+        or _num(quote.get("b"))
+        or _num(quote.get("bid"))
+        or _num(raw.get("bid"))
+    )
+    ask = (
+        _num(quote.get("P"))
+        or _num(quote.get("a"))
+        or _num(quote.get("ask"))
+        or _num(raw.get("ask"))
+    )
+    change_pct = (
+        _num(raw.get("todaysChangePerc"))
+        or _num(session.get("change_percent"))
+    )
     if change_pct is None and price is not None:
         previous_close = _num(prev.get("c"))
         if previous_close is not None and previous_close > 0:
@@ -166,6 +206,8 @@ def parse_massive_futures_contracts(payload: object) -> tuple[dict[str, object],
             "days_to_maturity": days_to_maturity,
             "trading_venue": str(raw.get("trading_venue") or ""),
             "trade_tick_size": raw.get("trade_tick_size"),
+            "min_order_quantity": raw.get("min_order_quantity"),
+            "max_order_quantity": raw.get("max_order_quantity"),
         })
     return tuple(out)
 

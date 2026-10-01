@@ -183,3 +183,53 @@ def test_futures_catalog_selects_front_contract_per_product_before_ranking() -> 
     )
     assert {row.provider for row in rows} == {"NinjaTrader"}
     assert {row.product_code for row in rows} == {"MES", "GC"}
+
+
+
+def test_massive_snapshot_parser_accepts_unified_and_futures_snake_case_shapes() -> None:
+    unified = parse_massive_forex_snapshot({
+        "results": [{
+            "ticker": "C:GBPUSD",
+            "session": {
+                "open": 1.31,
+                "high": 1.32,
+                "low": 1.30,
+                "close": 1.315,
+                "volume": 2000,
+                "change_percent": 0.4,
+            },
+            "last_quote": {"bid": 1.3149, "ask": 1.3151},
+            "last_trade": {"price": 1.315},
+        }]
+    }, observed_at_utc=NOW)
+    assert unified[0].price == 1.315
+    assert unified[0].bid == 1.3149
+    assert unified[0].ask == 1.3151
+    assert unified[0].change_pct == 0.4
+
+    contracts = {
+        "MESZ6": {
+            "ticker": "MESZ6",
+            "product_code": "MES",
+            "name": "MES Dec",
+        }
+    }
+    futures = parse_massive_futures_snapshot({
+        "results": [{
+            "ticker": "MESZ6",
+            "session": {
+                "open": 6000,
+                "high": 6050,
+                "low": 5980,
+                "close": 6040,
+                "volume": 120000,
+                "change_percent": 0.67,
+            },
+            "last_quote": {"bid": 6039.75, "ask": 6040.0},
+            "last_trade": {"price": 6040.0},
+        }]
+    }, contracts=contracts, observed_at_utc=NOW)
+    assert futures[0].price == 6040.0
+    assert futures[0].bid == 6039.75
+    assert futures[0].ask == 6040.0
+    assert futures[0].product_code == "MES"
