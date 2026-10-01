@@ -51,7 +51,7 @@ CME_PRODUCT_SLATE_V2_URL = (
 )
 CME_PRODUCT_SLATE_PAGE_URL = "https://www.cmegroup.com/markets/products"
 CME_DAILY_VOLUME_XLSX_URL = (
-    "https://www.cmegroup.com/ftp/daily_volume/daily_volume.xlsx"
+    "https://www.cmegroup.com/ftp/pub/pub/daily_volume/daily_volume.xlsx"
 )
 NASDAQ_LISTED_URL = (
     "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt"
@@ -874,7 +874,12 @@ async def fetch_ninjatrader_public_universe(
 ) -> tuple[DiscoveryInstrument, ...]:
     owned = client is None
     http = client or httpx.AsyncClient(
-        timeout=httpx.Timeout(12.0),
+        timeout=httpx.Timeout(
+            connect=10.0,
+            read=30.0,
+            write=10.0,
+            pool=10.0,
+        ),
         headers={"User-Agent": USER_AGENT},
         follow_redirects=True,
     )

@@ -4,6 +4,7 @@ import io
 from openpyxl import Workbook
 
 from aether_vnext.public_reference_discovery import (
+    CME_DAILY_VOLUME_XLSX_URL,
     build_ibkr_us_equity_reference_universe,
     build_ninjatrader_reference_universe,
     build_tastyfx_reference_universe,
@@ -208,3 +209,10 @@ def test_cme_daily_volume_xlsx_fallback_finds_exact_product_code_rows() -> None:
     )
     assert activity["MES"].volume == 250000.0
     assert activity["MGC"].volume == 80000.0
+
+
+
+def test_cme_daily_volume_uses_active_public_ftp_path() -> None:
+    assert CME_DAILY_VOLUME_XLSX_URL == (
+        "https://www.cmegroup.com/ftp/pub/pub/daily_volume/daily_volume.xlsx"
+    )
