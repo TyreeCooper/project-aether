@@ -1,5 +1,6 @@
-from aether_vnext.playbooks import playbook
 from __future__ import annotations
+
+from aether_vnext.playbooks import playbook
 
 from datetime import datetime, timedelta, timezone
 
