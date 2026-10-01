@@ -311,7 +311,8 @@ jobs:
           result=body.get("last_result") or {}
           providers=result.get("providers") or {}
           kraken=providers.get("Kraken") or {}
-          expected=("Kraken","tastyfx","NinjaTrader","IBKR")
+          expected=("Kraken","tastyfx","IBKR")
+          held=("NinjaTrader",)
           ok=(
               body.get("enabled") is True
               and body.get("running") is True
@@ -323,22 +324,34 @@ jobs:
               and result.get("live_blocked") is True
               and result.get("trading_authority") is False
               and int(result.get("provider_count") or 0) == 4
-              and int(result.get("online_provider_count") or 0) == 4
+              and int(result.get("online_provider_count") or 0) == 3
+              and int(result.get("on_hold_provider_count") or 0) == 1
+              and int(result.get("focus_limit_per_provider") or 0) == 100
               and all(
                   (providers.get(name) or {}).get("status") == "online"
                   for name in expected
+              )
+              and all(
+                  (providers.get(name) or {}).get("status") == "on_hold"
+                  for name in held
               )
               and all(
                   int((providers.get(name) or {}).get("catalog_count") or 0) > 0
                   for name in expected
               )
               and all(
-                  int((providers.get(name) or {}).get("focus_count") or 0) == 25
+                  int((providers.get(name) or {}).get("focus_count") or 0)
+                  == min(int((providers.get(name) or {}).get("eligible_count") or 0), 100)
+                  and int((providers.get(name) or {}).get("focus_count") or 0) > 0
                   for name in expected
               )
               and all(
-                  int((providers.get(name) or {}).get("focus_count") or 0) <= 25
+                  int((providers.get(name) or {}).get("focus_count") or 0) <= 100
                   for name in expected
+              )
+              and all(
+                  int((providers.get(name) or {}).get("focus_count") or 0) == 0
+                  for name in held
               )
           )
           sys.exit(0 if ok else 1)

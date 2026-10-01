@@ -37,25 +37,30 @@ def _row(provider: str, symbol: str, move: float, volume: float) -> DiscoveryIns
     )
 
 
-def test_focus_snapshot_has_top25_per_online_provider_and_explicit_missing_provider() -> None:
+def test_focus_snapshot_has_top100_per_online_provider_and_explicit_missing_provider() -> None:
     universes = {
-        "Kraken": tuple(_row("Kraken", f"K{i}", i, 1000 * i) for i in range(1, 31)),
-        "IBKR": tuple(_row("IBKR", f"S{i}", i / 10, 100000 * i) for i in range(1, 31)),
-        "tastyfx": tuple(_row("tastyfx", f"FX{i}", i / 100, 0) for i in range(1, 31)),
+        "Kraken": tuple(_row("Kraken", f"K{i}", i, 1000 * i) for i in range(1, 131)),
+        "IBKR": tuple(_row("IBKR", f"S{i}", i / 10, 100000 * i) for i in range(1, 131)),
+        "tastyfx": tuple(_row("tastyfx", f"FX{i}", i / 100, 0) for i in range(1, 131)),
     }
     snapshot = build_provider_focus_snapshot(
         universes,
-        provider_errors={"NinjaTrader": "public_reference_unavailable"},
+        provider_errors={},
         as_of_utc=NOW,
     )
-    assert snapshot["focus_count"] == 75
+    assert snapshot["focus_count"] == 300
     assert snapshot["scout_ready_count"] >= 0
-    assert snapshot["scout_ready_count"] + snapshot["discovery_only_count"] == 75
-    assert len(snapshot["scout_handoff"]) == 75
-    assert len(snapshot["providers"]["Kraken"]["top25"]) == 25
-    assert len(snapshot["providers"]["IBKR"]["top25"]) == 25
-    assert len(snapshot["providers"]["tastyfx"]["top25"]) == 25
-    assert snapshot["providers"]["NinjaTrader"]["status"] == "unavailable"
+    assert snapshot["scout_ready_count"] + snapshot["discovery_only_count"] == 300
+    assert len(snapshot["scout_handoff"]) == 300
+    assert len(snapshot["providers"]["Kraken"]["top100"]) == 100
+    assert len(snapshot["providers"]["IBKR"]["top100"]) == 100
+    assert len(snapshot["providers"]["tastyfx"]["top100"]) == 100
+    assert snapshot["providers"]["NinjaTrader"]["status"] == "on_hold"
+    assert snapshot["providers"]["NinjaTrader"]["reason"] == "operator_hold"
+    assert snapshot["providers"]["NinjaTrader"]["focus_count"] == 0
+    assert snapshot["online_provider_count"] == 3
+    assert snapshot["on_hold_provider_count"] == 1
+    assert snapshot["focus_limit_per_provider"] == 100
     assert snapshot["providers"]["Kraken"]["catalog_mode"] == "provider_native"
     assert snapshot["providers"]["IBKR"]["catalog_mode"] == "public_reference_proxy"
     assert snapshot["trading_authority"] is False
@@ -174,7 +179,7 @@ def test_provider_cycle_times_out_one_source_and_completes(monkeypatch) -> None:
         return (_row("tastyfx", "EUR/USD", 0.1, 100.0),)
 
     async def fast_ninja():
-        return (_row("NinjaTrader", "MES", 0.2, 500.0),)
+        raise AssertionError("held NinjaTrader provider must not be fetched")
 
     async def fast_ibkr():
         return (_row("IBKR", "AAPL", 0.3, 10000.0),)
@@ -204,7 +209,8 @@ def test_provider_cycle_times_out_one_source_and_completes(monkeypatch) -> None:
     assert snapshot["providers"]["Kraken"]["status"] == "online"
     assert snapshot["providers"]["tastyfx"]["status"] == "unavailable"
     assert "provider_fetch_timeout" in snapshot["providers"]["tastyfx"]["reason"]
-    assert snapshot["providers"]["NinjaTrader"]["status"] == "online"
+    assert snapshot["providers"]["NinjaTrader"]["status"] == "on_hold"
+    assert snapshot["providers"]["NinjaTrader"]["reason"] == "operator_hold"
     assert snapshot["providers"]["IBKR"]["status"] == "online"
 
     progress = discovery_progress_payload()
@@ -212,3 +218,4 @@ def test_provider_cycle_times_out_one_source_and_completes(monkeypatch) -> None:
     assert progress["current_provider"] is None
     assert progress["providers"]["tastyfx"]["state"] == "timeout"
     assert progress["providers"]["IBKR"]["state"] == "online"
+    assert progress["providers"]["NinjaTrader"]["state"] == "on_hold"

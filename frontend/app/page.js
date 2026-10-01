@@ -613,12 +613,12 @@ function discoveryProviderRows(discovery) {
       catalog_count: 0,
       eligible_count: 0,
       focus_count: 0,
-      top25: [],
+      top100: [],
     };
     return {
       provider,
       ...source,
-      top25: (source.top25 || []).map((item) => {
+      top100: (source.top100 || []).map((item) => {
         const focusKey = provider + ":" + String(item?.market_data_symbol || "");
         return {
           ...item,
@@ -650,7 +650,8 @@ function providerFeedSummary(row) {
 
 function ProviderFocusCard({ row }) {
   const online = row.status === "online";
-  const top = row.top25 || [];
+  const held = row.status === "on_hold";
+  const top = row.top100 || [];
   return (
     <article className={"providerFocusCard " + (online ? "online" : "offline")}>
       <div className="providerFocusHead">
@@ -658,7 +659,7 @@ function ProviderFocusCard({ row }) {
           <span>{row.catalog_mode === "provider_native" ? "PROVIDER-NATIVE CATALOG" : "PUBLIC REFERENCE CATALOG"}</span>
           <h3>{row.provider}</h3>
         </div>
-        <b className={online ? "state good" : "state bad"}>{online ? "ONLINE" : "WAITING"}</b>
+        <b className={held ? "state active" : online ? "state good" : "state bad"}>{held ? "ON HOLD" : online ? "ONLINE" : "WAITING"}</b>
       </div>
       <div className="providerFeedClass">
         <span>{providerFeedSummary(row)}</span>
@@ -724,7 +725,7 @@ function ProviderDiscoveryBoard({ discovery }) {
       <div className="sectionHead">
         <div>
           <p className="eyebrow">PROVIDER DISCOVERY</p>
-          <h2>Catalog → Top 25 per Provider</h2>
+          <h2>Catalog → Top 100 per Provider</h2>
         </div>
         <span className={running ? "state good" : "state active"}>
           DISCOVERY {running ? "RUNNING" : "WAITING"}
@@ -737,7 +738,7 @@ function ProviderDiscoveryBoard({ discovery }) {
         <i>→</i>
         <div><span>Provider ranking</span><strong>{number(totalEligible, 0)}</strong></div>
         <i>→</i>
-        <div><span>Focus pool</span><strong>{number(focusCount, 0)}</strong><small>max 25/provider</small></div>
+        <div><span>Focus pool</span><strong>{number(focusCount, 0)}</strong><small>max 100/provider</small></div>
         <i>→</i>
         <div><span>Scout ready</span><strong>{number(scoutReadyCount, 0)}</strong><small>{number(discoveryOnlyCount, 0)} discovery-only</small></div>
         <i>→</i>
@@ -839,9 +840,9 @@ function PipelineView({ universe, queues, cockpits, operator, strategy, discover
             tone="context"
           />
           <PipelineStage
-            label="Top 25 Focus"
+            label="Top 100 Focus"
             owned="RANK"
-            job="Keeps the twenty-five strongest attention candidates per provider for deeper strategy work."
+            job="Keeps the one hundred strongest attention candidates per provider for deeper strategy work."
             metricLabel="focused"
             count={focusCount}
             tone="context"

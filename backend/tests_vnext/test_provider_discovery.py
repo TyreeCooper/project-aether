@@ -24,7 +24,7 @@ UTC = timezone.utc
 NOW = datetime(2026, 10, 1, 6, 30, tzinfo=UTC)
 
 
-def test_provider_ranker_returns_only_top_twenty_five_with_deterministic_scores() -> None:
+def test_provider_ranker_returns_only_top_one_hundred_with_deterministic_scores() -> None:
     rows = tuple(
         DiscoveryInstrument(
             provider="IBKR",
@@ -42,17 +42,17 @@ def test_provider_ranker_returns_only_top_twenty_five_with_deterministic_scores(
             observed_at_utc=NOW,
             source="test",
         )
-        for i in range(1, 36)
+        for i in range(1, 136)
     )
     focus = rank_provider_catalog(rows, provider="IBKR")
-    assert focus.catalog_count == 35
-    assert focus.eligible_count == 35
-    assert len(focus.top25) == 25
-    assert [row.rank for row in focus.top25] == list(range(1, 26))
-    assert focus.top25[0].symbol == "S35"
+    assert focus.catalog_count == 135
+    assert focus.eligible_count == 135
+    assert len(focus.top100) == 100
+    assert [row.rank for row in focus.top100] == list(range(1, 101))
+    assert focus.top100[0].symbol == "S135"
     payload = focus_payload(focus)
-    assert payload["focus_count"] == 25
-    assert payload["top25"][0]["provider"] if "provider" in payload["top25"][0] else True
+    assert payload["focus_count"] == 100
+    assert payload["top100"][0]["provider"] if "provider" in payload["top100"][0] else True
 
 
 def test_ranker_filters_inactive_or_unpriced_rows() -> None:
@@ -80,7 +80,7 @@ def test_ranker_filters_inactive_or_unpriced_rows() -> None:
     focus = rank_provider_catalog(rows, provider="tastyfx")
     assert focus.catalog_count == 2
     assert focus.eligible_count == 1
-    assert focus.top25[0].symbol == "C:EURUSD"
+    assert focus.top100[0].symbol == "C:EURUSD"
 
 
 def test_kraken_catalog_and_ticker_parser_cover_all_online_usd_pairs() -> None:
@@ -273,17 +273,17 @@ def test_ranker_accepts_activity_only_reference_instruments() -> None:
             feed_class="PUBLIC_REFERENCE_DELAYED",
             execution_quality=False,
         )
-        for i in range(1, 31)
+        for i in range(1, 131)
     )
     focus = rank_provider_catalog(rows, provider="NinjaTrader")
     assert focus.eligible_count == 30
-    assert len(focus.top25) == 25
-    assert focus.top25[0].symbol == "F30"
+    assert len(focus.top100) == 100
+    assert focus.top100[0].symbol == "F130"
     payload = focus_payload(focus)
-    assert payload["top25"][0]["price"] is None
-    assert payload["top25"][0]["open_interest"] == 60000.0
-    assert payload["top25"][0]["feed_class"] == "PUBLIC_REFERENCE_DELAYED"
-    assert payload["top25"][0]["execution_quality"] is False
+    assert payload["top100"][0]["price"] is None
+    assert payload["top100"][0]["open_interest"] == 260000.0
+    assert payload["top100"][0]["feed_class"] == "PUBLIC_REFERENCE_DELAYED"
+    assert payload["top100"][0]["execution_quality"] is False
 
 
 
@@ -358,4 +358,4 @@ def test_ranker_handles_large_equity_catalog_without_quadratic_rank_scan() -> No
     focus = rank_provider_catalog(rows, provider="IBKR")
     assert focus.catalog_count == 5000
     assert focus.eligible_count == 5000
-    assert len(focus.top25) == 25
+    assert len(focus.top100) == 100

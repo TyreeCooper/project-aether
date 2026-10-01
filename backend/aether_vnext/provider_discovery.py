@@ -1,7 +1,7 @@
-"""Provider-wide discovery and Top-25 focus ranking for AETHER vNext.
+"""Provider-wide discovery and Top-100 focus ranking for AETHER vNext.
 
 This module is deliberately pre-Scout. It ranks market opportunity only; it cannot
-create setups, tickets, Risk decisions, fills, or live orders. Provider Top 25 means
+create setups, tickets, Risk decisions, fills, or live orders. Provider Top 100 means
 "deserves deeper attention", never "must trade".
 """
 from __future__ import annotations
@@ -13,7 +13,7 @@ from typing import Iterable
 
 
 UTC = timezone.utc
-FOCUS_LIMIT = 25
+FOCUS_LIMIT = 100
 
 # Transparent prototype focus weights. These are provider-relative discovery
 # weights, not trading-strategy or Risk weights.
@@ -98,7 +98,7 @@ class ProviderFocus:
     provider: str
     catalog_count: int
     eligible_count: int
-    top25: tuple[RankedInstrument, ...]
+    top100: tuple[RankedInstrument, ...]
 
 
 def _eligible(row: DiscoveryInstrument) -> bool:
@@ -215,7 +215,7 @@ def rank_provider_catalog(
             provider=provider_name,
             catalog_count=len(catalog),
             eligible_count=0,
-            top25=(),
+            top100=(),
         )
 
     keys = {
@@ -328,7 +328,7 @@ def rank_provider_catalog(
         provider=provider_name,
         catalog_count=len(catalog),
         eligible_count=len(eligible),
-        top25=ranked,
+        top100=ranked,
     )
 
 
@@ -337,8 +337,8 @@ def focus_payload(focus: ProviderFocus) -> dict[str, object]:
         "provider": focus.provider,
         "catalog_count": focus.catalog_count,
         "eligible_count": focus.eligible_count,
-        "focus_count": len(focus.top25),
-        "top25": [
+        "focus_count": len(focus.top100),
+        "top100": [
             {
                 "rank": row.rank,
                 "symbol": row.symbol,
@@ -366,6 +366,6 @@ def focus_payload(focus: ProviderFocus) -> dict[str, object]:
                 "feed_class": row.feed_class,
                 "execution_quality": row.execution_quality,
             }
-            for row in focus.top25
+            for row in focus.top100
         ],
     }

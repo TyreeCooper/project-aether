@@ -20,6 +20,7 @@ from aether_vnext.public_reference_discovery import (
     fetch_tastyfx_public_universe,
 )
 from aether_vnext.provider_discovery import (
+    FOCUS_LIMIT,
     DiscoveryInstrument,
     focus_payload,
     rank_provider_catalog,
@@ -32,6 +33,7 @@ from aether_vnext.provider_focus_handoff import (
 
 UTC = timezone.utc
 PROVIDERS = ("Kraken", "tastyfx", "NinjaTrader", "IBKR")
+HELD_PROVIDERS = frozenset({"NinjaTrader"})
 CycleRunner = Callable[[], Awaitable[dict[str, object]]]
 _LATEST_FOCUS_SNAPSHOT: dict[str, object] | None = None
 _DISCOVERY_PROGRESS: dict[str, object] = {
@@ -188,6 +190,20 @@ def build_provider_focus_snapshot(
 
     for provider in PROVIDERS:
         rows = tuple(universes.get(provider, ()))
+        if provider in HELD_PROVIDERS:
+            providers[provider] = {
+                "provider": provider,
+                "status": "on_hold",
+                "reason": "operator_hold",
+                "catalog_count": 0,
+                "eligible_count": 0,
+                "focus_count": 0,
+                "top100": [],
+                "catalog_mode": "held",
+                "feed_classes": [],
+                "execution_binding_required": True,
+            }
+            continue
         if provider in errors:
             providers[provider] = {
                 "provider": provider,
@@ -196,11 +212,11 @@ def build_provider_focus_snapshot(
                 "catalog_count": len(rows),
                 "eligible_count": 0,
                 "focus_count": 0,
-                "top25": [],
+                "top100": [],
             }
             continue
 
-        focus = rank_provider_catalog(rows, provider=provider, limit=25)
+        focus = rank_provider_catalog(rows, provider=provider, limit=FOCUS_LIMIT)
         payload = focus_payload(focus)
         payload["status"] = "online"
         payload["reason"] = None
@@ -213,7 +229,7 @@ def build_provider_focus_snapshot(
         payload["execution_binding_required"] = provider != "Kraken"
         providers[provider] = payload
 
-        for row in payload["top25"]:
+        for row in payload["top100"]:
             focus_pool.append({
                 **row,
                 "provider": provider,
@@ -246,6 +262,11 @@ def build_provider_focus_snapshot(
             1 for row in providers.values()
             if isinstance(row, Mapping) and row.get("status") == "online"
         ),
+        "on_hold_provider_count": sum(
+            1 for row in providers.values()
+            if isinstance(row, Mapping) and row.get("status") == "on_hold"
+        ),
+        "focus_limit_per_provider": FOCUS_LIMIT,
         "trading_authority": False,
     }
 
@@ -284,7 +305,10 @@ async def run_configured_provider_discovery_cycle() -> dict[str, object]:
         ("IBKR", fetch_ibkr_us_equity_public_universe),
     )
     timeout_s = configured_provider_fetch_timeout_seconds()
-    provider_progress: dict[str, object] = {}
+    provider_progress: dict[str, object] = {
+        provider: {"state": "on_hold", "reason": "operator_hold"}
+        for provider in HELD_PROVIDERS
+    }
     _publish_progress(
         cycle_state="running",
         current_provider=None,
@@ -296,6 +320,8 @@ async def run_configured_provider_discovery_cycle() -> dict[str, object]:
     # also has a hard deadline so a slow public source cannot freeze the whole
     # discovery cycle or starve the strategy focus gate indefinitely.
     for provider, fetcher in providers:
+        if provider in HELD_PROVIDERS:
+            continue
         started = datetime.now(UTC)
         provider_progress = {
             **provider_progress,
