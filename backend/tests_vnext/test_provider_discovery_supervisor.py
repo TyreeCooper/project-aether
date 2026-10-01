@@ -90,7 +90,10 @@ def test_discovery_supervisor_cycles_without_execution_authority() -> None:
             interval_seconds=0.01,
         )
         await supervisor.start()
-        await asyncio.sleep(0.035)
+        for _ in range(100):
+            if supervisor.status().cycle_count >= 2:
+                break
+            await asyncio.sleep(0.01)
         status = supervisor.status()
         await supervisor.stop()
         assert status.running is True
