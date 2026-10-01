@@ -149,22 +149,7 @@ def test_unknown_product_has_no_fabricated_runtime_policy() -> None:
 
 
 def test_dynamic_kraken_spot_gets_transient_crypto_swing_view_without_registry_mutation() -> None:
-    projection = project_kraken_spot_product(
-        _dynamic_sol().product and {
-            "provider": "Kraken",
-            "symbol": "SOL/USD",
-            "execution_symbol": "SOLUSD",
-            "asset_class": "spot_crypto",
-            "base_currency": "SOL",
-            "quote_currency": "USD",
-            "quantity_step": 0.001,
-            "minimum_quantity": 0.02,
-            "minimum_notional": 0.5,
-            "tick_size": 0.0001,
-        },
-        primary_market_source_id="kraken_public",
-        stale_threshold_ms=15000,
-    )
+    projection = _dynamic_sol()
     assert projection.product is not None
     runtime = runtime_playbook_for_product(
         projection.product,
