@@ -6,28 +6,11 @@ on:
       - aether-vnext-swapout
     paths:
       - ".github/workflows/aether-vnext-activate-paper-prototype.yml"
-      - "backend/aether_vnext/prototype_strategy_supervisor.py"
-      - "backend/aether_vnext/provider_discovery.py"
-      - "backend/aether_vnext/provider_discovery_supervisor.py"
-      - "backend/aether_vnext/provider_focus_handoff.py"
-      - "backend/aether_vnext/kraken_catalog.py"
-      - "backend/aether_vnext/massive_discovery.py"
-      - "backend/aether_vnext/public_reference_discovery.py"
-      - "backend/aether_vnext/prototype_forward_paper_evidence.py"
-      - "backend/app/vnext_discovery.py"
-      - "backend/app/vnext_shadow.py"
-      - "backend/aether_vnext/db_runtime.py"
-      - "backend/app/main.py"
-      - "backend/tests_vnext/test_prototype_forward_paper_evidence.py"
-      - "backend/tests_vnext/test_provider_discovery.py"
-      - "backend/tests_vnext/test_provider_discovery_supervisor.py"
-      - "backend/tests_vnext/test_public_reference_discovery.py"
-      - "backend/tests_vnext/test_provider_focus_handoff.py"
-      - "backend/tests_vnext/test_phase16_configured_shadow_mount.py"
-      - "backend/tests_vnext/test_vnext_db_runtime_timeouts.py"
-      - "backend/tests_vnext/test_prototype_crypto_exit_runtime.py"
-      - "frontend/app/page.js"
-      - "frontend/app/globals.css"
+      - "backend/aether_vnext/**"
+      - "backend/app/**"
+      - "backend/alembic/**"
+      - "backend/tests_vnext/**"
+      - "frontend/app/**"
   workflow_dispatch:
 
 permissions:
