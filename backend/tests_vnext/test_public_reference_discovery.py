@@ -1,4 +1,7 @@
 from datetime import datetime, timezone
+import io
+
+from openpyxl import Workbook
 
 from aether_vnext.public_reference_discovery import (
     build_ibkr_us_equity_reference_universe,
@@ -7,6 +10,7 @@ from aether_vnext.public_reference_discovery import (
     extract_tastyfx_pairs,
     merge_cboe_symbol_quotes,
     parse_cboe_symbol_csv,
+    parse_cme_daily_volume_xlsx,
     parse_cme_product_slate_json,
     parse_ecb_90d_xml,
     parse_nasdaq_listed_file,
@@ -155,3 +159,52 @@ def test_cboe_incremental_merge_keeps_one_aggregate_per_symbol() -> None:
     assert merged["AAPL"].bid == 199.95
     assert merged["AAPL"].ask == 200.05
     assert merged["AAPL"].last == 200.01
+
+
+
+def test_cme_daily_volume_xlsx_maps_ninjatrader_product_codes() -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Daily Volume"
+    sheet.append([
+        "Exchange",
+        "Product Code",
+        "Product Name",
+        "Total Volume",
+        "Open Interest",
+    ])
+    sheet.append(["CME", "MES", "Micro E-mini S&P 500", 1234567, 2345678])
+    sheet.append(["COMEX", "MGC", "Micro Gold", 54321, 65432])
+    sheet.append(["CME", "IGNORED", "Ignored", 9999999, 9999999])
+
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    workbook.close()
+
+    activity = parse_cme_daily_volume_xlsx(
+        buffer.getvalue(),
+        product_codes=("MES", "MGC"),
+    )
+    assert set(activity) == {"MES", "MGC"}
+    assert activity["MES"].volume == 1234567.0
+    assert activity["MES"].open_interest == 2345678.0
+    assert activity["MGC"].exchange == "COMEX"
+
+
+def test_cme_daily_volume_xlsx_fallback_finds_exact_product_code_rows() -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Report generated", "2026-10-01"])
+    sheet.append(["MES", "Micro E-mini S&P 500", 100, 250000])
+    sheet.append(["MGC", "Micro Gold", 50, 80000])
+
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    workbook.close()
+
+    activity = parse_cme_daily_volume_xlsx(
+        buffer.getvalue(),
+        product_codes=("MES", "MGC"),
+    )
+    assert activity["MES"].volume == 250000.0
+    assert activity["MGC"].volume == 80000.0

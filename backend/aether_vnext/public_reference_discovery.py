@@ -27,6 +27,7 @@ from typing import Iterable, Mapping
 import xml.etree.ElementTree as ET
 
 import httpx
+from openpyxl import load_workbook
 
 from aether_vnext.provider_discovery import DiscoveryInstrument
 
@@ -49,6 +50,9 @@ CME_PRODUCT_SLATE_V2_URL = (
     "https://www.cmegroup.com/CmeWS/mvc/ProductSlate/V2/List"
 )
 CME_PRODUCT_SLATE_PAGE_URL = "https://www.cmegroup.com/markets/products"
+CME_DAILY_VOLUME_XLSX_URL = (
+    "https://www.cmegroup.com/ftp/daily_volume/daily_volume.xlsx"
+)
 NASDAQ_LISTED_URL = (
     "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt"
 )
@@ -404,6 +408,173 @@ def parse_cme_product_slate_html(raw_html: str) -> dict[str, CmeActivity]:
     return out
 
 
+
+def _normalized_header(value: object) -> str:
+    return re.sub(r"[^A-Z0-9]+", "", str(value or "").upper())
+
+
+def parse_cme_daily_volume_xlsx(
+    raw_xlsx: bytes,
+    *,
+    product_codes: Iterable[str],
+) -> dict[str, CmeActivity]:
+    """Parse CME's public daily-volume workbook for requested product codes.
+
+    Header names have changed across report revisions, so the parser first uses
+    semantic header aliases and then falls back to exact product-code row
+    matching. Only requested NinjaTrader product codes are retained.
+    """
+    wanted = {
+        str(code).strip().upper()
+        for code in product_codes
+        if str(code).strip()
+    }
+    if not wanted:
+        return {}
+
+    workbook = load_workbook(
+        filename=io.BytesIO(raw_xlsx),
+        read_only=True,
+        data_only=True,
+    )
+    out: dict[str, CmeActivity] = {}
+
+    code_aliases = {
+        "PRODUCTCODE", "GLOBEXCODE", "SYMBOL", "PRODUCT",
+    }
+    name_aliases = {
+        "PRODUCTNAME", "PRODUCTDESCRIPTION", "DESCRIPTION", "MARKET",
+    }
+    exchange_aliases = {"EXCHANGE", "EXCH"}
+    volume_aliases = {
+        "VOLUME", "TOTALVOLUME", "FUTURESVOLUME", "TOTALFUTURESVOLUME",
+    }
+    oi_aliases = {"OPENINTEREST", "OI", "TOTALOPENINTEREST"}
+
+    for sheet in workbook.worksheets:
+        rows = list(sheet.iter_rows(values_only=True))
+        header_idx: int | None = None
+        indexes: dict[str, int | None] = {
+            "code": None,
+            "name": None,
+            "exchange": None,
+            "volume": None,
+            "oi": None,
+        }
+
+        for row_index, row in enumerate(rows[:40]):
+            normalized = [_normalized_header(value) for value in row]
+            code_index = next(
+                (i for i, value in enumerate(normalized) if value in code_aliases),
+                None,
+            )
+            volume_index = next(
+                (i for i, value in enumerate(normalized) if value in volume_aliases),
+                None,
+            )
+            if code_index is None or volume_index is None:
+                continue
+            header_idx = row_index
+            indexes["code"] = code_index
+            indexes["volume"] = volume_index
+            indexes["name"] = next(
+                (i for i, value in enumerate(normalized) if value in name_aliases),
+                None,
+            )
+            indexes["exchange"] = next(
+                (i for i, value in enumerate(normalized) if value in exchange_aliases),
+                None,
+            )
+            indexes["oi"] = next(
+                (i for i, value in enumerate(normalized) if value in oi_aliases),
+                None,
+            )
+            break
+
+        if header_idx is not None:
+            for row in rows[header_idx + 1:]:
+                code_pos = indexes["code"]
+                if code_pos is None or code_pos >= len(row):
+                    continue
+                code = str(row[code_pos] or "").strip().upper()
+                if code not in wanted:
+                    continue
+                volume_pos = indexes["volume"]
+                volume = (
+                    None
+                    if volume_pos is None or volume_pos >= len(row)
+                    else _number(row[volume_pos])
+                )
+                oi_pos = indexes["oi"]
+                open_interest = (
+                    None
+                    if oi_pos is None or oi_pos >= len(row)
+                    else _number(row[oi_pos])
+                )
+                if volume is None and open_interest is None:
+                    continue
+                name_pos = indexes["name"]
+                exchange_pos = indexes["exchange"]
+                row_value = CmeActivity(
+                    symbol=code,
+                    name=(
+                        None
+                        if name_pos is None or name_pos >= len(row)
+                        else str(row[name_pos] or "").strip() or None
+                    ),
+                    exchange=(
+                        None
+                        if exchange_pos is None or exchange_pos >= len(row)
+                        else str(row[exchange_pos] or "").strip() or None
+                    ),
+                    asset_class=None,
+                    volume=volume,
+                    open_interest=open_interest,
+                )
+                previous = out.get(code)
+                if previous is None or (row_value.volume or 0.0) > (previous.volume or 0.0):
+                    out[code] = row_value
+
+        # Fallback for report revisions without stable headers: locate an exact
+        # requested product code and use the largest non-negative numeric cell as
+        # its daily activity. This is still source data; no synthetic values are
+        # introduced.
+        missing = wanted.difference(out)
+        if missing:
+            for row in rows:
+                text_cells = {
+                    str(value).strip().upper()
+                    for value in row
+                    if isinstance(value, str) and str(value).strip()
+                }
+                matches = text_cells.intersection(missing)
+                if not matches:
+                    continue
+                numbers = [
+                    number
+                    for value in row
+                    if (number := _number(value)) is not None and number >= 0.0
+                ]
+                if not numbers:
+                    continue
+                activity = max(numbers)
+                for code in matches:
+                    out[code] = CmeActivity(
+                        symbol=code,
+                        name=None,
+                        exchange=None,
+                        asset_class=None,
+                        volume=activity,
+                        open_interest=None,
+                    )
+                missing = wanted.difference(out)
+                if not missing:
+                    break
+
+    workbook.close()
+    return out
+
+
 def build_ninjatrader_reference_universe(
     catalog: Iterable[NinjaCatalogRow],
     cme_activity: Mapping[str, CmeActivity],
@@ -615,6 +786,12 @@ async def _get_text(client: httpx.AsyncClient, url: str) -> str:
     return response.text
 
 
+async def _get_bytes(client: httpx.AsyncClient, url: str) -> bytes:
+    response = await client.get(url)
+    response.raise_for_status()
+    return bytes(response.content)
+
+
 async def fetch_tastyfx_public_universe(
     *,
     client: httpx.AsyncClient | None = None,
@@ -702,14 +879,22 @@ async def fetch_ninjatrader_public_universe(
         follow_redirects=True,
     )
     try:
-        margins_html, activity = await asyncio.gather(
+        margins_html, daily_volume_xlsx = await asyncio.gather(
             _get_text(http, NINJATRADER_MARGINS_URL),
-            _fetch_cme_activity(http),
+            _get_bytes(http, CME_DAILY_VOLUME_XLSX_URL),
         )
         catalog = parse_ninjatrader_margin_html(margins_html)
         if len(catalog) < 25:
             raise RuntimeError(
                 f"ninjatrader_public_catalog_too_small:{len(catalog)}"
+            )
+        activity = parse_cme_daily_volume_xlsx(
+            daily_volume_xlsx,
+            product_codes=(row.symbol for row in catalog),
+        )
+        if len(activity) < 25:
+            raise RuntimeError(
+                f"cme_daily_volume_activity_too_small:{len(activity)}"
             )
         rows = build_ninjatrader_reference_universe(
             catalog,
