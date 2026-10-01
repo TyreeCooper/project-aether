@@ -42,6 +42,11 @@ from app.vnext_strategy import (
     start_configured_vnext_strategy,
     stop_configured_vnext_strategy,
 )
+from app.vnext_discovery import (
+    mount_vnext_discovery_status,
+    start_configured_vnext_discovery,
+    stop_configured_vnext_discovery,
+)
 
 STATIC = Path(__file__).parent / "static"
 VNEXT_UI = Path(__file__).parent / "vnext_ui"
@@ -77,6 +82,7 @@ async def lifespan(_: FastAPI):
         engine.start_loop()
     await start_configured_vnext_ingress()
     await start_configured_vnext_strategy()
+    await start_configured_vnext_discovery()
     logger.info(
         "event=app_start phase=ready version=2.1.0 storage_configured=%s storage_initialized=%s live_ready=%s",
         db_store.status().get("configured"),
@@ -87,6 +93,7 @@ async def lifespan(_: FastAPI):
         yield
     finally:
         logger.info("event=app_shutdown phase=begin")
+        await stop_configured_vnext_discovery()
         await stop_configured_vnext_strategy()
         await stop_configured_vnext_ingress()
         await engine.shutdown()
@@ -107,6 +114,7 @@ app.add_middleware(
 mount_configured_vnext_shadow_floor(app)
 mount_vnext_ingress_status(app)
 mount_vnext_strategy_status(app)
+mount_vnext_discovery_status(app)
 mount_configured_vnext_operator(app)
 
 
