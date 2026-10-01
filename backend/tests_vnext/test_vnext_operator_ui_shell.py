@@ -22,8 +22,7 @@ def test_vnext_ui_restores_familiar_operator_shell_without_legacy_routes() -> No
     assert "function feedClassLabel" in page
     assert "PUBLIC REF · DELAYED" in page
     assert "REFERENCE FEED" in page
-    assert "SCOUT READY" in page
-    assert "SCOUT QUEUED" in page
+        assert "SCOUT RECEIVED" in page
     assert "Scout Intake" in page
     assert "function pipelineBottleneck" in page
     assert "function DesktopCommandCenter" in page
@@ -50,8 +49,7 @@ def test_vnext_ui_restores_familiar_operator_shell_without_legacy_routes() -> No
     assert ".providerFeedClass" in css
     assert ".providerTop100" in css
     assert ".providerFeedLegend" in css
-    assert ".focusReady" in css
-    assert ".focusQueued" in css
+        assert ".focusReceived" in css
     assert ".desktopCommandCenter" in css
     assert ".desktopCommandGrid" in css
     assert ".mobileCommandStrip" in css

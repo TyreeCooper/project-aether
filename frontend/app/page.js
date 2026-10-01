@@ -451,7 +451,7 @@ function SettingsView({ ingress, strategy, discovery, operator, floor }) {
         </article>
         <article className="settingsCard">
           <span>Provider discovery</span><strong>{text(discovery?.last_result?.focus_count, "0")} FOCUSED</strong>
-          <small>{text(discovery?.last_result?.scout_ready_count, "0")} Scout-ready · {text(discovery?.last_result?.scout_queued_count, "0")} Scout-queued</small>
+          <small>{text(discovery?.last_result?.scout_received_count, "0")} Scout-received · {text(discovery?.last_result?.runtime_evaluable_count, "0")} immediately runtime-evaluable</small>
         </article>
         <article className="settingsCard">
           <span>Ingress interval</span><strong>{number(ingress?.interval_seconds, 0)}s</strong>
@@ -682,7 +682,6 @@ function providerFeedSummary(row) {
 
 function ProviderFocusCard({ row }) {
   const online = row.status === "online";
-  const held = row.status === "on_hold";
   const top = row.top100 || [];
   return (
     <article className={"providerFocusCard " + (online ? "online" : "offline")}>
@@ -691,7 +690,7 @@ function ProviderFocusCard({ row }) {
           <span>{row.catalog_mode === "provider_native" ? "PROVIDER-NATIVE CATALOG" : "PUBLIC REFERENCE CATALOG"}</span>
           <h3>{row.provider}</h3>
         </div>
-        <b className={held ? "state active" : online ? "state good" : "state bad"}>{held ? "ON HOLD" : online ? "ONLINE" : "WAITING"}</b>
+        <b className={online ? "state good" : "state bad"}>{online ? "ONLINE" : "UNAVAILABLE"}</b>
       </div>
       <div className="providerFeedClass">
         <span>{providerFeedSummary(row)}</span>
@@ -720,14 +719,10 @@ function ProviderFocusCard({ row }) {
                 <div className="focusFeedState">
                   <small>{feedClassLabel(item.feed_class)}</small>
                   <em
-                    className={
-                      item.handoff?.state === "SCOUT_READY"
-                        ? "focusReady"
-                        : "focusQueued"
-                    }
-                    title={(item.handoff?.blockers || []).join(", ")}
+                    className="focusReceived"
+                    title={(item.handoff?.requirements || []).join(", ")}
                   >
-                    {item.handoff?.state === "SCOUT_READY" ? "SCOUT READY" : "SCOUT QUEUED"}
+                    SCOUT RECEIVED
                   </em>
                 </div>
               </div>
@@ -749,9 +744,10 @@ function ProviderDiscoveryBoard({ discovery }) {
   const totalCatalog = rows.reduce((sum, row) => sum + Number(row.catalog_count || 0), 0);
   const totalEligible = rows.reduce((sum, row) => sum + Number(row.eligible_count || 0), 0);
   const focusCount = Number(discovery?.last_result?.focus_count || 0);
-  const scoutReadyCount = Number(discovery?.last_result?.scout_ready_count || 0);
-  const scoutQueuedCount = Number(discovery?.last_result?.scout_queued_count || 0);
-  const scoutIntakeCount = scoutReadyCount + scoutQueuedCount;
+  const scoutReceivedCount = Number(discovery?.last_result?.scout_received_count || 0);
+  const runtimeEvaluableCount = Number(discovery?.last_result?.runtime_evaluable_count || 0);
+  const runtimeRequirementsCount = Number(discovery?.last_result?.runtime_requirements_count || 0);
+  const scoutIntakeCount = scoutReceivedCount;
   const running = Boolean(discovery?.running && !discovery?.last_error);
   return (
     <section className="floorSection providerDiscoveryBoard">
@@ -773,7 +769,7 @@ function ProviderDiscoveryBoard({ discovery }) {
         <i>→</i>
         <div><span>Focus pool</span><strong>{number(focusCount, 0)}</strong><small>max 100/provider</small></div>
         <i>→</i>
-        <div><span>Scout intake</span><strong>{number(scoutIntakeCount, 0)}</strong><small>{number(scoutReadyCount, 0)} ready · {number(scoutQueuedCount, 0)} queued</small></div>
+        <div><span>Scout intake</span><strong>{number(scoutIntakeCount, 0)}</strong><small>all received · {number(runtimeEvaluableCount, 0)} immediately evaluable</small></div>
         <i>→</i>
         <div><span>Next seat</span><strong>SCOUT</strong><small>all focus items handed off</small></div>
       </div>
@@ -783,10 +779,10 @@ function ProviderDiscoveryBoard({ discovery }) {
       <div className="providerFeedLegend">
         <span><b>NATIVE PUBLIC</b> provider-hosted market reference</span>
         <span><b>PUBLIC REF</b> non-execution reference data; cadence shown per provider</span>
-        <span><b>SCOUT QUEUED</b> handed into Scout intake; remaining product/playbook/execution requirements stay visible</span>
+        <span><b>SCOUT RECEIVED</b> handed into Scout immediately; missing runtime facts remain visible requirements, not holds</span>
       </div>
       <p className="providerDiscoveryLaw">
-        Provider ranking sets attention priority only. It cannot veto an otherwise valid commissioned trade; normal market, strategy, Risk, Clerk, Portfolio and PAPER execution gates still apply.
+        Provider ranking sets attention priority only. Every focused asset enters Scout. Only the intentional market, strategy, Risk, Clerk, Portfolio, instrument and PAPER-execution laws may stop downstream progression.
       </p>
     </section>
   );
@@ -808,9 +804,8 @@ function PipelineView({ universe, queues, cockpits, operator, strategy, discover
   const discoveredCatalog = discoveryProviders.reduce((sum, row) => sum + Number(row.catalog_count || 0), 0);
   const discoveredEligible = discoveryProviders.reduce((sum, row) => sum + Number(row.eligible_count || 0), 0);
   const focusCount = Number(discovery?.last_result?.focus_count || 0);
-  const scoutReadyCount = Number(discovery?.last_result?.scout_ready_count || 0);
-  const scoutQueuedCount = Number(discovery?.last_result?.scout_queued_count || 0);
-  const scoutIntakeCount = scoutReadyCount + scoutQueuedCount;
+  const scoutReceivedCount = Number(discovery?.last_result?.scout_received_count || 0);
+  const scoutIntakeCount = scoutReceivedCount;
   const pipelineStatus = governor.count > 0 || governor.blockers > 0
     ? "GLOBAL HALT"
     : bottleneck
@@ -885,8 +880,8 @@ function PipelineView({ universe, queues, cockpits, operator, strategy, discover
           <PipelineStage
             label="Scout Intake"
             owned="HANDOFF"
-            job="Hands every Top-100 focus item to Scout intake. READY items can evaluate immediately; QUEUED items keep their remaining requirements visible."
-            metricLabel="in Scout intake"
+            job="Hands every Top-100 focus item directly into Scout intake. Runtime requirements are reported separately and never act as a pre-Scout hold."
+            metricLabel="received by Scout"
             count={scoutIntakeCount}
             tone="context"
           />
@@ -896,7 +891,7 @@ function PipelineView({ universe, queues, cockpits, operator, strategy, discover
               label={stage.seat}
               owned={stage.owned}
               job={stage.job}
-              metricLabel="in queue"
+              metricLabel={stage.seat === "Scout" ? "WATCH setups" : "in queue"}
               count={stage.count}
               blockers={stage.blockers}
               bottleneck={bottleneck?.seat === stage.seat}
@@ -1148,7 +1143,7 @@ function DesktopCommandCenter({ floor, queues, cockpits, operator, ingress, stra
             ))}
           </div>
           <div className="desktopPipelineFooter">
-            <span><b>{Number(discovery?.last_result?.scout_ready_count || 0) + Number(discovery?.last_result?.scout_queued_count || 0)}/{text(discovery?.last_result?.focus_count, "0")}</b> Scout intake/focused</span>
+            <span><b>{Number(discovery?.last_result?.scout_received_count || 0)}/{text(discovery?.last_result?.focus_count, "0")}</b> Scout intake/focused</span>
             <span><b>{queued}</b> queued</span>
             <span><b>{blockers}</b> blockers</span>
             <span><b>{cockpits.length}</b> open positions</span>

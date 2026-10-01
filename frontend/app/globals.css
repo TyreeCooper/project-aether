@@ -537,7 +537,7 @@ button { color: inherit; }
   color: var(--good);
   border-color: color-mix(in srgb, var(--good) 35%, var(--line));
 }
-.providerTop100 em.focusQueued {
+.providerTop100 em.focusReceived {
   color: var(--active);
   border-color: color-mix(in srgb, var(--active) 35%, var(--line));
 }
