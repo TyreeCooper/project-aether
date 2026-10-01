@@ -418,11 +418,25 @@ def _rotating_dynamic_strategy_batch(
     return (*priority, *selected)
 
 
+def _coinbase_warmup_cached(
+    rows: Sequence[PrototypeMarketBar],
+    *,
+    minimum_bars: int = 2200,
+) -> bool:
+    if minimum_bars < 1:
+        raise ValueError("minimum_bars must be positive")
+    return sum(
+        1 for row in rows
+        if row.source_id == COINBASE_SOURCE_ID
+    ) >= minimum_bars
+
+
 async def _fetch_dynamic_strategy_history(
     product: ProductRegistryRow,
     *,
     coinbase_products: Mapping[tuple[str, str], str],
     end_at_utc: datetime,
+    fetch_coinbase_warmup: bool,
 ) -> DynamicStrategyHistory:
     """Fetch one dynamic asset's history without allowing it to fail the cycle."""
     asset_id = str(product.asset_id).strip().lower()
@@ -441,7 +455,7 @@ async def _fetch_dynamic_strategy_history(
         )
 
     coinbase_product = coinbase_products.get((base, "USD"))
-    if not coinbase_product:
+    if fetch_coinbase_warmup and not coinbase_product:
         return DynamicStrategyHistory(
             asset_id=asset_id,
             coinbase_product=None,
@@ -452,24 +466,39 @@ async def _fetch_dynamic_strategy_history(
         )
 
     try:
-        coinbase_hourly, kraken_hourly, kraken_daily = await asyncio.gather(
-            fetch_coinbase_hourly_history(
-                asset_id=asset_id,
-                coinbase_product=coinbase_product,
-                end_at_utc=end_at_utc,
-                minimum_bars=2200,
-            ),
-            fetch_kraken_completed_hourly(
-                asset_id=asset_id,
-                kraken_pair=kraken_pair,
-                end_at_utc=end_at_utc,
-            ),
-            fetch_kraken_completed_daily(
-                asset_id=asset_id,
-                kraken_pair=kraken_pair,
-                end_at_utc=end_at_utc,
-            ),
-        )
+        if fetch_coinbase_warmup:
+            coinbase_hourly, kraken_hourly, kraken_daily = await asyncio.gather(
+                fetch_coinbase_hourly_history(
+                    asset_id=asset_id,
+                    coinbase_product=coinbase_product,
+                    end_at_utc=end_at_utc,
+                    minimum_bars=2200,
+                ),
+                fetch_kraken_completed_hourly(
+                    asset_id=asset_id,
+                    kraken_pair=kraken_pair,
+                    end_at_utc=end_at_utc,
+                ),
+                fetch_kraken_completed_daily(
+                    asset_id=asset_id,
+                    kraken_pair=kraken_pair,
+                    end_at_utc=end_at_utc,
+                ),
+            )
+        else:
+            kraken_hourly, kraken_daily = await asyncio.gather(
+                fetch_kraken_completed_hourly(
+                    asset_id=asset_id,
+                    kraken_pair=kraken_pair,
+                    end_at_utc=end_at_utc,
+                ),
+                fetch_kraken_completed_daily(
+                    asset_id=asset_id,
+                    kraken_pair=kraken_pair,
+                    end_at_utc=end_at_utc,
+                ),
+            )
+            coinbase_hourly = ()
     except Exception as exc:
         return DynamicStrategyHistory(
             asset_id=asset_id,
@@ -588,12 +617,25 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     )
                     for product in batch
                 }
+                warmup_cached = {}
+                for product in batch:
+                    rows = load_prototype_market_bars(
+                        sync_conn,
+                        store,
+                        asset_id=product.asset_id,
+                        interval_seconds=3600,
+                        end_at_utc=as_of_utc,
+                    )
+                    warmup_cached[product.asset_id] = _coinbase_warmup_cached(
+                        rows
+                    )
                 return (
                     registry_status,
                     products,
                     batch,
                     dynamic_open_ids,
                     market_ready,
+                    warmup_cached,
                 )
 
             (
@@ -602,6 +644,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                 dynamic_batch,
                 dynamic_open_ids,
                 prepared_dynamic_observations,
+                dynamic_warmup_cached,
             ) = await connection.run_sync(prepare)
 
         result["dynamic_product_registry"] = registry_status
@@ -616,7 +659,12 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
         # failure degrades only dynamic history; it never stops the seed lane.
         coinbase_catalog: Mapping[tuple[str, str], str] = {}
         coinbase_catalog_error: str | None = None
-        if dynamic_batch:
+        needs_coinbase_catalog = any(
+            prepared_dynamic_observations.get(product.asset_id) is not None
+            and not dynamic_warmup_cached.get(product.asset_id, False)
+            for product in dynamic_batch
+        )
+        if needs_coinbase_catalog:
             try:
                 coinbase_catalog = await fetch_coinbase_public_products(
                     timeout_s=20.0
@@ -632,21 +680,38 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
             for product in dynamic_batch
             if prepared_dynamic_observations.get(product.asset_id) is not None
         )
-        if fetchable_products and coinbase_catalog_error is None:
-            histories = await asyncio.gather(
-                *(
-                    _fetch_dynamic_strategy_history(
-                        product,
-                        coinbase_products=coinbase_catalog,
-                        end_at_utc=as_of_utc,
-                    )
-                    for product in fetchable_products
+        history_tasks = []
+        for product in fetchable_products:
+            needs_warmup = not dynamic_warmup_cached.get(
+                product.asset_id,
+                False,
+            )
+            if needs_warmup and coinbase_catalog_error is not None:
+                history_by_asset[product.asset_id] = DynamicStrategyHistory(
+                    asset_id=product.asset_id,
+                    coinbase_product=None,
+                    coinbase_hourly=(),
+                    kraken_hourly=(),
+                    kraken_daily=(),
+                    error=(
+                        "coinbase_catalog_error:"
+                        + coinbase_catalog_error
+                    ),
+                )
+                continue
+            history_tasks.append(
+                _fetch_dynamic_strategy_history(
+                    product,
+                    coinbase_products=coinbase_catalog,
+                    end_at_utc=as_of_utc,
+                    fetch_coinbase_warmup=needs_warmup,
                 )
             )
-            history_by_asset = {
-                row.asset_id: row
-                for row in histories
-            }
+        if history_tasks:
+            histories = await asyncio.gather(*history_tasks)
+            history_by_asset.update(
+                {row.asset_id: row for row in histories}
+            )
 
         # Second transaction: persist history and execute every eligible scan item.
         async with engine.begin() as connection:
@@ -919,15 +984,6 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         continue
 
                     history = history_by_asset.get(asset_id)
-                    if coinbase_catalog_error is not None:
-                        dynamic_results[asset_id] = {
-                            "stage": "HISTORY_NOT_READY",
-                            "reason": (
-                                "coinbase_catalog_error:"
-                                + coinbase_catalog_error
-                            ),
-                        }
-                        continue
                     if history is None:
                         dynamic_results[asset_id] = {
                             "stage": "HISTORY_NOT_READY",
@@ -1067,6 +1123,14 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         1
                         for row in history_by_asset.values()
                         if row.error is None
+                    ),
+                    "warmup_cache_hits": sum(
+                        1
+                        for product in dynamic_batch
+                        if dynamic_warmup_cached.get(
+                            product.asset_id,
+                            False,
+                        )
                     ),
                     "strategy_evaluated": evaluated,
                     "watch": _stage_count(dynamic_results, "WATCH"),

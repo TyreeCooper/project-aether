@@ -10,6 +10,7 @@ import pytest
 
 from aether_vnext.prototype_strategy_supervisor import (
     PrototypeStrategySupervisor,
+    _coinbase_warmup_cached,
     _current_dynamic_kraken_products,
     _entry_focus_block,
     _rotating_dynamic_strategy_batch,
@@ -310,3 +311,18 @@ def test_dynamic_strategy_rotation_never_drops_open_assets_over_batch_limit() ->
         "kraken:avaxusd",
         "kraken:dotusd",
     )
+
+
+
+def test_coinbase_warmup_cache_requires_full_reference_window() -> None:
+    rows = tuple(
+        SimpleNamespace(source_id="coinbase_exchange_public_candles")
+        for _ in range(2200)
+    )
+    assert _coinbase_warmup_cached(rows) is True
+    assert _coinbase_warmup_cached(rows[:-1]) is False
+    mixed = (
+        *rows[:-1],
+        SimpleNamespace(source_id="kraken_public_rest_ohlc"),
+    )
+    assert _coinbase_warmup_cached(mixed) is False
