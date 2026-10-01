@@ -57,6 +57,7 @@ async def test_strategy_supervisor_repeats_and_stops() -> None:
     assert calls >= 2
     assert status.running is True
     assert status.cycle_count >= 2
+    assert status.interval_seconds == 0.01
     assert status.last_error is None
     assert status.paper_only is True
     assert status.live_blocked is True

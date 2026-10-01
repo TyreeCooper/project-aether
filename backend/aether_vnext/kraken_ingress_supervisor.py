@@ -18,7 +18,10 @@ from typing import Awaitable, Callable
 
 from aether_vnext.db_runtime import VNextDatabaseConfig, open_vnext_engine
 from aether_vnext.freeze import LIVE_BLOCKED, PAPER_ONLY
-from aether_vnext.kraken_public import fetch_kraken_public_tickers
+from aether_vnext.kraken_public import (
+    CRYPTO_ASSET_TO_KRAKEN_V2_SYMBOL,
+    fetch_kraken_public_tickers,
+)
 from aether_vnext.market_ingress import ingest_market_quotes
 from aether_vnext.store import VNextStore
 
@@ -34,6 +37,7 @@ class KrakenIngressSupervisorStatus:
     paper_only: bool
     live_blocked: bool
     cycle_count: int
+    interval_seconds: float
     last_cycle_started_at_utc: str | None
     last_cycle_finished_at_utc: str | None
     last_error: str | None
@@ -70,6 +74,7 @@ class KrakenIngressSupervisor:
             paper_only=PAPER_ONLY,
             live_blocked=LIVE_BLOCKED,
             cycle_count=self._cycle_count,
+            interval_seconds=self._interval_seconds,
             last_cycle_started_at_utc=(
                 None if self._last_started is None else self._last_started.isoformat()
             ),
@@ -129,6 +134,28 @@ class KrakenIngressSupervisor:
                 continue
 
 
+def _quote_telemetry(quote: object) -> dict[str, object]:
+    asset_id = str(getattr(quote, "asset_id")).strip().lower()
+    exchange_ts = getattr(quote, "exchange_ts")
+    received_ts = getattr(quote, "received_ts")
+    reference_ts = exchange_ts or received_ts
+    return {
+        "asset_id": asset_id,
+        "symbol": CRYPTO_ASSET_TO_KRAKEN_V2_SYMBOL[asset_id],
+        "bid": getattr(quote, "bid"),
+        "ask": getattr(quote, "ask"),
+        "last": getattr(quote, "last"),
+        "mark": getattr(quote, "mark"),
+        "exchange_ts_utc": (
+            None if exchange_ts is None else exchange_ts.isoformat()
+        ),
+        "received_ts_utc": received_ts.isoformat(),
+        "reference_ts_utc": reference_ts.isoformat(),
+        "source_id": str(getattr(quote, "source_id")),
+        "venue": str(getattr(quote, "venue")),
+    }
+
+
 async def run_configured_kraken_ingress_cycle() -> dict[str, object]:
     """Fetch one public Kraken BBO batch and persist canonical ingress attempts."""
     batch = await fetch_kraken_public_tickers(
@@ -171,6 +198,7 @@ async def run_configured_kraken_ingress_cycle() -> dict[str, object]:
         "status_system": batch.status_system,
         "subscription_acknowledged": batch.subscription_acknowledged,
         "asset_results": results,
+        "quotes": [_quote_telemetry(quote) for quote in batch.quotes],
         "paper_only": PAPER_ONLY,
         "live_blocked": LIVE_BLOCKED,
     }

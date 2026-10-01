@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const apiBase = process.env.NEXT_PUBLIC_API_BASE || "";
 const floorPath = process.env.NEXT_PUBLIC_AETHER_FLOOR_PATH || "/api/v1/vnext/floor";
@@ -39,6 +39,58 @@ function number(value, digits = 2) {
     minimumFractionDigits: 0,
     maximumFractionDigits: digits,
   });
+}
+
+function quotePrice(row) {
+  if (!row) return null;
+  for (const candidate of [row.mark, row.last]) {
+    const parsed = Number(candidate);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  const bid = Number(row.bid);
+  const ask = Number(row.ask);
+  return Number.isFinite(bid) && Number.isFinite(ask) && bid > 0 && ask >= bid
+    ? (bid + ask) / 2
+    : null;
+}
+
+function ageLabel(value, nowMs) {
+  if (!value) return "waiting";
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return "waiting";
+  const seconds = Math.max(0, Math.floor((nowMs - parsed) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return `${minutes}m ${remainder}s`;
+}
+
+function strategyCountdown(strategy, nowMs) {
+  if (!strategy?.enabled || !strategy?.running || strategy?.last_error) return "waiting";
+  const started = Date.parse(strategy?.last_cycle_started_at_utc || "");
+  const finished = Date.parse(strategy?.last_cycle_finished_at_utc || "");
+  if (Number.isFinite(started) && (!Number.isFinite(finished) || started > finished)) return "scanning…";
+  if (!Number.isFinite(finished)) return "scanning…";
+  const interval = Math.max(1, Number(strategy?.interval_seconds) || 60);
+  const elapsed = Math.max(0, (nowMs - finished) / 1000);
+  const remaining = Math.max(0, Math.ceil(interval - elapsed));
+  return remaining > 0 ? `${remaining}s` : "scanning…";
+}
+
+function HeartbeatQuote({ assetId, row, direction, nowMs }) {
+  const price = quotePrice(row);
+  const arrow = direction > 0 ? "↑" : direction < 0 ? "↓" : "•";
+  const moveClass = direction > 0 ? "up" : direction < 0 ? "down" : "";
+  return (
+    <div className="heartbeatQuote">
+      <span>{text(row?.symbol, `${assetId.toUpperCase()}/USD`)}</span>
+      <strong>
+        {price === null ? "waiting" : `$${number(price, 2)}`}
+        <em className={moveClass}>{arrow}</em>
+      </strong>
+      <small>quote age {ageLabel(row?.reference_ts_utc, nowMs)}</small>
+    </div>
+  );
 }
 
 function stateClass(state) {
@@ -150,6 +202,14 @@ export default function DashboardPage() {
   const [error, setError] = useState("");
   const [runtimeError, setRuntimeError] = useState("");
   const [selectedAsset, setSelectedAsset] = useState(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [quoteMoves, setQuoteMoves] = useState({});
+  const previousQuotePrices = useRef({});
+
+  useEffect(() => {
+    const ticker = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(ticker);
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -176,7 +236,29 @@ export default function DashboardPage() {
           setError("Canonical vNext Floor endpoint unavailable.");
         }
 
-        if (ingressResult.status === "fulfilled") setIngress(ingressResult.value);
+        if (ingressResult.status === "fulfilled") {
+          const nextIngress = ingressResult.value;
+          const rows = nextIngress?.last_result?.quotes || [];
+          const nextPrices = {};
+          for (const row of rows) {
+            const assetId = String(row?.asset_id || "").toLowerCase();
+            const price = quotePrice(row);
+            if (!assetId || price === null) continue;
+            nextPrices[assetId] = price;
+          }
+          setQuoteMoves((current) => {
+            const updated = { ...current };
+            for (const [assetId, price] of Object.entries(nextPrices)) {
+              const prior = previousQuotePrices.current[assetId];
+              if (Number.isFinite(prior) && price !== prior) {
+                updated[assetId] = price > prior ? 1 : -1;
+              }
+            }
+            return updated;
+          });
+          previousQuotePrices.current = nextPrices;
+          setIngress(nextIngress);
+        }
         if (strategyResult.status === "fulfilled") setStrategy(strategyResult.value);
         setRuntimeError(
           ingressResult.status === "rejected" || strategyResult.status === "rejected"
@@ -215,6 +297,12 @@ export default function DashboardPage() {
   const ingressState = runtimeState(ingress?.enabled, ingress?.running, ingress?.last_error);
   const strategyState = runtimeState(strategy?.enabled, strategy?.running, strategy?.last_error);
   const strategyAssets = strategy?.last_result?.assets || {};
+  const ingressQuotes = ingress?.last_result?.quotes || [];
+  const quoteByAsset = Object.fromEntries(
+    ingressQuotes.map((row) => [String(row?.asset_id || "").toLowerCase(), row]),
+  );
+  const marketRunning = Boolean(ingress?.enabled && ingress?.running && !ingress?.last_error);
+  const nextStrategyScan = strategyCountdown(strategy, nowMs);
 
   return (
     <main className="floorShell">
@@ -229,6 +317,28 @@ export default function DashboardPage() {
           <span className="mode blocked">LIVE BLOCKED</span>
         </div>
       </header>
+
+      <section className="marketHeartbeat" aria-label="Live market heartbeat">
+        <div className="heartbeatLead">
+          <span className={`heartbeatDot ${marketRunning ? "running" : ""}`} aria-hidden="true" />
+          <div>
+            <span>MARKET HEARTBEAT</span>
+            <strong>{marketRunning ? "KRAKEN INGEST RUNNING" : "MARKET FEED WAITING"}</strong>
+          </div>
+        </div>
+
+        <div className="heartbeatQuotes">
+          <HeartbeatQuote assetId="btc" row={quoteByAsset.btc} direction={quoteMoves.btc} nowMs={nowMs} />
+          <HeartbeatQuote assetId="eth" row={quoteByAsset.eth} direction={quoteMoves.eth} nowMs={nowMs} />
+        </div>
+
+        <div className="heartbeatMeta">
+          <span><b>Ingress</b> #{text(ingress?.cycle_count, "0")}</span>
+          <span><b>Strategy</b> #{text(strategy?.cycle_count, "0")}</span>
+          <span><b>Next scan</b> {nextStrategyScan}</span>
+          <span><b>Trading</b> NATURAL SETUPS ONLY</span>
+        </div>
+      </section>
 
       <section className="statusStrip" aria-label="Floor status">
         <span><b>App restarted</b> {timestamp(floor?.runtime_started_at_utc, "waiting for runtime")}</span>

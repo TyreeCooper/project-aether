@@ -56,6 +56,7 @@ class PrototypeStrategySupervisorStatus:
     paper_only: bool
     live_blocked: bool
     cycle_count: int
+    interval_seconds: float
     last_cycle_started_at_utc: str | None
     last_cycle_finished_at_utc: str | None
     last_error: str | None
@@ -92,6 +93,7 @@ class PrototypeStrategySupervisor:
             paper_only=PAPER_ONLY,
             live_blocked=LIVE_BLOCKED,
             cycle_count=self._cycle_count,
+            interval_seconds=self._interval_seconds,
             last_cycle_started_at_utc=(
                 None if self._last_started is None else self._last_started.isoformat()
             ),

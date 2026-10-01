@@ -45,6 +45,7 @@ def configured_vnext_ingress_status() -> dict[str, object]:
             "paper_only": True,
             "live_blocked": True,
             "cycle_count": 0,
+            "interval_seconds": configured_ingress_interval_seconds(),
             "last_cycle_started_at_utc": None,
             "last_cycle_finished_at_utc": None,
             "last_error": None,

@@ -23,6 +23,26 @@ button { color: inherit; }
 .mode { border: 1px solid var(--line); border-radius: 999px; padding: 7px 9px; font-size: 10px; font-weight: 900; letter-spacing: .08em; white-space: nowrap; }
 .mode.paper { color: var(--active); border-color: color-mix(in srgb, var(--active) 55%, var(--line)); }
 .mode.blocked { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 55%, var(--line)); }
+.marketHeartbeat { display: grid; grid-template-columns: minmax(220px, .9fr) minmax(320px, 1.4fr) minmax(300px, 1.3fr); gap: 1px; margin-bottom: 8px; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--line); }
+.marketHeartbeat > div { min-width: 0; background: var(--panel); }
+.heartbeatLead { display: flex; align-items: center; gap: 10px; padding: 11px 12px; }
+.heartbeatLead > div { display: grid; gap: 2px; min-width: 0; }
+.heartbeatLead span:not(.heartbeatDot) { color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .08em; }
+.heartbeatLead strong { font-size: 11px; letter-spacing: .04em; }
+.heartbeatDot { width: 11px; height: 11px; flex: 0 0 11px; border-radius: 999px; background: var(--muted); }
+.heartbeatDot.running { background: var(--good); animation: heartbeatPulse 1.4s ease-in-out infinite; }
+.heartbeatQuotes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--line) !important; }
+.heartbeatQuote { display: grid; gap: 2px; min-width: 0; padding: 9px 12px; background: var(--panel-2); }
+.heartbeatQuote > span, .heartbeatQuote small { color: var(--muted); font-size: 9px; }
+.heartbeatQuote strong { display: flex; align-items: baseline; gap: 6px; min-width: 0; font-size: 17px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.heartbeatQuote em { color: var(--muted); font-size: 13px; font-style: normal; }
+.heartbeatQuote em.up { color: var(--good); }
+.heartbeatQuote em.down { color: var(--bad); }
+.heartbeatMeta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--line) !important; }
+.heartbeatMeta span { min-width: 0; padding: 9px 10px; background: var(--panel); color: var(--muted); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.heartbeatMeta b { color: var(--text); margin-right: 4px; }
+@keyframes heartbeatPulse { 0%, 100% { opacity: .45; transform: scale(.82); } 50% { opacity: 1; transform: scale(1.12); } }
+
 .statusStrip { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 1px; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--line); }
 .statusStrip span { min-width: 0; background: var(--panel); padding: 10px 12px; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .statusStrip b { color: var(--text); margin-right: 5px; }
@@ -98,12 +118,16 @@ button { color: inherit; }
 .drawerList dt, .drawerList dd { font-size: 11px; }
 .drawerLaw { margin-top: 16px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); font-size: 11px; line-height: 1.5; }
 @media (max-width: 1050px) {
+  .marketHeartbeat { grid-template-columns: 1fr 1.5fr; }
+  .heartbeatMeta { grid-column: 1 / -1; }
   .attentionGrid, .universeGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 @media (max-width: 780px) {
   .floorShell { padding: 10px 10px 88px; }
   .floorHeader { align-items: center; }
   .subtle { display: none; }
+  .marketHeartbeat { grid-template-columns: 1fr; }
+  .heartbeatMeta { grid-column: auto; }
   .statusStrip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .testStatus { grid-template-columns: 1fr; }
   .runtimeMetrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -122,4 +146,8 @@ button { color: inherit; }
   .sectionHead > span { display: none; }
   .inspectionDrawer { top: auto; left: 0; width: 100%; height: min(72vh, 620px); border-left: 0; border-top: 1px solid var(--line); transform: translateY(102%); }
   .inspectionDrawer.open { transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .heartbeatDot.running { animation: none; }
 }

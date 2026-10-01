@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 
 import pytest
 
 from aether_vnext.kraken_ingress_supervisor import (
     KrakenIngressSupervisor,
+    _quote_telemetry,
     configured_ingress_enabled,
     configured_ingress_interval_seconds,
     validate_configured_ingress_environment,
 )
+from aether_vnext.market_data import RawQuote
 
 
 def test_ingress_is_disabled_by_default(monkeypatch) -> None:
@@ -29,6 +32,28 @@ def test_interval_has_hard_lower_bound(monkeypatch) -> None:
     monkeypatch.setenv("AETHER_VNEXT_KRAKEN_INGRESS_INTERVAL_SECONDS", "4")
     with pytest.raises(ValueError, match="must be >= 5"):
         configured_ingress_interval_seconds()
+
+
+def test_quote_telemetry_exposes_real_kraken_quote_and_timestamp() -> None:
+    ts = datetime(2026, 10, 1, 4, 0, tzinfo=timezone.utc)
+    quote = RawQuote(
+        asset_id="btc",
+        venue="kraken",
+        source_id="kraken_public_ticker_v2",
+        bid=65000.0,
+        ask=65001.0,
+        last=65000.5,
+        mark=65000.5,
+        exchange_ts=ts,
+        received_ts=ts,
+        adapter_version="test",
+    )
+    payload = _quote_telemetry(quote)
+    assert payload["asset_id"] == "btc"
+    assert payload["symbol"] == "BTC/USD"
+    assert payload["mark"] == 65000.5
+    assert payload["reference_ts_utc"] == ts.isoformat()
+    assert payload["received_ts_utc"] == ts.isoformat()
 
 
 @pytest.mark.asyncio
@@ -57,6 +82,7 @@ async def test_supervisor_runs_repeated_market_only_cycles_and_stops() -> None:
     assert calls >= 2
     assert status.running is True
     assert status.cycle_count >= 2
+    assert status.interval_seconds == 0.01
     assert status.last_error is None
     assert status.paper_only is True
     assert status.live_blocked is True
