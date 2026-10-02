@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 import hmac
 import logging
@@ -34,21 +35,25 @@ from app.vnext_runtime_mode import (
 )
 from app.vnext_operator import mount_configured_vnext_operator
 from app.vnext_maintenance import (
+    configured_vnext_maintenance_status,
     mount_vnext_maintenance,
     start_configured_vnext_maintenance,
     stop_configured_vnext_maintenance,
 )
 from app.vnext_ingress import (
+    configured_vnext_ingress_status,
     mount_vnext_ingress_status,
     start_configured_vnext_ingress,
     stop_configured_vnext_ingress,
 )
 from app.vnext_strategy import (
+    configured_vnext_strategy_status,
     mount_vnext_strategy_status,
     start_configured_vnext_strategy,
     stop_configured_vnext_strategy,
 )
 from app.vnext_discovery import (
+    current_discovery_status,
     mount_vnext_discovery_status,
     start_configured_vnext_discovery,
     stop_configured_vnext_discovery,
@@ -258,12 +263,91 @@ async def vnext_build_identity():
     }
 
 
+def _parse_runtime_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _supervisor_operating_state(
+    status: dict[str, object],
+    *,
+    now: datetime,
+) -> str:
+    if status.get("last_error"):
+        return "FAULT"
+    if status.get("enabled") is False:
+        return "OFF"
+    running = status.get("running") is True
+    cycles = int(status.get("cycle_count") or 0)
+    if not running:
+        return "BLOCKED" if cycles > 0 else "STARTING"
+
+    interval = float(status.get("interval_seconds") or 15.0)
+    stale_after = max(90.0, interval * 4.0)
+    started = _parse_runtime_timestamp(status.get("last_cycle_started_at_utc"))
+    finished = _parse_runtime_timestamp(status.get("last_cycle_finished_at_utc"))
+
+    if started is not None and (finished is None or started > finished):
+        return "STALLED" if (now - started).total_seconds() > stale_after else "BUSY"
+    if cycles == 0:
+        return "STARTING"
+    if finished is not None and (now - finished).total_seconds() > stale_after:
+        return "STALLED"
+    return "ACTIVE"
+
+
 @app.get("/api/v1/health")
 async def health():
+    if configured_vnext_runtime_only():
+        now = datetime.now(timezone.utc)
+        supervisors = {
+            "ingress": configured_vnext_ingress_status(),
+            "discovery": current_discovery_status(),
+            "strategy": configured_vnext_strategy_status(),
+            "maintenance": configured_vnext_maintenance_status(),
+        }
+        operating = {
+            name: _supervisor_operating_state(status, now=now)
+            for name, status in supervisors.items()
+        }
+        primary = tuple(operating[name] for name in ("ingress", "discovery", "strategy"))
+        if any(state == "FAULT" for state in primary):
+            pipeline_state = "DEGRADED"
+        elif any(state == "STALLED" for state in primary):
+            pipeline_state = "STALLED"
+        elif any(state in {"BLOCKED", "OFF"} for state in primary):
+            pipeline_state = "BLOCKED"
+        elif any(state in {"STARTING", "BUSY"} for state in primary):
+            pipeline_state = "BUSY"
+        elif all(state == "ACTIVE" for state in primary):
+            pipeline_state = "ACTIVE"
+        else:
+            pipeline_state = "NOT_OBSERVED"
+
+        return {
+            "ok": True,
+            "env": "paper",
+            "runtime": "vnext",
+            "paper_mode": True,
+            "live_blocked": True,
+            "build": load_build_info(),
+            "pipeline_state": pipeline_state,
+            "supervisor_state": operating,
+            "supervisors": supervisors,
+        }
+
     snap = engine.snapshot()
     return {
         "ok": True,
         "env": "paper",
+        "runtime": "legacy",
         "venue": snap.get("mark_source"),
         "watch": "binance.us",
         "symbols": [a["pair"] for a in public_catalog()],

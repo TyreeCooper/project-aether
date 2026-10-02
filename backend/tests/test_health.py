@@ -21,3 +21,36 @@ def test_bot_remains_in_safe_paper_state():
     assert body["state"] in {"OFFLINE", "IDLE"}
     live = client.get("/api/v1/live").json()
     assert live["orders_enabled"] is False
+
+
+def test_health_uses_vnext_runtime_truth_in_sandbox(monkeypatch):
+    import app.main as main
+
+    monkeypatch.setenv("AETHER_VNEXT_ENVIRONMENT", "sandbox")
+    active = {
+        "enabled": True,
+        "running": True,
+        "paper_only": True,
+        "live_blocked": True,
+        "cycle_count": 3,
+        "interval_seconds": 15.0,
+        "last_cycle_started_at_utc": "2099-01-01T00:00:00+00:00",
+        "last_cycle_finished_at_utc": "2099-01-01T00:00:01+00:00",
+        "last_error": None,
+        "last_result": {},
+    }
+    monkeypatch.setattr(main, "configured_vnext_ingress_status", lambda: dict(active))
+    monkeypatch.setattr(main, "current_discovery_status", lambda: dict(active, interval_seconds=300.0))
+    monkeypatch.setattr(main, "configured_vnext_strategy_status", lambda: dict(active))
+    monkeypatch.setattr(main, "configured_vnext_maintenance_status", lambda: dict(active))
+
+    response = client.get("/api/v1/health")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["runtime"] == "vnext"
+    assert body["paper_mode"] is True
+    assert body["live_blocked"] is True
+    assert body["pipeline_state"] == "ACTIVE"
+    assert body["supervisor_state"]["ingress"] == "ACTIVE"
+    assert "watch" not in body
+    assert "universe" not in body
