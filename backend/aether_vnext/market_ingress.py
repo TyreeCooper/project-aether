@@ -402,8 +402,11 @@ def assess_market_ingress_health(
     if observation is None:
         health_blockers.append("latest_ingress_has_no_observation")
     else:
-        reference = observation.exchange_ts or observation.received_ts
-        age_now_ms = int((as_of_utc - reference).total_seconds() * 1000)
+        # Freshness is anchored to the local receive clock. A remote venue
+        # exchange timestamp may legitimately be slightly ahead of this worker.
+        age_now_ms = int(
+            (as_of_utc - observation.received_ts).total_seconds() * 1000
+        )
         if age_now_ms < 0:
             health_blockers.append("observation_timestamp_in_future")
         elif stale_threshold_ms is None:

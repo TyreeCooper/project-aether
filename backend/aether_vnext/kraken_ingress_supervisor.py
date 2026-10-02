@@ -210,7 +210,6 @@ def _chunks(values: tuple[str, ...], size: int) -> tuple[tuple[str, ...], ...]:
 
 async def run_configured_kraken_ingress_cycle() -> dict[str, object]:
     """Ingest seed plus verified dynamic Kraken BBO using bounded subscriptions."""
-    as_of_utc = datetime.now(timezone.utc)
     store = VNextStore(schema="aether_vnext")
     results: list[dict[str, object]] = []
     all_quotes: list[object] = []
@@ -261,14 +260,18 @@ async def run_configured_kraken_ingress_cycle() -> dict[str, object]:
         quote_rows = tuple(all_quotes)
         async with engine.begin() as connection:
             for asset_id in attempted_assets:
+                # Decide only after provider I/O has completed. Capturing this
+                # timestamp before an awaited fetch made every newly received
+                # quote appear to come from the future.
+                asset_as_of_utc = datetime.now(timezone.utc)
                 result = await connection.run_sync(
-                    lambda sync_conn, aid=asset_id: ingest_market_quotes(
+                    lambda sync_conn, aid=asset_id, now=asset_as_of_utc: ingest_market_quotes(
                         sync_conn,
                         store,
                         asset_id=aid,
                         quotes=quote_rows,
                         calendar_provider=None,
-                        as_of_utc=as_of_utc,
+                        as_of_utc=now,
                     )
                 )
                 results.append(

@@ -144,19 +144,43 @@ def test_stale_primary_fails_over_to_healthy_fallback() -> None:
     assert "primary:stale" in selection.rejection_reasons
 
 
-def test_future_market_timestamp_is_rejected_not_clamped_to_fresh() -> None:
+def test_remote_exchange_clock_ahead_uses_local_receive_time_for_freshness() -> None:
     row = bind_market_data(
         SEED_REGISTRY["btc"],
         primary_source_id="primary",
         stale_threshold_ms=1_000,
     )
-    future = _quote(
+    remote_ahead = _quote(
         source_id="primary",
         exchange_ts=T0 + timedelta(seconds=1),
+        received_ts=T0,
     )
-    with pytest.raises(ValueError, match="after decision time"):
+    observation = normalize_quote(
+        remote_ahead,
+        registry_row=row,
+        calendar=_calendar(),
+        as_of_utc=T0,
+        stale_threshold_ms=1_000,
+    )
+    assert observation.quality_state is QualityState.HEALTHY
+    assert observation.age_ms == 0
+    assert observation.exchange_ts == T0 + timedelta(seconds=1)
+
+
+def test_future_received_timestamp_is_rejected_not_clamped_to_fresh() -> None:
+    row = bind_market_data(
+        SEED_REGISTRY["btc"],
+        primary_source_id="primary",
+        stale_threshold_ms=1_000,
+    )
+    future_receive = _quote(
+        source_id="primary",
+        exchange_ts=T0,
+        received_ts=T0 + timedelta(seconds=1),
+    )
+    with pytest.raises(ValueError, match="receive timestamp cannot be after decision time"):
         normalize_quote(
-            future,
+            future_receive,
             registry_row=row,
             calendar=_calendar(),
             as_of_utc=T0,

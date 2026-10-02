@@ -60,12 +60,16 @@ def observation_id_for(
 def _age_ms(raw: RawQuote, as_of_utc: datetime) -> int:
     if as_of_utc.tzinfo is None or raw.received_ts.tzinfo is None:
         raise ValueError("timestamps must be timezone-aware")
-    reference = raw.exchange_ts or raw.received_ts
-    if reference.tzinfo is None:
+    if raw.exchange_ts is not None and raw.exchange_ts.tzinfo is None:
         raise ValueError("exchange_ts must be timezone-aware when provided")
-    age_ms = int((as_of_utc - reference).total_seconds() * 1000)
+
+    # Freshness is a local causal property. Provider exchange clocks may lead or
+    # lag the worker clock slightly, so they cannot safely define observation age.
+    # Keep exchange_ts for venue chronology, but age from when this process
+    # actually received the quote.
+    age_ms = int((as_of_utc - raw.received_ts).total_seconds() * 1000)
     if age_ms < 0:
-        raise ValueError("market timestamp cannot be after decision time")
+        raise ValueError("market receive timestamp cannot be after decision time")
     return age_ms
 
 

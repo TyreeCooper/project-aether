@@ -68,6 +68,7 @@ def _quote(
     source_id: str,
     exchange_ts: datetime,
     venue: str,
+    received_ts: datetime | None = None,
 ) -> RawQuote:
     return RawQuote(
         asset_id=asset_id,
@@ -78,7 +79,7 @@ def _quote(
         last=100.0,
         mark=100.0,
         exchange_ts=exchange_ts,
-        received_ts=exchange_ts,
+        received_ts=exchange_ts if received_ts is None else received_ts,
         adapter_version="test-adapter-v1",
     )
 
@@ -280,6 +281,45 @@ def test_health_report_recomputes_freshness_from_persisted_exchange_time() -> No
     assert fresh.observation_age_now_ms == 500
     assert stale.fresh_now is False
     assert "latest_observation_stale_now" in stale.blockers
+
+
+def test_health_uses_receive_clock_when_exchange_clock_is_ahead() -> None:
+    engine, store = _store()
+    with engine.begin() as conn:
+        record_test_runtime_binding(
+            conn,
+            store,
+            asset_id="btc",
+            configuration_hash=CONFIGURATION_HASH,
+            now=T0,
+        )
+        result = ingest_market_quotes(
+            conn,
+            store,
+            asset_id="btc",
+            quotes=(
+                _quote(
+                    "btc",
+                    source_id="test.market.btc",
+                    exchange_ts=T0 + timedelta(seconds=1),
+                    received_ts=T0,
+                    venue="Kraken",
+                ),
+            ),
+            calendar_provider=None,
+            as_of_utc=T0 + timedelta(milliseconds=100),
+        )
+        health = assess_market_ingress_health(
+            conn,
+            store,
+            asset_id="btc",
+            as_of_utc=T0 + timedelta(milliseconds=500),
+        )
+
+    assert result.executable is True
+    assert health.fresh_now is True
+    assert health.observation_age_now_ms == 500
+    assert "observation_timestamp_in_future" not in health.blockers
 
 
 def test_health_report_is_explicit_when_ingress_never_ran() -> None:
