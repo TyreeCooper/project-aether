@@ -116,7 +116,7 @@ def test_pipeline_flow_map_is_vertical_code_bound_and_explains_real_gates() -> N
     assert "REJECT → EVIDENCE" in page
     for code_ref in (
         "focus_handoff_rows()",
-        "_rotating_dynamic_strategy_batch",
+        "_ordered_dynamic_strategy_work",
         "ingest_market_quotes()",
         "assemble_prototype_crypto_warmup()",
         "evaluate_sniper_fire()",
@@ -148,7 +148,7 @@ def test_pipeline_flow_map_has_reconciliation_predicates_reasons_and_full_exit_p
         "finalize_filled_flat()",
         "Runtime facts this map will not hide",
         "btc_kraken_daily still exists in warm-up",
-        "Default batch 4",
+        "Worker capacity controls simultaneous history I/O only",
         "market_not_ready",
         "history_not_ready",
         "evaluation_error",

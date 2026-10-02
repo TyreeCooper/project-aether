@@ -80,7 +80,7 @@ function ts(value, fallback = "waiting") {
 
 function age(value, nowMs) {
   const stamp = Date.parse(value || "");
-  if (!Number.isFinite(stamp)) return "—";
+  if (!Number.isFinite(stamp)) return "NOT OBSERVED";
   const seconds = Math.max(0, Math.floor((nowMs - stamp) / 1000));
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
@@ -89,7 +89,7 @@ function age(value, nowMs) {
 
 function duration(value, nowMs) {
   const stamp = Date.parse(value || "");
-  if (!Number.isFinite(stamp)) return "—";
+  if (!Number.isFinite(stamp)) return "NOT OBSERVED";
   const seconds = Math.max(0, Math.floor((nowMs - stamp) / 1000));
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
@@ -180,8 +180,9 @@ function supervisorState(supervisor, nowMs) {
   if (!supervisor) return "NOT OBSERVED";
   if (supervisor.last_error) return "FAULT";
   if (supervisor.enabled === false) return "OFF";
-  if (supervisor.running !== true) return Number(supervisor.cycle_count || 0) > 0 ? "BLOCKED" : "WAIT";
-  const cycles = Number(supervisor.cycle_count || 0);
+  if (!isObservedNumber(supervisor.cycle_count) || typeof supervisor.running !== "boolean") return "NOT OBSERVED";
+  const cycles = Number(supervisor.cycle_count);
+  if (supervisor.running !== true) return cycles > 0 ? "BLOCKED" : "WAIT";
   const started = Date.parse(supervisor.last_cycle_started_at_utc || "");
   const finished = Date.parse(supervisor.last_cycle_finished_at_utc || "");
   if (cycles === 0) return "STARTING";
@@ -253,10 +254,12 @@ function CommandCenter({ floor, ingress, strategy, discovery, operator, maintena
   const focusRaw = discovery?.last_result?.focus_admitted_count;
   const focus = focusRaw === null || focusRaw === undefined ? null : Number(focusRaw);
   const pipe = strategy?.last_result?.pipeline || {};
+  const strategyObserved = Boolean(strategy?.last_result && (strategy.last_result.assets || strategy.last_result.dynamic_assets));
   const strategyRows = combinedStrategyRows(strategy).slice(0, 12);
   const maintenanceState = maintenance?.last_result || {};
   const bank = operator?.bank || {};
-  const events = operator?.activity || [];
+  const eventsObserved = Array.isArray(operator?.activity);
+  const events = eventsObserved ? operator.activity : [];
   return (
     <div className="pageGrid">
       <div className="hero">
@@ -308,7 +311,7 @@ function CommandCenter({ floor, ingress, strategy, discovery, operator, maintena
               <span>{text(row.reason, "—")}</span>
               <span>{row.watch_eligible === true ? "YES" : row.watch_eligible === false ? "NO" : "—"}</span>
             </div>
-          )) : <div className="empty">No strategy activity reported yet.</div>}
+          )) : <div className="empty">{strategyObserved ? "No strategy activity reported this cycle." : "Strategy activity NOT OBSERVED."}</div>}
         </div>
       </Section>
 
@@ -320,7 +323,7 @@ function CommandCenter({ floor, ingress, strategy, discovery, operator, maintena
               <div><strong>{text(row.seat, "Firm")} · {text(row.new_state, "EVENT")}</strong><span>{text(row.reason_code, "recorded")}</span></div>
             </div>
           ))}
-          {!events.length ? <div className="empty">No recorded Firm events yet.</div> : null}
+          {!eventsObserved ? <div className="empty">Firm activity ledger NOT OBSERVED.</div> : !events.length ? <div className="empty">No recorded Firm events yet.</div> : null}
         </div>
       </Section>
 
@@ -360,7 +363,7 @@ function Markets({ discovery, ingress, nowMs }) {
               <Metric label="Catalog" value={num(row.catalog_count)} />
               <Metric label="Eligible" value={num(row.eligible_count)} />
               <Metric label="Priority pool" value={num(row.focus_count)} />
-              <Metric label="Data mode" value={text(row.catalog_mode, "reference").replaceAll("_", " ")} />
+              <Metric label="Data mode" value={text(row.catalog_mode, "NOT OBSERVED").replaceAll("_", " ")} />
             </div>
             <div className="marketTable">
               <div className="marketHead"><span>Rank</span><span>Instrument</span><span>Score</span><span>Move</span><span>Reference</span><span>Quote age</span><span>Readiness</span></div>
@@ -371,7 +374,9 @@ function Markets({ discovery, ingress, nowMs }) {
                     <span>#{num(item.rank)}</span>
                     <strong>{text(item.symbol)}</strong>
                     <span>{num(item.score, 1)}</span>
-                    <span className={Number(item.change_pct) < 0 ? "loss" : Number(item.change_pct) > 0 ? "gain" : ""}>{Number(item.change_pct) >= 0 ? "+" : ""}{num(item.change_pct, 2)}%</span>
+                    {isObservedNumber(item.change_pct)
+                      ? <span className={Number(item.change_pct) < 0 ? "loss" : Number(item.change_pct) > 0 ? "gain" : ""}>{Number(item.change_pct) >= 0 ? "+" : ""}{num(item.change_pct, 2)}%</span>
+                      : <span>NOT OBSERVED</span>}
                     <span>{money(item.price)}</span>
                     <span>{age(q?.reference_ts_utc, nowMs)}</span>
                     <Badge value="ACTIVE">PRIORITY</Badge>
@@ -389,13 +394,13 @@ function Markets({ discovery, ingress, nowMs }) {
 
 function floorQueueCount(floor, seat, state) {
   const row = (floor?.seat_queues || []).find((item) => item.seat === seat && item.state === state);
-  return row ? Number(row.count || 0) : null;
+  return row && isObservedNumber(row.count) ? Number(row.count) : null;
 }
 
 const PIPELINE_TRUE_PREDICATES = {
   CATALOG: "eligible provider row → FOCUS_ADMITTED; provider rank is priority telemetry, not execution permission",
   FOCUS_ADMITTED: "projection.product != null && runtime_playbook_for_product(...) succeeds",
-  PRODUCT_BOUND: "priority OPEN assets + rotating slice; capacity = max(batch_size - priority_count, 0)",
+  PRODUCT_BOUND: "full commissioned compatible universe ordered OPEN/attention first; worker concurrency affects scheduling only and assets_dropped=0",
   ROAMING_SCAN: "binding_blockers == () && product.market_data_ready() && lifecycle_fire_eligible() && decision-time observation is valid",
   MARKET_READY: "history.error is None && source-bound warm-up snapshot assembles successfully",
   HISTORY_READY: "completed trigger bar closes at/before as_of_utc && setup identity has not already completed",
@@ -464,9 +469,9 @@ const PIPELINE_GATE_BLUEPRINT = [
     stage: "PRODUCT_BOUND",
     label: "Product Bound",
     owner: "Runtime Registry",
-    gate: "Roaming scheduler",
-    plain: "Commissioned products are scheduled into the active scan slice. Open positions are always retained; otherwise the scheduler rotates through the eligible set.",
-    dev: "prototype_strategy_supervisor._rotating_dynamic_strategy_batch(... configured_dynamic_strategy_scan_batch_size()); current default batch=4, configured range=1..20.",
+    gate: "Full-universe work scheduler",
+    plain: "Every commissioned compatible product remains in the work set. Open positions and attention-ranked assets move first, while bounded worker concurrency controls simultaneous history I/O without dropping eligibility.",
+    dev: "prototype_strategy_supervisor._ordered_dynamic_strategy_work(...); configured_dynamic_strategy_scan_batch_size() controls workers only and _dynamic_flow_telemetry() proves assets_dropped=0.",
   },
   {
     stage: "ROAMING_SCAN",
@@ -593,16 +598,17 @@ const PIPELINE_GATE_BLUEPRINT = [
 function Pipeline({ strategy, discovery, ingress, maintenance, floor, operator }) {
   const pipe = strategy?.last_result?.pipeline || {};
   const registry = strategy?.last_result?.dynamic_product_registry || {};
+  const roam = strategy?.last_result?.dynamic_roam || {};
   const queue = (seat, state) => floorQueueCount(floor, seat, state);
   const counts = {
     CATALOG: observedSum(providerRows(discovery).map((row) => row.catalog_count)),
-    FOCUS_ADMITTED: discovery?.last_result?.focus_admitted_count === undefined ? null : Number(discovery.last_result.focus_admitted_count),
-    PRODUCT_BOUND: registry.persisted === undefined || registry.persisted === null ? null : Number(registry.persisted),
-    ROAMING_SCAN: pipe.roaming_batch === undefined ? null : Number(pipe.roaming_batch || 0),
-    MARKET_READY: pipe.market_ready === undefined ? null : Number(pipe.market_ready || 0),
-    HISTORY_READY: pipe.history_ready === undefined ? null : Number(pipe.history_ready || 0),
-    STRATEGY_EVALUATED: pipe.strategy_evaluated === undefined ? null : Number(pipe.strategy_evaluated || 0),
-    WATCH: queue("Scout", "WATCH") ?? (pipe.watch === undefined ? null : Number(pipe.watch || 0)),
+    FOCUS_ADMITTED: isObservedNumber(discovery?.last_result?.focus_admitted_count) ? Number(discovery.last_result.focus_admitted_count) : null,
+    PRODUCT_BOUND: isObservedNumber(registry.persisted) ? Number(registry.persisted) : null,
+    ROAMING_SCAN: isObservedNumber(pipe.roaming_batch) ? Number(pipe.roaming_batch) : null,
+    MARKET_READY: isObservedNumber(pipe.market_ready) ? Number(pipe.market_ready) : null,
+    HISTORY_READY: isObservedNumber(pipe.history_ready) ? Number(pipe.history_ready) : null,
+    STRATEGY_EVALUATED: isObservedNumber(pipe.strategy_evaluated) ? Number(pipe.strategy_evaluated) : null,
+    WATCH: queue("Scout", "WATCH") ?? (isObservedNumber(pipe.watch) ? Number(pipe.watch) : null),
     FIRE: queue("Sniper", "FIRE"),
     SIZE: queue("Risk", "SIZE"),
     READY: queue("Clerk", "READY"),
@@ -619,19 +625,21 @@ function Pipeline({ strategy, discovery, ingress, maintenance, floor, operator }
   if (cycleFlat > 0) counts.FLAT = cycleFlat;
 
   const catalog = counts.CATALOG;
-  const eligible = providerRows(discovery).reduce((sum, row) => sum + Number(row.eligible_count || 0), 0);
-  const dynamicRows = Object.values(strategy?.last_result?.dynamic_assets || {});
+  const eligible = observedSum(providerRows(discovery).map((row) => row.eligible_count));
+  const dynamicAssetsObserved = strategy?.last_result?.dynamic_assets && typeof strategy.last_result.dynamic_assets === "object";
+  const dynamicRows = dynamicAssetsObserved ? Object.values(strategy.last_result.dynamic_assets) : [];
   const ingressRows = ingress?.last_result?.asset_results || [];
   const queueRows = floor?.seat_queues || [];
 
   const gateTelemetry = (stage) => {
     if (stage === "CATALOG") {
+      const complete = [catalog, eligible, counts.FOCUS_ADMITTED].every(isObservedNumber);
       return reconcileGate({
         input: catalog,
         pass: counts.FOCUS_ADMITTED,
-        wait: Math.max(0, eligible - counts.FOCUS_ADMITTED),
-        reject: Math.max(0, catalog - eligible),
-        exact: catalog >= eligible && eligible >= counts.FOCUS_ADMITTED,
+        wait: complete ? Math.max(0, eligible - counts.FOCUS_ADMITTED) : null,
+        reject: complete ? Math.max(0, catalog - eligible) : null,
+        exact: complete && catalog >= eligible && eligible >= counts.FOCUS_ADMITTED,
         reasons: reasonHistogram(providerRows(discovery).filter((row) => row.status !== "online"), () => true),
       });
     }
@@ -639,9 +647,9 @@ function Pipeline({ strategy, discovery, ingress, maintenance, floor, operator }
       return reconcileGate({
         input: counts.ROAMING_SCAN,
         pass: counts.MARKET_READY,
-        wait: Number(pipe.market_not_ready || 0),
+        wait: isObservedNumber(pipe.market_not_ready) ? Number(pipe.market_not_ready) : null,
         reject: 0,
-        exact: pipe.market_not_ready !== undefined,
+        exact: isObservedNumber(pipe.market_not_ready),
         reasons: reasonHistogram(dynamicRows, (row) => row?.stage === "MARKET_NOT_READY").concat(
           reasonHistogram(ingressRows, (row) => row?.executable === false)
         ).slice(0, 6),
@@ -651,9 +659,9 @@ function Pipeline({ strategy, discovery, ingress, maintenance, floor, operator }
       return reconcileGate({
         input: counts.MARKET_READY,
         pass: counts.HISTORY_READY,
-        wait: Number(pipe.history_not_ready || 0),
+        wait: isObservedNumber(pipe.history_not_ready) ? Number(pipe.history_not_ready) : null,
         reject: 0,
-        exact: pipe.history_not_ready !== undefined,
+        exact: isObservedNumber(pipe.history_not_ready),
         reasons: reasonHistogram(dynamicRows, (row) => row?.stage === "HISTORY_NOT_READY"),
       });
     }
@@ -663,20 +671,22 @@ function Pipeline({ strategy, discovery, ingress, maintenance, floor, operator }
         pass: counts.STRATEGY_EVALUATED,
         wait: 0,
         reject: 0,
-        fault: Number(pipe.evaluation_error || 0),
-        exact: pipe.evaluation_error !== undefined,
+        fault: isObservedNumber(pipe.evaluation_error) ? Number(pipe.evaluation_error) : null,
+        exact: isObservedNumber(pipe.evaluation_error),
         reasons: reasonHistogram(dynamicRows, (row) => ["EVALUATION_ERROR", "PIPELINE_ERROR"].includes(row?.stage)),
       });
     }
     if (stage === "STRATEGY_EVALUATED") {
-      const qualified = Number(pipe.watch || 0) + Number(pipe.fire_or_beyond || 0);
-      const noSetup = dynamicRows.filter((row) => row?.stage === "NO_SETUP").length;
+      const qualifiedObserved = isObservedNumber(pipe.watch) && isObservedNumber(pipe.fire_or_beyond);
+      const qualified = qualifiedObserved ? Number(pipe.watch) + Number(pipe.fire_or_beyond) : null;
+      const noSetup = dynamicAssetsObserved ? dynamicRows.filter((row) => row?.stage === "NO_SETUP").length : null;
+      const complete = isObservedNumber(counts.STRATEGY_EVALUATED) && isObservedNumber(qualified) && isObservedNumber(noSetup);
       return reconcileGate({
         input: counts.STRATEGY_EVALUATED,
         pass: qualified,
-        wait: 0,
+        wait: complete ? 0 : null,
         reject: noSetup,
-        exact: counts.STRATEGY_EVALUATED === qualified + noSetup,
+        exact: complete && counts.STRATEGY_EVALUATED === qualified + noSetup,
         reasons: reasonHistogram(dynamicRows, (row) => row?.stage === "NO_SETUP"),
       });
     }
@@ -750,7 +760,7 @@ function Pipeline({ strategy, discovery, ingress, maintenance, floor, operator }
 
       <Section eyebrow="ENGINEERING CONSTRAINTS" title="Runtime facts this map will not hide" className="wide">
         <div className="constraintGrid">
-          <div><span>Scan scheduler</span><strong>Default batch 4 · configured range 1–20</strong><small>Runtime-selected value is not currently exposed by telemetry.</small></div>
+          <div><span>Scan scheduler</span><strong>{isObservedNumber(roam.worker_concurrency) ? `${num(roam.worker_concurrency)} workers · range ${num(roam.configured_worker_concurrency_range?.minimum)}–${num(roam.configured_worker_concurrency_range?.maximum)}` : "NOT OBSERVED"}</strong><small>Worker capacity controls simultaneous history I/O only; it does not drop or gate eligible assets.</small></div>
           <div><span>Crypto regime input</span><strong>btc_kraken_daily still exists in warm-up</strong><small>This is a real code dependency to remove/generalize later, not a UI preference.</small></div>
           <div><span>Telemetry coverage</span><strong>{fullCoverage}/{PIPELINE_GATE_BLUEPRINT.length} gates fully reconcilable</strong><small>Unknown outcomes stay NOT OBSERVED; the UI does not invent zeroes.</small></div>
           <div className={unexplainedTotal ? "constraintFault" : ""}><span>Unexplained flow loss</span><strong>{num(unexplainedTotal)}</strong><small>{unexplainedTotal ? "Observed counts do not reconcile at one or more fully measured gates." : "No unexplained loss in fully measured gates."}</small></div>
@@ -772,7 +782,7 @@ function Pipeline({ strategy, discovery, ingress, maintenance, floor, operator }
                     <div className="flowStageTitle">
                       <div><span>{item.owner}</span><h3>{item.label}</h3></div>
                       <div className="flowStageCount">
-                        <strong>{observed ? num(value) : "—"}</strong>
+                        <strong>{observed ? num(value) : "NOT OBSERVED"}</strong>
                         <small>{observed ? "CURRENTLY OBSERVED" : "NOT EXPOSED BY CURRENT TELEMETRY"}</small>
                       </div>
                     </div>
