@@ -45,7 +45,7 @@ def test_activation_proves_strategy_monitor_ui_after_exact_head_cutover() -> Non
 def test_activation_keeps_sandbox_safety_invariants() -> None:
     workflow = _workflow()
 
-        assert "AETHER_VNEXT_ENVIRONMENT=sandbox" in workflow
+    assert "AETHER_VNEXT_ENVIRONMENT=sandbox" in workflow
     assert "AETHER_VNEXT_KRAKEN_INGRESS_ENABLED=true" in workflow
     assert "AETHER_VNEXT_SANDBOX_TRADING_ENABLED=true" in workflow
     assert 'body.get("paper_mode") is True' in workflow
