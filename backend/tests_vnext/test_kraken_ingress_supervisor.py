@@ -12,6 +12,7 @@ from aether_vnext.kraken_ingress_supervisor import (
     _dynamic_kraken_symbol_map,
     _quote_telemetry,
     configured_dynamic_ingress_batch_size,
+    configured_dynamic_ingress_worker_concurrency,
     configured_ingress_enabled,
     configured_ingress_interval_seconds,
     validate_configured_ingress_environment,
@@ -138,6 +139,16 @@ def test_dynamic_ingress_batch_size_is_bounded(monkeypatch) -> None:
     monkeypatch.setenv("AETHER_VNEXT_KRAKEN_DYNAMIC_BATCH_SIZE", "51")
     with pytest.raises(ValueError, match="between 1 and 50"):
         configured_dynamic_ingress_batch_size()
+
+
+def test_dynamic_ingress_worker_concurrency_is_bounded(monkeypatch) -> None:
+    monkeypatch.delenv("AETHER_VNEXT_KRAKEN_INGRESS_WORKER_CONCURRENCY", raising=False)
+    assert configured_dynamic_ingress_worker_concurrency() == 8
+    monkeypatch.setenv("AETHER_VNEXT_KRAKEN_INGRESS_WORKER_CONCURRENCY", "12")
+    assert configured_dynamic_ingress_worker_concurrency() == 12
+    monkeypatch.setenv("AETHER_VNEXT_KRAKEN_INGRESS_WORKER_CONCURRENCY", "21")
+    with pytest.raises(ValueError, match="between 1 and 20"):
+        configured_dynamic_ingress_worker_concurrency()
 
 
 def test_dynamic_kraken_symbol_map_uses_only_verified_usd_kraken_products() -> None:

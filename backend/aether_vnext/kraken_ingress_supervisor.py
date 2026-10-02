@@ -254,24 +254,43 @@ async def run_configured_kraken_ingress_cycle() -> dict[str, object]:
         all_quotes.extend(seed_batch.quotes)
 
         dynamic_assets = tuple(dynamic_symbols)
-        for chunk in _chunks(
+        dynamic_chunks = _chunks(
             dynamic_assets,
             configured_dynamic_ingress_batch_size(),
-        ):
+        )
+        dynamic_worker_concurrency = configured_dynamic_ingress_worker_concurrency()
+        dynamic_semaphore = asyncio.Semaphore(dynamic_worker_concurrency)
+
+        async def fetch_dynamic_chunk(
+            chunk: tuple[str, ...],
+        ) -> tuple[tuple[str, ...], object | None, str | None]:
             chunk_symbols = {asset: dynamic_symbols[asset] for asset in chunk}
-            try:
-                dynamic_batch = await fetch_kraken_public_tickers(
-                    assets=chunk,
-                    symbol_by_asset=chunk_symbols,
-                    timeout_s=10.0,
-                )
+            async with dynamic_semaphore:
+                try:
+                    batch = await fetch_kraken_public_tickers(
+                        assets=chunk,
+                        symbol_by_asset=chunk_symbols,
+                        timeout_s=10.0,
+                    )
+                    return chunk, batch, None
+                except Exception as exc:
+                    return chunk, None, f"{type(exc).__name__}:{exc}"
+
+        # Dynamic provider I/O is bounded-concurrent. Eligibility remains the full
+        # commissioned universe; worker capacity controls only simultaneous sockets.
+        # One slow/rejected chunk cannot serialize every other catalog asset.
+        dynamic_fetches = await asyncio.gather(
+            *(fetch_dynamic_chunk(chunk) for chunk in dynamic_chunks)
+        )
+        for chunk, dynamic_batch, error in dynamic_fetches:
+            if dynamic_batch is not None:
                 all_quotes.extend(dynamic_batch.quotes)
-            except Exception as exc:
+            if error is not None:
                 # A failed dynamic batch becomes explicit quote_missing attempts;
                 # the seed lane and every other dynamic batch keep running.
                 batch_errors.append({
                     "assets": list(chunk),
-                    "error": f"{type(exc).__name__}:{exc}",
+                    "error": error,
                 })
 
         attempted_assets = CRYPTO_ASSETS + dynamic_assets
@@ -312,6 +331,9 @@ async def run_configured_kraken_ingress_cycle() -> dict[str, object]:
         "subscription_acknowledged": seed_batch.subscription_acknowledged,
         "seed_asset_count": len(CRYPTO_ASSETS),
         "dynamic_asset_count": len(dynamic_assets),
+        "dynamic_batch_count": len(dynamic_chunks),
+        "dynamic_batch_size": configured_dynamic_ingress_batch_size(),
+        "dynamic_worker_concurrency": dynamic_worker_concurrency,
         "attempted_asset_count": len(CRYPTO_ASSETS) + len(dynamic_assets),
         "quoted_asset_count": len({
             str(getattr(quote, "asset_id")).strip().lower()
@@ -334,6 +356,19 @@ def configured_dynamic_ingress_batch_size() -> int:
     if value < 1 or value > 50:
         raise ValueError(
             "AETHER_VNEXT_KRAKEN_DYNAMIC_BATCH_SIZE must be between 1 and 50"
+        )
+    return value
+
+
+def configured_dynamic_ingress_worker_concurrency() -> int:
+    raw = os.getenv(
+        "AETHER_VNEXT_KRAKEN_INGRESS_WORKER_CONCURRENCY",
+        "8",
+    ).strip()
+    value = int(raw)
+    if value < 1 or value > 20:
+        raise ValueError(
+            "AETHER_VNEXT_KRAKEN_INGRESS_WORKER_CONCURRENCY must be between 1 and 20"
         )
     return value
 
