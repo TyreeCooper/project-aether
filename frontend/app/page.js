@@ -216,9 +216,9 @@ const VIEW_META = {
   assets: { title: "Assets", subtitle: "Live stations, strategy state and canonical blockers." },
   pipeline: { title: "Pipeline", subtitle: "See each Firm seat working and where flow is backing up." },
   live: { title: "Live Trades", subtitle: "Open PAPER positions, setup watch and runtime activity." },
-  blotter: { title: "Blotter", subtitle: "Completed round trips in the current paper-test epoch." },
+  blotter: { title: "Blotter", subtitle: "Completed round trips in the current sandbox session." },
   booth: { title: "Booth", subtitle: "Operator visibility, system health and safety state." },
-  settings: { title: "Settings", subtitle: "Prototype runtime, data and safety configuration." },
+  settings: { title: "Settings", subtitle: "Sandbox runtime, data and safety configuration." },
 };
 
 function durationLabel(openedAt, nowMs) {
@@ -260,7 +260,7 @@ function BankStrip({ operator }) {
 
 function ActivityFeed({ rows, limit = 30 }) {
   const items = (rows || []).slice(0, limit);
-  if (!items.length) return <Empty>No vNext Firm events in the current test epoch yet.</Empty>;
+  if (!items.length) return <Empty>No vNext Firm events in the current sandbox session yet.</Empty>;
   return (
     <div className="activityFeed">
       {items.map((row) => (
@@ -282,8 +282,8 @@ function AssetsView({ universe, selectedAsset, onSelect, strategyAssets }) {
     <section className="appView">
       <div className="pageLead">
         <p className="eyebrow">ASSET DESKS</p>
-        <h2>Prototype Stations</h2>
-        <p>BTC and ETH are the commissioned autonomous prototype assets. Other Firm stations remain fail-closed until their providers are commissioned.</p>
+        <h2>Sandbox Stations</h2>
+        <p>Provider catalogs feed the sandbox runtime. Assets advance according to runtime binding and visible pipeline gates.</p>
       </div>
       <div className="universeGrid">
         {universe.map((station) => (
@@ -366,7 +366,7 @@ function BlotterView({ rows }) {
       <div className="pageLead">
         <p className="eyebrow">COMPLETED ROUND TRIPS</p>
         <h2>Blotter</h2>
-        <p>Current paper-test epoch only. One row per completed trade.</p>
+        <p>Current sandbox session. One row per completed trade.</p>
       </div>
       {rows?.length ? (
         <div className="blotterWrap">
@@ -397,7 +397,7 @@ function BlotterView({ rows }) {
             </tbody>
           </table>
         </div>
-      ) : <Empty>No completed trades in the new-system test epoch yet.</Empty>}
+      ) : <Empty>No completed trades in the current sandbox session yet.</Empty>}
     </section>
   );
 }
@@ -409,7 +409,7 @@ function BoothView({ floor, ingress, strategy, operator }) {
       <div className="pageLead">
         <p className="eyebrow">OPERATOR CONTROL ROOM</p>
         <h2>Booth</h2>
-        <p>Read-only prototype operations. Trade authority remains server-side.</p>
+        <p>Sandbox operations. Trade authority remains server-side.</p>
       </div>
       <div className="settingsGrid">
         <article className="settingsCard">
@@ -429,7 +429,7 @@ function BoothView({ floor, ingress, strategy, operator }) {
           <small>App restarted {timestamp(floor?.runtime_started_at_utc, "waiting")}</small>
         </article>
         <article className="settingsCard">
-          <span>Paper epoch</span><strong>{text(operator?.paper_test?.epoch_id, "not started")}</strong>
+          <span>Paper session</span><strong>{text(operator?.paper_test?.epoch_id, "not started")}</strong>
           <small>Seed {money(operator?.paper_test?.seed_bank_usd)}</small>
         </article>
         <article className="settingsCard">
@@ -451,7 +451,7 @@ function SettingsView({ ingress, strategy, discovery, operator, floor, maintenan
     <section className="appView">
       <div className="pageLead">
         <p className="eyebrow">APP CONFIGURATION</p><h2>Settings</h2>
-        <p>Current prototype configuration. Locked safety laws are intentionally not editable.</p>
+        <p>Current sandbox configuration. PAPER/LIVE safety laws are intentionally not editable.</p>
       </div>
       <div className="settingsGrid">
         <article className="settingsCard"><span>Trading mode</span><strong>PAPER</strong><small>Natural setups only · forced entries OFF</small></article>
@@ -1129,7 +1129,7 @@ function AppMenu({ open, activeView, onClose, onNavigate, floor, ingress, strate
           ["pipeline", "⇢", "Pipeline", "Seat flow and bottleneck visibility"],
           ["live", "●", "Live Trades", "Positions, setup watch and activity"],
           ["blotter", "≡", "Blotter", "Completed PAPER trades"],
-          ["assets", "◉", "Assets", "Prototype trading stations"],
+          ["assets", "◉", "Assets", "Sandbox trading stations"],
           ["booth", "◇", "Booth", "System health and operator visibility"],
         ].map(([id, icon, label, description]) => (
           <button
@@ -1545,8 +1545,8 @@ export default function DashboardPage() {
         <span><b>Open cockpits</b> {cockpits.length}</span>
       </section>
 
-      <section className="testStatus" aria-label="Paper test status">
-        <span><b>Test run</b> {text(floor?.paper_test?.epoch_id, "not reset")}</span>
+      <section className="testStatus" aria-label="Paper sandbox status">
+        <span><b>Session</b> {text(floor?.paper_test?.epoch_id, "not reset")}</span>
         <span><b>Starting bank</b> ${number(floor?.paper_test?.seed_bank_usd, 2)}</span>
         <span><b>Blotter</b> {text(floor?.paper_test?.blotter_trade_count, "0")} trade(s)</span>
       </section>
@@ -1574,7 +1574,7 @@ export default function DashboardPage() {
         nowMs={nowMs}
       />
 
-      <section className="runtimeMonitor" aria-label="Autonomous prototype runtime">
+      <section className="runtimeMonitor" aria-label="Autonomous sandbox runtime">
         <div className="runtimeMonitorHead">
           <div>
             <p className="eyebrow">AUTONOMOUS PAPER ENGINE</p>

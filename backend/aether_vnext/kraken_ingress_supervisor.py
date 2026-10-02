@@ -1,4 +1,4 @@
-"""Autonomous Kraken market-ingress supervisor for the vNext prototype.
+"""Autonomous Kraken market-ingress supervisor for the vNext sandbox.
 
 This worker is deliberately market-data-only. It may fetch public BTC/ETH quotes and
 run them through the canonical vNext ingress boundary, but it has no authority to
@@ -339,7 +339,8 @@ def configured_dynamic_ingress_batch_size() -> int:
 
 
 def configured_ingress_enabled() -> bool:
-    raw = os.getenv("AETHER_VNEXT_KRAKEN_INGRESS_ENABLED", "").strip().lower()
+    default = "true" if os.getenv("AETHER_VNEXT_ENVIRONMENT", "").strip().lower() == "sandbox" else "false"
+    raw = os.getenv("AETHER_VNEXT_KRAKEN_INGRESS_ENABLED", default).strip().lower()
     return raw in {"1", "true", "yes", "on"}
 
 
@@ -354,8 +355,8 @@ def configured_ingress_interval_seconds() -> float:
 def validate_configured_ingress_environment() -> None:
     if not configured_ingress_enabled():
         return
-    if os.getenv("AETHER_VNEXT_ENVIRONMENT", "").strip().lower() != "burnin":
-        raise RuntimeError("vNext Kraken ingress may only run in burnin")
+    if os.getenv("AETHER_VNEXT_ENVIRONMENT", "").strip().lower() != "sandbox":
+        raise RuntimeError("vNext Kraken ingress requires sandbox environment")
     if not PAPER_ONLY or not LIVE_BLOCKED:
         raise RuntimeError("vNext Kraken ingress safety invariant failed")
     # Parse configuration before starting the task so a missing/invalid dedicated

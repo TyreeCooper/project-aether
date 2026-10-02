@@ -1,4 +1,4 @@
-"""Isolated database connection boundary for the AETHER vNext burn-in book.
+"""Isolated database connection boundary for the AETHER vNext sandbox book.
 
 vNext deliberately does not fall back to the legacy runtime's DATABASE_URL or
 AZURE_POSTGRESQL_CONNECTIONSTRING variables. A non-production burn-in environment must
@@ -20,7 +20,7 @@ from sqlalchemy.pool import NullPool
 
 
 POSTGRES_SCOPE = "https://ossrdbms-aad.database.windows.net/.default"
-_ALLOWED_ENVIRONMENTS = frozenset({"burnin"})
+_ALLOWED_ENVIRONMENTS = frozenset({"sandbox"})
 
 
 def parse_connection_kv(raw: str) -> dict[str, str]:
@@ -51,7 +51,7 @@ class VNextDatabaseConfig:
     def __post_init__(self) -> None:
         if self.environment not in _ALLOWED_ENVIRONMENTS:
             raise ValueError(
-                "AETHER_VNEXT_ENVIRONMENT must be the isolated 'burnin' environment"
+                "AETHER_VNEXT_ENVIRONMENT must be 'sandbox'"
             )
         configured = int(bool(self.database_url)) + int(
             bool(self.azure_connection_string)

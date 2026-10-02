@@ -1,4 +1,4 @@
-"""Autonomous BTC/ETH PAPER strategy supervisor for the vNext prototype.
+"""Autonomous PAPER strategy supervisor for the vNext sandbox.
 
 The supervisor:
 - refreshes only completed Kraken 1h/daily bars into prototype_market_bars;
@@ -56,7 +56,7 @@ from aether_vnext.store import VNextStore
 
 
 UTC = timezone.utc
-EXPECTED_EPOCH = "aether-prototype-new-system-test-001"
+SANDBOX_SESSION_ID = "aether-sandbox"
 ASSETS = ("btc", "eth")
 CycleRunner = Callable[[], Awaitable[dict[str, object]]]
 
@@ -573,7 +573,7 @@ def _stage_count(
 async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
     """Run one crash-safe seed + dynamic Kraken PAPER strategy pass."""
     if not PAPER_ONLY or not LIVE_BLOCKED:
-        raise RuntimeError("prototype strategy safety invariant failed")
+        raise RuntimeError("sandbox strategy safety invariant failed")
 
     as_of_utc = datetime.now(UTC)
     focused_asset_ids = current_deep_trade_focus_asset_ids()
@@ -596,7 +596,6 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
     result: dict[str, object] = {
         "paper_only": PAPER_ONLY,
         "live_blocked": LIVE_BLOCKED,
-        "phase18_evidence": False,
         "as_of_utc": as_of_utc.isoformat(),
         "provider_focus_available": focused_asset_ids is not None,
         "deep_trade_focus_asset_ids": (
@@ -610,14 +609,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
         # First transaction: persist current provider truth and plan this roaming slice.
         async with engine.begin() as connection:
             def prepare(sync_conn):
-                epoch = store.current_paper_test_epoch(sync_conn)
-                if epoch is None or str(epoch["epoch_id"]) != EXPECTED_EPOCH:
-                    raise RuntimeError(
-                        "prototype paper epoch is not the expected fresh epoch"
-                    )
-                if not bool(epoch["paper_only"]) or not bool(epoch["live_blocked"]):
-                    raise RuntimeError("prototype paper epoch safety flags changed")
-
+                # Sandbox execution is continuous. It is not gated by a named test epoch.
                 registry_status = _sync_dynamic_kraken_products(
                     sync_conn,
                     store,
@@ -984,7 +976,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                             persist_prototype_no_setup_observation(
                                 sync_conn,
                                 store,
-                                paper_epoch_id=EXPECTED_EPOCH,
+                                paper_epoch_id=SANDBOX_SESSION_ID,
                                 asset_id=asset_id,
                                 trigger_close_utc=feature.trigger_close_utc,
                                 evaluated_at_utc=decision_at_utc,
@@ -1166,7 +1158,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                                 persist_prototype_no_setup_observation(
                                     sync_conn,
                                     store,
-                                    paper_epoch_id=EXPECTED_EPOCH,
+                                    paper_epoch_id=SANDBOX_SESSION_ID,
                                     asset_id=asset_id,
                                     trigger_close_utc=(
                                         feature.trigger_close_utc
@@ -1276,12 +1268,12 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                 result["exit_results"] = exit_results
                 result["assets"] = seed_results
                 result["dynamic_assets"] = dynamic_results
-                result["paper_epoch_id"] = EXPECTED_EPOCH
+                result["paper_epoch_id"] = SANDBOX_SESSION_ID
                 result["forward_paper_observation_count"] = (
                     count_prototype_no_setup_observations(
                         sync_conn,
                         store,
-                        paper_epoch_id=EXPECTED_EPOCH,
+                        paper_epoch_id=SANDBOX_SESSION_ID,
                     )
                 )
 
@@ -1291,23 +1283,24 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
 
 
 def configured_strategy_enabled() -> bool:
-    raw = os.getenv("AETHER_VNEXT_PROTOTYPE_TRADING_ENABLED", "").strip().lower()
+    default = "true" if os.getenv("AETHER_VNEXT_ENVIRONMENT", "").strip().lower() == "sandbox" else "false"
+    raw = os.getenv("AETHER_VNEXT_SANDBOX_TRADING_ENABLED", default).strip().lower()
     return raw in {"1", "true", "yes", "on"}
 
 
 def configured_strategy_interval_seconds() -> float:
-    raw = os.getenv("AETHER_VNEXT_PROTOTYPE_TRADING_INTERVAL_SECONDS", "15").strip()
+    raw = os.getenv("AETHER_VNEXT_SANDBOX_TRADING_INTERVAL_SECONDS", "15").strip()
     value = float(raw)
     if value < 5.0:
-        raise ValueError("AETHER_VNEXT_PROTOTYPE_TRADING_INTERVAL_SECONDS must be >= 5")
+        raise ValueError("AETHER_VNEXT_SANDBOX_TRADING_INTERVAL_SECONDS must be >= 5")
     return value
 
 
 def validate_configured_strategy_environment() -> None:
     if not configured_strategy_enabled():
         return
-    if os.getenv("AETHER_VNEXT_ENVIRONMENT", "").strip().lower() != "burnin":
-        raise RuntimeError("prototype strategy may only run in burnin")
+    if os.getenv("AETHER_VNEXT_ENVIRONMENT", "").strip().lower() != "sandbox":
+        raise RuntimeError("sandbox strategy requires sandbox environment")
     if not PAPER_ONLY or not LIVE_BLOCKED:
         raise RuntimeError("prototype strategy safety invariant failed")
     VNextDatabaseConfig.from_environment()

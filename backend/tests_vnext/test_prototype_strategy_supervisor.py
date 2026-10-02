@@ -23,21 +23,22 @@ from aether_vnext.prototype_strategy_supervisor import (
 )
 
 
-def test_strategy_disabled_by_default(monkeypatch) -> None:
-    monkeypatch.delenv("AETHER_VNEXT_PROTOTYPE_TRADING_ENABLED", raising=False)
-    assert configured_strategy_enabled() is False
+def test_strategy_enabled_by_default_in_sandbox(monkeypatch) -> None:
+    monkeypatch.setenv("AETHER_VNEXT_ENVIRONMENT", "sandbox")
+    monkeypatch.delenv("AETHER_VNEXT_SANDBOX_TRADING_ENABLED", raising=False)
+    assert configured_strategy_enabled() is True
     validate_configured_strategy_environment()
 
 
-def test_enabled_strategy_refuses_non_burnin(monkeypatch) -> None:
-    monkeypatch.setenv("AETHER_VNEXT_PROTOTYPE_TRADING_ENABLED", "true")
+def test_enabled_strategy_refuses_non_sandbox(monkeypatch) -> None:
+    monkeypatch.setenv("AETHER_VNEXT_SANDBOX_TRADING_ENABLED", "true")
     monkeypatch.setenv("AETHER_VNEXT_ENVIRONMENT", "production")
-    with pytest.raises(RuntimeError, match="only run in burnin"):
+    with pytest.raises(RuntimeError, match="sandbox"):
         validate_configured_strategy_environment()
 
 
 def test_strategy_interval_has_hard_lower_bound(monkeypatch) -> None:
-    monkeypatch.setenv("AETHER_VNEXT_PROTOTYPE_TRADING_INTERVAL_SECONDS", "4")
+    monkeypatch.setenv("AETHER_VNEXT_SANDBOX_TRADING_INTERVAL_SECONDS", "4")
     with pytest.raises(ValueError, match="must be >= 5"):
         configured_strategy_interval_seconds()
 
@@ -52,7 +53,6 @@ async def test_strategy_supervisor_repeats_and_stops() -> None:
         return {
             "paper_only": True,
             "live_blocked": True,
-            "phase18_evidence": False,
         }
 
     supervisor = PrototypeStrategySupervisor(

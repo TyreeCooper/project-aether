@@ -1,4 +1,4 @@
-name: AETHER vNext Activate Autonomous Paper Prototype
+name: AETHER vNext Activate Sandbox Paper Runtime
 
 on:
   push:
@@ -32,7 +32,7 @@ jobs:
       - name: Checkout exact vNext head
         uses: actions/checkout@v4
 
-      - name: Verify protected prototype boundary
+      - name: Verify sandbox branch boundary
         id: revision
         shell: bash
         run: |
@@ -41,7 +41,7 @@ jobs:
           actual="$(git rev-parse HEAD)"
           test "$actual" = "$GITHUB_SHA"
           echo "source_revision=$actual" >> "$GITHUB_OUTPUT"
-          echo "Activating autonomous PAPER prototype at $actual"
+          echo "Activating autonomous PAPER sandbox at $actual"
 
       - uses: actions/setup-node@v4
         with:
@@ -95,7 +95,7 @@ jobs:
           python -m pytest -q             tests_vnext/test_vnext_runtime_mode.py             tests_vnext/test_kraken_ingress_supervisor.py             tests_vnext/test_prototype_crypto_features.py             tests_vnext/test_prototype_crypto_entry_plan.py             tests_vnext/test_prototype_crypto_entry_runtime.py             tests_vnext/test_prototype_crypto_exit.py             tests_vnext/test_prototype_crypto_exit_runtime.py             tests_vnext/test_prototype_strategy_supervisor.py             tests_vnext/test_provider_discovery.py             tests_vnext/test_provider_discovery_supervisor.py             tests_vnext/test_public_reference_discovery.py             tests_vnext/test_provider_focus_handoff.py             tests_vnext/test_phase16_configured_shadow_mount.py             tests_vnext/test_vnext_db_runtime_timeouts.py             tests_vnext/test_phase17_floor_test_status.py
           python -m py_compile             app/main.py             app/vnext_ingress.py             app/vnext_strategy.py             app/vnext_discovery.py             app/vnext_shadow.py             app/vnext_runtime_mode.py             aether_vnext/kraken_ingress_supervisor.py             aether_vnext/provider_discovery.py             aether_vnext/provider_discovery_supervisor.py             aether_vnext/provider_focus_handoff.py             aether_vnext/db_runtime.py             aether_vnext/kraken_catalog.py             aether_vnext/massive_discovery.py             aether_vnext/public_reference_discovery.py             aether_vnext/prototype_strategy_supervisor.py
 
-      - name: Require protected burn-in database URL
+      - name: Require sandbox database URL
         env:
           DATABASE_URL: ${{ secrets.AETHER_VNEXT_BURNIN_DATABASE_URL }}
         shell: bash
@@ -103,7 +103,7 @@ jobs:
           set -euo pipefail
           test -n "$DATABASE_URL"
 
-      - name: Upgrade protected burn-in schema to exact branch head
+      - name: Upgrade sandbox schema to exact branch head
         working-directory: backend
         env:
           DATABASE_URL: ${{ secrets.AETHER_VNEXT_BURNIN_DATABASE_URL }}
@@ -137,7 +137,7 @@ jobs:
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_0E83D5CA9CF543228DA7FA7818D7C998 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_B530D2ECBF5549A39B4758868409068A }}
 
-      - name: Bind autonomous prototype-only runtime settings
+      - name: Bind autonomous sandbox runtime settings
         env:
           DATABASE_URL: ${{ secrets.AETHER_VNEXT_BURNIN_DATABASE_URL }}
         shell: bash
@@ -157,17 +157,16 @@ jobs:
           az webapp config appsettings delete             --name "$app"             --resource-group "$rg"             --setting-names AETHER_VNEXT_AZURE_POSTGRESQL_CONNECTIONSTRING             >/dev/null 2>&1 || true
 
           settings=(
-            AETHER_VNEXT_ENVIRONMENT=burnin
+            AETHER_VNEXT_ENVIRONMENT=sandbox
             AETHER_VNEXT_DATABASE_URL="$DATABASE_URL"
-            AETHER_VNEXT_RUNTIME_ONLY=true
-            AETHER_VNEXT_KRAKEN_INGRESS_ENABLED=true
+                         AETHER_VNEXT_KRAKEN_INGRESS_ENABLED=true
             AETHER_VNEXT_KRAKEN_INGRESS_INTERVAL_SECONDS=15
             AETHER_VNEXT_PROVIDER_DISCOVERY_ENABLED=true
             AETHER_VNEXT_PROVIDER_DISCOVERY_INTERVAL_SECONDS=300
             AETHER_VNEXT_PROVIDER_DISCOVERY_INITIAL_DELAY_SECONDS=15
             AETHER_VNEXT_PROVIDER_FETCH_TIMEOUT_SECONDS=60
-            AETHER_VNEXT_PROTOTYPE_TRADING_ENABLED=true
-            AETHER_VNEXT_PROTOTYPE_TRADING_INTERVAL_SECONDS=60
+            AETHER_VNEXT_SANDBOX_TRADING_ENABLED=true
+            AETHER_VNEXT_SANDBOX_TRADING_INTERVAL_SECONDS=15
           )
 
           # Public/reference discovery is intentionally keyless for the prototype.
@@ -184,22 +183,21 @@ jobs:
           echo "resource_group=$rg" >> "$GITHUB_ENV"
           echo "prototype_host=$host" >> "$GITHUB_ENV"
 
-      - name: Verify runtime-only settings are bound to prototype
+      - name: Verify sandbox runtime settings
         shell: bash
         run: |
           set -euo pipefail
-          values="$(az webapp config appsettings list             --name "$app_name"             --resource-group "$resource_group"             --query "[?name=='AETHER_VNEXT_RUNTIME_ONLY' || name=='AETHER_VNEXT_KRAKEN_INGRESS_ENABLED' || name=='AETHER_VNEXT_PROVIDER_DISCOVERY_ENABLED' || name=='AETHER_VNEXT_PROTOTYPE_TRADING_ENABLED'].{name:name,value:value}"             -o json)"
+          values="$(az webapp config appsettings list             --name "$app_name"             --resource-group "$resource_group"             --query "[?name=='AETHER_VNEXT_RUNTIME_ONLY' || name=='AETHER_VNEXT_KRAKEN_INGRESS_ENABLED' || name=='AETHER_VNEXT_PROVIDER_DISCOVERY_ENABLED' || name=='AETHER_VNEXT_SANDBOX_TRADING_ENABLED'].{name:name,value:value}"             -o json)"
           python - "$values" <<'PY'
           import json, sys
           rows = {row["name"]: str(row["value"]).lower() for row in json.loads(sys.argv[1])}
-          assert rows.get("AETHER_VNEXT_RUNTIME_ONLY") == "true", rows
-          assert rows.get("AETHER_VNEXT_KRAKEN_INGRESS_ENABLED") == "true", rows
+                     assert rows.get("AETHER_VNEXT_KRAKEN_INGRESS_ENABLED") == "true", rows
           assert rows.get("AETHER_VNEXT_PROVIDER_DISCOVERY_ENABLED") == "true", rows
-          assert rows.get("AETHER_VNEXT_PROTOTYPE_TRADING_ENABLED") == "true", rows
+          assert rows.get("AETHER_VNEXT_SANDBOX_TRADING_ENABLED") == "true", rows
           print(json.dumps(rows, indent=2, sort_keys=True))
           PY
 
-      - name: Deploy exact autonomous prototype package
+      - name: Deploy exact sandbox package
         uses: azure/webapps-deploy@v3
         with:
           app-name: aether-vnext-nonprod

@@ -391,7 +391,7 @@ async def run_configured_provider_discovery_cycle() -> dict[str, object]:
 def configured_discovery_enabled() -> bool:
     default = (
         "true"
-        if os.getenv("AETHER_VNEXT_ENVIRONMENT", "").strip().lower() == "burnin"
+        if os.getenv("AETHER_VNEXT_ENVIRONMENT", "").strip().lower() == "sandbox"
         else "false"
     )
     raw = os.getenv("AETHER_VNEXT_PROVIDER_DISCOVERY_ENABLED", default).strip().lower()
@@ -435,8 +435,8 @@ def configured_discovery_initial_delay_seconds() -> float:
 def validate_configured_discovery_environment() -> None:
     if not configured_discovery_enabled():
         return
-    if os.getenv("AETHER_VNEXT_ENVIRONMENT", "").strip().lower() != "burnin":
-        raise RuntimeError("provider discovery may only run in burnin")
+    if os.getenv("AETHER_VNEXT_ENVIRONMENT", "").strip().lower() != "sandbox":
+        raise RuntimeError("provider discovery requires sandbox environment")
     if not PAPER_ONLY or not LIVE_BLOCKED:
         raise RuntimeError("provider discovery safety invariant failed")
 

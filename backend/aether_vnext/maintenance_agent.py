@@ -177,7 +177,7 @@ StatusProvider=Callable[[],Mapping[str,object]|Awaitable[Mapping[str,object]]]
 
 class PipelineMaintenanceSupervisor:
     def __init__(self,*,ingress_provider:StatusProvider,discovery_provider:StatusProvider,strategy_provider:StatusProvider,interval_seconds:float=15.0):
-      self._ingress=ingress_provider; self._discovery=discovery_provider; self._strategy=strategy_provider; self._interval=float(interval_seconds); self._task=None; self._stop=asyncio.Event(); self._cycles=0; self._started=None; self._finished=None; self._error=None; self._result=None
+      self._ingress=ingress_provider; self._discovery=discovery_provider; self._strategy=strategy_provider; self._interval=float(interval_seconds); self._task=None; self._stop: asyncio.Event | None=None; self._cycles=0; self._started=None; self._finished=None; self._error=None; self._result=None
     @property
     def running(self): return self._task is not None and not self._task.done()
     async def _value(self,p):
@@ -192,22 +192,24 @@ class PipelineMaintenanceSupervisor:
     async def start(self):
       if self.running:return
       if not PAPER_ONLY or not LIVE_BLOCKED: raise RuntimeError("Maintenance requires PAPER_ONLY/LIVE_BLOCKED")
-      self._stop.clear(); self._task=asyncio.create_task(self._run(),name="aether-vnext-maintenance")
+      self._stop=asyncio.Event(); self._task=asyncio.create_task(self._run(),name="aether-vnext-maintenance")
     async def stop(self):
-      self._stop.set()
+      if self._stop is not None: self._stop.set()
       if self._task is None:return
       self._task.cancel()
       try: await self._task
       except asyncio.CancelledError: pass
       self._task=None
     async def _run(self):
-      while not self._stop.is_set():
+      stop=self._stop
+      if stop is None: return
+      while not stop.is_set():
         self._started=datetime.now(UTC)
         try: self._result=await self.run_once(); self._error=None; self._cycles+=1
         except asyncio.CancelledError: raise
         except Exception as exc: self._error=f"{type(exc).__name__}:{exc}"
         self._finished=datetime.now(UTC)
-        try: await asyncio.wait_for(self._stop.wait(),timeout=self._interval)
+        try: await asyncio.wait_for(stop.wait(),timeout=self._interval)
         except TimeoutError: continue
 
 def configured_maintenance_interval_seconds()->float:

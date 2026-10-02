@@ -42,12 +42,12 @@ def test_activation_proves_strategy_monitor_ui_after_exact_head_cutover() -> Non
     assert "/tmp/index.html" in workflow
 
 
-def test_activation_keeps_prototype_safety_invariants() -> None:
+def test_activation_keeps_sandbox_safety_invariants() -> None:
     workflow = _workflow()
 
-    assert "AETHER_VNEXT_RUNTIME_ONLY=true" in workflow
+        assert "AETHER_VNEXT_ENVIRONMENT=sandbox" in workflow
     assert "AETHER_VNEXT_KRAKEN_INGRESS_ENABLED=true" in workflow
-    assert "AETHER_VNEXT_PROTOTYPE_TRADING_ENABLED=true" in workflow
+    assert "AETHER_VNEXT_SANDBOX_TRADING_ENABLED=true" in workflow
     assert 'body.get("paper_mode") is True' in workflow
     assert 'body.get("live_blocked") is True' in workflow
     assert '"deployment_health": "GREEN"' in workflow

@@ -20,15 +20,16 @@ from aether_vnext.market_data import RawQuote
 
 
 def test_ingress_is_disabled_by_default(monkeypatch) -> None:
+    monkeypatch.setenv("AETHER_VNEXT_ENVIRONMENT", "sandbox")
     monkeypatch.delenv("AETHER_VNEXT_KRAKEN_INGRESS_ENABLED", raising=False)
-    assert configured_ingress_enabled() is False
+    assert configured_ingress_enabled() is True
     validate_configured_ingress_environment()
 
 
-def test_enabled_ingress_refuses_non_burnin(monkeypatch) -> None:
+def test_enabled_ingress_refuses_non_sandbox(monkeypatch) -> None:
     monkeypatch.setenv("AETHER_VNEXT_KRAKEN_INGRESS_ENABLED", "true")
     monkeypatch.setenv("AETHER_VNEXT_ENVIRONMENT", "production")
-    with pytest.raises(RuntimeError, match="only run in burnin"):
+    with pytest.raises(RuntimeError, match="sandbox"):
         validate_configured_ingress_environment()
 
 

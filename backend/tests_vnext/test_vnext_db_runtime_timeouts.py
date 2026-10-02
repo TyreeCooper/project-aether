@@ -21,7 +21,7 @@ def test_database_url_engine_uses_bounded_asyncpg_timeouts(monkeypatch) -> None:
 
     async def scenario() -> None:
         config = db_runtime.VNextDatabaseConfig(
-            environment="burnin",
+            environment="sandbox",
             database_url="postgresql://user:pass@db.example/aether",
         )
         async with db_runtime.open_vnext_engine(config):
