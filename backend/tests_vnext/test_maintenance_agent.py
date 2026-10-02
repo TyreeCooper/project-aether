@@ -31,3 +31,12 @@ def test_revision_0035_is_maintenance_schema():
     assert 'revision: str = "0035"' in migration
     assert 'down_revision: Union[str, None] = "0034"' in migration
     assert "maintenance_controls" in migration and "maintenance_incidents" in migration
+
+
+def test_maintenance_runtime_only_starts_in_sandbox(monkeypatch) -> None:
+    from app.vnext_maintenance import configured_maintenance_enabled
+
+    monkeypatch.delenv("AETHER_VNEXT_ENVIRONMENT", raising=False)
+    assert configured_maintenance_enabled() is False
+    monkeypatch.setenv("AETHER_VNEXT_ENVIRONMENT", "sandbox")
+    assert configured_maintenance_enabled() is True
