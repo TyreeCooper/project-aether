@@ -30,6 +30,22 @@ from aether_vnext.store import VNextStore
 CycleRunner = Callable[[], Awaitable[dict[str, object]]]
 CRYPTO_ASSETS = ("btc", "eth")
 
+_MAINTENANCE_QUARANTINED_SYMBOLS: set[str] = set()
+
+
+def maintenance_quarantine_symbols(symbols: Sequence[str]) -> tuple[str, ...]:
+    """Level-1 PAPER repair: isolate provider-rejected dynamic symbols."""
+    for symbol in symbols:
+        value = str(symbol).strip().upper()
+        if value:
+            _MAINTENANCE_QUARANTINED_SYMBOLS.add(value)
+    return tuple(sorted(_MAINTENANCE_QUARANTINED_SYMBOLS))
+
+
+def maintenance_quarantine_snapshot() -> tuple[str, ...]:
+    return tuple(sorted(_MAINTENANCE_QUARANTINED_SYMBOLS))
+
+
 
 @dataclass(frozen=True, slots=True)
 class KrakenIngressSupervisorStatus:
@@ -179,6 +195,8 @@ def _dynamic_kraken_symbol_map(
             continue
         asset_id = str(getattr(product, "asset_id", "") or "").strip().lower()
         symbol = str(getattr(product, "canonical_symbol", "") or "").strip()
+        if symbol.upper() in _MAINTENANCE_QUARANTINED_SYMBOLS:
+            continue
         if (
             not asset_id
             or not symbol

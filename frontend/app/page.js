@@ -8,11 +8,24 @@ const ingressPath = "/api/v1/vnext/ingress-runtime";
 const strategyPath = "/api/v1/vnext/strategy-runtime";
 const operatorPath = "/api/v1/vnext/operator";
 const discoveryPath = "/api/v1/vnext/discovery-runtime";
+const maintenancePath = "/api/v1/vnext/maintenance";
 
 async function getJson(path) {
   const response = await fetch(`${apiBase}${path}`, { cache: "no-store" });
   if (!response.ok) throw new Error(`${response.status} ${path}`);
   return response.json();
+}
+
+async function postJson(path, body, operatorToken) {
+  const response = await fetch(`${apiBase}${path}`, {
+    method: "POST",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json", "X-Operator-Token": operatorToken },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload?.detail || `${response.status} ${path}`);
+  return payload;
 }
 
 function text(value, fallback = "—") {
@@ -428,60 +441,62 @@ function BoothView({ floor, ingress, strategy, operator }) {
   );
 }
 
-function SettingsView({ ingress, strategy, discovery, operator, floor }) {
+function SettingsView({ ingress, strategy, discovery, operator, floor, maintenance, onMaintenanceToggle, onMaintenanceRepair, maintenanceBusy, maintenanceError }) {
+  const [operatorToken, setOperatorToken] = useState("");
+  const controls = maintenance?.controls || {};
+  const labels = maintenance?.control_labels || {};
+  const unlocked = operatorToken.trim().length > 0;
+  const maintStatus = maintenance?.last_result?.status || (maintenance?.running ? "SYNCING" : "OFF");
   return (
     <section className="appView">
       <div className="pageLead">
-        <p className="eyebrow">APP CONFIGURATION</p>
-        <h2>Settings</h2>
+        <p className="eyebrow">APP CONFIGURATION</p><h2>Settings</h2>
         <p>Current prototype configuration. Locked safety laws are intentionally not editable.</p>
       </div>
       <div className="settingsGrid">
-        <article className="settingsCard">
-          <span>Trading mode</span><strong>PAPER</strong>
-          <small>Natural setups only · forced entries OFF</small>
-        </article>
-        <article className="settingsCard">
-          <span>Live execution</span><strong className="lossText">HARD BLOCKED</strong>
-          <small>Cannot be enabled from this UI</small>
-        </article>
-        <article className="settingsCard">
-          <span>Deep trading runtime</span><strong>BTC · ETH + KRAKEN ROAMING</strong>
-          <small>Verified dynamic Kraken USD spot assets are scanned in bounded batches; Top-100 priority cannot veto a valid setup</small>
-        </article>
-        <article className="settingsCard">
-          <span>Provider discovery</span><strong>{text(discovery?.last_result?.focus_count, "0")} FOCUSED</strong>
-          <small>{text(discovery?.last_result?.focus_admitted_count, "0")} Focus-admitted · {text(discovery?.last_result?.runtime_evaluable_count, "0")} immediately runtime-evaluable</small>
-        </article>
-        <article className="settingsCard">
-          <span>Ingress interval</span><strong>{number(ingress?.interval_seconds, 0)}s</strong>
-          <small>UI polls runtime telemetry every 5s</small>
-        </article>
-        <article className="settingsCard">
-          <span>Strategy interval</span><strong>{number(strategy?.interval_seconds, 0)}s</strong>
-          <small>Completed-bar strategy evaluation</small>
-        </article>
-        <article className="settingsCard">
-          <span>Forward-paper observations</span><strong>{text(strategy?.last_result?.forward_paper_observation_count, "0")}</strong>
-          <small>Operational audit only · Phase 18 false</small>
-        </article>
-        <article className="settingsCard">
-          <span>Database</span><strong>vNext BURN-IN</strong>
-          <small>{text(operator?.bank?.ledger_count, "0")} isolated sleeve ledger(s)</small>
-        </article>
-        <article className="settingsCard">
-          <span>Source revision</span><strong>{text(floor?.build?.source_revision?.slice(0, 12), "local")}</strong>
-          <small>No legacy trading-state fallback</small>
-        </article>
+        <article className="settingsCard"><span>Trading mode</span><strong>PAPER</strong><small>Natural setups only · forced entries OFF</small></article>
+        <article className="settingsCard"><span>Live execution</span><strong className="lossText">HARD BLOCKED</strong><small>Cannot be enabled from this UI</small></article>
+        <article className="settingsCard"><span>Provider discovery</span><strong>{text(discovery?.last_result?.focus_count, "0")} FOCUSED</strong><small>{text(discovery?.last_result?.focus_admitted_count, "0")} Focus-admitted</small></article>
+        <article className="settingsCard"><span>Ingress interval</span><strong>{number(ingress?.interval_seconds, 0)}s</strong><small>UI polls runtime telemetry every 5s</small></article>
+        <article className="settingsCard"><span>Strategy interval</span><strong>{number(strategy?.interval_seconds, 0)}s</strong><small>Completed-bar strategy evaluation</small></article>
+        <article className="settingsCard"><span>Source revision</span><strong>{text(floor?.build?.source_revision?.slice(0, 12), "local")}</strong><small>No legacy fallback</small></article>
       </div>
-      <section className="lockedLaw">
-        <strong>LOCKED SAFETY LAWS</strong>
-        <span>Valid market data · capital/risk admission · instrument caps · PAPER-only execution · LIVE hard block.</span>
+
+      <section className="floorSection">
+        <div className="sectionHead">
+          <div><p className="eyebrow">SELF-DIAGNOSIS / SELF-HEALING</p><h2>Maintenance Agent</h2></div>
+          <span>{maintStatus}</span>
+        </div>
+        <p className="runtimeLaw">Master OFF makes the agent inert. Auto-repair defaults OFF. PAPER ONLY and LIVE BLOCKED remain locked.</p>
+        <label>
+          <span className="eyebrow">Operator token</span>
+          <input type="password" value={operatorToken} onChange={(e) => setOperatorToken(e.target.value)} placeholder="Required to change Maintenance" />
+        </label>
+        <div className="settingsGrid">
+          {Object.entries(labels).map(([key, label]) => {
+            const enabled = controls[key] !== false;
+            return (
+              <article className="settingsCard" key={key}>
+                <span>{label}</span>
+                <strong>{enabled ? "ON" : "OFF"}</strong>
+                <small>{key === "master_enabled" ? "Emergency master switch." : key.replaceAll("_", " ")}</small>
+                <button type="button" disabled={!unlocked || maintenanceBusy} onClick={() => onMaintenanceToggle(key, !enabled, operatorToken)}>
+                  TURN {enabled ? "OFF" : "ON"}
+                </button>
+              </article>
+            );
+          })}
+        </div>
+        <button type="button" disabled={!unlocked || maintenanceBusy || controls.master_enabled === false} onClick={() => onMaintenanceRepair(operatorToken)}>
+          RUN SAFE REPAIR NOW
+        </button>
+        {maintenanceError ? <p className="runtimeFault">{maintenanceError}</p> : null}
       </section>
+
+      <section className="lockedLaw"><strong>LOCKED SAFETY LAWS</strong><span>PAPER-only · LIVE hard block · no force-trade behavior · no production cutover.</span></section>
     </section>
   );
 }
-
 
 const PIPELINE_QUEUE_SEATS = [
   {
@@ -797,7 +812,7 @@ function ProviderDiscoveryBoard({ discovery, strategy }) {
   );
 }
 
-function PipelineView({ universe, queues, cockpits, operator, strategy, discovery }) {
+function PipelineView({ universe, queues, cockpits, operator, strategy, discovery, maintenance }) {
   const queueStages = PIPELINE_QUEUE_SEATS.map((stage) => Object.assign(
     {},
     stage,
@@ -846,6 +861,24 @@ function PipelineView({ universe, queues, cockpits, operator, strategy, discover
           <span><b>{blockerCount}</b> blockers</span>
           <span><b>{cockpits.length}</b> open positions</span>
         </div>
+      </section>
+
+      <section className="floorSection">
+        <div className="sectionHead">
+          <div><p className="eyebrow">AETHER MAINTENANCE</p><h2>Pipeline Self-Diagnosis</h2></div>
+          <span>{text(maintenance?.last_result?.status, maintenance?.running ? "SYNCING" : "OFF")}</span>
+        </div>
+        <div className="settingsGrid">
+          <article className="settingsCard"><span>First causal edge</span><strong>{text(maintenance?.last_result?.first_causal_edge, "waiting")}</strong><small>{text(maintenance?.last_result?.primary_reason, "no diagnosis yet")}</small></article>
+          <article className="settingsCard"><span>Owner</span><strong>{text(maintenance?.last_result?.owner, "waiting")}</strong><small>{text(maintenance?.last_result?.confidence, "—")} confidence</small></article>
+          <article className="settingsCard"><span>Affected</span><strong>{text(maintenance?.last_result?.affected_count, "0")}</strong><small>{text(maintenance?.last_result?.observed, "Establishing healthy baseline")}</small></article>
+          <article className="settingsCard"><span>Repair</span><strong>{maintenance?.last_result?.auto_fix_available ? "AVAILABLE" : "NONE"}</strong><small>{text(maintenance?.last_result?.recommended_action, "No action recommended yet")}</small></article>
+        </div>
+        {(maintenance?.last_result?.stages || []).length ? (
+          <div className="pipelineQueueInspector">
+            {maintenance.last_result.stages.map((row) => <article key={row.stage}><div><strong>{row.stage}</strong><span>{row.pass}/{row.input} pass</span></div></article>)}
+          </div>
+        ) : null}
       </section>
 
       <ProviderDiscoveryBoard discovery={discovery} strategy={strategy} />
@@ -1035,12 +1068,12 @@ function PipelineView({ universe, queues, cockpits, operator, strategy, discover
   );
 }
 
-function AppSubview({ activeView, universe, queues, selectedAsset, onSelectAsset, cockpits, strategyAssets, strategy, ingress, discovery, operator, floor, nowMs }) {
+function AppSubview({ activeView, universe, queues, selectedAsset, onSelectAsset, cockpits, strategyAssets, strategy, ingress, discovery, operator, floor, nowMs, maintenance, onMaintenanceToggle, onMaintenanceRepair, maintenanceBusy, maintenanceError }) {
   if (activeView === "assets") {
     return <AssetsView universe={universe} selectedAsset={selectedAsset} onSelect={onSelectAsset} strategyAssets={strategyAssets} />;
   }
   if (activeView === "pipeline") {
-    return <PipelineView universe={universe} queues={queues} cockpits={cockpits} operator={operator} strategy={strategy} discovery={discovery} />;
+    return <PipelineView universe={universe} queues={queues} cockpits={cockpits} operator={operator} strategy={strategy} discovery={discovery} maintenance={maintenance} />;
   }
   if (activeView === "live") {
     return <LiveTradesView cockpits={cockpits} strategyAssets={strategyAssets} strategy={strategy} activity={operator?.activity || []} nowMs={nowMs} />;
@@ -1052,7 +1085,7 @@ function AppSubview({ activeView, universe, queues, selectedAsset, onSelectAsset
     return <BoothView floor={floor} ingress={ingress} strategy={strategy} operator={operator} />;
   }
   if (activeView === "settings") {
-    return <SettingsView ingress={ingress} strategy={strategy} discovery={discovery} operator={operator} floor={floor} />;
+    return <SettingsView ingress={ingress} strategy={strategy} discovery={discovery} operator={operator} floor={floor} maintenance={maintenance} onMaintenanceToggle={onMaintenanceToggle} onMaintenanceRepair={onMaintenanceRepair} maintenanceBusy={maintenanceBusy} maintenanceError={maintenanceError} />;
   }
   return null;
 }
@@ -1298,6 +1331,9 @@ export default function DashboardPage() {
   const [strategy, setStrategy] = useState(null);
   const [operator, setOperator] = useState(null);
   const [discovery, setDiscovery] = useState(null);
+  const [maintenance, setMaintenance] = useState(null);
+  const [maintenanceBusy, setMaintenanceBusy] = useState(false);
+  const [maintenanceError, setMaintenanceError] = useState("");
   const [error, setError] = useState("");
   const [runtimeError, setRuntimeError] = useState("");
   const [operatorError, setOperatorError] = useState("");
@@ -1318,12 +1354,13 @@ export default function DashboardPage() {
     let mounted = true;
     const load = async () => {
       try {
-        const [floorResult, ingressResult, strategyResult, operatorResult, discoveryResult] = await Promise.allSettled([
+        const [floorResult, ingressResult, strategyResult, operatorResult, discoveryResult, maintenanceResult] = await Promise.allSettled([
           getJson(floorPath),
           getJson(ingressPath),
           getJson(strategyPath),
           getJson(operatorPath),
           getJson(discoveryPath),
+          getJson(maintenancePath),
         ]);
         if (!mounted) return;
 
@@ -1377,6 +1414,7 @@ export default function DashboardPage() {
         } else {
           setDiscoveryError("Provider discovery telemetry is temporarily unavailable.");
         }
+        if (maintenanceResult.status === "fulfilled") setMaintenance(maintenanceResult.value);
         setRuntimeError(
           ingressResult.status === "rejected" || strategyResult.status === "rejected"
             ? "One or more autonomous runtime telemetry endpoints are unavailable."
@@ -1434,6 +1472,23 @@ export default function DashboardPage() {
     setActiveView(view);
     if (view !== "assets") setSelectedAsset(null);
     if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const onMaintenanceToggle = async (key, enabled, token) => {
+    setMaintenanceBusy(true); setMaintenanceError("");
+    try {
+      const result = await postJson(`${maintenancePath}/controls/${encodeURIComponent(key)}`, { enabled }, token);
+      setMaintenance((current) => ({ ...(current || {}), controls: result.controls }));
+    } catch (err) { setMaintenanceError(err instanceof Error ? err.message : "Maintenance control update failed."); }
+    finally { setMaintenanceBusy(false); }
+  };
+  const onMaintenanceRepair = async (token) => {
+    setMaintenanceBusy(true); setMaintenanceError("");
+    try {
+      const result = await postJson(`${maintenancePath}/repair`, undefined, token);
+      setMaintenance((current) => ({ ...(current || {}), last_result: result.result }));
+    } catch (err) { setMaintenanceError(err instanceof Error ? err.message : "Maintenance repair failed."); }
+    finally { setMaintenanceBusy(false); }
   };
 
   return (
@@ -1643,6 +1698,11 @@ export default function DashboardPage() {
           operator={operator}
           floor={floor}
           nowMs={nowMs}
+          maintenance={maintenance}
+          onMaintenanceToggle={onMaintenanceToggle}
+          onMaintenanceRepair={onMaintenanceRepair}
+          maintenanceBusy={maintenanceBusy}
+          maintenanceError={maintenanceError}
         />
       )}
 

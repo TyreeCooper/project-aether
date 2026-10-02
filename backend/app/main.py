@@ -33,6 +33,11 @@ from app.vnext_runtime_mode import (
     validate_vnext_runtime_only_environment,
 )
 from app.vnext_operator import mount_configured_vnext_operator
+from app.vnext_maintenance import (
+    mount_vnext_maintenance,
+    start_configured_vnext_maintenance,
+    stop_configured_vnext_maintenance,
+)
 from app.vnext_ingress import (
     mount_vnext_ingress_status,
     start_configured_vnext_ingress,
@@ -84,6 +89,7 @@ async def lifespan(_: FastAPI):
     await start_configured_vnext_ingress()
     await start_configured_vnext_discovery()
     await start_configured_vnext_strategy()
+    await start_configured_vnext_maintenance()
     logger.info(
         "event=app_start phase=ready version=2.1.0 storage_configured=%s storage_initialized=%s live_ready=%s",
         db_store.status().get("configured"),
@@ -94,6 +100,7 @@ async def lifespan(_: FastAPI):
         yield
     finally:
         logger.info("event=app_shutdown phase=begin")
+        await stop_configured_vnext_maintenance()
         await stop_configured_vnext_strategy()
         await stop_configured_vnext_discovery()
         await stop_configured_vnext_ingress()
@@ -117,6 +124,7 @@ mount_vnext_ingress_status(app)
 mount_vnext_strategy_status(app)
 mount_vnext_discovery_status(app)
 mount_configured_vnext_operator(app)
+mount_vnext_maintenance(app)
 
 
 @app.middleware("http")

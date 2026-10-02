@@ -72,6 +72,8 @@ def test_book_of_record_has_required_tables() -> None:
         "reconciliation_runs",
         "event_ledger",
         "paper_test_epochs",
+        "maintenance_controls",
+        "maintenance_incidents",
     } <= set(store.tables)
 
 
@@ -383,7 +385,7 @@ def test_phase5_execution_reservation_columns_are_in_current_schema() -> None:
     assert "fill_market_observation_id" not in columns
 
 
-def test_runtime_schema_facade_is_pinned_to_revision_0033() -> None:
+def test_runtime_schema_facade_is_pinned_to_revision_0035() -> None:
     _, store = _engine_and_store()
     backend = Path(__file__).resolve().parents[1]
     facade = (backend / "aether_vnext" / "schema.py").read_text(encoding="utf-8")
@@ -396,7 +398,7 @@ def test_runtime_schema_facade_is_pinned_to_revision_0033() -> None:
         / "versions"
         / "0033_aether_vnext_prototype_market_bars.py"
     ).read_text(encoding="utf-8")
-    assert "schema_v0033" in facade
+    assert "schema_v0035" in facade
     assert "paper_test_epochs" in frozen_0032
     assert 'revision: str = "0033"' in migration_0033
     assert 'down_revision: Union[str, None] = "0032"' in migration_0033
