@@ -108,3 +108,19 @@ button{cursor:pointer}
 .gateExplanation p{margin:0;font-size:8.5px;line-height:1.55;color:#c9d6e2}.devNote code{display:block;white-space:normal;overflow-wrap:anywhere;font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace;font-size:7.5px;line-height:1.55;color:#8fbce7}
 @media(max-width:900px){.causalBanner{grid-template-columns:repeat(2,minmax(0,1fr))}.causalBanner>div:last-child{grid-column:1/-1}.flowGateHead{grid-template-columns:60px 1fr}.gateOutcomes{grid-column:1/-1;justify-content:flex-start}.gateExplanation{grid-template-columns:1fr}}
 @media(max-width:560px){.verticalFlow:before{left:22px}.flowStageV{grid-template-columns:44px minmax(0,1fr)}.flowStageIndex{font-size:8px}.flowStageBody{padding:10px}.flowStageTitle{align-items:flex-start}.flowStageCount strong{font-size:17px}.flowStageCount small{max-width:110px}.flowConnector{padding-left:44px}.flowArrow span{margin-left:-34px;width:24px}.flowGateHead{grid-template-columns:1fr}.gateExplanation{grid-template-columns:1fr}.causalBanner{grid-template-columns:1fr}.causalBanner>div:last-child{grid-column:auto}}
+
+
+/* Pipeline audit/reconciliation telemetry */
+.constraintGrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.constraintGrid>div{display:grid;gap:4px;padding:10px;border:1px solid var(--line);border-radius:9px;background:var(--panel2)}
+.constraintGrid span,.predicateNote>span,.gateReasons>span,.gateTelemetry span{font-size:6.5px;letter-spacing:.09em;color:var(--muted);text-transform:uppercase}
+.constraintGrid strong{font-size:9px;line-height:1.4}.constraintGrid small{font-size:7.5px;line-height:1.45;color:var(--muted)}
+.constraintGrid .constraintFault{border-color:color-mix(in srgb,var(--bad) 55%,var(--line))}
+.predicateNote{padding:9px 11px;border-top:1px solid var(--line);background:#06101a}
+.predicateNote span{display:block;margin-bottom:5px}.predicateNote code{display:block;white-space:normal;overflow-wrap:anywhere;font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace;font-size:7.5px;line-height:1.55;color:#a9d2f7}
+.gateTelemetry{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:1px;background:var(--line);border-top:1px solid var(--line)}
+.gateTelemetry>div{display:grid;gap:3px;padding:8px;background:#08131e}.gateTelemetry strong{font-size:9px}
+.gateReasons{display:grid;grid-template-columns:140px minmax(0,1fr);gap:10px;align-items:start;padding:9px 11px;border-top:1px solid var(--line);background:#07111b}
+.gateReasons>div{display:flex;flex-wrap:wrap;gap:5px}.gateReasons b{display:flex;gap:5px;align-items:center;padding:4px 7px;border:1px solid var(--line);border-radius:999px;font-size:7px;font-weight:650;color:#b8c7d6}.gateReasons b i{font-style:normal;color:var(--accent);font-weight:900}.gateReasons em{font-size:7.5px;color:var(--muted);font-style:normal}
+@media(max-width:1100px){.constraintGrid{grid-template-columns:repeat(2,minmax(0,1fr))}.gateTelemetry{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media(max-width:700px){.constraintGrid{grid-template-columns:1fr}.gateTelemetry{grid-template-columns:repeat(2,minmax(0,1fr))}.gateReasons{grid-template-columns:1fr}}

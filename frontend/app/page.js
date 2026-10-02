@@ -308,6 +308,57 @@ function floorQueueCount(floor, seat, state) {
   return row ? Number(row.count || 0) : null;
 }
 
+const PIPELINE_TRUE_PREDICATES = {
+  CATALOG: "eligible provider row → FOCUS_ADMITTED; provider rank is priority telemetry, not execution permission",
+  FOCUS_ADMITTED: "projection.product != null && runtime_playbook_for_product(...) succeeds",
+  PRODUCT_BOUND: "priority OPEN assets + rotating slice; capacity = max(batch_size - priority_count, 0)",
+  ROAMING_SCAN: "binding_blockers == () && product.market_data_ready() && lifecycle_fire_eligible() && decision-time observation is valid",
+  MARKET_READY: "history.error is None && source-bound warm-up snapshot assembles successfully",
+  HISTORY_READY: "completed trigger bar closes at/before as_of_utc && setup identity has not already completed",
+  STRATEGY_EVALUATED: "plan.eligible === true → WATCH; otherwise terminal NO_SETUP evidence",
+  WATCH: "state==WATCH && completed_bar matches trigger/grain && !invalidation_hit && market healthy && side supported && stop legal",
+  FIRE: "RiskSizeResult.ok && quantity > 0 after trade/asset/cluster/portfolio + product/capital quantity caps",
+  SIZE: "product_side_supported(...) && ready_after_cost_hurdle(opportunity_pct, modeled_round_trip_cost)",
+  READY: "READY identity/preflight valid && Governor clear && Firm risk/capital reservation succeeds atomically",
+  RESERVED: "PAPER_ONLY && LIVE_BLOCKED && intent.state==RESERVED && order_type==MARKET_PAPER && OPEN risk reservation exists",
+  SUBMITTED: "at_utc >= paper_fill_due_at(...) && fill_time_reject_code(...) is None",
+  OPEN: "governor_halted || hard_stop_on_bid/ask || completed_structure_close < frozen_breakout || as_of_utc >= time_stop_deadline",
+  EXIT_REQUESTED: "active EXIT_PRECEDENCE reason + OPEN trade + matching market observation → FLATTEN_REQUEST",
+  CLOSE_RESERVED: "matching FLATTEN_REQUEST && OPEN trade && zero-capital CLOSE reservation",
+  CLOSE_SUBMITTED: "CLOSE intent state==RESERVED && MARKET_PAPER && reserved_cash_usd==0 && reserved_margin_usd==0",
+  FLAT: "SUBMITTED CLOSE passes paper latency + fresh executable market guard → FILLED → finalize_filled_flat()",
+};
+
+function reasonHistogram(rows, predicate = () => true) {
+  const counts = new Map();
+  for (const row of rows || []) {
+    if (!row || !predicate(row)) continue;
+    const reason = text(row.reason || row.reject_code || row.error || row.first_blocker_reason, "unspecified");
+    counts.set(reason, (counts.get(reason) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, 6)
+    .map(([reason, count]) => ({ reason, count }));
+}
+
+function reconcileGate({ input, pass, wait, reject, bypass = 0, fault = 0, exact = false, reasons = [] }) {
+  const values = [input, pass, wait, reject, bypass, fault];
+  const numeric = values.every((value) => value !== null && value !== undefined && Number.isFinite(Number(value)));
+  if (!numeric) {
+    return { input, pass, wait, reject, bypass, fault, unexplained: null, reconciled: null, coverage: "PARTIAL", reasons };
+  }
+  const accounted = Number(pass) + Number(wait) + Number(reject) + Number(bypass) + Number(fault);
+  const unexplained = Math.max(0, Number(input) - accounted);
+  return {
+    input: Number(input), pass: Number(pass), wait: Number(wait), reject: Number(reject),
+    bypass: Number(bypass), fault: Number(fault), unexplained,
+    reconciled: exact ? accounted === Number(input) : null,
+    coverage: exact ? "FULL" : "PARTIAL",
+    reasons,
+  };
+}
+
 const PIPELINE_GATE_BLUEPRINT = [
   {
     stage: "CATALOG",
@@ -422,6 +473,30 @@ const PIPELINE_GATE_BLUEPRINT = [
     dev: "prototype_crypto_exit_runtime.advance_prototype_crypto_exit(); close lifecycle continues through runtime_exit_request_bridge / runtime_close_reserve_bridge / runtime_close_execution_bridge / runtime_close_fill_bridge.",
   },
   {
+    stage: "EXIT_REQUESTED",
+    label: "Flatten Requested",
+    owner: "Exit",
+    gate: "Close reservation",
+    plain: "A valid exit reason is persisted as FLATTEN_REQUEST. The position is still OPEN until the close lifecycle actually succeeds.",
+    dev: "runtime_exit_request_bridge.request_runtime_flatten() validates EXIT_PRECEDENCE, OPEN trade identity and observation identity before persisting FLATTEN_REQUEST.",
+  },
+  {
+    stage: "CLOSE_RESERVED",
+    label: "Close Reserved",
+    owner: "Portfolio",
+    gate: "Paper close submit",
+    plain: "The risk-reducing close must map to the still-open trade and matching FLATTEN_REQUEST. It reserves zero new cash and zero new margin.",
+    dev: "runtime_close_reserve_bridge.reserve_runtime_flatten() requires matching FLATTEN_REQUEST and OPEN trade identity; reserve_cash_usd=0 and reserve_margin_usd=0.",
+  },
+  {
+    stage: "CLOSE_SUBMITTED",
+    label: "Close Submitted",
+    owner: "Paper Execution",
+    gate: "Close fill-time guard",
+    plain: "The submitted close waits for paper latency and must still have fresh executable market data. A rejected close leaves the trade OPEN for a later retry with new market evidence.",
+    dev: "runtime_close_execution_bridge.submit_runtime_reserved_close() → runtime_close_fill_bridge.fill_runtime_submitted_close(); rejection releases the reservation and prototype_crypto_exit_runtime returns OPEN.",
+  },
+  {
     stage: "FLAT",
     label: "FLAT / BLOTTER",
     owner: "Book of Record",
@@ -431,7 +506,7 @@ const PIPELINE_GATE_BLUEPRINT = [
   },
 ];
 
-function Pipeline({ strategy, discovery, maintenance, floor, operator }) {
+function Pipeline({ strategy, discovery, ingress, maintenance, floor, operator }) {
   const pipe = strategy?.last_result?.pipeline || {};
   const registry = strategy?.last_result?.dynamic_product_registry || {};
   const queue = (seat, state) => floorQueueCount(floor, seat, state);
@@ -452,6 +527,117 @@ function Pipeline({ strategy, discovery, maintenance, floor, operator }) {
     OPEN: Array.isArray(floor?.open_cockpits) ? floor.open_cockpits.length : null,
     FLAT: Array.isArray(operator?.blotter) ? operator.blotter.length : null,
   };
+  const exitRows = Object.values(strategy?.last_result?.exit_results || {});
+  counts.EXIT_REQUESTED = null;
+  counts.CLOSE_RESERVED = null;
+  counts.CLOSE_SUBMITTED = exitRows.length ? exitRows.filter((row) => row?.stage === "CLOSE_SUBMITTED").length : null;
+  const cycleFlat = exitRows.filter((row) => row?.stage === "FLAT").length;
+  if (cycleFlat > 0) counts.FLAT = cycleFlat;
+
+  const catalog = counts.CATALOG;
+  const eligible = providerRows(discovery).reduce((sum, row) => sum + Number(row.eligible_count || 0), 0);
+  const dynamicRows = Object.values(strategy?.last_result?.dynamic_assets || {});
+  const ingressRows = ingress?.last_result?.asset_results || [];
+  const queueRows = floor?.seat_queues || [];
+
+  const gateTelemetry = (stage) => {
+    if (stage === "CATALOG") {
+      return reconcileGate({
+        input: catalog,
+        pass: counts.FOCUS_ADMITTED,
+        wait: Math.max(0, eligible - counts.FOCUS_ADMITTED),
+        reject: Math.max(0, catalog - eligible),
+        exact: catalog >= eligible && eligible >= counts.FOCUS_ADMITTED,
+        reasons: reasonHistogram(providerRows(discovery).filter((row) => row.status !== "online"), () => true),
+      });
+    }
+    if (stage === "ROAMING_SCAN") {
+      return reconcileGate({
+        input: counts.ROAMING_SCAN,
+        pass: counts.MARKET_READY,
+        wait: Number(pipe.market_not_ready || 0),
+        reject: 0,
+        exact: pipe.market_not_ready !== undefined,
+        reasons: reasonHistogram(dynamicRows, (row) => row?.stage === "MARKET_NOT_READY").concat(
+          reasonHistogram(ingressRows, (row) => row?.executable === false)
+        ).slice(0, 6),
+      });
+    }
+    if (stage === "MARKET_READY") {
+      return reconcileGate({
+        input: counts.MARKET_READY,
+        pass: counts.HISTORY_READY,
+        wait: Number(pipe.history_not_ready || 0),
+        reject: 0,
+        exact: pipe.history_not_ready !== undefined,
+        reasons: reasonHistogram(dynamicRows, (row) => row?.stage === "HISTORY_NOT_READY"),
+      });
+    }
+    if (stage === "HISTORY_READY") {
+      return reconcileGate({
+        input: counts.HISTORY_READY,
+        pass: counts.STRATEGY_EVALUATED,
+        wait: 0,
+        reject: 0,
+        fault: Number(pipe.evaluation_error || 0),
+        exact: pipe.evaluation_error !== undefined,
+        reasons: reasonHistogram(dynamicRows, (row) => ["EVALUATION_ERROR", "PIPELINE_ERROR"].includes(row?.stage)),
+      });
+    }
+    if (stage === "STRATEGY_EVALUATED") {
+      const qualified = Number(pipe.watch || 0) + Number(pipe.fire_or_beyond || 0);
+      const noSetup = dynamicRows.filter((row) => row?.stage === "NO_SETUP").length;
+      return reconcileGate({
+        input: counts.STRATEGY_EVALUATED,
+        pass: qualified,
+        wait: 0,
+        reject: noSetup,
+        exact: counts.STRATEGY_EVALUATED === qualified + noSetup,
+        reasons: reasonHistogram(dynamicRows, (row) => row?.stage === "NO_SETUP"),
+      });
+    }
+    if (stage === "OPEN" && exitRows.length) {
+      const pass = exitRows.filter((row) => ["CLOSE_SUBMITTED", "FLAT"].includes(row?.stage)).length;
+      const wait = exitRows.filter((row) => row?.stage === "OPEN").length;
+      return reconcileGate({
+        input: exitRows.length,
+        pass,
+        wait,
+        reject: 0,
+        exact: pass + wait === exitRows.length,
+        reasons: reasonHistogram(exitRows),
+      });
+    }
+    const seatByStage = {
+      WATCH: ["Scout", "WATCH"],
+      FIRE: ["Sniper", "FIRE"],
+      SIZE: ["Risk", "SIZE"],
+      READY: ["Clerk", "READY"],
+      RESERVED: ["Portfolio", "ORDER"],
+    };
+    const seat = seatByStage[stage];
+    if (seat) {
+      const matching = queueRows.filter((row) => row.seat === seat[0] && row.state === seat[1]);
+      return reconcileGate({
+        input: counts[stage],
+        pass: null,
+        wait: matching.reduce((sum, row) => sum + Number(row.count || 0), 0),
+        reject: null,
+        exact: false,
+        reasons: reasonHistogram(matching, (row) => Number(row.blocker_count || 0) > 0),
+      });
+    }
+    return reconcileGate({ input: counts[stage], pass: null, wait: null, reject: null, exact: false, reasons: [] });
+  };
+
+  const telemetryByStage = Object.fromEntries(
+    PIPELINE_GATE_BLUEPRINT.map((item) => [item.stage, gateTelemetry(item.stage)])
+  );
+  const fullCoverage = Object.values(telemetryByStage).filter((row) => row.coverage === "FULL").length;
+  const unexplainedTotal = Object.values(telemetryByStage).reduce(
+    (sum, row) => sum + (row.unexplained === null ? 0 : Number(row.unexplained || 0)),
+    0
+  );
   const m = maintenance?.last_result || {};
   const firstCausal = String(m.first_causal_edge || "").toUpperCase();
 
@@ -477,12 +663,22 @@ function Pipeline({ strategy, discovery, maintenance, floor, operator }) {
         <p className="causalObservation">{text(m.observed, "Maintenance is establishing the healthy-system baseline.")}</p>
       </Section>
 
+      <Section eyebrow="ENGINEERING CONSTRAINTS" title="Runtime facts this map will not hide" className="wide">
+        <div className="constraintGrid">
+          <div><span>Scan scheduler</span><strong>Default batch 4 · configured range 1–20</strong><small>Runtime-selected value is not currently exposed by telemetry.</small></div>
+          <div><span>Crypto regime input</span><strong>btc_kraken_daily still exists in warm-up</strong><small>This is a real code dependency to remove/generalize later, not a UI preference.</small></div>
+          <div><span>Telemetry coverage</span><strong>{fullCoverage}/{PIPELINE_GATE_BLUEPRINT.length} gates fully reconcilable</strong><small>Unknown outcomes stay NOT OBSERVED; the UI does not invent zeroes.</small></div>
+          <div className={unexplainedTotal ? "constraintFault" : ""}><span>Unexplained flow loss</span><strong>{num(unexplainedTotal)}</strong><small>{unexplainedTotal ? "Observed counts do not reconcile at one or more fully measured gates." : "No unexplained loss in fully measured gates."}</small></div>
+        </div>
+      </Section>
+
       <Section eyebrow="FLOW MAP" title="Canonical sandbox lifecycle" className="wide">
         <div className="verticalFlow">
           {PIPELINE_GATE_BLUEPRINT.map((item, index) => {
             const value = counts[item.stage];
             const observed = value !== null && value !== undefined;
             const flagged = firstCausal.includes(item.stage.replaceAll("_", " ")) || firstCausal.includes(item.stage);
+            const gate = telemetryByStage[item.stage];
             return (
               <div className="flowUnit" key={item.stage}>
                 <article className={flagged ? "flowStageV flagged" : "flowStageV"}>
@@ -497,6 +693,7 @@ function Pipeline({ strategy, discovery, maintenance, floor, operator }) {
                     </div>
                     {item.stage === "RESERVED" ? <p className="telemetryNote">Floor currently projects this queue as <code>Portfolio / ORDER</code>; the underlying runtime transition is READY → RESERVED.</p> : null}
                     {item.stage === "SUBMITTED" ? <p className="telemetryNote">The current Floor payload does not expose a dedicated SUBMITTED count, so this map intentionally shows no fabricated number.</p> : null}
+                    {["EXIT_REQUESTED","CLOSE_RESERVED"].includes(item.stage) ? <p className="telemetryNote">This transient close state is enforced in code but is not separately counted in the current Floor payload.</p> : null}
                   </div>
                 </article>
 
@@ -517,6 +714,26 @@ function Pipeline({ strategy, discovery, maintenance, floor, operator }) {
                         <div className="devNote">
                           <span>DEV CODE NOTE</span>
                           <code>{item.dev}</code>
+                        </div>
+                      </div>
+                      <div className="predicateNote">
+                        <span>TRUE CODE PREDICATE</span>
+                        <code>{PIPELINE_TRUE_PREDICATES[item.stage]}</code>
+                      </div>
+                      <div className="gateTelemetry">
+                        <div><span>INPUT</span><strong>{gate.input === null || gate.input === undefined ? "—" : num(gate.input)}</strong></div>
+                        <div><span>PASS</span><strong>{gate.pass === null || gate.pass === undefined ? "—" : num(gate.pass)}</strong></div>
+                        <div><span>WAIT</span><strong>{gate.wait === null || gate.wait === undefined ? "—" : num(gate.wait)}</strong></div>
+                        <div><span>REJECT / NO SETUP</span><strong>{gate.reject === null || gate.reject === undefined ? "—" : num(gate.reject)}</strong></div>
+                        <div><span>FAULT</span><strong>{gate.fault === null || gate.fault === undefined ? "—" : num(gate.fault)}</strong></div>
+                        <div><span>UNEXPLAINED</span><strong className={Number(gate.unexplained || 0) > 0 ? "loss" : ""}>{gate.unexplained === null ? "—" : num(gate.unexplained)}</strong></div>
+                        <div><span>COVERAGE</span><strong>{gate.coverage}</strong></div>
+                        <div><span>RECONCILED</span><strong>{gate.reconciled === null ? "NOT OBSERVED" : gate.reconciled ? "YES" : "NO"}</strong></div>
+                      </div>
+                      <div className="gateReasons">
+                        <span>LIVE REASON DISTRIBUTION</span>
+                        <div>
+                          {gate.reasons.length ? gate.reasons.map((row) => <b key={`${item.stage}:${row.reason}`}><i>{row.count}</i>{row.reason}</b>) : <em>Reason histogram not exposed for this gate.</em>}
                         </div>
                       </div>
                     </article>
@@ -728,7 +945,7 @@ function Settings({ ingress, strategy, discovery, floor, maintenance, onToggle, 
 function AppPage({ active, data, nowMs, onToggle, onRepair, busy, controlError }) {
   const { floor, ingress, strategy, discovery, operator, maintenance } = data;
   if (active === "markets") return <Markets discovery={discovery} ingress={ingress} nowMs={nowMs} />;
-  if (active === "pipeline") return <Pipeline strategy={strategy} discovery={discovery} maintenance={maintenance} floor={floor} operator={operator} />;
+  if (active === "pipeline") return <Pipeline strategy={strategy} discovery={discovery} ingress={ingress} maintenance={maintenance} floor={floor} operator={operator} />;
   if (active === "trading") return <TradingFloor strategy={strategy} />;
   if (active === "positions") return <Positions floor={floor} nowMs={nowMs} />;
   if (active === "blotter") return <Blotter operator={operator} />;

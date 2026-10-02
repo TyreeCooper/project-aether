@@ -131,3 +131,30 @@ def test_pipeline_flow_map_is_vertical_code_bound_and_explains_real_gates() -> N
     assert ".flowStageV" in css
     assert ".flowGateCard" in css
     assert "grid-template-columns:repeat(9" not in css
+
+
+def test_pipeline_flow_map_has_reconciliation_predicates_reasons_and_full_exit_path() -> None:
+    page = (_repo_root() / "frontend" / "app" / "page.js").read_text(encoding="utf-8")
+    css = (_repo_root() / "frontend" / "app" / "globals.css").read_text(encoding="utf-8")
+    for required in (
+        "TRUE CODE PREDICATE",
+        "LIVE REASON DISTRIBUTION",
+        "UNEXPLAINED",
+        "RECONCILED",
+        "NOT OBSERVED",
+        "Flatten Requested",
+        "Close Reserved",
+        "Close Submitted",
+        "finalize_filled_flat()",
+        "Runtime facts this map will not hide",
+        "btc_kraken_daily still exists in warm-up",
+        "Default batch 4",
+        "market_not_ready",
+        "history_not_ready",
+        "evaluation_error",
+    ):
+        assert required in page
+    assert ".gateTelemetry" in css
+    assert ".predicateNote" in css
+    assert ".gateReasons" in css
+    assert ".constraintGrid" in css
