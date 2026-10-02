@@ -514,6 +514,33 @@ def _rotating_dynamic_strategy_batch(
     return (*open_priority, *selected)
 
 
+def _dynamic_flow_telemetry(
+    products: Sequence[ProductRegistryRow],
+    active: Sequence[ProductRegistryRow],
+    *,
+    as_of_utc: datetime,
+    concurrency: int,
+) -> dict[str, object]:
+    """Expose active work without treating concurrency as an eligibility gate."""
+    all_ids = tuple(row.asset_id for row in products)
+    active_ids = tuple(row.asset_id for row in active)
+    active_set = set(active_ids)
+    waiting_ids = tuple(asset_id for asset_id in all_ids if asset_id not in active_set)
+    return {
+        "eligible_asset_count": len(all_ids),
+        "worker_concurrency": concurrency,
+        "active_worker_count": len(active_ids),
+        "active_asset_ids": list(active_ids),
+        "waiting_asset_count": len(waiting_ids),
+        "waiting_asset_ids": list(waiting_ids),
+        "waiting_dependency": "worker_capacity" if waiting_ids else None,
+        "wake_condition": "worker_slot_available" if waiting_ids else None,
+        "queue_observed_at_utc": as_of_utc.astimezone(UTC).isoformat(),
+        "priority_is_allowlist": False,
+        "assets_dropped": 0,
+    }
+
+
 def _coinbase_warmup_cached(
     rows: Sequence[PrototypeMarketBar],
     *,
