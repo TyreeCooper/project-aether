@@ -158,3 +158,14 @@ def test_pipeline_flow_map_has_reconciliation_predicates_reasons_and_full_exit_p
     assert ".predicateNote" in css
     assert ".gateReasons" in css
     assert ".constraintGrid" in css
+
+
+def test_frontend_uses_amber_gold_brand_accent_without_legacy_blue() -> None:
+    css = (_repo_root() / "frontend" / "app" / "globals.css").read_text(encoding="utf-8")
+    assert "--accent:#e7a93b" in css
+    assert "--accent-soft:#f2c14e" in css
+    assert "--accent-deep:#b8741a" in css
+    assert "#5aa9ff" not in css
+    assert "#8fbce7" not in css
+    assert "#a9d2f7" not in css
+    assert "#a9c9e8" not in css
