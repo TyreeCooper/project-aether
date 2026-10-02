@@ -18,8 +18,10 @@ permissions:
   id-token: write
 
 concurrency:
+  # Activation is revision-specific. A stale deployment waiting for approval must
+  # never block the newest green branch head from becoming the approval target.
   group: aether-vnext-activate-paper-prototype
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   activate:
