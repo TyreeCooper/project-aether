@@ -32,7 +32,7 @@ def evaluate_and_persist_clerk_ready(
     exit_plan: ExitPlan | None,
     created_at_utc: datetime,
     event_id: str,
-    cost_edge_multiple: float = 1.25,
+    cost_edge_multiple: float = 1.40,
     holding_days: float = 0.0,
     venue_borrow_rate_annual: float | None = None,
 ) -> tuple[ClerkDecision, dict[str, object]]:
@@ -70,6 +70,7 @@ def evaluate_and_persist_clerk_ready(
         holding_days=holding_days,
         venue_borrow_rate_annual=venue_borrow_rate_annual,
     )
+    quantity_before = float(ticket.quantity)
     result = store.apply_clerk_decision(
         conn,
         ticket_id=ticket_id,
@@ -79,4 +80,15 @@ def evaluate_and_persist_clerk_ready(
         created_at_utc=created_at_utc,
         event_id=event_id,
     )
+    persisted = store.load_ticket(conn, ticket_id=ticket_id)
+    quantity_after = float(persisted.quantity) if persisted is not None and persisted.quantity is not None else None
+    if quantity_after != quantity_before:
+        raise RuntimeError("Clerk cannot alter Risk-sized quantity")
+    result = {
+        **result,
+        "predicate": "expected_edge >= 1.40x modeled_round_trip_cost",
+        "cost_edge_multiple": cost_edge_multiple,
+        "quantity_before_clerk": quantity_before,
+        "quantity_after_clerk": quantity_after,
+    }
     return decision, result

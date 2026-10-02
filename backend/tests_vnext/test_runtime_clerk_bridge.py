@@ -242,3 +242,9 @@ def test_runtime_clerk_bridge_requires_size_ticket_and_current_asset() -> None:
                 created_at_utc=T0,
                 event_id="evt-runtime-clerk-wrong-state",
             )
+
+
+def test_runtime_clerk_default_hurdle_is_frozen_1_40() -> None:
+    import inspect
+    signature = inspect.signature(evaluate_and_persist_clerk_ready)
+    assert signature.parameters["cost_edge_multiple"].default == 1.40
