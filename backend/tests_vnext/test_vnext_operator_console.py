@@ -1,5 +1,6 @@
-import sqlalchemy as sa
 from __future__ import annotations
+
+import sqlalchemy as sa
 
 from pathlib import Path
 
