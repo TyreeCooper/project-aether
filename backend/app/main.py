@@ -27,6 +27,7 @@ from app.paper_exec import (
 )
 from app.universe import public_catalog
 from app.vnext_shadow import mount_configured_vnext_shadow_floor
+from aether_vnext.build_info import load_build_info
 from app.vnext_runtime_mode import (
     configured_vnext_runtime_only,
     validate_vnext_runtime_only_environment,
@@ -236,6 +237,17 @@ async def favicon_svg():
 @app.get("/favicon.ico")
 async def favicon_ico():
     return FileResponse(STATIC / "aether-mark.svg", media_type="image/svg+xml")
+
+
+@app.get("/api/v1/vnext/build")
+async def vnext_build_identity():
+    """Return immutable package identity without opening the vNext database."""
+    return {
+        "ok": True,
+        "paper_only": True,
+        "live_blocked": True,
+        "build": load_build_info(),
+    }
 
 
 @app.get("/api/v1/health")

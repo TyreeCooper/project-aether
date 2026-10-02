@@ -250,25 +250,22 @@ jobs:
           done
           test "$health_ready" = "1"
 
-          # Only after HTTP liveness is proven, require the exact revision from
-          # the canonical Floor. Floor has its own bounded database timeout.
+          # Prove exact package identity through a DB-independent endpoint.
+          # This avoids hammering the heavier Floor while Azure is still warming.
           revision_ready=0
-          for attempt in $(seq 1 24); do
-            code="$(curl --silent --show-error --max-time 20 \
-              -o /tmp/floor.json -w '%{http_code}' \
-              "$base/api/v1/vnext/floor" || true)"
+          for attempt in $(seq 1 12); do
+            code="$(curl --silent --show-error --max-time 10 \
+              -o /tmp/build.json -w '%{http_code}' \
+              "$base/api/v1/vnext/build" || true)"
             if [ "$code" = "200" ] && EXPECTED_SHA="$EXPECTED_SHA" python - <<'PY'
           import json, os, sys
-          body=json.load(open("/tmp/floor.json", encoding="utf-8"))
-          mode=body.get("mode") or {}
+          body=json.load(open("/tmp/build.json", encoding="utf-8"))
           build=body.get("build") or {}
-          paper=body.get("paper_test") or {}
           ok=(
-              mode.get("paper_only") is True
-              and mode.get("live_blocked") is True
+              body.get("ok") is True
+              and body.get("paper_only") is True
+              and body.get("live_blocked") is True
               and build.get("source_revision") == os.environ["EXPECTED_SHA"]
-              and paper.get("epoch_id") == "aether-prototype-new-system-test-001"
-              and paper.get("seed_bank_usd") == 10000.0
           )
           sys.exit(0 if ok else 1)
           PY
@@ -276,8 +273,8 @@ jobs:
               revision_ready=1
               break
             fi
-            echo "Waiting for exact revision $EXPECTED_SHA (attempt $attempt/24, http=$code)"
-            sleep 10
+            echo "Waiting for exact package revision $EXPECTED_SHA (attempt $attempt/12, http=$code)"
+            sleep 5
           done
           test "$revision_ready" = "1"
 
@@ -428,6 +425,37 @@ jobs:
           done
           test "$strategy_ready" = "1"
 
+          # Validate the DB-backed canonical Floor only after runtime workers have
+          # completed at least one healthy cycle. This prevents cold-start probe storms.
+          floor_ready=0
+          for attempt in $(seq 1 6); do
+            code="$(curl --silent --show-error --max-time 20 \
+              -o /tmp/floor.json -w '%{http_code}' \
+              "$base/api/v1/vnext/floor" || true)"
+            if [ "$code" = "200" ] && EXPECTED_SHA="$EXPECTED_SHA" python - <<'PY'
+          import json, os, sys
+          body=json.load(open("/tmp/floor.json", encoding="utf-8"))
+          mode=body.get("mode") or {}
+          build=body.get("build") or {}
+          paper=body.get("paper_test") or {}
+          ok=(
+              mode.get("paper_only") is True
+              and mode.get("live_blocked") is True
+              and build.get("source_revision") == os.environ["EXPECTED_SHA"]
+              and paper.get("epoch_id") == "aether-prototype-new-system-test-001"
+              and paper.get("seed_bank_usd") == 10000.0
+          )
+          sys.exit(0 if ok else 1)
+          PY
+            then
+              floor_ready=1
+              break
+            fi
+            echo "Waiting for canonical Floor after runtime warm-up (attempt $attempt/6, http=$code)"
+            sleep 5
+          done
+          test "$floor_ready" = "1"
+
           ui_ready=0
           for attempt in $(seq 1 12); do
             code="$(curl --silent --show-error --max-time 30 \
@@ -518,7 +546,7 @@ jobs:
             --resource-group "$resource_group" || true
 
           echo "=== Last probe bodies ==="
-          for file in /tmp/health.json /tmp/floor.json /tmp/ingress.json /tmp/discovery.json /tmp/strategy.json; do
+          for file in /tmp/health.json /tmp/build.json /tmp/floor.json /tmp/ingress.json /tmp/discovery.json /tmp/strategy.json; do
             if [ -f "$file" ]; then
               echo "--- $file ---"
               cat "$file"
@@ -532,6 +560,7 @@ jobs:
           name: aether-vnext-autonomous-paper-activation-${{ github.run_id }}
           path: |
             /tmp/health.json
+            /tmp/build.json
             /tmp/ingress.json
             /tmp/strategy.json
             /tmp/floor.json
