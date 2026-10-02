@@ -16,16 +16,28 @@ async function getJson(path) {
   return response.json();
 }
 
-async function postJson(path, body, operatorToken) {
-  const response = await fetch(`${apiBase}${path}`, {
-    method: "POST",
-    cache: "no-store",
-    headers: { "Content-Type": "application/json", "X-Operator-Token": operatorToken },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload?.detail || `${response.status} ${path}`);
-  return payload;
+async function postJson(path, body, operatorToken, timeoutMs = 15000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${apiBase}${path}`, {
+      method: "POST",
+      cache: "no-store",
+      signal: controller.signal,
+      headers: { "Content-Type": "application/json", "X-Operator-Token": operatorToken },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload?.detail || `${response.status} ${path}`);
+    return payload;
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error(`Operation ended after ${Math.round(timeoutMs / 1000)}s without completion.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function text(value, fallback = "—") {
@@ -84,7 +96,7 @@ function tone(value) {
   const v = String(value || "").toUpperCase();
   if (["CLEAR","RUNNING","ONLINE","OPEN","READY","GREEN","ACTIVE"].includes(v)) return "good";
   if (["FAULT","BLOCKED","HALT","REJECT","ERROR","OFFLINE"].includes(v)) return "bad";
-  if (["DEGRADED","WAIT","WATCH","FIRE","STARTING","SYNCING"].includes(v)) return "warn";
+  if (["DEGRADED","WAIT","WATCH","FIRE","STARTING","SYNCING","BUSY","CATCHING_UP","BASELINE_PENDING","RECOVERY","RECOVERY_BEFORE_BASELINE"].includes(v)) return "warn";
   return "neutral";
 }
 
@@ -840,6 +852,8 @@ function Maintenance({ maintenance }) {
       <div className="pageIntro"><div><span className="kicker">SELF-HEALING OPERATIONS</span><h2>Maintenance</h2><p>Expected vs observed system behavior, first-cause diagnosis, incident recurrence and repair evidence.</p></div><Badge value={m.status}>{text(m.status, "SYNCING")}</Badge></div>
       <div className="metricGrid">
         <Metric label="Status" value={text(m.status,"SYNCING")} state={m.status} />
+        <Metric label="Mode" value={text(m.maintenance_mode, "BASELINE PENDING")} state={m.maintenance_mode} />
+        <Metric label="Healthy baseline" value={maintenance?.healthy_baseline_established || m.healthy_baseline_established ? "ESTABLISHED" : "PENDING"} state={maintenance?.healthy_baseline_established || m.healthy_baseline_established ? "GREEN" : "BUSY"} />
         <Metric label="First causal edge" value={text(m.first_causal_edge,"waiting")} />
         <Metric label="Affected" value={num(m.affected_count)} />
         <Metric label="Confidence" value={text(m.confidence)} />
@@ -923,15 +937,15 @@ function Settings({ ingress, strategy, discovery, floor, maintenance, onToggle, 
             </div>
           </div>
           <div className="repairTelemetry">
-            <div><span>Agent</span><strong>{controls.master_enabled===false ? "OFF" : "READY"}</strong></div>
-            <div><span>Auto repair</span><strong>{controls.auto_repair_enabled ? "ON" : "OFF"}</strong></div>
-            <div><span>Level 1</span><strong>{controls.level1_safe_repair_enabled===false ? "OFF" : "ARMED"}</strong></div>
+            <div><span>Agent mode</span><strong>{controls.master_enabled===false ? "OFF" : text(maintenance?.last_result?.maintenance_mode, maintenance?.healthy_baseline_established ? "MAINTAINING" : "BASELINE PENDING")}</strong></div>
+            <div><span>Idle guard</span><strong>{num(maintenance?.idle_timeout_seconds)}s</strong></div>
+            <div><span>Repair deadline</span><strong>{num(maintenance?.repair_timeout_seconds)}s</strong></div>
             <div><span>Last action</span><strong>{text(maintenance?.last_manual_repair?.action, "none")}</strong></div>
           </div>
           {busy ? (
             <div className="repairProgress" role="status">
               <span className="repairProgressBar"><i /></span>
-              <div><strong>Maintenance repair in progress</strong><small>Diagnosing first causal clog → checking authority → applying smallest safe repair → verifying pipeline health.</small></div>
+              <div><strong>Maintenance repair in progress</strong><small>Diagnosing first causal clog → checking authority → applying smallest safe repair. Idle progress is bounded; the run is ended instead of hanging.</small></div>
             </div>
           ) : null}
           <p className="repairNote">Master OFF makes the Maintenance Agent inert. Automatic repair remains separately controllable. Manual repair never enables LIVE or forces a trade.</p>
@@ -1000,7 +1014,13 @@ export default function DashboardPage() {
   const onRepair=async(token)=>{
     setMaintenanceBusy(true); setMaintenanceError("");
     try{
-      const result=await postJson(`${maintenancePath}/repair`,undefined,token);
+      const serverDeadline = Number(data.maintenance?.repair_timeout_seconds || 25);
+      const result=await postJson(
+        `${maintenancePath}/repair`,
+        undefined,
+        token,
+        Math.max(8000, (serverDeadline + 5) * 1000),
+      );
       setData((current)=>({
         ...current,
         maintenance:{

@@ -1,6 +1,12 @@
 from __future__ import annotations
 from pathlib import Path
-from aether_vnext.maintenance_agent import diagnose_pipeline
+from aether_vnext.maintenance_agent import (
+    CONTROL_DEFAULTS,
+    MaintenanceIdleTimeout,
+    PipelineMaintenanceSupervisor,
+    configured_maintenance_idle_timeout_seconds,
+    diagnose_pipeline,
+)
 
 def base(): return {"enabled":True,"running":True,"last_error":None,"paper_only":True,"live_blocked":True}
 
@@ -40,3 +46,91 @@ def test_maintenance_runtime_only_starts_in_sandbox(monkeypatch) -> None:
     assert configured_maintenance_enabled() is False
     monkeypatch.setenv("AETHER_VNEXT_ENVIRONMENT", "sandbox")
     assert configured_maintenance_enabled() is True
+
+
+def test_newer_discovery_snapshot_is_busy_not_false_blocked() -> None:
+    ingress={
+        **base(),
+        "cycle_count":2,
+        "last_cycle_finished_at_utc":"2026-10-02T17:00:00+00:00",
+        "last_result":{"asset_results":[]},
+    }
+    discovery={
+        **base(),
+        "cycle_count":2,
+        "last_cycle_finished_at_utc":"2026-10-02T17:00:20+00:00",
+        "last_result":{"focus_admitted_count":279,"providers":{"Kraken":{"eligible_count":120}}},
+    }
+    strategy={
+        **base(),
+        "cycle_count":1,
+        "last_cycle_finished_at_utc":"2026-10-02T17:00:10+00:00",
+        "last_result":{"pipeline":{"roaming_batch":0}},
+    }
+    d=diagnose_pipeline(ingress=ingress,discovery=discovery,strategy=strategy)
+    assert d["status"]=="BUSY"
+    assert d["primary_reason"]=="awaiting_strategy_sync"
+    assert d["maintenance_mode"]=="CATCHING_UP"
+
+
+def test_healthy_pipeline_is_the_only_maintaining_mode() -> None:
+    ingress={**base(),"last_result":{"asset_results":[]}}
+    discovery={**base(),"last_result":{"focus_admitted_count":10,"providers":{}}}
+    strategy={**base(),"last_result":{"pipeline":{"roaming_batch":4,"market_ready":4,"history_ready":4,"strategy_evaluated":4,"watch":1,"fire_or_beyond":0}}}
+    d=diagnose_pipeline(ingress=ingress,discovery=discovery,strategy=strategy)
+    assert d["status"]=="CLEAR"
+    assert d["healthy_now"] is True
+    assert d["maintenance_mode"]=="MAINTAINING"
+
+
+def test_runtime_binding_diagnosis_uses_runtime_catalog_not_all_provider_focus() -> None:
+    ingress={**base(),"last_result":{"asset_results":[]}}
+    discovery={
+        **base(),
+        "last_result":{
+            "focus_admitted_count":279,
+            "providers":{"Kraken":{"eligible_count":120}},
+        },
+    }
+    strategy={
+        **base(),
+        "last_result":{
+            "dynamic_product_registry":{"status":"synced","received":120,"persisted":118},
+            "dynamic_roam":{"available":118},
+            "pipeline":{"roaming_batch":20,"market_ready":20,"history_ready":20,"strategy_evaluated":20,"watch":0,"fire_or_beyond":0,"evaluation_error":0},
+        },
+    }
+    d=diagnose_pipeline(ingress=ingress,discovery=discovery,strategy=strategy)
+    assert d["status"]=="CLEAR"
+    roaming=next(row for row in d["stages"] if row["stage"]=="ROAMING_SCAN")
+    assert roaming["input"]==118
+    assert roaming["pass"]==20
+
+
+def test_maintenance_idle_timeout_has_bounded_configuration(monkeypatch) -> None:
+    monkeypatch.setenv("AETHER_VNEXT_MAINTENANCE_IDLE_TIMEOUT_SECONDS","15")
+    assert configured_maintenance_idle_timeout_seconds()==15
+    monkeypatch.setenv("AETHER_VNEXT_MAINTENANCE_IDLE_TIMEOUT_SECONDS","2")
+    import pytest
+    with pytest.raises(ValueError,match="3..60"):
+        configured_maintenance_idle_timeout_seconds()
+
+
+async def _never_finishes():
+    import asyncio
+    await asyncio.sleep(1)
+    return {}
+
+
+def test_maintenance_agent_exposes_idle_timeout_type() -> None:
+    exc=MaintenanceIdleTimeout("read_strategy",15)
+    assert exc.phase=="read_strategy"
+    assert "idle deadline" in str(exc)
+
+
+def test_maintenance_supervisor_has_hard_cycle_watchdog_in_source() -> None:
+    source=Path(__file__).resolve().parents[1].joinpath("aether_vnext","maintenance_agent.py").read_text()
+    assert "asyncio.wait_for(" in source
+    assert "maintenance_cycle_timeout" in source
+    assert "MaintenanceIdleTimeout" in source
+    assert "healthy_baseline_established" in source

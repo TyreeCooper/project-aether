@@ -169,3 +169,16 @@ def test_frontend_uses_amber_gold_brand_accent_without_legacy_blue() -> None:
     assert "#8fbce7" not in css
     assert "#a9d2f7" not in css
     assert "#a9c9e8" not in css
+
+
+def test_maintenance_ui_exposes_health_mode_and_bounded_repair_timeout() -> None:
+    page = (_repo_root() / "frontend" / "app" / "page.js").read_text(encoding="utf-8")
+    app = (_repo_root() / "backend" / "app" / "vnext_maintenance.py").read_text(encoding="utf-8")
+    assert "Healthy baseline" in page
+    assert "Idle guard" in page
+    assert "Repair deadline" in page
+    assert "Operation ended after" in page
+    assert "AbortController" in page
+    assert "TIMED_OUT_IDLE" in app
+    assert "TIMED_OUT_TOTAL" in app
+    assert "status_code=504" in app
