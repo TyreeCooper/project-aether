@@ -91,3 +91,15 @@ def test_vnext_frontend_is_static_exported_for_same_origin_azure_mount() -> None
     assert 'process.env.NEXT_PUBLIC_API_BASE || ""' in page
     assert 'Path(__file__).parent / "vnext_ui"' in main
     assert 'app.mount("/vnext", StaticFiles(directory=VNEXT_UI, html=True)' in main
+
+
+def test_maintenance_repair_control_has_commercial_grade_operation_feedback() -> None:
+    page = (_repo_root() / "frontend" / "app" / "page.js").read_text(encoding="utf-8")
+    css = (_repo_root() / "frontend" / "app" / "globals.css").read_text(encoding="utf-8")
+    assert "LAST REPAIR RUN" in page
+    assert "REPAIRING…" in page
+    assert "last_manual_repair" in page
+    assert "Maintenance repair in progress" in page
+    assert ".repairSpinner" in css
+    assert "@keyframes repairSpin" in css
+    assert ".repairProgress" in css

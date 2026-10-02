@@ -495,9 +495,41 @@ function Settings({ ingress, strategy, discovery, floor, maintenance, onToggle, 
             );
           })}
         </div>
-        <div className="repairBar">
-          <button type="button" disabled={!unlocked||busy||controls.master_enabled===false} onClick={()=>onRepair(token)}>RUN SAFE REPAIR NOW</button>
-          <span>Master OFF makes the Maintenance Agent inert. Automatic repair remains separately controllable.</span>
+        <div className="repairConsole">
+          <div className="repairActionRow">
+            <button
+              type="button"
+              className={busy ? "repairButton busy" : "repairButton"}
+              disabled={!unlocked||busy||controls.master_enabled===false}
+              onClick={()=>onRepair(token)}
+              aria-busy={busy}
+            >
+              {busy ? <span className="repairSpinner" aria-hidden="true" /> : <span className="repairPulse" aria-hidden="true" />}
+              <span>{busy ? "REPAIRING…" : "RUN SAFE REPAIR NOW"}</span>
+            </button>
+            <div className="repairTimestamp">
+              <span>LAST REPAIR RUN</span>
+              <strong>{ts(maintenance?.last_manual_repair?.completed_at_utc, "Never")}</strong>
+              <small>
+                {maintenance?.last_manual_repair
+                  ? `${text(maintenance.last_manual_repair.outcome, "NO ACTION")} · ${num(maintenance.last_manual_repair.duration_ms, 0)} ms`
+                  : "No manual repair has run in this worker session."}
+              </small>
+            </div>
+          </div>
+          <div className="repairTelemetry">
+            <div><span>Agent</span><strong>{controls.master_enabled===false ? "OFF" : "READY"}</strong></div>
+            <div><span>Auto repair</span><strong>{controls.auto_repair_enabled ? "ON" : "OFF"}</strong></div>
+            <div><span>Level 1</span><strong>{controls.level1_safe_repair_enabled===false ? "OFF" : "ARMED"}</strong></div>
+            <div><span>Last action</span><strong>{text(maintenance?.last_manual_repair?.action, "none")}</strong></div>
+          </div>
+          {busy ? (
+            <div className="repairProgress" role="status">
+              <span className="repairProgressBar"><i /></span>
+              <div><strong>Maintenance repair in progress</strong><small>Diagnosing first causal clog → checking authority → applying smallest safe repair → verifying pipeline health.</small></div>
+            </div>
+          ) : null}
+          <p className="repairNote">Master OFF makes the Maintenance Agent inert. Automatic repair remains separately controllable. Manual repair never enables LIVE or forces a trade.</p>
         </div>
         {error ? <div className="errorBox">{error}</div> : null}
       </Section>
@@ -564,7 +596,14 @@ export default function DashboardPage() {
     setMaintenanceBusy(true); setMaintenanceError("");
     try{
       const result=await postJson(`${maintenancePath}/repair`,undefined,token);
-      setData((current)=>({...current,maintenance:{...(current.maintenance||{}),last_result:result.result}}));
+      setData((current)=>({
+        ...current,
+        maintenance:{
+          ...(current.maintenance||{}),
+          last_result:result.result,
+          last_manual_repair:result.operation || current.maintenance?.last_manual_repair || null,
+        },
+      }));
     }catch(err){setMaintenanceError(err instanceof Error?err.message:"Maintenance repair failed.");}
     finally{setMaintenanceBusy(false);}
   };

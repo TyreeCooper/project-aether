@@ -300,8 +300,8 @@ jobs:
             code="$(curl --silent --show-error --max-time 30 \
               -o /tmp/index.html -w '%{http_code}' "$base/vnext/" || true)"
             if [ "$code" = "200" ] \
-              && grep -q "Live Strategy Monitor" /tmp/index.html \
-              && grep -q "AUTONOMOUS PAPER ENGINE" /tmp/index.html
+              && grep -q "Command Center" /tmp/index.html \
+              && grep -q "Autonomous Market Operations" /tmp/index.html
             then
               ui_ready=1
               break
