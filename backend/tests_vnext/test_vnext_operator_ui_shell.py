@@ -23,7 +23,7 @@ def test_vnext_ui_restores_familiar_operator_shell_without_legacy_routes() -> No
     assert "PUBLIC REF · DELAYED" in page
     assert "REFERENCE FEED" in page
     assert "FOCUS ADMITTED" in page
-    assert "Focus Intake" in page || "Scout Intake" in page
+    assert "Focus Intake" in page or "Scout Intake" in page
     assert "function pipelineBottleneck" in page
     assert "function DesktopCommandCenter" in page
     assert "function MobileCommandStrip" in page

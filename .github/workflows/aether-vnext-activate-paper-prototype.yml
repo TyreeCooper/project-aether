@@ -176,13 +176,9 @@ jobs:
 
           az webapp config appsettings set             --name "$app"             --resource-group "$rg"             --settings "${settings[@]}" >/dev/null
 
-          # Capture Linux App Service stdout/stderr so a failed cold start is
-          # diagnosable from the same activation run instead of requiring a blind retry.
-          az webapp log config \
-            --name "$app" \
-            --resource-group "$rg" \
-            --docker-container-logging filesystem \
-            --level information >/dev/null || true
+          # Do not mutate App Service logging on every activation. Reconfiguring
+          # filesystem container logging adds required platform mounts during a cold
+          # start and can turn a normal deployment into a mount/startup race.
 
           echo "app_name=$app" >> "$GITHUB_ENV"
           echo "resource_group=$rg" >> "$GITHUB_ENV"
@@ -209,13 +205,6 @@ jobs:
           app-name: aether-vnext-nonprod
           package: backend
 
-      - name: Restart prototype only
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$app_name" = "aether-vnext-nonprod"
-          az webapp restart             --name "$app_name"             --resource-group "$resource_group"
-
       - name: Verify deployed PAPER runtime end to end
         env:
           EXPECTED_SHA: ${{ steps.revision.outputs.source_revision }}
@@ -227,8 +216,8 @@ jobs:
           # Prove the web process independently of the DB-backed Floor.
           # This distinguishes app startup failure from a burn-in DB read stall.
           health_ready=0
-          for attempt in $(seq 1 24); do
-            code="$(curl --silent --show-error --max-time 10 \
+          for attempt in $(seq 1 18); do
+            code="$(curl --silent --show-error --max-time 5 \
               -o /tmp/health.json -w '%{http_code}' \
               "$base/api/v1/health" || true)"
             if [ "$code" = "200" ] && python - <<'PY'
@@ -245,7 +234,7 @@ jobs:
               health_ready=1
               break
             fi
-            echo "Waiting for web health (attempt $attempt/24, http=$code)"
+            echo "Waiting for web health (attempt $attempt/18, http=$code)"
             sleep 5
           done
           test "$health_ready" = "1"
@@ -530,11 +519,12 @@ jobs:
             --query '{startup:appCommandLine,alwaysOn:alwaysOn,linuxFxVersion:linuxFxVersion,http20Enabled:http20Enabled}' \
             -o json
 
-          echo "=== Logging configuration ==="
-          az webapp log show \
+          echo "=== App state after failed activation ==="
+          az webapp show \
             --name "$app_name" \
             --resource-group "$resource_group" \
-            -o json
+            --query '{state:state,availabilityState:availabilityState,host:defaultHostName}' \
+            -o json || true
 
           echo "=== Container startup logs ==="
           az webapp log startup list \
