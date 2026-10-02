@@ -37,7 +37,6 @@ from aether_vnext.prototype_forward_paper_evidence import (
 )
 from aether_vnext.prototype_crypto_warmup import assemble_prototype_crypto_warmup
 from aether_vnext.prototype_history_sources import (
-    CRYPTOCOMPARE_SOURCE_ID,
     KRAKEN_DAILY_SOURCE_ID,
     fetch_kraken_completed_daily,
     fetch_kraken_completed_hourly,
@@ -501,7 +500,7 @@ def _kraken_history_cached(
     hourly_closes = tuple(
         row.bucket_close_utc.astimezone(UTC)
         for row in hourly_rows
-        if row.source_id == CRYPTOCOMPARE_SOURCE_ID
+        if row.source_id == KRAKEN_DAILY_SOURCE_ID
     )
     daily_closes = tuple(
         row.bucket_close_utc.astimezone(UTC)

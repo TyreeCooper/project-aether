@@ -326,7 +326,7 @@ def test_kraken_history_cache_tracks_completed_bar_boundaries() -> None:
     as_of = datetime(2026, 10, 2, 19, 30, tzinfo=timezone.utc)
     hourly = (
         SimpleNamespace(
-            source_id="cryptocompare_kraken_histohour",
+            source_id="kraken_public_rest_ohlc",
             bucket_close_utc=datetime(2026, 10, 2, 19, 0, tzinfo=timezone.utc),
         ),
     )
@@ -340,7 +340,7 @@ def test_kraken_history_cache_tracks_completed_bar_boundaries() -> None:
 
     stale_hourly = (
         SimpleNamespace(
-            source_id="cryptocompare_kraken_histohour",
+            source_id="kraken_public_rest_ohlc",
             bucket_close_utc=datetime(2026, 10, 2, 18, 0, tzinfo=timezone.utc),
         ),
     )
