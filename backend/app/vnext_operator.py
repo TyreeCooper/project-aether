@@ -10,6 +10,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from datetime import date, datetime, timezone
 from decimal import Decimal
 import inspect
+import hashlib
 from typing import Any
 
 import sqlalchemy as sa
@@ -102,8 +103,14 @@ def build_vnext_operator_snapshot(
         else float(epoch["seed_bank_total_usd"])
     )
 
+    refresh_time = as_of_utc.astimezone(UTC).isoformat()
+    snapshot_id = hashlib.sha256(refresh_time.encode("utf-8")).hexdigest()[:24]
+    bound = epoch is not None or bool(ledgers)
     return {
-        "as_of_utc": as_of_utc.astimezone(UTC).isoformat(),
+        "snapshot_id": snapshot_id,
+        "refresh_time_utc": refresh_time,
+        "as_of_utc": refresh_time,
+        "binding_state": "BOUND" if bound else "BASELINE_PENDING",
         "mode": {
             "paper_only": bool(PAPER_ONLY),
             "live_blocked": bool(LIVE_BLOCKED),
@@ -117,23 +124,23 @@ def build_vnext_operator_snapshot(
             "legacy_fallback_allowed": False,
         },
         "paper_test": {
-            "epoch_id": None if epoch is None else str(epoch["epoch_id"]),
+            "epoch_id": None if not bound or epoch is None else str(epoch["epoch_id"]),
             "started_at_utc": (
                 None if epoch_started is None else epoch_started.isoformat()
             ),
-            "seed_bank_usd": seed_bank,
+            "seed_bank_usd": seed_bank if bound else None,
         },
         "bank": {
-            "cash_available_usd": cash_available,
-            "cash_reserved_usd": cash_reserved,
-            "book_cash_usd": cash_available + cash_reserved,
-            "margin_used_usd": margin_used,
-            "margin_available_usd": margin_available,
-            "realized_pnl_usd": realized_pnl,
-            "unrealized_pnl_usd": unrealized_pnl,
-            "fees_accrued_usd": fees,
-            "carry_accrued_usd": carry,
-            "ledger_count": len(ledgers),
+            "cash_available_usd": cash_available if bound else None,
+            "cash_reserved_usd": (cash_reserved) if bound else None,
+            "book_cash_usd": (cash_available + cash_reserved) if bound else None,
+            "margin_used_usd": (margin_used) if bound else None,
+            "margin_available_usd": (margin_available) if bound else None,
+            "realized_pnl_usd": (realized_pnl) if bound else None,
+            "unrealized_pnl_usd": (unrealized_pnl) if bound else None,
+            "fees_accrued_usd": (fees) if bound else None,
+            "carry_accrued_usd": (carry) if bound else None,
+            "ledger_count": len(ledgers) if bound else None,
         },
         "blotter": [_json_safe(row) for row in blotter],
         "activity": [_json_safe(row) for row in event_rows],
