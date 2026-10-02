@@ -25,12 +25,13 @@ def test_phase15_frontend_contains_complete_unified_floor_composition() -> None:
         assert required in page
 
 
-def test_phase15_frontend_exposes_no_mutation_transport() -> None:
+def test_phase15_frontend_mutation_transport_is_limited_to_operator_maintenance_controls() -> None:
     page = (_repo_root() / "frontend" / "app" / "page.js").read_text(
         encoding="utf-8"
     )
+
+    # The original Floor remains free of trading/risk/governor mutation controls.
     for forbidden in (
-        'method: "POST"',
         'method: "PUT"',
         'method: "PATCH"',
         'method: "DELETE"',
@@ -40,6 +41,15 @@ def test_phase15_frontend_exposes_no_mutation_transport() -> None:
         "mutateRoute",
     ):
         assert forbidden not in page
+
+    # POST is now intentionally present only for authenticated Maintenance
+    # controls/repairs. These endpoints cannot create trades or enable LIVE.
+    assert 'method: "POST"' in page
+    assert "/api/v1/vnext/maintenance" in page
+    assert "X-Operator-Token" in page
+    assert "onMaintenanceToggle" in page
+    assert "onMaintenanceRepair" in page
+    assert "RUN SAFE REPAIR NOW" in page
 
 
 def test_phase15_floor_is_responsive_for_desktop_and_mobile() -> None:
