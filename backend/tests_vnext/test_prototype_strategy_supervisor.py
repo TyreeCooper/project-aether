@@ -14,6 +14,7 @@ from aether_vnext.prototype_strategy_supervisor import (
     _partition_observations_for_decision_time,
     _current_dynamic_kraken_products,
     _entry_focus_block,
+    _dynamic_flow_telemetry,
     _focus_priority_asset_ids,
     _rotating_dynamic_strategy_batch,
     _sync_dynamic_kraken_products,
@@ -376,3 +377,20 @@ def test_dynamic_strategy_attention_priority_never_starves_background_catalog() 
 def test_dynamic_strategy_scan_default_is_four(monkeypatch) -> None:
     monkeypatch.delenv("AETHER_VNEXT_DYNAMIC_STRATEGY_SCAN_BATCH_SIZE", raising=False)
     assert configured_dynamic_strategy_scan_batch_size() == 4
+
+
+def test_dynamic_flow_telemetry_keeps_waiting_assets_owned() -> None:
+    products = tuple(_dynamic_product(symbol) for symbol in ("ADA/USD", "DOT/USD", "SOL/USD"))
+    active = products[:2]
+    flow = _dynamic_flow_telemetry(
+        products, active,
+        as_of_utc=datetime(2026, 10, 2, 19, 30, tzinfo=timezone.utc),
+        concurrency=2,
+    )
+    assert flow["eligible_asset_count"] == 3
+    assert flow["active_worker_count"] == 2
+    assert flow["waiting_asset_count"] == 1
+    assert flow["waiting_dependency"] == "worker_capacity"
+    assert flow["wake_condition"] == "worker_slot_available"
+    assert flow["assets_dropped"] == 0
+    assert flow["priority_is_allowlist"] is False
