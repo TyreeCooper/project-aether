@@ -44,15 +44,19 @@ function text(value, fallback = "—") {
   return value === null || value === undefined || value === "" ? fallback : String(value);
 }
 
-function num(value, digits = 0) {
+function isObservedNumber(value) {
+  return value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
+}
+
+function num(value, digits = 0, fallback = "NOT OBSERVED") {
+  if (!isObservedNumber(value)) return fallback;
   const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return "—";
   return parsed.toLocaleString("en-US", { maximumFractionDigits: digits });
 }
 
-function money(value, fallback = "—") {
+function money(value, fallback = "NOT OBSERVED") {
+  if (!isObservedNumber(value)) return fallback;
   const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return fallback;
   const sign = parsed < 0 ? "-$" : "$";
   return sign + Math.abs(parsed).toLocaleString("en-US", {
     minimumFractionDigits: 2,
@@ -95,7 +99,7 @@ function duration(value, nowMs) {
 function tone(value) {
   const v = String(value || "").toUpperCase();
   if (["CLEAR","RUNNING","ONLINE","OPEN","READY","GREEN","ACTIVE"].includes(v)) return "good";
-  if (["FAULT","BLOCKED","HALT","REJECT","ERROR","OFFLINE"].includes(v)) return "bad";
+  if (["FAULT","BLOCKED","HALT","REJECT","ERROR","OFFLINE","STALLED","UNSAFE"].includes(v)) return "bad";
   if (["DEGRADED","WAIT","WATCH","FIRE","STARTING","SYNCING","BUSY","CATCHING_UP","BASELINE_PENDING","RECOVERY","RECOVERY_BEFORE_BASELINE"].includes(v)) return "warn";
   return "neutral";
 }
@@ -172,24 +176,77 @@ function Metric({ label, value, sub, state }) {
   );
 }
 
-function RuntimeStrip({ floor, ingress, strategy, discovery, maintenance }) {
-  const pipeline = maintenance?.last_result?.status || "SYNCING";
+function supervisorState(supervisor, nowMs) {
+  if (!supervisor) return "NOT OBSERVED";
+  if (supervisor.last_error) return "FAULT";
+  if (supervisor.enabled === false) return "OFF";
+  if (supervisor.running !== true) return Number(supervisor.cycle_count || 0) > 0 ? "BLOCKED" : "WAIT";
+  const cycles = Number(supervisor.cycle_count || 0);
+  const started = Date.parse(supervisor.last_cycle_started_at_utc || "");
+  const finished = Date.parse(supervisor.last_cycle_finished_at_utc || "");
+  if (cycles === 0) return "STARTING";
+  if (Number.isFinite(started) && (!Number.isFinite(finished) || started > finished)) return "BUSY";
+  const heartbeat = Number.isFinite(finished) ? finished : started;
+  const intervalMs = isObservedNumber(supervisor.interval_seconds)
+    ? Number(supervisor.interval_seconds) * 1000
+    : 15000;
+  const staleAfterMs = Math.max(90000, intervalMs * 4);
+  if (Number.isFinite(heartbeat) && nowMs - heartbeat > staleAfterMs) return "STALLED";
+  return "ACTIVE";
+}
+
+function pipelineRuntimeState(ingress, discovery, strategy, maintenance, nowMs) {
+  const states = [
+    supervisorState(ingress, nowMs),
+    supervisorState(discovery, nowMs),
+    supervisorState(strategy, nowMs),
+  ];
+  if (states.includes("FAULT")) return "DEGRADED";
+  if (states.includes("STALLED")) return "STALLED";
+  if (states.includes("BLOCKED") || states.includes("OFF")) return "BLOCKED";
+  if (states.some((state) => ["STARTING","BUSY","WAIT"].includes(state))) return "BUSY";
+  if (states.every((state) => state === "ACTIVE")) {
+    const maintenanceState = String(maintenance?.last_result?.status || "").toUpperCase();
+    if (["FAULT","BLOCKED","DEGRADED","STALLED"].includes(maintenanceState)) return "DEGRADED";
+    return "ACTIVE";
+  }
+  return "NOT OBSERVED";
+}
+
+function telemetryWatermark(data) {
+  const stamps = [
+    data.floor?.refresh_time_utc || data.floor?.as_of_utc,
+    data.ingress?.last_cycle_finished_at_utc,
+    data.strategy?.last_cycle_finished_at_utc,
+    data.discovery?.last_cycle_finished_at_utc,
+    data.maintenance?.last_result?.as_of_utc || data.maintenance?.as_of_utc,
+  ].map((value) => Date.parse(value || "")).filter(Number.isFinite);
+  if (stamps.length < 5) return null;
+  return new Date(Math.min(...stamps)).toISOString();
+}
+
+function RuntimeStrip({ floor, ingress, strategy, discovery, maintenance, nowMs }) {
+  const ingressState = supervisorState(ingress, nowMs);
+  const discoveryState = supervisorState(discovery, nowMs);
+  const strategyState = supervisorState(strategy, nowMs);
+  const pipeline = pipelineRuntimeState(ingress, discovery, strategy, maintenance, nowMs);
   return (
     <div className="runtimeStrip">
-      <div><span>BUILD</span><b>{text(floor?.build?.source_revision?.slice(0, 8), "local")}</b></div>
+      <div><span>BUILD</span><b>{text(floor?.build?.source_revision?.slice(0, 8), "NOT OBSERVED")}</b></div>
       <div><span>SNAPSHOT</span><b>{text(floor?.snapshot_id, "NOT OBSERVED")}</b></div>
-      <div><span>REFRESHED</span><b>{ts(floor?.refresh_time_utc || floor?.as_of_utc, "NOT OBSERVED")}</b></div>
-      <div><span>INGRESS</span><Badge value={ingress?.last_error ? "FAULT" : ingress?.running ? "RUNNING" : "WAIT"}>{ingress?.last_error ? "FAULT" : ingress?.running ? "RUNNING" : "WAIT"}</Badge></div>
-      <div><span>DISCOVERY</span><Badge value={discovery?.last_error ? "FAULT" : discovery?.running ? "RUNNING" : "WAIT"}>{discovery?.last_error ? "FAULT" : discovery?.running ? "RUNNING" : "WAIT"}</Badge></div>
-      <div><span>STRATEGY</span><Badge value={strategy?.last_error ? "FAULT" : strategy?.running ? "RUNNING" : "WAIT"}>{strategy?.last_error ? "FAULT" : strategy?.running ? "RUNNING" : "WAIT"}</Badge></div>
+      <div><span>FLOOR REFRESHED</span><b>{ts(floor?.refresh_time_utc || floor?.as_of_utc, "NOT OBSERVED")}</b></div>
+      <div><span>INGRESS</span><Badge value={ingressState}>{ingressState}</Badge></div>
+      <div><span>DISCOVERY</span><Badge value={discoveryState}>{discoveryState}</Badge></div>
+      <div><span>STRATEGY</span><Badge value={strategyState}>{strategyState}</Badge></div>
       <div><span>PIPELINE</span><Badge value={pipeline}>{pipeline}</Badge></div>
     </div>
   );
 }
 
 function CommandCenter({ floor, ingress, strategy, discovery, operator, maintenance, nowMs }) {
-  const universe = floor?.full_universe || [];
-  const positions = floor?.open_cockpits || [];
+  const universe = Array.isArray(floor?.full_universe) ? floor.full_universe : [];
+  const positionsObserved = Array.isArray(floor?.open_cockpits);
+  const positions = positionsObserved ? floor.open_cockpits : [];
   const providers = providerRows(discovery);
   const catalog = observedSum(providers.map((r) => r.catalog_count));
   const eligible = observedSum(providers.map((r) => r.eligible_count));
@@ -209,8 +266,12 @@ function CommandCenter({ floor, ingress, strategy, discovery, operator, maintena
           <p>Provider-wide discovery, pipeline state, strategy activity, risk and self-healing in one command surface.</p>
         </div>
         <div className="heroModes">
-          <Badge value="GREEN">PAPER ACTIVE</Badge>
-          <Badge value="BLOCKED">LIVE BLOCKED</Badge>
+          <Badge value={floor?.mode?.paper_only === true ? "GREEN" : floor?.mode?.paper_only === false ? "UNSAFE" : "NOT OBSERVED"}>
+            {floor?.mode?.paper_only === true ? "PAPER ACTIVE" : floor?.mode?.paper_only === false ? "PAPER UNSAFE" : "PAPER NOT OBSERVED"}
+          </Badge>
+          <Badge value={floor?.mode?.live_blocked === true ? "BLOCKED" : floor?.mode?.live_blocked === false ? "UNSAFE" : "NOT OBSERVED"}>
+            {floor?.mode?.live_blocked === true ? "LIVE BLOCKED" : floor?.mode?.live_blocked === false ? "LIVE NOT BLOCKED" : "LIVE NOT OBSERVED"}
+          </Badge>
           <Badge value={maintenanceState.status || "SYNCING"}>{text(maintenanceState.status, "SYNCING")}</Badge>
         </div>
       </div>
@@ -219,7 +280,7 @@ function CommandCenter({ floor, ingress, strategy, discovery, operator, maintena
         <Metric label="Catalog instruments" value={catalog === null ? "NOT OBSERVED" : num(catalog)} sub="Across connected provider lanes" />
         <Metric label="Focus admitted" value={focus === null ? "NOT OBSERVED" : num(focus)} sub={eligible === null ? "eligibility NOT OBSERVED" : `${num(eligible)} eligible`} />
         <Metric label="Evaluated this cycle" value={pipe.strategy_evaluated === undefined ? "NOT OBSERVED" : num(pipe.strategy_evaluated)} sub={pipe.market_ready === undefined ? "market readiness NOT OBSERVED" : `${num(pipe.market_ready)} market ready`} />
-        <Metric label="Open positions" value={num(positions.length)} sub="PAPER positions" />
+        <Metric label="Open positions" value={positionsObserved ? num(positions.length) : "NOT OBSERVED"} sub="PAPER positions" />
         <Metric label="Book cash" value={money(bank.book_cash_usd, "NOT OBSERVED")} sub={bank.cash_reserved_usd === null || bank.cash_reserved_usd === undefined ? "reserved NOT OBSERVED" : `${money(bank.cash_reserved_usd)} reserved`} />
         <Metric label="Maintenance" value={text(maintenanceState.status, "SYNCING")} sub={text(maintenanceState.primary_reason, "establishing baseline")} state={maintenanceState.status} />
       </div>
@@ -264,9 +325,11 @@ function CommandCenter({ floor, ingress, strategy, discovery, operator, maintena
       </Section>
 
       <Section eyebrow="OPEN RISK" title="Active positions" className="wide">
-        {positions.length ? <div className="positionGrid">
-          {positions.map((row) => <PositionCard row={row} nowMs={nowMs} key={row.position_key} />)}
-        </div> : <div className="empty">No open PAPER positions.</div>}
+        {!positionsObserved
+          ? <div className="empty">Position book NOT OBSERVED.</div>
+          : positions.length
+            ? <div className="positionGrid">{positions.map((row) => <PositionCard row={row} nowMs={nowMs} key={row.position_key} />)}</div>
+            : <div className="empty">No open PAPER positions.</div>}
       </Section>
     </div>
   );
@@ -289,7 +352,7 @@ function Markets({ discovery, ingress, nowMs }) {
           <Section
             eyebrow={row.catalog_mode === "provider_native" ? "NATIVE CATALOG" : "REFERENCE CATALOG"}
             title={row.provider}
-            action={<Badge value={row.status === "online" ? "ONLINE" : "FAULT"}>{String(row.status || "waiting").toUpperCase()}</Badge>}
+            action={<Badge value={row.status === "online" ? "ONLINE" : row.status === "NOT OBSERVED" ? "NOT OBSERVED" : "FAULT"}>{String(row.status || "NOT OBSERVED").toUpperCase()}</Badge>}
             className="wide"
             key={row.provider}
           >
@@ -654,9 +717,10 @@ function Pipeline({ strategy, discovery, ingress, maintenance, floor, operator }
   const telemetryByStage = Object.fromEntries(
     PIPELINE_GATE_BLUEPRINT.map((item) => [item.stage, gateTelemetry(item.stage)])
   );
-  const fullCoverage = Object.values(telemetryByStage).filter((row) => row.coverage === "FULL").length;
+  const fullyReconciled = (row) => row.coverage === "FULL" && row.reconciled === true;
+  const fullCoverage = Object.values(telemetryByStage).filter(fullyReconciled).length;
   const unexplainedTotal = Object.values(telemetryByStage).reduce(
-    (sum, row) => sum + (row.unexplained === null ? 0 : Number(row.unexplained || 0)),
+    (sum, row) => sum + (fullyReconciled(row) ? Number(row.unexplained || 0) : 0),
     0
   );
   const m = maintenance?.last_result || {};
@@ -742,14 +806,20 @@ function Pipeline({ strategy, discovery, ingress, maintenance, floor, operator }
                         <code>{PIPELINE_TRUE_PREDICATES[item.stage]}</code>
                       </div>
                       <div className="gateTelemetry">
-                        <div><span>INPUT</span><strong>{gate.input === null || gate.input === undefined ? "—" : num(gate.input)}</strong></div>
-                        <div><span>PASS</span><strong>{gate.pass === null || gate.pass === undefined ? "—" : num(gate.pass)}</strong></div>
-                        <div><span>WAIT</span><strong>{gate.wait === null || gate.wait === undefined ? "—" : num(gate.wait)}</strong></div>
-                        <div><span>REJECT / NO SETUP</span><strong>{gate.reject === null || gate.reject === undefined ? "—" : num(gate.reject)}</strong></div>
-                        <div><span>FAULT</span><strong>{gate.fault === null || gate.fault === undefined ? "—" : num(gate.fault)}</strong></div>
-                        <div><span>UNEXPLAINED</span><strong className={Number(gate.unexplained || 0) > 0 ? "loss" : ""}>{gate.unexplained === null ? "—" : num(gate.unexplained)}</strong></div>
-                        <div><span>COVERAGE</span><strong>{gate.coverage}</strong></div>
-                        <div><span>RECONCILED</span><strong>{gate.reconciled === null ? "NOT OBSERVED" : gate.reconciled ? "YES" : "NO"}</strong></div>
+                        {(() => {
+                          const reveal = gate.coverage === "FULL" && gate.reconciled === true;
+                          const show = (value) => reveal ? num(value) : "NOT OBSERVED";
+                          return <>
+                            <div><span>INPUT</span><strong>{show(gate.input)}</strong></div>
+                            <div><span>PASS</span><strong>{show(gate.pass)}</strong></div>
+                            <div><span>WAIT</span><strong>{show(gate.wait)}</strong></div>
+                            <div><span>REJECT / NO SETUP</span><strong>{show(gate.reject)}</strong></div>
+                            <div><span>FAULT</span><strong>{show(gate.fault)}</strong></div>
+                            <div><span>UNEXPLAINED</span><strong className={reveal && Number(gate.unexplained || 0) > 0 ? "loss" : ""}>{show(gate.unexplained)}</strong></div>
+                            <div><span>COVERAGE</span><strong>{gate.coverage}</strong></div>
+                            <div><span>RECONCILED</span><strong>{gate.reconciled === null ? "NOT OBSERVED" : gate.reconciled ? "YES" : "NO"}</strong></div>
+                          </>;
+                        })()}
                       </div>
                       <div className="gateReasons">
                         <span>LIVE REASON DISTRIBUTION</span>
@@ -822,23 +892,25 @@ function PositionCard({ row, nowMs }) {
 }
 
 function Positions({ floor, nowMs }) {
-  const rows = floor?.open_cockpits || [];
+  const observed = Array.isArray(floor?.open_cockpits);
+  const rows = observed ? floor.open_cockpits : [];
   return (
     <div className="pageGrid">
       <div className="pageIntro"><div><span className="kicker">OPEN RISK</span><h2>Positions</h2><p>Active PAPER positions remain managed regardless of discovery rank changes.</p></div></div>
-      <Section eyebrow="POSITION BOOK" title={`${rows.length} open`} className="wide">
-        {rows.length ? <div className="positionGrid">{rows.map((row)=><PositionCard row={row} nowMs={nowMs} key={row.position_key} />)}</div> : <div className="empty">No open positions.</div>}
+      <Section eyebrow="POSITION BOOK" title={observed ? `${rows.length} open` : "NOT OBSERVED"} className="wide">
+        {!observed ? <div className="empty">Position book NOT OBSERVED.</div> : rows.length ? <div className="positionGrid">{rows.map((row)=><PositionCard row={row} nowMs={nowMs} key={row.position_key} />)}</div> : <div className="empty">No open positions.</div>}
       </Section>
     </div>
   );
 }
 
 function Blotter({ operator }) {
-  const rows = operator?.blotter || [];
+  const observed = Array.isArray(operator?.blotter);
+  const rows = observed ? operator.blotter : [];
   return (
     <div className="pageGrid">
       <div className="pageIntro"><div><span className="kicker">EXECUTION HISTORY</span><h2>Blotter</h2><p>Completed PAPER round trips with cost and excursion telemetry.</p></div></div>
-      <Section eyebrow="TRADE LEDGER" title={`${rows.length} completed`} className="wide">
+      <Section eyebrow="TRADE LEDGER" title={observed ? `${rows.length} completed` : "NOT OBSERVED"} className="wide">
         <div className="blotterTable">
           <div className="blotterHead"><span>Closed</span><span>Instrument</span><span>Side</span><span>Qty</span><span>Entry</span><span>Exit</span><span>Net</span><span>MFE</span><span>MAE</span><span>Reason</span></div>
           {rows.map((row)=>(
@@ -846,7 +918,7 @@ function Blotter({ operator }) {
               <span>{ts(row.closed_at_utc,"—")}</span><strong>{text(row.asset_id).toUpperCase()}</strong><span>{text(row.side)}</span><span>{num(row.quantity,8)}</span><span>{num(row.avg_entry_price,8)}</span><span>{num(row.exit_price,8)}</span><span className={Number(row.net_pnl_usd)<0?"loss":Number(row.net_pnl_usd)>0?"gain":""}>{money(row.net_pnl_usd)}</span><span>{money(row.mfe_usd)}</span><span>{money(row.mae_usd)}</span><span>{text(row.exit_reason)}</span>
             </div>
           ))}
-          {!rows.length ? <div className="empty">No completed trades in this sandbox session.</div> : null}
+          {!observed ? <div className="empty">Trade ledger NOT OBSERVED.</div> : !rows.length ? <div className="empty">No completed trades in this sandbox session.</div> : null}
         </div>
       </Section>
     </div>
@@ -902,8 +974,8 @@ function Settings({ ingress, strategy, discovery, floor, maintenance, onToggle, 
       <div className="pageIntro"><div><span className="kicker">SYSTEM CONFIGURATION</span><h2>Settings</h2><p>Operational controls only. PAPER execution and LIVE hard block remain locked outside this UI.</p></div></div>
       <Section eyebrow="RUNTIME" title="Sandbox configuration" className="wide">
         <div className="settingsMetrics">
-          <Metric label="Execution" value="PAPER" state="GREEN" sub="Continuous sandbox flow" />
-          <Metric label="Live" value="BLOCKED" state="BLOCKED" sub="Not configurable here" />
+          <Metric label="Execution" value={floor?.mode?.paper_only === true ? "PAPER" : floor?.mode?.paper_only === false ? "UNSAFE" : "NOT OBSERVED"} state={floor?.mode?.paper_only === true ? "GREEN" : floor?.mode?.paper_only === false ? "UNSAFE" : "NOT OBSERVED"} sub="Canonical Floor mode" />
+          <Metric label="Live" value={floor?.mode?.live_blocked === true ? "BLOCKED" : floor?.mode?.live_blocked === false ? "UNSAFE" : "NOT OBSERVED"} state={floor?.mode?.live_blocked === true ? "BLOCKED" : floor?.mode?.live_blocked === false ? "UNSAFE" : "NOT OBSERVED"} sub="Not configurable here" />
           <Metric label="Ingress cadence" value={`${num(ingress?.interval_seconds)}s`} />
           <Metric label="Strategy cadence" value={`${num(strategy?.interval_seconds)}s`} />
           <Metric label="Discovery" value={discovery?.running ? "RUNNING" : "WAIT"} state={discovery?.running ? "GREEN":"WARN"} />
@@ -1043,6 +1115,7 @@ export default function DashboardPage() {
   };
 
   const title = NAV.find(([id])=>id===active)?.[1] || "Command Center";
+  const watermark = telemetryWatermark(data);
   return (
     <main className="appShell">
       <aside className="sidebar">
@@ -1061,12 +1134,12 @@ export default function DashboardPage() {
         <header className="topbar">
           <div><span className="kicker">AETHER / SANDBOX</span><h1>{title}</h1></div>
           <div className="topbarMeta">
-            <span>App restarted {ts(data.floor?.runtime_started_at_utc,"waiting")}</span>
-            <span>Data refreshed {ts(data.floor?.as_of_utc,"waiting")}</span>
+            <span>App restarted {ts(data.floor?.runtime_started_at_utc,"NOT OBSERVED")}</span>
+            <span>Telemetry watermark {ts(watermark,"NOT OBSERVED")}</span>
           </div>
         </header>
 
-        <RuntimeStrip floor={data.floor} ingress={data.ingress} strategy={data.strategy} discovery={data.discovery} maintenance={data.maintenance} />
+        <RuntimeStrip floor={data.floor} ingress={data.ingress} strategy={data.strategy} discovery={data.discovery} maintenance={data.maintenance} nowMs={nowMs} />
 
         {errors.length ? <div className="errorBox"><strong>Telemetry degraded:</strong> {errors.join(", ")} endpoint(s) unavailable. Existing UI state is preserved; no placeholder trade state is invented.</div> : null}
 
