@@ -38,7 +38,7 @@ def test_phase16_bridge_uses_dedicated_vnext_book_and_has_no_legacy_fallback() -
     assert "VNextDatabaseConfig.from_environment()" in bridge
     assert "open_vnext_engine" in bridge
     assert "build_shadow_floor_snapshot" in bridge
-    assert "dedicated_aether_vnext_burnin" in bridge
+    assert "dedicated_aether_vnext_sandbox" in bridge
     assert "desk.floor_snapshot" not in bridge
     assert "engine.start_loop" not in bridge
     assert "legacy_fallback_allowed" in bridge
