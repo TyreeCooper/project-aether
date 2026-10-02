@@ -419,100 +419,23 @@ def _focus_priority_asset_ids(
     )
 
 
-def _rotating_dynamic_strategy_batch(
+def _ordered_dynamic_strategy_work(
     products: Sequence[ProductRegistryRow],
     *,
-    as_of_utc: datetime,
-    interval_seconds: float,
-    batch_size: int,
     priority_asset_ids: Sequence[str] = (),
     attention_asset_ids: Sequence[str] = (),
 ) -> tuple[ProductRegistryRow, ...]:
-    """Choose a bounded slice: OPEN always wins; attention ranks accelerate, never gate."""
-    if as_of_utc.tzinfo is None:
-        raise ValueError("as_of_utc must be timezone-aware")
-    if interval_seconds <= 0:
-        raise ValueError("interval_seconds must be positive")
-    if batch_size < 1:
-        raise ValueError("batch_size must be positive")
-
+    """Order the entire eligible universe; worker concurrency never gates eligibility."""
     rows = tuple(sorted(products, key=lambda row: row.asset_id))
-    if not rows:
-        return ()
-
     by_id = {row.asset_id: row for row in rows}
-    open_priority = tuple(
-        by_id[asset_id]
-        for asset_id in dict.fromkeys(
-            str(value).strip().lower() for value in priority_asset_ids
+    ordered_ids = tuple(dict.fromkeys(
+        (
+            *(str(value).strip().lower() for value in priority_asset_ids),
+            *(str(value).strip().lower() for value in attention_asset_ids),
+            *(row.asset_id for row in rows),
         )
-        if asset_id in by_id
-    )
-    open_ids = {row.asset_id for row in open_priority}
-    remaining = tuple(row for row in rows if row.asset_id not in open_ids)
-    capacity = max(batch_size - len(open_priority), 0)
-    if capacity == 0 or not remaining:
-        return open_priority
-
-    attention_ids = tuple(
-        asset_id
-        for asset_id in dict.fromkeys(
-            str(value).strip().lower() for value in attention_asset_ids
-        )
-        if asset_id in by_id and asset_id not in open_ids
-    )
-    attention_set = set(attention_ids)
-    attention = tuple(
-        by_id[asset_id]
-        for asset_id in attention_ids
-        if asset_id in by_id
-    )
-    background = tuple(
-        row for row in remaining if row.asset_id not in attention_set
-    )
-    slot = int(as_of_utc.timestamp() // interval_seconds)
-
-    def rotate(group: Sequence[ProductRegistryRow], count: int, salt: int) -> tuple[ProductRegistryRow, ...]:
-        rows_ = tuple(group)
-        if count <= 0 or not rows_:
-            return ()
-        take = min(count, len(rows_))
-        start = ((slot + salt) * max(take, 1)) % len(rows_)
-        return tuple(
-            rows_[(start + offset) % len(rows_)]
-            for offset in range(take)
-        )
-
-    if attention and background and capacity == 1:
-        # One-slot configurations still prospect the full universe instead of
-        # permanently starving non-Top-100 products.
-        selected = (
-            rotate(attention, 1, 0)
-            if slot % 2 == 0
-            else rotate(background, 1, 1)
-        )
-        return (*open_priority, *selected)
-
-    if attention and background:
-        attention_capacity = min(
-            len(attention),
-            max(1, (capacity * 3 + 3) // 4),
-        )
-        background_capacity = max(1, capacity - attention_capacity)
-        if attention_capacity + background_capacity > capacity:
-            attention_capacity = max(0, capacity - background_capacity)
-        selected_attention = rotate(attention, attention_capacity, 0)
-        selected_background = rotate(background, background_capacity, 1)
-        selected = (*selected_attention, *selected_background)
-        if len(selected) < capacity:
-            used = {row.asset_id for row in selected}
-            spill = tuple(row for row in remaining if row.asset_id not in used)
-            selected = (*selected, *rotate(spill, capacity - len(selected), 2))
-        return (*open_priority, *selected)
-
-    selected = rotate(attention or background or remaining, capacity, 0)
-    return (*open_priority, *selected)
-
+    ))
+    return tuple(by_id[asset_id] for asset_id in ordered_ids if asset_id in by_id)
 
 def _dynamic_flow_telemetry(
     products: Sequence[ProductRegistryRow],
@@ -721,11 +644,8 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     products,
                     focus_snapshot=focus_snapshot,
                 )
-                batch = _rotating_dynamic_strategy_batch(
+                batch = _ordered_dynamic_strategy_work(
                     products,
-                    as_of_utc=as_of_utc,
-                    interval_seconds=configured_strategy_interval_seconds(),
-                    batch_size=configured_dynamic_strategy_scan_batch_size(),
                     priority_asset_ids=dynamic_open_ids,
                     attention_asset_ids=attention_ids,
                 )
@@ -772,10 +692,10 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
         result["dynamic_product_registry"] = registry_status
         result["dynamic_roam"] = {
             "available": len(dynamic_products),
-            "configured_scan_batch_size": configured_dynamic_strategy_scan_batch_size(),
-            "configured_scan_batch_range": {"minimum": 1, "maximum": 20},
-            "batch_size": len(dynamic_batch),
-            "batch_asset_ids": [row.asset_id for row in dynamic_batch],
+            "worker_concurrency": configured_dynamic_strategy_scan_batch_size(),
+            "configured_worker_concurrency_range": {"minimum": 1, "maximum": 20},
+            "work_candidate_count": len(dynamic_batch),
+            "work_candidate_asset_ids": [row.asset_id for row in dynamic_batch],
             "open_priority_asset_ids": list(dynamic_open_ids),
             "attention_priority_asset_ids": list(dynamic_attention_ids),
             "priority_is_allowlist": False,
@@ -807,6 +727,17 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
             if prepared_dynamic_observations.get(product.asset_id) is not None
         )
         history_tasks = []
+        history_semaphore = asyncio.Semaphore(configured_dynamic_strategy_scan_batch_size())
+
+        async def fetch_bounded(product, *, needs_warmup):
+            async with history_semaphore:
+                return await _fetch_dynamic_strategy_history(
+                    product,
+                    coinbase_products=coinbase_catalog,
+                    end_at_utc=as_of_utc,
+                    fetch_coinbase_warmup=needs_warmup,
+                )
+
         for product in fetchable_products:
             needs_warmup = not dynamic_warmup_cached.get(
                 product.asset_id,
@@ -825,14 +756,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     ),
                 )
                 continue
-            history_tasks.append(
-                _fetch_dynamic_strategy_history(
-                    product,
-                    coinbase_products=coinbase_catalog,
-                    end_at_utc=as_of_utc,
-                    fetch_coinbase_warmup=needs_warmup,
-                )
-            )
+            history_tasks.append(fetch_bounded(product, needs_warmup=needs_warmup))
         if history_tasks:
             histories = await asyncio.gather(*history_tasks)
             history_by_asset.update(
