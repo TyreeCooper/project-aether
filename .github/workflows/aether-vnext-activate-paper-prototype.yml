@@ -159,7 +159,7 @@ jobs:
           settings=(
             AETHER_VNEXT_ENVIRONMENT=sandbox
             AETHER_VNEXT_DATABASE_URL="$DATABASE_URL"
-                         AETHER_VNEXT_KRAKEN_INGRESS_ENABLED=true
+            AETHER_VNEXT_KRAKEN_INGRESS_ENABLED=true
             AETHER_VNEXT_KRAKEN_INGRESS_INTERVAL_SECONDS=15
             AETHER_VNEXT_PROVIDER_DISCOVERY_ENABLED=true
             AETHER_VNEXT_PROVIDER_DISCOVERY_INTERVAL_SECONDS=300
@@ -169,7 +169,7 @@ jobs:
             AETHER_VNEXT_SANDBOX_TRADING_INTERVAL_SECONDS=15
           )
 
-          # Public/reference discovery is intentionally keyless for the prototype.
+          # Public/reference discovery is intentionally keyless in the sandbox.
           # Remove any stale paid-feed key so runtime proof exercises only public sources.
           az webapp config appsettings delete             --name "$app"             --resource-group "$rg"             --setting-names AETHER_MASSIVE_API_KEY >/dev/null 2>&1 || true
 
@@ -187,11 +187,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          values="$(az webapp config appsettings list             --name "$app_name"             --resource-group "$resource_group"             --query "[?name=='AETHER_VNEXT_RUNTIME_ONLY' || name=='AETHER_VNEXT_KRAKEN_INGRESS_ENABLED' || name=='AETHER_VNEXT_PROVIDER_DISCOVERY_ENABLED' || name=='AETHER_VNEXT_SANDBOX_TRADING_ENABLED'].{name:name,value:value}"             -o json)"
+          values="$(az webapp config appsettings list             --name "$app_name"             --resource-group "$resource_group"             --query "[?name=='AETHER_VNEXT_KRAKEN_INGRESS_ENABLED' || name=='AETHER_VNEXT_PROVIDER_DISCOVERY_ENABLED' || name=='AETHER_VNEXT_SANDBOX_TRADING_ENABLED'].{name:name,value:value}"             -o json)"
           python - "$values" <<'PY'
           import json, sys
           rows = {row["name"]: str(row["value"]).lower() for row in json.loads(sys.argv[1])}
-                     assert rows.get("AETHER_VNEXT_KRAKEN_INGRESS_ENABLED") == "true", rows
+          assert rows.get("AETHER_VNEXT_KRAKEN_INGRESS_ENABLED") == "true", rows
           assert rows.get("AETHER_VNEXT_PROVIDER_DISCOVERY_ENABLED") == "true", rows
           assert rows.get("AETHER_VNEXT_SANDBOX_TRADING_ENABLED") == "true", rows
           print(json.dumps(rows, indent=2, sort_keys=True))
