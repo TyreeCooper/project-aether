@@ -355,6 +355,59 @@ def rank_provider_catalog(
     )
 
 
+def eligible_catalog_payload(
+    rows: Iterable[DiscoveryInstrument],
+    *,
+    provider: str,
+) -> list[dict[str, object]]:
+    """Serialize the full eligible provider catalog without turning rank into a gate."""
+    provider_name = str(provider).strip()
+    if not provider_name:
+        raise ValueError("provider is required")
+    eligible = sorted(
+        (
+            row for row in rows
+            if row.provider == provider_name and _eligible(row)
+        ),
+        key=lambda row: (row.market_data_symbol, row.symbol),
+    )
+    return [
+        {
+            "provider": row.provider,
+            "symbol": row.symbol,
+            "market_data_symbol": row.market_data_symbol,
+            "execution_symbol": row.execution_symbol,
+            "asset_class": row.asset_class,
+            "name": row.name,
+            "product_code": row.product_code,
+            "base_currency": row.base_currency,
+            "quote_currency": row.quote_currency,
+            "quantity_step": row.quantity_step,
+            "minimum_quantity": row.minimum_quantity,
+            "minimum_notional": row.minimum_notional,
+            "tick_size": row.tick_size,
+            "price": None if row.price is None else float(row.price),
+            "bid": None if row.bid is None else float(row.bid),
+            "ask": None if row.ask is None else float(row.ask),
+            "change_pct": _change_pct(row),
+            "volume": None if row.volume is None else float(row.volume),
+            "open_interest": (
+                None if row.open_interest is None else float(row.open_interest)
+            ),
+            "spread_bps": _spread_bps(row),
+            "observed_at_utc": (
+                None
+                if row.observed_at_utc is None
+                else row.observed_at_utc.astimezone(UTC).isoformat()
+            ),
+            "source": row.source,
+            "feed_class": row.feed_class,
+            "execution_quality": bool(row.execution_quality),
+        }
+        for row in eligible
+    ]
+
+
 def focus_payload(focus: ProviderFocus) -> dict[str, object]:
     return {
         "provider": focus.provider,

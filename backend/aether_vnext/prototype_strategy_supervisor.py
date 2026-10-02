@@ -304,7 +304,7 @@ def _sync_dynamic_kraken_products(
     providers = focus_snapshot.get("providers") or {}
     kraken = providers.get("Kraken") if isinstance(providers, dict) else None
     rows = (
-        kraken.get("top100") or []
+        (kraken.get("eligible_catalog") or kraken.get("top100") or [])
         if isinstance(kraken, dict)
         else []
     )
@@ -354,12 +354,12 @@ def _sync_dynamic_kraken_products(
 def configured_dynamic_strategy_scan_batch_size() -> int:
     raw = os.getenv(
         "AETHER_VNEXT_DYNAMIC_STRATEGY_SCAN_BATCH_SIZE",
-        "4",
+        "20",
     ).strip()
     value = int(raw)
-    if value < 1 or value > 20:
+    if value < 1 or value > 100:
         raise ValueError(
-            "AETHER_VNEXT_DYNAMIC_STRATEGY_SCAN_BATCH_SIZE must be between 1 and 20"
+            "AETHER_VNEXT_DYNAMIC_STRATEGY_SCAN_BATCH_SIZE must be between 1 and 100"
         )
     return value
 
@@ -370,27 +370,8 @@ def _current_dynamic_kraken_products(
     focus_snapshot: Mapping[str, object] | None,
     include_asset_ids: Sequence[str] = (),
 ) -> tuple[ProductRegistryRow, ...]:
-    """Return verified dynamic Kraken products in focus plus any OPEN assets."""
-    providers = (
-        focus_snapshot.get("providers")
-        if isinstance(focus_snapshot, Mapping)
-        else None
-    )
-    kraken = providers.get("Kraken") if isinstance(providers, Mapping) else None
-    focus_rows = kraken.get("top100") if isinstance(kraken, Mapping) else None
-    focused_symbols = {
-        str(row.get("execution_symbol") or "").strip()
-        for row in (focus_rows or ())
-        if isinstance(row, Mapping)
-        and str(row.get("execution_symbol") or "").strip()
-    }
-
-    include_ids = {
-        str(value).strip().lower()
-        for value in include_asset_ids
-        if str(value).strip()
-    }
-
+    """Return every commissioned compatible Kraken product; focus never gates it."""
+    _ = (focus_snapshot, include_asset_ids)
     products: list[ProductRegistryRow] = []
     for state in states:
         product = state.get("product")
@@ -399,11 +380,7 @@ def _current_dynamic_kraken_products(
         asset_id = str(product.asset_id).strip().lower()
         if asset_id in SEED_REGISTRY:
             continue
-        symbol = str(product.broker_symbol or "").strip()
-        if not symbol or (
-            symbol not in focused_symbols
-            and asset_id not in include_ids
-        ):
+        if not str(product.broker_symbol or "").strip():
             continue
         try:
             runtime_playbook_for_product(
@@ -416,6 +393,32 @@ def _current_dynamic_kraken_products(
     return tuple(sorted(products, key=lambda row: row.asset_id))
 
 
+def _focus_priority_asset_ids(
+    products: Sequence[ProductRegistryRow],
+    *,
+    focus_snapshot: Mapping[str, object] | None,
+) -> tuple[str, ...]:
+    """Map Kraken Top-100 attention rank to commissioned asset IDs only."""
+    providers = (
+        focus_snapshot.get("providers")
+        if isinstance(focus_snapshot, Mapping)
+        else None
+    )
+    kraken = providers.get("Kraken") if isinstance(providers, Mapping) else None
+    rows = kraken.get("top100") if isinstance(kraken, Mapping) else None
+    by_symbol = {
+        str(row.broker_symbol or "").strip(): row.asset_id
+        for row in products
+        if str(row.broker_symbol or "").strip()
+    }
+    return tuple(
+        by_symbol[symbol]
+        for raw in (rows or ())
+        if isinstance(raw, Mapping)
+        and (symbol := str(raw.get("execution_symbol") or "").strip()) in by_symbol
+    )
+
+
 def _rotating_dynamic_strategy_batch(
     products: Sequence[ProductRegistryRow],
     *,
@@ -423,8 +426,9 @@ def _rotating_dynamic_strategy_batch(
     interval_seconds: float,
     batch_size: int,
     priority_asset_ids: Sequence[str] = (),
+    attention_asset_ids: Sequence[str] = (),
 ) -> tuple[ProductRegistryRow, ...]:
-    """Choose a bounded deterministic slice while always including OPEN assets."""
+    """Choose a bounded slice: OPEN always wins; attention ranks accelerate, never gate."""
     if as_of_utc.tzinfo is None:
         raise ValueError("as_of_utc must be timezone-aware")
     if interval_seconds <= 0:
@@ -437,28 +441,77 @@ def _rotating_dynamic_strategy_batch(
         return ()
 
     by_id = {row.asset_id: row for row in rows}
-    priority = tuple(
+    open_priority = tuple(
         by_id[asset_id]
         for asset_id in dict.fromkeys(
             str(value).strip().lower() for value in priority_asset_ids
         )
         if asset_id in by_id
     )
-    remaining = tuple(
-        row for row in rows
-        if row.asset_id not in {item.asset_id for item in priority}
-    )
-    capacity = max(batch_size - len(priority), 0)
+    open_ids = {row.asset_id for row in open_priority}
+    remaining = tuple(row for row in rows if row.asset_id not in open_ids)
+    capacity = max(batch_size - len(open_priority), 0)
     if capacity == 0 or not remaining:
-        return priority
+        return open_priority
 
-    slot = int(as_of_utc.timestamp() // interval_seconds)
-    start = (slot * capacity) % len(remaining)
-    selected = tuple(
-        remaining[(start + offset) % len(remaining)]
-        for offset in range(min(capacity, len(remaining)))
+    attention_ids = tuple(
+        asset_id
+        for asset_id in dict.fromkeys(
+            str(value).strip().lower() for value in attention_asset_ids
+        )
+        if asset_id in by_id and asset_id not in open_ids
     )
-    return (*priority, *selected)
+    attention_set = set(attention_ids)
+    attention = tuple(
+        by_id[asset_id]
+        for asset_id in attention_ids
+        if asset_id in by_id
+    )
+    background = tuple(
+        row for row in remaining if row.asset_id not in attention_set
+    )
+    slot = int(as_of_utc.timestamp() // interval_seconds)
+
+    def rotate(group: Sequence[ProductRegistryRow], count: int, salt: int) -> tuple[ProductRegistryRow, ...]:
+        rows_ = tuple(group)
+        if count <= 0 or not rows_:
+            return ()
+        take = min(count, len(rows_))
+        start = ((slot + salt) * max(take, 1)) % len(rows_)
+        return tuple(
+            rows_[(start + offset) % len(rows_)]
+            for offset in range(take)
+        )
+
+    if attention and background and capacity == 1:
+        # One-slot configurations still prospect the full universe instead of
+        # permanently starving non-Top-100 products.
+        selected = (
+            rotate(attention, 1, 0)
+            if slot % 2 == 0
+            else rotate(background, 1, 1)
+        )
+        return (*open_priority, *selected)
+
+    if attention and background:
+        attention_capacity = min(
+            len(attention),
+            max(1, (capacity * 3 + 3) // 4),
+        )
+        background_capacity = max(1, capacity - attention_capacity)
+        if attention_capacity + background_capacity > capacity:
+            attention_capacity = max(0, capacity - background_capacity)
+        selected_attention = rotate(attention, attention_capacity, 0)
+        selected_background = rotate(background, background_capacity, 1)
+        selected = (*selected_attention, *selected_background)
+        if len(selected) < capacity:
+            used = {row.asset_id for row in selected}
+            spill = tuple(row for row in remaining if row.asset_id not in used)
+            selected = (*selected, *rotate(spill, capacity - len(selected), 2))
+        return (*open_priority, *selected)
+
+    selected = rotate(attention or background or remaining, capacity, 0)
+    return (*open_priority, *selected)
 
 
 def _coinbase_warmup_cached(
@@ -637,12 +690,17 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     focus_snapshot=focus_snapshot,
                     include_asset_ids=dynamic_open_ids,
                 )
+                attention_ids = _focus_priority_asset_ids(
+                    products,
+                    focus_snapshot=focus_snapshot,
+                )
                 batch = _rotating_dynamic_strategy_batch(
                     products,
                     as_of_utc=as_of_utc,
                     interval_seconds=configured_strategy_interval_seconds(),
                     batch_size=configured_dynamic_strategy_scan_batch_size(),
                     priority_asset_ids=dynamic_open_ids,
+                    attention_asset_ids=attention_ids,
                 )
                 market_ready = {
                     product.asset_id: _latest_observation(
@@ -671,6 +729,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     dynamic_open_ids,
                     market_ready,
                     warmup_cached,
+                    attention_ids,
                 )
 
             (
@@ -680,6 +739,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                 dynamic_open_ids,
                 prepared_dynamic_observations,
                 dynamic_warmup_cached,
+                dynamic_attention_ids,
             ) = await connection.run_sync(prepare)
 
         result["dynamic_product_registry"] = registry_status
@@ -688,6 +748,8 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
             "batch_size": len(dynamic_batch),
             "batch_asset_ids": [row.asset_id for row in dynamic_batch],
             "open_priority_asset_ids": list(dynamic_open_ids),
+            "attention_priority_asset_ids": list(dynamic_attention_ids),
+            "priority_is_allowlist": False,
         }
 
         # Resolve a real cross-venue warm-up product once per cycle. A catalog

@@ -23,6 +23,7 @@ from aether_vnext.public_reference_discovery import (
 from aether_vnext.provider_discovery import (
     FOCUS_LIMIT,
     DiscoveryInstrument,
+    eligible_catalog_payload,
     focus_payload,
     rank_provider_catalog,
 )
@@ -204,6 +205,13 @@ def build_provider_focus_snapshot(
 
         focus = rank_provider_catalog(rows, provider=provider, limit=FOCUS_LIMIT)
         payload = focus_payload(focus)
+        if provider == "Kraken":
+            # The entire eligible Kraken catalog remains commissionable. Top 100 is
+            # scheduling priority only and must never become a trading allowlist.
+            payload["eligible_catalog"] = eligible_catalog_payload(
+                rows,
+                provider=provider,
+            )
         payload["status"] = "online"
         payload["reason"] = None
         payload["catalog_mode"] = (

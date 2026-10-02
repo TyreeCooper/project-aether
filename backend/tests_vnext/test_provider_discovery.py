@@ -15,6 +15,7 @@ from aether_vnext.massive_discovery import (
 from aether_vnext.provider_discovery import (
     DiscoveryInstrument,
     _percentile_scores,
+    eligible_catalog_payload,
     focus_payload,
     rank_provider_catalog,
 )
@@ -441,3 +442,35 @@ def test_kraken_discovery_carries_assetpairs_product_math() -> None:
     assert item.tick_size == 0.0001
     assert item.bid == 149.99
     assert item.ask == 150.01
+
+
+def test_kraken_full_eligible_catalog_remains_available_beyond_top100() -> None:
+    rows = tuple(
+        DiscoveryInstrument(
+            provider="Kraken",
+            symbol=f"K{i:03d}/USD",
+            market_data_symbol=f"K{i:03d}/USD",
+            execution_symbol=f"K{i:03d}USD",
+            asset_class="spot_crypto",
+            base_currency=f"K{i:03d}",
+            quote_currency="USD",
+            quantity_step=0.001,
+            minimum_quantity=0.01,
+            minimum_notional=0.5,
+            tick_size=0.0001,
+            price=10.0 + i,
+            open_price=10.0,
+            volume=1000.0 + i,
+            bid=9.99 + i,
+            ask=10.01 + i,
+            observed_at_utc=NOW,
+            source="test",
+            feed_class="NATIVE_PUBLIC",
+        )
+        for i in range(135)
+    )
+    focus = rank_provider_catalog(rows, provider="Kraken")
+    assert len(focus.top100) == 100
+    eligible = eligible_catalog_payload(rows, provider="Kraken")
+    assert len(eligible) == 135
+    assert {row["execution_symbol"] for row in eligible} >= {"K000USD", "K134USD"}

@@ -14,6 +14,7 @@ from aether_vnext.prototype_strategy_supervisor import (
     _partition_observations_for_decision_time,
     _current_dynamic_kraken_products,
     _entry_focus_block,
+    _focus_priority_asset_ids,
     _rotating_dynamic_strategy_batch,
     _sync_dynamic_kraken_products,
     configured_dynamic_strategy_scan_batch_size,
@@ -251,12 +252,12 @@ def _dynamic_product(symbol: str):
 def test_dynamic_strategy_scan_batch_size_is_bounded(monkeypatch) -> None:
     monkeypatch.setenv("AETHER_VNEXT_DYNAMIC_STRATEGY_SCAN_BATCH_SIZE", "4")
     assert configured_dynamic_strategy_scan_batch_size() == 4
-    monkeypatch.setenv("AETHER_VNEXT_DYNAMIC_STRATEGY_SCAN_BATCH_SIZE", "21")
-    with pytest.raises(ValueError, match="between 1 and 20"):
+    monkeypatch.setenv("AETHER_VNEXT_DYNAMIC_STRATEGY_SCAN_BATCH_SIZE", "101")
+    with pytest.raises(ValueError, match="between 1 and 100"):
         configured_dynamic_strategy_scan_batch_size()
 
 
-def test_current_dynamic_products_require_current_focus_and_runtime_compatibility() -> None:
+def test_current_dynamic_products_are_not_hard_gated_by_top100_focus() -> None:
     sol = _dynamic_product("SOL/USD")
     ada = _dynamic_product("ADA/USD")
     states = ({"product": sol}, {"product": ada})
@@ -273,15 +274,11 @@ def test_current_dynamic_products_require_current_focus_and_runtime_compatibilit
         states,
         focus_snapshot=focus,
     )
-    assert tuple(row.asset_id for row in rows) == ("kraken:solusd",)
-
-    rows_with_open = _current_dynamic_kraken_products(
-        states,
-        focus_snapshot=focus,
-        include_asset_ids=("kraken:adausd",),
-    )
-    assert tuple(row.asset_id for row in rows_with_open) == (
+    assert tuple(row.asset_id for row in rows) == (
         "kraken:adausd",
+        "kraken:solusd",
+    )
+    assert _focus_priority_asset_ids(rows, focus_snapshot=focus) == (
         "kraken:solusd",
     )
 
@@ -351,3 +348,31 @@ def test_coinbase_warmup_cache_requires_full_reference_window() -> None:
         SimpleNamespace(source_id="kraken_public_rest_ohlc"),
     )
     assert _coinbase_warmup_cached(mixed) is False
+
+
+def test_dynamic_strategy_attention_priority_never_starves_background_catalog() -> None:
+    products = tuple(
+        _dynamic_product(symbol)
+        for symbol in ("ADA/USD", "AVAX/USD", "DOT/USD", "LINK/USD", "SOL/USD", "XRP/USD")
+    )
+    selected = _rotating_dynamic_strategy_batch(
+        products,
+        as_of_utc=datetime(2026, 10, 1, 22, 0, tzinfo=timezone.utc),
+        interval_seconds=15.0,
+        batch_size=4,
+        attention_asset_ids=(
+            "kraken:solusd",
+            "kraken:adausd",
+            "kraken:avaxusd",
+            "kraken:dotusd",
+        ),
+    )
+    selected_ids = {row.asset_id for row in selected}
+    assert len(selected) == 4
+    assert selected_ids & {"kraken:solusd", "kraken:adausd", "kraken:avaxusd", "kraken:dotusd"}
+    assert selected_ids & {"kraken:linkusd", "kraken:xrpusd"}
+
+
+def test_dynamic_strategy_scan_default_is_twenty(monkeypatch) -> None:
+    monkeypatch.delenv("AETHER_VNEXT_DYNAMIC_STRATEGY_SCAN_BATCH_SIZE", raising=False)
+    assert configured_dynamic_strategy_scan_batch_size() == 20
