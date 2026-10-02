@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import sqlalchemy as sa
-
+from datetime import datetime, timezone
 from pathlib import Path
 
+import sqlalchemy as sa
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.vnext_operator import create_vnext_operator_router
+from app.vnext_operator import build_vnext_operator_snapshot, create_vnext_operator_router
 
 
 def _snapshot() -> dict[str, object]:
