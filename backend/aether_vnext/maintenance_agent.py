@@ -650,6 +650,36 @@ async def record_incident(
             await conn.run_sync(write)
 
 
+async def close_cleared_incidents(diagnosis: Mapping[str, object]) -> int:
+    """Persist incident closure when a later observed cycle clears the causal edge."""
+    if diagnosis.get("status") not in {"CLEAR", "BUSY"}:
+        return 0
+    now = datetime.now(UTC)
+    store = VNextStore()
+    async with open_vnext_engine() as engine:
+        async with engine.begin() as conn:
+            def write(sync_conn):
+                table = store.tables["maintenance_incidents"]
+                rows = tuple(sync_conn.execute(sa.select(table).where(table.c.resolved.is_(False))).mappings())
+                closed = 0
+                for row in rows:
+                    prior = dict(row.get("diagnosis") or {})
+                    edge = str(prior.get("first_causal_edge") or row["stage"])
+                    reason = str(prior.get("primary_reason") or row["reason"])
+                    closure = {
+                        "closed_at_utc": now.isoformat(),
+                        "later_status": diagnosis.get("status"),
+                        "later_edge": diagnosis.get("first_causal_edge"),
+                        "later_reason": diagnosis.get("primary_reason"),
+                        "result": "EDGE_CLEARED",
+                    }
+                    repair = {**dict(row.get("repair") or {}), "closure": closure}
+                    sync_conn.execute(table.update().where(table.c.incident_id == row["incident_id"]).values(resolved=True, repair=repair, last_seen_at_utc=now))
+                    closed += 1
+                return closed
+            return await conn.run_sync(write)
+
+
 async def incident_history(limit: int = 20) -> list[dict[str, object]]:
     store = VNextStore()
     async with open_vnext_engine() as engine:
@@ -839,6 +869,7 @@ class PipelineMaintenanceSupervisor:
 
                 if diagnosis.get("status") == "CLEAR":
                     self._healthy_baseline = True
+                    await self._step(close_cleared_incidents(diagnosis), "close_cleared_incidents")
 
                 diagnosis["healthy_baseline_established"] = (
                     self._healthy_baseline

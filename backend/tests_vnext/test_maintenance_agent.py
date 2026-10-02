@@ -172,3 +172,14 @@ def test_maintenance_supervisor_has_hard_cycle_watchdog_in_source() -> None:
     assert "maintenance_cycle_timeout" in source
     assert "MaintenanceIdleTimeout" in source
     assert "healthy_baseline_established" in source
+
+
+def test_clear_diagnosis_keeps_maintenance_semantics() -> None:
+    result = diagnose_pipeline(
+        ingress={"enabled": True, "running": True, "cycle_count": 2, "last_result": {"asset_results": []}},
+        discovery={"enabled": True, "running": True, "cycle_count": 2, "last_result": {}},
+        strategy={"enabled": True, "running": True, "cycle_count": 2, "last_result": {"pipeline": {"strategy_evaluated": 1, "watch": 0}}},
+    )
+    assert result["status"] == "CLEAR"
+    assert result["maintenance_mode"] == "MAINTAINING"
+    assert result["primary_reason"] == "no_natural_setup"
