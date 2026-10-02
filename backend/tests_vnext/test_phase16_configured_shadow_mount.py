@@ -54,7 +54,7 @@ def test_configured_shadow_mount_fails_closed_without_vnext_database(monkeypatch
 
     response = client.get("/api/v1/vnext/floor")
     assert response.status_code == 503
-    assert "dedicated burn-in database configuration" in response.json()["detail"]
+    assert "dedicated sandbox database configuration" in response.json()["detail"]
 
     for method in ("post", "put", "patch", "delete"):
         assert getattr(client, method)("/api/v1/vnext/floor").status_code == 405
@@ -82,7 +82,7 @@ def test_configured_shadow_floor_times_out_as_503(monkeypatch) -> None:
     from fastapi import HTTPException
     from app import vnext_shadow
 
-    monkeypatch.setenv("AETHER_VNEXT_ENVIRONMENT", "burnin")
+    monkeypatch.setenv("AETHER_VNEXT_ENVIRONMENT", "sandbox")
     monkeypatch.setenv(
         "AETHER_VNEXT_DATABASE_URL",
         "postgresql+asyncpg://user:pass@example.invalid/aether",

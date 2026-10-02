@@ -19,8 +19,9 @@ from aether_vnext.kraken_ingress_supervisor import (
 from aether_vnext.market_data import RawQuote
 
 
-def test_ingress_is_disabled_by_default(monkeypatch) -> None:
+def test_ingress_is_enabled_by_default_in_sandbox(monkeypatch) -> None:
     monkeypatch.setenv("AETHER_VNEXT_ENVIRONMENT", "sandbox")
+    monkeypatch.setenv("AETHER_VNEXT_DATABASE_URL", "postgresql://user:pass@example.invalid/aether")
     monkeypatch.delenv("AETHER_VNEXT_KRAKEN_INGRESS_ENABLED", raising=False)
     assert configured_ingress_enabled() is True
     validate_configured_ingress_environment()

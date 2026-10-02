@@ -1,6 +1,6 @@
 """Phase-16 shadow mount bridge for the vNext Unified Firm Floor.
 
-The shadow route reads only from the dedicated vNext burn-in PostgreSQL target.
+The shadow route reads only from the dedicated vNext sandbox PostgreSQL target.
 If that target is not explicitly configured or cannot be read, the route fails
 closed with HTTP 503. It never substitutes legacy desk state and never starts a
 second trading runtime.
@@ -41,14 +41,14 @@ def mount_vnext_shadow_floor(
 
 
 async def load_configured_vnext_shadow_snapshot() -> UnifiedFirmFloorSnapshot:
-    """Read one Floor snapshot from the dedicated isolated vNext burn-in book."""
+    """Read one Floor snapshot from the dedicated isolated vNext sandbox book."""
     try:
         config = VNextDatabaseConfig.from_environment()
     except ValueError as exc:
         raise HTTPException(
             status_code=503,
             detail=(
-                "vNext shadow Floor unavailable: dedicated burn-in database "
+                "vNext shadow Floor unavailable: dedicated sandbox database "
                 "configuration is not valid"
             ),
         ) from exc
@@ -73,7 +73,7 @@ async def load_configured_vnext_shadow_snapshot() -> UnifiedFirmFloorSnapshot:
         raise HTTPException(
             status_code=503,
             detail=(
-                "vNext shadow Floor unavailable: dedicated burn-in database "
+                "vNext shadow Floor unavailable: dedicated sandbox database "
                 "read timed out"
             ),
         ) from exc
@@ -81,7 +81,7 @@ async def load_configured_vnext_shadow_snapshot() -> UnifiedFirmFloorSnapshot:
         raise HTTPException(
             status_code=503,
             detail=(
-                "vNext shadow Floor unavailable: dedicated burn-in book "
+                "vNext shadow Floor unavailable: dedicated sandbox book "
                 "could not be read"
             ),
         ) from exc
@@ -106,6 +106,6 @@ def shadow_floor_contract() -> dict[str, object]:
         "paper_only": True,
         "live_blocked": True,
         "legacy_fallback_allowed": False,
-        "database_source": "dedicated_aether_vnext_burnin",
+        "database_source": "dedicated_aether_vnext_sandbox",
         "mutation_methods": (),
     }

@@ -22,7 +22,7 @@ UTC = timezone.utc
 NOW = datetime(2026, 9, 27, 0, 10, tzinfo=UTC)
 
 
-def test_vnext_database_config_requires_dedicated_burnin_environment(
+def test_vnext_database_config_requires_dedicated_sandbox_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("DATABASE_URL", "postgresql://legacy/production")
@@ -35,14 +35,14 @@ def test_vnext_database_config_requires_dedicated_burnin_environment(
         "AETHER_VNEXT_AZURE_POSTGRESQL_CONNECTIONSTRING",
         raising=False,
     )
-    monkeypatch.setenv("AETHER_VNEXT_ENVIRONMENT", "burnin")
+    monkeypatch.setenv("AETHER_VNEXT_ENVIRONMENT", "sandbox")
 
     with pytest.raises(ValueError, match="exactly one dedicated"):
         VNextDatabaseConfig.from_environment()
 
 
-def test_vnext_database_config_rejects_non_burnin_environment() -> None:
-    with pytest.raises(ValueError, match="isolated 'burnin'"):
+def test_vnext_database_config_rejects_non_sandbox_environment() -> None:
+    with pytest.raises(ValueError, match="'sandbox'"):
         VNextDatabaseConfig(
             environment="production",
             database_url="postgresql://example/vnext",
@@ -52,7 +52,7 @@ def test_vnext_database_config_rejects_non_burnin_environment() -> None:
 def test_vnext_database_config_rejects_ambiguous_connection_sources() -> None:
     with pytest.raises(ValueError, match="exactly one dedicated"):
         VNextDatabaseConfig(
-            environment="burnin",
+            environment="sandbox",
             database_url="postgresql://example/vnext",
             azure_connection_string="host=x dbname=y user=z",
         )

@@ -25,6 +25,7 @@ from aether_vnext.prototype_strategy_supervisor import (
 
 def test_strategy_enabled_by_default_in_sandbox(monkeypatch) -> None:
     monkeypatch.setenv("AETHER_VNEXT_ENVIRONMENT", "sandbox")
+    monkeypatch.setenv("AETHER_VNEXT_DATABASE_URL", "postgresql://user:pass@example.invalid/aether")
     monkeypatch.delenv("AETHER_VNEXT_SANDBOX_TRADING_ENABLED", raising=False)
     assert configured_strategy_enabled() is True
     validate_configured_strategy_environment()

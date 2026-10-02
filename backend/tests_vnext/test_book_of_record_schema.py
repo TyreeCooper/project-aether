@@ -986,7 +986,7 @@ def test_revision_0034_repairs_postgresql_json_setup_trigger_and_activation_appl
     assert "to_jsonb(OLD.asset_risk_hitches)" in migration
     assert "to_jsonb(NEW.asset_risk_hitches)" in migration
     assert "reject_setup_playbook_identity_mutation" in migration
-    assert "Upgrade protected burn-in schema to exact branch head" in workflow
+    assert "Upgrade sandbox schema to exact branch head" in workflow
     assert 'url = url.set(drivername="postgresql+asyncpg")' in workflow
     assert 'url.drivername != "postgresql+asyncpg"' in workflow
     assert 'command.upgrade(cfg, "head")' in workflow
