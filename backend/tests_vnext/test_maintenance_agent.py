@@ -24,12 +24,40 @@ def test_zero_watch_can_be_healthy():
     d=diagnose_pipeline(ingress=ingress,discovery=discovery,strategy=strategy)
     assert d["status"]=="CLEAR"; assert d["primary_reason"]=="no_natural_setup"
 
-def test_unsupported_symbol_exposes_safe_repair():
-    ingress={**base(),"last_result":{"asset_results":[],"batch_errors":[{"error":"RuntimeError:Currency pair not supported XDG/USD"}]}}
-    discovery={**base(),"last_result":{"focus_admitted_count":10,"providers":{}}}
-    strategy={**base(),"last_result":{"pipeline":{"roaming_batch":0,"market_ready":0,"history_ready":0,"strategy_evaluated":0,"watch":0,"fire_or_beyond":0}}}
+def test_unsupported_symbol_exposes_safe_repair_after_runtime_baseline():
+    completed = {
+        "cycle_count": 1,
+        "last_cycle_finished_at_utc": "2026-10-02T17:00:00+00:00",
+    }
+    ingress={
+        **base(),
+        **completed,
+        "last_result":{
+            "asset_results":[],
+            "batch_errors":[{"error":"RuntimeError:Currency pair not supported XDG/USD"}],
+        },
+    }
+    discovery={
+        **base(),
+        **completed,
+        "last_result":{"focus_admitted_count":10,"providers":{}},
+    }
+    strategy={
+        **base(),
+        **completed,
+        "last_result":{"pipeline":{
+            "roaming_batch":0,
+            "market_ready":0,
+            "history_ready":0,
+            "strategy_evaluated":0,
+            "watch":0,
+            "fire_or_beyond":0,
+        }},
+    }
     d=diagnose_pipeline(ingress=ingress,discovery=discovery,strategy=strategy)
-    assert d["unsupported_symbols"]==["XDG/USD"]; assert d["auto_fix_available"] is True
+    assert d["status"]=="BLOCKED"
+    assert d["unsupported_symbols"]==["XDG/USD"]
+    assert d["auto_fix_available"] is True
 
 def test_revision_0035_is_maintenance_schema():
     backend=Path(__file__).resolve().parents[1]
