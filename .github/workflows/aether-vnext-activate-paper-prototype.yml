@@ -205,6 +205,19 @@ jobs:
           app-name: aether-vnext-nonprod
           package: backend
 
+      - name: Activate newly deployed package once
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$app_name" = "aether-vnext-nonprod"
+          # OneDeploy uploads the new package but the currently serving Linux
+          # worker can continue running the previous extracted package. Perform
+          # exactly one post-deploy restart so the worker loads this run's
+          # embedded SOURCE_REVISION. Do not restart again in verification.
+          az webapp restart \
+            --name "$app_name" \
+            --resource-group "$resource_group"
+
       - name: Verify deployed PAPER runtime end to end
         env:
           EXPECTED_SHA: ${{ steps.revision.outputs.source_revision }}
