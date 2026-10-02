@@ -240,12 +240,12 @@ class InspectionDrawer:
 @dataclass(frozen=True, slots=True)
 class UnifiedFirmFloorSnapshot:
     as_of_utc: datetime
-    snapshot_id: str | None = None
-    binding_state: str = "BOUND"
     full_universe: tuple[FloorUniverseStation, ...]
     top12_attention: tuple[AttentionStation, ...]
     seat_queues: tuple[SeatQueueSnapshot, ...]
     open_cockpits: tuple[OpenPositionCockpit, ...]
+    snapshot_id: str | None = None
+    binding_state: str = "BOUND"
     paper_test_epoch_id: str | None = None
     paper_test_started_at_utc: datetime | None = None
     paper_test_seed_bank_usd: float | None = None
