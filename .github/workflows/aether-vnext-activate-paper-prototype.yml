@@ -226,10 +226,55 @@ jobs:
           set -euo pipefail
           base="https://$prototype_host"
 
-          # Prove the web process independently of the DB-backed Floor.
-          # This distinguishes app startup failure from a burn-in DB read stall.
+          # OneDeploy + restart is asynchronous at the App Service front end:
+          # the old worker can continue returning HTTP 200 for a short period,
+          # then the site can be unavailable while the new worker cold-starts.
+          # The first authoritative readiness condition is therefore the exact
+          # embedded SOURCE_REVISION, not generic HTTP liveness.
+          revision_ready=0
+          for attempt in $(seq 1 36); do
+            code="$(curl --silent --show-error --max-time 5 \
+              -o /tmp/build.json -w '%{http_code}' \
+              "$base/api/v1/vnext/build" || true)"
+            observed=""
+            if [ "$code" = "200" ]; then
+              observed="$(python - <<'PY'
+          import json
+          try:
+              body=json.load(open("/tmp/build.json", encoding="utf-8"))
+              print((body.get("build") or {}).get("source_revision") or "")
+          except Exception:
+              print("")
+          PY
+          )"
+            fi
+            if [ "$code" = "200" ] && [ "$observed" = "$EXPECTED_SHA" ] && EXPECTED_SHA="$EXPECTED_SHA" python - <<'PY'
+          import json, os, sys
+          body=json.load(open("/tmp/build.json", encoding="utf-8"))
+          build=body.get("build") or {}
+          ok=(
+              body.get("ok") is True
+              and body.get("paper_only") is True
+              and body.get("live_blocked") is True
+              and build.get("source_revision") == os.environ["EXPECTED_SHA"]
+          )
+          sys.exit(0 if ok else 1)
+          PY
+            then
+              revision_ready=1
+              echo "Exact package revision is serving: $EXPECTED_SHA"
+              break
+            fi
+            echo "Waiting for new worker (attempt $attempt/36, http=$code, observed_revision=${observed:-none})"
+            sleep 10
+          done
+          test "$revision_ready" = "1"
+
+          # Once the exact package is serving, prove the application health
+          # contract on that same worker. Do not let the pre-restart worker
+          # satisfy this gate.
           health_ready=0
-          for attempt in $(seq 1 18); do
+          for attempt in $(seq 1 12); do
             code="$(curl --silent --show-error --max-time 5 \
               -o /tmp/health.json -w '%{http_code}' \
               "$base/api/v1/health" || true)"
@@ -247,38 +292,10 @@ jobs:
               health_ready=1
               break
             fi
-            echo "Waiting for web health (attempt $attempt/18, http=$code)"
+            echo "Waiting for exact-revision health (attempt $attempt/12, http=$code)"
             sleep 5
           done
           test "$health_ready" = "1"
-
-          # Prove exact package identity through a DB-independent endpoint.
-          # This avoids hammering the heavier Floor while Azure is still warming.
-          revision_ready=0
-          for attempt in $(seq 1 12); do
-            code="$(curl --silent --show-error --max-time 10 \
-              -o /tmp/build.json -w '%{http_code}' \
-              "$base/api/v1/vnext/build" || true)"
-            if [ "$code" = "200" ] && EXPECTED_SHA="$EXPECTED_SHA" python - <<'PY'
-          import json, os, sys
-          body=json.load(open("/tmp/build.json", encoding="utf-8"))
-          build=body.get("build") or {}
-          ok=(
-              body.get("ok") is True
-              and body.get("paper_only") is True
-              and body.get("live_blocked") is True
-              and build.get("source_revision") == os.environ["EXPECTED_SHA"]
-          )
-          sys.exit(0 if ok else 1)
-          PY
-            then
-              revision_ready=1
-              break
-            fi
-            echo "Waiting for exact package revision $EXPECTED_SHA (attempt $attempt/12, http=$code)"
-            sleep 5
-          done
-          test "$revision_ready" = "1"
 
           ingress_ready=0
           for attempt in $(seq 1 24); do
