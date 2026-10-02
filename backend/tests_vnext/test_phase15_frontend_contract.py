@@ -103,3 +103,31 @@ def test_maintenance_repair_control_has_commercial_grade_operation_feedback() ->
     assert ".repairSpinner" in css
     assert "@keyframes repairSpin" in css
     assert ".repairProgress" in css
+
+
+def test_pipeline_flow_map_is_vertical_code_bound_and_explains_real_gates() -> None:
+    page = (_repo_root() / "frontend" / "app" / "page.js").read_text(encoding="utf-8")
+    css = (_repo_root() / "frontend" / "app" / "globals.css").read_text(encoding="utf-8")
+    assert "Institutional pipeline flow map" in page
+    assert "PLAIN ENGLISH" in page
+    assert "DEV CODE NOTE" in page
+    assert "PASS ↓" in page
+    assert "WAIT ↺" in page
+    assert "REJECT → EVIDENCE" in page
+    for code_ref in (
+        "focus_handoff_rows()",
+        "_rotating_dynamic_strategy_batch",
+        "ingest_market_quotes()",
+        "assemble_prototype_crypto_warmup()",
+        "evaluate_sniper_fire()",
+        "size_runtime_fire_ticket()",
+        "evaluate_clerk_ready()",
+        "reserve_runtime_ready_ticket()",
+        "submit_runtime_reserved_open()",
+        "fill_runtime_submitted_open()",
+    ):
+        assert code_ref in page
+    assert ".verticalFlow" in css
+    assert ".flowStageV" in css
+    assert ".flowGateCard" in css
+    assert "grid-template-columns:repeat(9" not in css

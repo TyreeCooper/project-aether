@@ -303,45 +303,233 @@ function Markets({ discovery, ingress, nowMs }) {
   );
 }
 
-function Pipeline({ strategy, discovery, maintenance, floor }) {
+function floorQueueCount(floor, seat, state) {
+  const row = (floor?.seat_queues || []).find((item) => item.seat === seat && item.state === state);
+  return row ? Number(row.count || 0) : null;
+}
+
+const PIPELINE_GATE_BLUEPRINT = [
+  {
+    stage: "CATALOG",
+    label: "Provider Catalog",
+    owner: "Discovery",
+    gate: "Discovery eligibility & focus admission",
+    plain: "Provider rows must survive catalog eligibility and enter the prioritized focus pool. Rank controls attention order; it is not permission to trade.",
+    dev: 'provider_focus_handoff.focus_handoff_rows() → state="FOCUS_ADMITTED"; provider rank remains priority telemetry, not an execution veto.',
+  },
+  {
+    stage: "FOCUS_ADMITTED",
+    label: "Focus Admitted",
+    owner: "Discovery → Runtime",
+    gate: "Runtime product commissioning",
+    plain: "The instrument needs a real runtime product definition and a commissioned strategy contract before it can enter deep evaluation.",
+    dev: 'prototype_strategy_supervisor._sync_dynamic_kraken_products() + runtime_playbook_for_product(..., playbook_id="pb_crypto_swing_v1_2").',
+  },
+  {
+    stage: "PRODUCT_BOUND",
+    label: "Product Bound",
+    owner: "Runtime Registry",
+    gate: "Roaming scheduler",
+    plain: "Commissioned products are scheduled into the active scan slice. Open positions are always retained; otherwise the scheduler rotates through the eligible set.",
+    dev: "prototype_strategy_supervisor._rotating_dynamic_strategy_batch(... configured_dynamic_strategy_scan_batch_size()); current default batch=4, configured range=1..20.",
+  },
+  {
+    stage: "ROAMING_SCAN",
+    label: "Roaming Scan",
+    owner: "Strategy Supervisor",
+    gate: "Executable market ingress",
+    plain: "The product must have executable market plumbing, valid lifecycle/calendar state, a usable quote and a decision-time clock that is not invalid.",
+    dev: "market_ingress.ingest_market_quotes() → binding_blockers(), ProductRegistryRow.market_data_ready(), lifecycle_fire_eligible(); then _partition_observations_for_decision_time().",
+  },
+  {
+    stage: "MARKET_READY",
+    label: "Market Ready",
+    owner: "Market Ingress",
+    gate: "History & warm-up completeness",
+    plain: "A current quote is not enough. The strategy requires enough completed history to build its source-bound feature snapshot before evaluation.",
+    dev: "prototype_strategy_supervisor._fetch_dynamic_strategy_history() → assemble_prototype_crypto_warmup(). Current crypto warm-up uses Coinbase/Kraken history and supplies btc_kraken_daily regime context.",
+  },
+  {
+    stage: "HISTORY_READY",
+    label: "History Ready",
+    owner: "History / Features",
+    gate: "Closed-bar strategy evaluation",
+    plain: "Only a completed decision bar may trigger evaluation. The current crypto path requires the exact completed 1-hour Kraken bar, rejects future/unavailable bars and will not re-enter an already-traded setup.",
+    dev: "prototype_crypto_entry_runtime._require_completed_kraken_hour() + build_prototype_crypto_entry_plan(); prototype_strategy_supervisor._setup_already_completed().",
+  },
+  {
+    stage: "STRATEGY_EVALUATED",
+    label: "Strategy Evaluated",
+    owner: "Strategy",
+    gate: "Scout setup admission",
+    plain: "The evaluated strategy must actually produce a WATCH candidate. A valid evaluation with no setup is a normal no-trade outcome, not a broken pipeline.",
+    dev: "advance_prototype_crypto_entry(): if !plan.eligible → NO_SETUP; runtime_scout_bridge.persist_cycle_watch_setups() persists only cycle.decision.watch_candidates.",
+  },
+  {
+    stage: "WATCH",
+    label: "WATCH",
+    owner: "Scout",
+    gate: "Sniper FIRE validation",
+    plain: "The setup must still match the completed trigger bar, remain uninvalidated, have usable current market data, support the requested side and carry a legal protective stop.",
+    dev: "sniper.evaluate_sniper_fire(); VNextStore.record_sniper_ticket() also rejects duplicate signal_key, BENCH/DISABLED route state and Governor admission blocks.",
+  },
+  {
+    stage: "FIRE",
+    label: "FIRE",
+    owner: "Sniper",
+    gate: "Firm Risk sizing",
+    plain: "Risk sizes the trade against current Firm equity and the combined open + pending exposure. A candidate cannot consume more than the frozen trade, asset, cluster or portfolio capacity.",
+    dev: "runtime_risk_bridge.size_runtime_fire_ticket() → VNextStore.size_fire_ticket() → risk.size_candidate_to_risk(); ceilings: trade 0.75%, asset 1.50%, cluster 2.25%, portfolio 3.00%.",
+  },
+  {
+    stage: "SIZE",
+    label: "SIZE",
+    owner: "Risk",
+    gate: "Clerk economics",
+    plain: "The Risk-sized candidate must have a supported side and enough expected opportunity to clear modeled round-trip costs. Clerk cannot increase the Risk quantity.",
+    dev: "runtime_clerk_bridge.evaluate_and_persist_clerk_ready() → clerk.evaluate_clerk_ready(); current crypto path passes PROTOTYPE_COST_EDGE_MULTIPLE=1.40.",
+  },
+  {
+    stage: "READY",
+    label: "READY",
+    owner: "Clerk",
+    gate: "Portfolio atomic reservation",
+    plain: "Before an order exists, Portfolio rechecks identity, product binding, Governor state and Firm risk capacity, then atomically reserves the OPEN intent so concurrent candidates cannot spend the same capacity.",
+    dev: "runtime_portfolio_bridge.reserve_runtime_ready_ticket() → VNextStore.reserve_risk_checked_open_intent(); idempotency + active-book and RESERVED/SUBMITTED risk are checked under the Firm guard row.",
+  },
+  {
+    stage: "RESERVED",
+    label: "RESERVED",
+    owner: "Portfolio",
+    gate: "PAPER submit",
+    plain: "The reserved intent can submit only through the PAPER adapter. It must still be a MARKET_PAPER OPEN intent with an existing Firm risk reservation.",
+    dev: "runtime_execution_bridge.submit_runtime_reserved_open(); requires PAPER_ONLY && LIVE_BLOCKED, state=RESERVED, order_type=MARKET_PAPER and tracked risk reservation.",
+  },
+  {
+    stage: "SUBMITTED",
+    label: "SUBMITTED",
+    owner: "Paper Execution",
+    gate: "Fill-time market guard",
+    plain: "Submission does not guarantee a fill. The later fill cycle waits for paper latency and rechecks market quality, freshness, session, spread expansion and protective-stop geometry.",
+    dev: "runtime_fill_bridge.fill_runtime_submitted_open() → execution.fill_submitted_paper_intent(); 250ms latency, spread ≤ 2× READY spread, stop not breached, no bad_fill_through_stop.",
+  },
+  {
+    stage: "OPEN",
+    label: "OPEN",
+    owner: "Position Management",
+    gate: "Exit management",
+    plain: "An open position remains managed regardless of discovery rank. Exit logic evaluates the position from current market and completed-bar state; a failed close does not make the position disappear.",
+    dev: "prototype_crypto_exit_runtime.advance_prototype_crypto_exit(); close lifecycle continues through runtime_exit_request_bridge / runtime_close_reserve_bridge / runtime_close_execution_bridge / runtime_close_fill_bridge.",
+  },
+  {
+    stage: "FLAT",
+    label: "FLAT / BLOTTER",
+    owner: "Book of Record",
+    gate: null,
+    plain: "Completed round trips land in the blotter and evidence surfaces with execution economics and exit reason.",
+    dev: "Terminal close persistence feeds the durable book / blotter; this is the end of the entry-to-close path shown here.",
+  },
+];
+
+function Pipeline({ strategy, discovery, maintenance, floor, operator }) {
   const pipe = strategy?.last_result?.pipeline || {};
-  const stages = [
-    ["CATALOG", providerRows(discovery).reduce((s,r)=>s+Number(r.catalog_count||0),0)],
-    ["FOCUS ADMITTED", Number(discovery?.last_result?.focus_admitted_count||0)],
-    ["ROAMING", Number(pipe.roaming_batch||0)],
-    ["MARKET READY", Number(pipe.market_ready||0)],
-    ["HISTORY READY", Number(pipe.history_ready||0)],
-    ["EVALUATED", Number(pipe.strategy_evaluated||0)],
-    ["WATCH", Number(pipe.watch||0)],
-    ["FIRE +", Number(pipe.fire_or_beyond||0)],
-    ["OPEN", (floor?.open_cockpits||[]).length],
-  ];
+  const registry = strategy?.last_result?.dynamic_product_registry || {};
+  const queue = (seat, state) => floorQueueCount(floor, seat, state);
+  const counts = {
+    CATALOG: providerRows(discovery).reduce((sum, row) => sum + Number(row.catalog_count || 0), 0),
+    FOCUS_ADMITTED: Number(discovery?.last_result?.focus_admitted_count || 0),
+    PRODUCT_BOUND: registry.persisted === undefined || registry.persisted === null ? null : Number(registry.persisted),
+    ROAMING_SCAN: pipe.roaming_batch === undefined ? null : Number(pipe.roaming_batch || 0),
+    MARKET_READY: pipe.market_ready === undefined ? null : Number(pipe.market_ready || 0),
+    HISTORY_READY: pipe.history_ready === undefined ? null : Number(pipe.history_ready || 0),
+    STRATEGY_EVALUATED: pipe.strategy_evaluated === undefined ? null : Number(pipe.strategy_evaluated || 0),
+    WATCH: queue("Scout", "WATCH") ?? (pipe.watch === undefined ? null : Number(pipe.watch || 0)),
+    FIRE: queue("Sniper", "FIRE"),
+    SIZE: queue("Risk", "SIZE"),
+    READY: queue("Clerk", "READY"),
+    RESERVED: queue("Portfolio", "ORDER"),
+    SUBMITTED: null,
+    OPEN: Array.isArray(floor?.open_cockpits) ? floor.open_cockpits.length : null,
+    FLAT: Array.isArray(operator?.blotter) ? operator.blotter.length : null,
+  };
   const m = maintenance?.last_result || {};
+  const firstCausal = String(m.first_causal_edge || "").toUpperCase();
+
   return (
     <div className="pageGrid">
-      <div className="pageIntro"><div><span className="kicker">STATE MACHINE</span><h2>Pipeline control plane</h2><p>Every instrument should have an explainable current destination. Downstream zeros are not treated as independent faults.</p></div></div>
-      <Section eyebrow="FLOW MAP" title="End-to-end progression" className="wide" action={<Badge value={m.status}>{text(m.status, "SYNCING")}</Badge>}>
-        <div className="flowMap">
-          {stages.map(([label,count], i) => <div className="flowNode" key={label}><span>{label}</span><strong>{num(count)}</strong>{i < stages.length-1 ? <i>→</i> : null}</div>)}
+      <div className="pageIntro">
+        <div>
+          <span className="kicker">STATE MACHINE / CODE-BOUND</span>
+          <h2>Institutional pipeline flow map</h2>
+          <p>Top-to-bottom lifecycle. Every connector describes the actual gate that advances, waits or rejects an instrument, with the corresponding implementation path shown directly underneath.</p>
+        </div>
+        <Badge value={m.status}>{text(m.status, "SYNCING")}</Badge>
+      </div>
+
+      <Section eyebrow="FIRST CAUSAL CLOG" title={text(m.first_causal_edge, "No causal clog identified")} className="wide">
+        <div className="causalBanner">
+          <div><span>Status</span><Badge value={m.status}>{text(m.status, "SYNCING")}</Badge></div>
+          <div><span>Owner</span><strong>{text(m.owner)}</strong></div>
+          <div><span>Affected</span><strong>{num(m.affected_count)}</strong></div>
+          <div><span>Reason</span><strong>{text(m.primary_reason)}</strong></div>
+          <div><span>Confidence</span><strong>{text(m.confidence)}</strong></div>
+        </div>
+        <p className="causalObservation">{text(m.observed, "Maintenance is establishing the healthy-system baseline.")}</p>
+      </Section>
+
+      <Section eyebrow="FLOW MAP" title="Canonical sandbox lifecycle" className="wide">
+        <div className="verticalFlow">
+          {PIPELINE_GATE_BLUEPRINT.map((item, index) => {
+            const value = counts[item.stage];
+            const observed = value !== null && value !== undefined;
+            const flagged = firstCausal.includes(item.stage.replaceAll("_", " ")) || firstCausal.includes(item.stage);
+            return (
+              <div className="flowUnit" key={item.stage}>
+                <article className={flagged ? "flowStageV flagged" : "flowStageV"}>
+                  <div className="flowStageIndex">{String(index + 1).padStart(2, "0")}</div>
+                  <div className="flowStageBody">
+                    <div className="flowStageTitle">
+                      <div><span>{item.owner}</span><h3>{item.label}</h3></div>
+                      <div className="flowStageCount">
+                        <strong>{observed ? num(value) : "—"}</strong>
+                        <small>{observed ? "CURRENTLY OBSERVED" : "NOT EXPOSED BY CURRENT TELEMETRY"}</small>
+                      </div>
+                    </div>
+                    {item.stage === "RESERVED" ? <p className="telemetryNote">Floor currently projects this queue as <code>Portfolio / ORDER</code>; the underlying runtime transition is READY → RESERVED.</p> : null}
+                    {item.stage === "SUBMITTED" ? <p className="telemetryNote">The current Floor payload does not expose a dedicated SUBMITTED count, so this map intentionally shows no fabricated number.</p> : null}
+                  </div>
+                </article>
+
+                {item.gate ? (
+                  <div className="flowConnector">
+                    <div className="flowArrow" aria-hidden="true"><span>↓</span></div>
+                    <article className="flowGateCard">
+                      <div className="flowGateHead">
+                        <span>GATE {String(index + 1).padStart(2, "0")}</span>
+                        <strong>{item.gate}</strong>
+                        <div className="gateOutcomes"><b>PASS ↓</b><b>WAIT ↺</b><b>REJECT → EVIDENCE</b></div>
+                      </div>
+                      <div className="gateExplanation">
+                        <div>
+                          <span>PLAIN ENGLISH</span>
+                          <p>{item.plain}</p>
+                        </div>
+                        <div className="devNote">
+                          <span>DEV CODE NOTE</span>
+                          <code>{item.dev}</code>
+                        </div>
+                      </div>
+                    </article>
+                    <div className="flowArrow flowArrowBottom" aria-hidden="true"><span>↓</span></div>
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
         </div>
       </Section>
-      <Section eyebrow="FIRST CAUSAL CLOG" title={text(m.first_causal_edge, "No clog identified")}>
-        <div className="diagnosis">
-          <Badge value={m.status}>{text(m.status, "SYNCING")}</Badge>
-          <dl>
-            <div><dt>Owner</dt><dd>{text(m.owner)}</dd></div>
-            <div><dt>Reason</dt><dd>{text(m.primary_reason)}</dd></div>
-            <div><dt>Affected</dt><dd>{num(m.affected_count)}</dd></div>
-            <div><dt>Confidence</dt><dd>{text(m.confidence)}</dd></div>
-          </dl>
-          <p>{text(m.observed, "Maintenance is establishing the healthy-system baseline.")}</p>
-        </div>
-      </Section>
-      <Section eyebrow="RECOMMENDED ACTION" title="Maintenance guidance">
-        <p className="longText">{text(m.recommended_action, "No corrective action recommended.")}</p>
-        {(m.not_root_causes || []).length ? <div className="chipRow">{m.not_root_causes.map((x)=><span key={x}>{x} not root</span>)}</div> : null}
-      </Section>
-      <Section eyebrow="SEAT QUEUES" title="Current queue pressure" className="wide">
+
+      <Section eyebrow="CURRENT QUEUE PRESSURE" title="Seat-level runtime telemetry" className="wide">
         <div className="queueTable">
           {(floor?.seat_queues || []).map((q) => (
             <div className="queueRow" key={`${q.seat}:${q.state}`}>
@@ -540,7 +728,7 @@ function Settings({ ingress, strategy, discovery, floor, maintenance, onToggle, 
 function AppPage({ active, data, nowMs, onToggle, onRepair, busy, controlError }) {
   const { floor, ingress, strategy, discovery, operator, maintenance } = data;
   if (active === "markets") return <Markets discovery={discovery} ingress={ingress} nowMs={nowMs} />;
-  if (active === "pipeline") return <Pipeline strategy={strategy} discovery={discovery} maintenance={maintenance} floor={floor} />;
+  if (active === "pipeline") return <Pipeline strategy={strategy} discovery={discovery} maintenance={maintenance} floor={floor} operator={operator} />;
   if (active === "trading") return <TradingFloor strategy={strategy} />;
   if (active === "positions") return <Positions floor={floor} nowMs={nowMs} />;
   if (active === "blotter") return <Blotter operator={operator} />;
