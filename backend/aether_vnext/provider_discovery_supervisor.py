@@ -40,6 +40,7 @@ _LATEST_FOCUS_SNAPSHOT: dict[str, object] | None = None
 _DISCOVERY_PROGRESS: dict[str, object] = {
     "cycle_state": "idle",
     "current_provider": None,
+    "active_providers": [],
     "provider_deadline_seconds": None,
     "providers": {},
 }
@@ -325,71 +326,85 @@ async def run_configured_provider_discovery_cycle() -> dict[str, object]:
         providers=provider_progress,
     )
 
-    # Resource-bound by design: one provider universe at a time. Each provider
-    # also has a hard deadline so a slow public source cannot freeze the whole
-    # discovery cycle or stall provider-priority telemetry indefinitely.
-    for provider, fetcher in providers:
-        started = datetime.now(UTC)
-        provider_progress = {
-            **provider_progress,
-            provider: {
-                "state": "fetching",
-                "started_at_utc": started.isoformat(),
-            },
-        }
+    # Provider catalogs are independent discovery lanes. Fetch them concurrently
+    # with an individual deadline so one slow source cannot serialize the whole
+    # market-intelligence cycle. This changes scheduling only; provider rows retain
+    # their original source identity and no discovery lane gains trading authority.
+    active_providers: set[str] = set()
+
+    def publish_provider_progress() -> None:
+        active = sorted(active_providers)
         _publish_progress(
-            current_provider=provider,
-            providers=provider_progress,
+            current_provider=(
+                active[0] if len(active) == 1
+                else "MULTIPLE" if active
+                else None
+            ),
+            active_providers=active,
+            providers=dict(provider_progress),
         )
+
+    async def fetch_provider(provider, fetcher):
+        started = datetime.now(UTC)
+        active_providers.add(provider)
+        provider_progress[provider] = {
+            "state": "fetching",
+            "started_at_utc": started.isoformat(),
+        }
+        publish_provider_progress()
         try:
             async with asyncio.timeout(timeout_s):
                 rows = tuple(await fetcher())
-            universes[provider] = rows
-            provider_progress = {
-                **provider_progress,
-                provider: {
-                    "state": "online",
-                    "started_at_utc": started.isoformat(),
-                    "finished_at_utc": datetime.now(UTC).isoformat(),
-                    "catalog_count": len(rows),
-                },
+            provider_progress[provider] = {
+                "state": "online",
+                "started_at_utc": started.isoformat(),
+                "finished_at_utc": datetime.now(UTC).isoformat(),
+                "catalog_count": len(rows),
             }
+            return provider, rows, None
         except TimeoutError:
             reason = f"provider_fetch_timeout:{timeout_s:g}s"
-            errors[provider] = reason
-            provider_progress = {
-                **provider_progress,
-                provider: {
-                    "state": "timeout",
-                    "started_at_utc": started.isoformat(),
-                    "finished_at_utc": datetime.now(UTC).isoformat(),
-                    "reason": reason,
-                },
+            provider_progress[provider] = {
+                "state": "timeout",
+                "started_at_utc": started.isoformat(),
+                "finished_at_utc": datetime.now(UTC).isoformat(),
+                "reason": reason,
             }
+            return provider, (), reason
         except Exception as exc:
             reason = f"{type(exc).__name__}:{exc}"
-            errors[provider] = reason
-            provider_progress = {
-                **provider_progress,
-                provider: {
-                    "state": "error",
-                    "started_at_utc": started.isoformat(),
-                    "finished_at_utc": datetime.now(UTC).isoformat(),
-                    "reason": reason,
-                },
+            provider_progress[provider] = {
+                "state": "error",
+                "started_at_utc": started.isoformat(),
+                "finished_at_utc": datetime.now(UTC).isoformat(),
+                "reason": reason,
             }
+            return provider, (), reason
         finally:
-            _publish_progress(providers=provider_progress)
+            active_providers.discard(provider)
+            publish_provider_progress()
+
+    provider_results = await asyncio.gather(
+        *(fetch_provider(provider, fetcher) for provider, fetcher in providers)
+    )
+    for provider, rows, error in provider_results:
+        if error is None:
+            universes[provider] = tuple(rows)
+        else:
+            errors[provider] = error
 
     snapshot = build_provider_focus_snapshot(
         universes,
         provider_errors=errors,
         as_of_utc=datetime.now(UTC),
     )
+    snapshot["provider_fetch_mode"] = "concurrent"
+    snapshot["provider_fetch_concurrency"] = len(providers)
     _LATEST_FOCUS_SNAPSHOT = dict(snapshot)
     _publish_progress(
         cycle_state="complete",
         current_provider=None,
+        active_providers=[],
         providers=provider_progress,
         finished_at_utc=datetime.now(UTC).isoformat(),
     )

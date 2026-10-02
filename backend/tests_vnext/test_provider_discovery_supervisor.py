@@ -180,6 +180,49 @@ def test_discovery_status_route_is_get_only(monkeypatch) -> None:
 
 
 
+def test_provider_cycle_fetches_independent_catalogs_concurrently(monkeypatch) -> None:
+    active = 0
+    peak = 0
+
+    async def fetch(provider):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+        return (_row(provider, f"{provider}-1", 0.1, 1000.0),)
+
+    monkeypatch.setattr(
+        "aether_vnext.provider_discovery_supervisor.fetch_kraken_discovery_universe",
+        lambda: fetch("Kraken"),
+    )
+    monkeypatch.setattr(
+        "aether_vnext.provider_discovery_supervisor.fetch_tastyfx_public_universe",
+        lambda: fetch("tastyfx"),
+    )
+    monkeypatch.setattr(
+        "aether_vnext.provider_discovery_supervisor.fetch_ninjatrader_public_universe",
+        lambda: fetch("NinjaTrader"),
+    )
+    monkeypatch.setattr(
+        "aether_vnext.provider_discovery_supervisor.fetch_ibkr_us_equity_public_universe",
+        lambda: fetch("IBKR"),
+    )
+    monkeypatch.setattr(
+        "aether_vnext.provider_discovery_supervisor.configured_provider_fetch_timeout_seconds",
+        lambda: 1.0,
+    )
+
+    snapshot = asyncio.run(run_configured_provider_discovery_cycle())
+    assert peak == 4
+    assert snapshot["provider_fetch_mode"] == "concurrent"
+    assert snapshot["provider_fetch_concurrency"] == 4
+    assert all(
+        snapshot["providers"][provider]["status"] == "online"
+        for provider in ("Kraken", "tastyfx", "NinjaTrader", "IBKR")
+    )
+
+
 def test_provider_cycle_times_out_one_source_and_completes(monkeypatch) -> None:
     async def fast_kraken():
         return (_row("Kraken", "BTC/USD", 1.0, 1000.0),)
