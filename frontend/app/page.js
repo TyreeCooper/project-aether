@@ -1135,7 +1135,7 @@ export default function DashboardPage() {
           <div><span className="kicker">AETHER / SANDBOX</span><h1>{title}</h1></div>
           <div className="topbarMeta">
             <span>App restarted {ts(data.floor?.runtime_started_at_utc,"NOT OBSERVED")}</span>
-            <span>Telemetry watermark {ts(watermark,"NOT OBSERVED")}</span>
+            <span>Data refreshed · telemetry watermark {ts(watermark,"NOT OBSERVED")}</span>
           </div>
         </header>
 
