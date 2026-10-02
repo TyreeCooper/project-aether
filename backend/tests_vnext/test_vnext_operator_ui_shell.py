@@ -21,7 +21,7 @@ def test_vnext_ui_uses_professional_multi_page_operations_shell() -> None:
     assert "LIVE BLOCKED" in page
     assert "Autonomous Market Operations" in page
     assert "Provider universe" in page
-    assert "Pipeline control plane" in page
+    assert "Institutional pipeline flow map" in page
 
     for forbidden in ('assetId="btc"', 'assetId="eth"', "Top 12 Attention", "function BottomDock", "function AppMenu", "Prototype Stations"):
         assert forbidden not in page
