@@ -87,3 +87,29 @@ def test_main_mounts_vnext_operator_without_legacy_fallback() -> None:
     assert "legacy_fallback_allowed" in bridge
     assert "from app.desk" not in bridge
     assert "engine.start_loop" not in bridge
+
+
+def test_operator_cold_start_does_not_fabricate_zero_book() -> None:
+    class EmptyStore:
+        tables = {"event_ledger": sa.table("event_ledger", sa.column("created_at_utc"), sa.column("event_id"))}
+        def current_paper_test_epoch(self, conn): return None
+        def closed_trades_current_paper_epoch(self, conn, limit=200): return ()
+        def ledger_rows(self, conn): return ()
+
+    class EmptyResult:
+        def mappings(self): return self
+        def __iter__(self): return iter(())
+
+    class EmptyConn:
+        def execute(self, stmt): return EmptyResult()
+
+    snapshot = build_vnext_operator_snapshot(
+        EmptyConn(),
+        store=EmptyStore(),
+        as_of_utc=datetime(2026, 10, 3, 0, 0, tzinfo=timezone.utc),
+    )
+    assert snapshot["binding_state"] == "BASELINE_PENDING"
+    assert snapshot["paper_test"]["seed_bank_usd"] is None
+    assert snapshot["bank"]["book_cash_usd"] is None
+    assert snapshot["bank"]["cash_available_usd"] is None
+    assert snapshot["bank"]["ledger_count"] is None
