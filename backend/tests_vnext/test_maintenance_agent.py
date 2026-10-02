@@ -45,17 +45,27 @@ def test_unsupported_symbol_exposes_safe_repair_after_runtime_baseline():
     strategy={
         **base(),
         **completed,
-        "last_result":{"pipeline":{
-            "roaming_batch":0,
-            "market_ready":0,
-            "history_ready":0,
-            "strategy_evaluated":0,
-            "watch":0,
-            "fire_or_beyond":0,
-        }},
+        "last_result":{
+            "dynamic_product_registry":{
+                "status":"synced",
+                "received":1,
+                "persisted":1,
+            },
+            "dynamic_roam":{"available":1},
+            "pipeline":{
+                "dynamic_kraken_available":1,
+                "roaming_batch":1,
+                "market_ready":0,
+                "history_ready":0,
+                "strategy_evaluated":0,
+                "watch":0,
+                "fire_or_beyond":0,
+            },
+        },
     }
     d=diagnose_pipeline(ingress=ingress,discovery=discovery,strategy=strategy)
     assert d["status"]=="BLOCKED"
+    assert d["first_causal_edge"]=="ROAMING_SCAN→MARKET_READY"
     assert d["unsupported_symbols"]==["XDG/USD"]
     assert d["auto_fix_available"] is True
 
