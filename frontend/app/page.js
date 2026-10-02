@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 const apiBase = process.env.NEXT_PUBLIC_API_BASE || "";
 const floorPath = process.env.NEXT_PUBLIC_AETHER_FLOOR_PATH || "/api/v1/vnext/floor";
@@ -32,205 +32,10 @@ function text(value, fallback = "—") {
   return value === null || value === undefined || value === "" ? fallback : String(value);
 }
 
-function timestamp(value, fallback = "waiting") {
-  if (!value) return fallback;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return fallback;
-  return parsed.toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit",
-    timeZoneName: "short",
-  });
-}
-
-function number(value, digits = 2) {
+function num(value, digits = 0) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return "—";
-  return parsed.toLocaleString("en-US", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: digits,
-  });
-}
-
-function quotePrice(row) {
-  if (!row) return null;
-  for (const candidate of [row.mark, row.last]) {
-    const parsed = Number(candidate);
-    if (Number.isFinite(parsed) && parsed > 0) return parsed;
-  }
-  const bid = Number(row.bid);
-  const ask = Number(row.ask);
-  return Number.isFinite(bid) && Number.isFinite(ask) && bid > 0 && ask >= bid
-    ? (bid + ask) / 2
-    : null;
-}
-
-function ageLabel(value, nowMs) {
-  if (!value) return "waiting";
-  const parsed = Date.parse(value);
-  if (!Number.isFinite(parsed)) return "waiting";
-  const seconds = Math.max(0, Math.floor((nowMs - parsed) / 1000));
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const remainder = seconds % 60;
-  return `${minutes}m ${remainder}s`;
-}
-
-function strategyCountdown(strategy, nowMs) {
-  if (!strategy?.enabled || !strategy?.running || strategy?.last_error) return "waiting";
-  const started = Date.parse(strategy?.last_cycle_started_at_utc || "");
-  const finished = Date.parse(strategy?.last_cycle_finished_at_utc || "");
-  if (Number.isFinite(started) && (!Number.isFinite(finished) || started > finished)) return "scanning…";
-  if (!Number.isFinite(finished)) return "scanning…";
-  const interval = Math.max(1, Number(strategy?.interval_seconds) || 60);
-  const elapsed = Math.max(0, (nowMs - finished) / 1000);
-  const remaining = Math.max(0, Math.ceil(interval - elapsed));
-  return remaining > 0 ? `${remaining}s` : "scanning…";
-}
-
-function HeartbeatQuote({ assetId, row, direction, nowMs }) {
-  const price = quotePrice(row);
-  const arrow = direction > 0 ? "↑" : direction < 0 ? "↓" : "•";
-  const moveClass = direction > 0 ? "up" : direction < 0 ? "down" : "";
-  return (
-    <div className="heartbeatQuote">
-      <span>{text(row?.symbol, `${assetId.toUpperCase()}/USD`)}</span>
-      <strong>
-        {price === null ? "waiting" : `$${number(price, 2)}`}
-        <em className={moveClass}>{arrow}</em>
-      </strong>
-      <small>quote age {ageLabel(row?.reference_ts_utc, nowMs)}</small>
-    </div>
-  );
-}
-
-function stateClass(state) {
-  const value = String(state || "").toLowerCase();
-  if (["open", "seeing", "ready"].includes(value)) return "state good";
-  if (["fire", "size", "order", "watch"].includes(value)) return "state active";
-  if (["reject", "halt"].includes(value)) return "state bad";
-  return "state";
-}
-
-function Empty({ children }) {
-  return <div className="empty">{children}</div>;
-}
-
-function runtimeState(enabled, running, lastError) {
-  if (lastError) return { label: "FAULT", className: "state bad" };
-  if (enabled && running) return { label: "RUNNING", className: "state good" };
-  if (enabled) return { label: "STARTING", className: "state active" };
-  return { label: "OFF", className: "state" };
-}
-
-function StrategyDecision({ assetId, row }) {
-  const stage = text(row?.stage, "WAITING");
-  const reason = text(row?.reason, "waiting for first cycle");
-  return (
-    <article className="strategyDecision">
-      <div className="strategyDecisionHead">
-        <strong>{assetId.toUpperCase()}</strong>
-        <span className={stateClass(stage)}>{stage}</span>
-      </div>
-      <dl className="mini">
-        <div><dt>Reason</dt><dd>{reason}</dd></div>
-        <div><dt>Trigger close</dt><dd>{timestamp(row?.trigger_close_utc, "waiting")}</dd></div>
-        <div><dt>Vol percentile</dt><dd>{number(row?.volatility_percentile, 2)}</dd></div>
-        <div><dt>Watch eligible</dt><dd>{row?.watch_eligible === true ? "YES" : row?.watch_eligible === false ? "NO" : "—"}</dd></div>
-      </dl>
-    </article>
-  );
-}
-
-function UniverseCard({ station, selected, onSelect }) {
-  return (
-    <button
-      type="button"
-      className={`station ${selected ? "selected" : ""}`}
-      onClick={() => onSelect(station.asset_id)}
-      aria-pressed={selected}
-    >
-      <div className="stationHead">
-        <div>
-          <strong>{text(station.symbol, station.asset_id?.toUpperCase())}</strong>
-          <span>{text(station.product_type)}</span>
-        </div>
-        <span className={stateClass(station.dominant_state)}>
-          {text(station.dominant_state, "NO")}
-        </span>
-      </div>
-      <div className="stationMark">{number(station.mark, 8)}</div>
-      <dl className="mini">
-        <div><dt>Seat</dt><dd>{text(station.seat_owner)}</dd></div>
-        <div><dt>Open</dt><dd>{text(station.open_position_count, "0")}</dd></div>
-        <div><dt>First blocker</dt><dd>{text(station.first_blocker, "clear")}</dd></div>
-      </dl>
-    </button>
-  );
-}
-
-function Queue({ queue }) {
-  return (
-    <article className="queueCard">
-      <div className="queueHead">
-        <div><span>{queue.seat}</span><strong>{queue.state}</strong></div>
-        <b>{text(queue.count, queue.item_ids?.length || 0)}</b>
-      </div>
-      <div className="queueItems">
-        {(queue.item_ids || []).slice(0, 5).map((id) => <span key={id}>{id}</span>)}
-        {(queue.item_ids || []).length === 0 ? <em>Queue clear</em> : null}
-      </div>
-      <small>{text(queue.blocker_count, 0)} blocker(s)</small>
-    </article>
-  );
-}
-
-function Cockpit({ cockpit }) {
-  return (
-    <article className="cockpit">
-      <div className="cockpitHead">
-        <div>
-          <strong>{cockpit.asset_id?.toUpperCase()}</strong>
-          <span>{cockpit.horizon} · {cockpit.side}</span>
-        </div>
-        <span className={stateClass(cockpit.dominant_state)}>{cockpit.dominant_state}</span>
-      </div>
-      <div className="cockpitGrid">
-        <div><span>Qty</span><b>{number(cockpit.quantity, 8)}</b></div>
-        <div><span>Entry</span><b>{number(cockpit.average_entry_price, 8)}</b></div>
-        <div><span>Mark</span><b>{number(cockpit.mark_price, 8)}</b></div>
-        <div><span>Hard stop</span><b>{number(cockpit.hard_stop_price, 8)}</b></div>
-      </div>
-      <small>{cockpit.position_key}</small>
-    </article>
-  );
-}
-
-
-const VIEW_META = {
-  floor: { title: "Unified Firm Floor", subtitle: "Command central for the autonomous PAPER firm." },
-  assets: { title: "Assets", subtitle: "Live stations, strategy state and canonical blockers." },
-  pipeline: { title: "Pipeline", subtitle: "See each Firm seat working and where flow is backing up." },
-  live: { title: "Live Trades", subtitle: "Open PAPER positions, setup watch and runtime activity." },
-  blotter: { title: "Blotter", subtitle: "Completed round trips in the current sandbox session." },
-  booth: { title: "Booth", subtitle: "Operator visibility, system health and safety state." },
-  settings: { title: "Settings", subtitle: "Sandbox runtime, data and safety configuration." },
-};
-
-function durationLabel(openedAt, nowMs) {
-  const started = Date.parse(openedAt || "");
-  if (!Number.isFinite(started)) return "—";
-  const seconds = Math.max(0, Math.floor((nowMs - started) / 1000));
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const remainder = seconds % 60;
-  if (hours > 0) return hours + "h " + minutes + "m " + remainder + "s";
-  if (minutes > 0) return minutes + "m " + remainder + "s";
-  return remainder + "s";
+  return parsed.toLocaleString("en-US", { maximumFractionDigits: digits });
 }
 
 function money(value, fallback = "—") {
@@ -243,1527 +48,557 @@ function money(value, fallback = "—") {
   });
 }
 
-function BankStrip({ operator }) {
-  const bank = operator?.bank || {};
-  const test = operator?.paper_test || {};
-  return (
-    <section className="bankStrip" aria-label="Paper bank">
-      <div><span>Starting bank</span><strong>{money(test.seed_bank_usd)}</strong></div>
-      <div><span>Book cash</span><strong>{money(bank.book_cash_usd)}</strong></div>
-      <div><span>Available</span><strong>{money(bank.cash_available_usd)}</strong></div>
-      <div><span>Reserved</span><strong>{money(bank.cash_reserved_usd)}</strong></div>
-      <div><span>Realized P&amp;L</span><strong className={Number(bank.realized_pnl_usd) < 0 ? "lossText" : Number(bank.realized_pnl_usd) > 0 ? "gainText" : ""}>{money(bank.realized_pnl_usd, "$0.00")}</strong></div>
-      <div><span>Fees</span><strong>{money(bank.fees_accrued_usd, "$0.00")}</strong></div>
-    </section>
-  );
-}
-
-function ActivityFeed({ rows, limit = 30 }) {
-  const items = (rows || []).slice(0, limit);
-  if (!items.length) return <Empty>No vNext Firm events in the current sandbox session yet.</Empty>;
-  return (
-    <div className="activityFeed">
-      {items.map((row) => (
-        <article className="activityRow" key={row.event_id}>
-          <time>{timestamp(row.created_at_utc, "—")}</time>
-          <div>
-            <strong>{text(row.seat, "Firm")} · {text(row.new_state, "EVENT")}</strong>
-            <span>{text(row.aggregate_type, "event")} · {text(row.reason_code, "recorded")}</span>
-          </div>
-          <small>{text(row.aggregate_id)}</small>
-        </article>
-      ))}
-    </div>
-  );
-}
-
-function AssetsView({ universe, selectedAsset, onSelect, strategyAssets }) {
-  return (
-    <section className="appView">
-      <div className="pageLead">
-        <p className="eyebrow">ASSET DESKS</p>
-        <h2>Sandbox Stations</h2>
-        <p>Provider catalogs feed the sandbox runtime. Assets advance according to runtime binding and visible pipeline gates.</p>
-      </div>
-      <div className="universeGrid">
-        {universe.map((station) => (
-          <div className="assetStationWrap" key={station.asset_id}>
-            <UniverseCard
-              station={station}
-              selected={station.asset_id === selectedAsset}
-              onSelect={onSelect}
-            />
-            {strategyAssets?.[station.asset_id] ? (
-              <div className="assetStrategyLine">
-                <span>Strategy</span>
-                <b>{text(strategyAssets[station.asset_id].stage, "WAITING")}</b>
-                <small>{text(strategyAssets[station.asset_id].reason, "—")}</small>
-              </div>
-            ) : null}
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function LiveTradesView({ cockpits, strategyAssets, strategy, activity, nowMs }) {
-  return (
-    <section className="appView">
-      <div className="heroGrid compactHero">
-        <article><span>Open trades</span><strong>{cockpits.length}</strong></article>
-        <article><span>Strategy cycle</span><strong>#{text(strategy?.cycle_count, "0")}</strong></article>
-        <article><span>Last scan</span><strong>{timestamp(strategy?.last_cycle_finished_at_utc, "waiting")}</strong></article>
-        <article><span>Execution</span><strong>PAPER</strong><small>LIVE BLOCKED</small></article>
-      </div>
-
-      <section className="floorSection">
-        <div className="sectionHead">
-          <div><p className="eyebrow">IN-FLIGHT EXECUTION</p><h2>Active Trade Cockpits</h2></div>
-          <span>Timers update every second</span>
-        </div>
-        {cockpits.length ? (
-          <div className="liveCockpitGrid">
-            {cockpits.map((row) => (
-              <article className="liveTradeCard" key={row.position_key}>
-                <div className="tradeCardHead">
-                  <div><strong>{row.asset_id?.toUpperCase()}</strong><span>{text(row.horizon)} · {text(row.side)}</span></div>
-                  <span className="state good">OPEN</span>
-                </div>
-                <div className="tradeTimer">{durationLabel(row.opened_at_utc, nowMs)}</div>
-                <dl className="tradeMetrics">
-                  <div><dt>Entry</dt><dd>{number(row.average_entry_price, 8)}</dd></div>
-                  <div><dt>Mark</dt><dd>{number(row.mark_price, 8)}</dd></div>
-                  <div><dt>Qty</dt><dd>{number(row.quantity, 8)}</dd></div>
-                  <div><dt>Hard stop</dt><dd>{number(row.hard_stop_price, 8)}</dd></div>
-                </dl>
-              </article>
-            ))}
-          </div>
-        ) : <Empty>No open PAPER trades. AETHER is scanning for a natural setup.</Empty>}
-      </section>
-
-      <section className="split">
-        <section className="floorSection">
-          <div className="sectionHead"><div><p className="eyebrow">SETUP WATCH</p><h2>What AETHER Sees Now</h2></div></div>
-          <div className="strategyDecisionGrid">
-            <StrategyDecision assetId="btc" row={strategyAssets.btc} />
-            <StrategyDecision assetId="eth" row={strategyAssets.eth} />
-          </div>
-        </section>
-        <section className="floorSection">
-          <div className="sectionHead"><div><p className="eyebrow">BOT ACTIVITY</p><h2>Firm Event Stream</h2></div></div>
-          <ActivityFeed rows={activity} limit={16} />
-        </section>
-      </section>
-    </section>
-  );
-}
-
-function BlotterView({ rows }) {
-  return (
-    <section className="appView">
-      <div className="pageLead">
-        <p className="eyebrow">COMPLETED ROUND TRIPS</p>
-        <h2>Blotter</h2>
-        <p>Current sandbox session. One row per completed trade.</p>
-      </div>
-      {rows?.length ? (
-        <div className="blotterWrap">
-          <table className="blotterTable">
-            <thead>
-              <tr>
-                <th>Closed</th><th>Asset</th><th>Side</th><th>Qty</th><th>Entry</th><th>Exit</th><th>Duration</th><th>Gross</th><th>Fees</th><th>Net</th><th>MFE</th><th>MAE</th><th>Exit reason</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <tr key={row.trade_id}>
-                  <td>{timestamp(row.closed_at_utc, "—")}</td>
-                  <td><strong>{text(row.asset_id).toUpperCase()}</strong></td>
-                  <td>{text(row.side)}</td>
-                  <td>{number(row.quantity, 8)}</td>
-                  <td>{number(row.avg_entry_price, 8)}</td>
-                  <td>{number(row.exit_price, 8)}</td>
-                  <td>{durationLabel(row.closed_at_utc ? new Date(Date.parse(row.closed_at_utc) - Number(row.duration_s || 0) * 1000).toISOString() : null, Date.parse(row.closed_at_utc || ""))}</td>
-                  <td>{money(row.gross_pnl_usd)}</td>
-                  <td>{money(row.fees_usd)}</td>
-                  <td className={Number(row.net_pnl_usd) < 0 ? "lossText" : Number(row.net_pnl_usd) > 0 ? "gainText" : ""}>{money(row.net_pnl_usd)}</td>
-                  <td>{money(row.mfe_usd)}</td>
-                  <td>{money(row.mae_usd)}</td>
-                  <td>{text(row.exit_reason)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : <Empty>No completed trades in the current sandbox session yet.</Empty>}
-    </section>
-  );
-}
-
-function BoothView({ floor, ingress, strategy, operator }) {
-  const build = floor?.build || {};
-  return (
-    <section className="appView">
-      <div className="pageLead">
-        <p className="eyebrow">OPERATOR CONTROL ROOM</p>
-        <h2>Booth</h2>
-        <p>Sandbox operations. Trade authority remains server-side.</p>
-      </div>
-      <div className="settingsGrid">
-        <article className="settingsCard">
-          <span>Market ingress</span><strong>{ingress?.running ? "RUNNING" : "OFF"}</strong>
-          <small>Cycle #{text(ingress?.cycle_count, "0")} · {text(ingress?.last_error, "no error")}</small>
-        </article>
-        <article className="settingsCard">
-          <span>Strategy worker</span><strong>{strategy?.running ? "RUNNING" : "OFF"}</strong>
-          <small>Cycle #{text(strategy?.cycle_count, "0")} · {text(strategy?.last_error, "no error")}</small>
-        </article>
-        <article className="settingsCard">
-          <span>Execution mode</span><strong>PAPER ONLY</strong>
-          <small>LIVE execution hard blocked</small>
-        </article>
-        <article className="settingsCard">
-          <span>Build</span><strong>{text(build.source_revision?.slice(0, 12), "local")}</strong>
-          <small>App restarted {timestamp(floor?.runtime_started_at_utc, "waiting")}</small>
-        </article>
-        <article className="settingsCard">
-          <span>Paper session</span><strong>{text(operator?.paper_test?.epoch_id, "not started")}</strong>
-          <small>Seed {money(operator?.paper_test?.seed_bank_usd)}</small>
-        </article>
-        <article className="settingsCard">
-          <span>Authority</span><strong>READ ONLY UI</strong>
-          <small>No legacy fallback · no order mutation controls</small>
-        </article>
-      </div>
-    </section>
-  );
-}
-
-function SettingsView({ ingress, strategy, discovery, operator, floor, maintenance, onMaintenanceToggle, onMaintenanceRepair, maintenanceBusy, maintenanceError }) {
-  const [operatorToken, setOperatorToken] = useState("");
-  const controls = maintenance?.controls || {};
-  const labels = maintenance?.control_labels || {};
-  const unlocked = operatorToken.trim().length > 0;
-  const maintStatus = maintenance?.last_result?.status || (maintenance?.running ? "SYNCING" : "OFF");
-  return (
-    <section className="appView">
-      <div className="pageLead">
-        <p className="eyebrow">APP CONFIGURATION</p><h2>Settings</h2>
-        <p>Current sandbox configuration. PAPER/LIVE safety laws are intentionally not editable.</p>
-      </div>
-      <div className="settingsGrid">
-        <article className="settingsCard"><span>Trading mode</span><strong>PAPER</strong><small>Natural setups only · forced entries OFF</small></article>
-        <article className="settingsCard"><span>Live execution</span><strong className="lossText">HARD BLOCKED</strong><small>Cannot be enabled from this UI</small></article>
-        <article className="settingsCard"><span>Provider discovery</span><strong>{text(discovery?.last_result?.focus_count, "0")} FOCUSED</strong><small>{text(discovery?.last_result?.focus_admitted_count, "0")} Focus-admitted</small></article>
-        <article className="settingsCard"><span>Ingress interval</span><strong>{number(ingress?.interval_seconds, 0)}s</strong><small>UI polls runtime telemetry every 5s</small></article>
-        <article className="settingsCard"><span>Strategy interval</span><strong>{number(strategy?.interval_seconds, 0)}s</strong><small>Completed-bar strategy evaluation</small></article>
-        <article className="settingsCard"><span>Source revision</span><strong>{text(floor?.build?.source_revision?.slice(0, 12), "local")}</strong><small>No legacy fallback</small></article>
-      </div>
-
-      <section className="floorSection">
-        <div className="sectionHead">
-          <div><p className="eyebrow">SELF-DIAGNOSIS / SELF-HEALING</p><h2>Maintenance Agent</h2></div>
-          <span>{maintStatus}</span>
-        </div>
-        <p className="runtimeLaw">Master OFF makes the agent inert. Auto-repair defaults OFF. PAPER ONLY and LIVE BLOCKED remain locked.</p>
-        <label>
-          <span className="eyebrow">Operator token</span>
-          <input type="password" value={operatorToken} onChange={(e) => setOperatorToken(e.target.value)} placeholder="Required to change Maintenance" />
-        </label>
-        <div className="settingsGrid">
-          {Object.entries(labels).map(([key, label]) => {
-            const enabled = controls[key] !== false;
-            return (
-              <article className="settingsCard" key={key}>
-                <span>{label}</span>
-                <strong>{enabled ? "ON" : "OFF"}</strong>
-                <small>{key === "master_enabled" ? "Emergency master switch." : key.replaceAll("_", " ")}</small>
-                <button type="button" disabled={!unlocked || maintenanceBusy} onClick={() => onMaintenanceToggle(key, !enabled, operatorToken)}>
-                  TURN {enabled ? "OFF" : "ON"}
-                </button>
-              </article>
-            );
-          })}
-        </div>
-        <button type="button" disabled={!unlocked || maintenanceBusy || controls.master_enabled === false} onClick={() => onMaintenanceRepair(operatorToken)}>
-          RUN SAFE REPAIR NOW
-        </button>
-        {maintenanceError ? <p className="runtimeFault">{maintenanceError}</p> : null}
-      </section>
-
-      <section className="lockedLaw"><strong>LOCKED SAFETY LAWS</strong><span>PAPER-only · LIVE hard block · no force-trade behavior · no production cutover.</span></section>
-    </section>
-  );
-}
-
-const PIPELINE_QUEUE_SEATS = [
-  {
-    seat: "Scout",
-    owned: "WATCH",
-    job: "Finds real setups worth watching and passes only qualified opportunities forward.",
-  },
-  {
-    seat: "Sniper",
-    owned: "FIRE",
-    job: "Confirms trigger timing and converts a watched setup into an actionable entry candidate.",
-  },
-  {
-    seat: "Risk",
-    owned: "SIZE / REJECT",
-    job: "Sizes risk or rejects the trade when Firm risk laws are not satisfied.",
-  },
-  {
-    seat: "Clerk",
-    owned: "READY / REJECT",
-    job: "Builds the execution-ready ticket and refuses incomplete or invalid orders.",
-  },
-  {
-    seat: "Portfolio",
-    owned: "ORDER",
-    job: "Checks portfolio admission and routes an approved PAPER order into the book.",
-  },
-];
-
-function queueSummary(queues, seat) {
-  const rows = (queues || []).filter((row) => row.seat === seat);
-  return {
-    seat,
-    count: rows.reduce((sum, row) => sum + Number(row.count || 0), 0),
-    blockers: rows.reduce((sum, row) => sum + Number(row.blocker_count || 0), 0),
-    states: rows.map((row) => ({
-      state: text(row.state),
-      count: Number(row.count || 0),
-      blockerCount: Number(row.blocker_count || 0),
-      itemIds: row.item_ids || [],
-    })),
-    itemIds: rows.flatMap((row) => row.item_ids || []),
-  };
-}
-
-function pipelineBottleneck(queues) {
-  const governor = queueSummary(queues, "Governor");
-  if (governor.count > 0 || governor.blockers > 0) {
-    return {
-      seat: "Governor",
-      count: governor.count,
-      blockers: governor.blockers,
-      reason: "Global HALT pressure",
-    };
-  }
-
-  const candidates = PIPELINE_QUEUE_SEATS
-    .map((row) => Object.assign({}, row, queueSummary(queues, row.seat)))
-    .filter((row) => row.count > 0 || row.blockers > 0)
-    .sort((a, b) => (
-      b.blockers - a.blockers
-      || b.count - a.count
-      || a.seat.localeCompare(b.seat)
-    ));
-
-  if (!candidates.length) return null;
-  const row = candidates[0];
-  return {
-    seat: row.seat,
-    count: row.count,
-    blockers: row.blockers,
-    reason: row.blockers > 0
-      ? row.blockers + " blocker" + (row.blockers === 1 ? "" : "s")
-      : row.count + " item" + (row.count === 1 ? "" : "s") + " waiting",
-  };
-}
-
-function pipelineRuntimeMode({ ingress, strategy, discovery, queues, cockpits }) {
-  if (!ingress || !strategy || !discovery) {
-    return { label: "PIPELINE SYNCING", tone: "pipelineBusy" };
-  }
-
-  const governor = queueSummary(queues, "Governor");
-  const runtimeBlocked = Boolean(
-    ingress?.last_error
-    || strategy?.last_error
-    || discovery?.last_error
-    || ingress?.enabled === false
-    || strategy?.enabled === false
-    || discovery?.enabled === false
-    || !ingress?.running
-    || !strategy?.running
-    || !discovery?.running
-    || governor.blockers > 0
-  );
-  if (runtimeBlocked) {
-    return { label: "PIPELINE BLOCKED", tone: "pipelineBlocked" };
-  }
-
-  const queued = PIPELINE_QUEUE_SEATS.reduce(
-    (sum, row) => sum + queueSummary(queues, row.seat).count,
-    governor.count,
-  );
-  if (queued > 0 || (cockpits || []).length > 0) {
-    return { label: "PIPELINE IN FLIGHT", tone: "pipelineBusy" };
-  }
-  return { label: "PIPELINE ACTIVE", tone: "pipelineActive" };
-}
-
-function PipelineStage({ label, job, owned, metricLabel, count, blockers = 0, bottleneck = false, tone = "queue", states = [] }) {
-  const active = Number(count || 0) > 0;
-  const blocked = Number(blockers || 0) > 0;
-  const className = [
-    "pipelineStage",
-    tone,
-    active ? "busy" : "clear",
-    blocked ? "blocked" : "",
-    bottleneck ? "bottleneck" : "",
-  ].filter(Boolean).join(" ");
-
-  return (
-    <article className={className}>
-      <div className="pipelineStageTop">
-        <span>{owned}</span>
-        {bottleneck ? <b>BOTTLENECK</b> : blocked ? <b>BLOCKED</b> : active ? <b>WORKING</b> : <b>CLEAR</b>}
-      </div>
-      <h3>{label}</h3>
-      <p>{job}</p>
-      <div className="pipelineMetric">
-        <strong>{number(count, 0)}</strong>
-        <span>{metricLabel}</span>
-      </div>
-      {tone === "queue" ? (
-        <div className="pipelineStateList">
-          {states.map((row) => (
-            <span key={label + "-" + row.state}>
-              <b>{row.state}</b> {row.count}
-              {row.blockerCount ? <em>{row.blockerCount} blocked</em> : null}
-            </span>
-          ))}
-          {!states.length ? <span><b>QUEUE</b> 0</span> : null}
-        </div>
-      ) : null}
-    </article>
-  );
-}
-
-
-const DISCOVERY_PROVIDERS = ["Kraken", "tastyfx", "NinjaTrader", "IBKR"];
-
-function discoveryProviderRows(discovery) {
-  const providers = discovery?.last_result?.providers || {};
-  const handoff = discovery?.last_result?.scout_handoff || [];
-  const handoffByKey = Object.fromEntries(
-    handoff.map((row) => [String(row?.focus_key || ""), row]),
-  );
-  return DISCOVERY_PROVIDERS.map((provider) => {
-    const source = providers[provider] || {
-      status: "waiting",
-      reason: "waiting_for_discovery_cycle",
-      catalog_count: 0,
-      eligible_count: 0,
-      focus_count: 0,
-      top100: [],
-    };
-    return {
-      provider,
-      ...source,
-      top100: (source.top100 || []).map((item) => {
-        const focusKey = provider + ":" + String(item?.market_data_symbol || "");
-        return {
-          ...item,
-          handoff: handoffByKey[focusKey] || null,
-        };
-      }),
-    };
+function ts(value, fallback = "waiting") {
+  if (!value) return fallback;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return fallback;
+  return parsed.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZoneName: "short",
   });
 }
 
-
-function feedClassLabel(value) {
-  const raw = String(value || "REFERENCE").toUpperCase();
-  if (raw === "NATIVE_PUBLIC") return "NATIVE PUBLIC";
-  if (raw === "PUBLIC_REFERENCE_INTRADAY") return "PUBLIC REF · INTRADAY";
-  if (raw === "PUBLIC_REFERENCE_DELAYED") return "PUBLIC REF · DELAYED";
-  if (raw === "PUBLIC_REFERENCE_DAILY") return "PUBLIC REF · DAILY";
-  if (raw === "PUBLIC_CATALOG") return "PUBLIC CATALOG";
-  return raw.replaceAll("_", " ");
+function age(value, nowMs) {
+  const stamp = Date.parse(value || "");
+  if (!Number.isFinite(stamp)) return "—";
+  const seconds = Math.max(0, Math.floor((nowMs - stamp) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m ${seconds % 60}s`;
 }
 
-function providerFeedSummary(row) {
-  const values = Array.isArray(row?.feed_classes) ? row.feed_classes : [];
-  if (!values.length) {
-    return row?.catalog_mode === "provider_native" ? "NATIVE PUBLIC" : "PUBLIC REFERENCE";
-  }
-  return values.map(feedClassLabel).join(" · ");
+function duration(value, nowMs) {
+  const stamp = Date.parse(value || "");
+  if (!Number.isFinite(stamp)) return "—";
+  const seconds = Math.max(0, Math.floor((nowMs - stamp) / 1000));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return hours ? `${hours}h ${minutes}m` : minutes ? `${minutes}m ${seconds % 60}s` : `${seconds}s`;
 }
 
-function ProviderFocusCard({ row }) {
-  const online = row.status === "online";
-  const top = row.top100 || [];
+function tone(value) {
+  const v = String(value || "").toUpperCase();
+  if (["CLEAR","RUNNING","ONLINE","OPEN","READY","GREEN","ACTIVE"].includes(v)) return "good";
+  if (["FAULT","BLOCKED","HALT","REJECT","ERROR","OFFLINE"].includes(v)) return "bad";
+  if (["DEGRADED","WAIT","WATCH","FIRE","STARTING","SYNCING"].includes(v)) return "warn";
+  return "neutral";
+}
+
+function Badge({ children, value }) {
+  return <span className={`badge ${tone(value ?? children)}`}>{children}</span>;
+}
+
+const NAV = [
+  ["command", "Command Center", "Overview"],
+  ["markets", "Markets", "Provider universe"],
+  ["pipeline", "Pipeline", "Flow & diagnostics"],
+  ["trading", "Trading Floor", "Opportunities"],
+  ["positions", "Positions", "Open risk"],
+  ["blotter", "Blotter", "Completed trades"],
+  ["maintenance", "Maintenance", "Self-healing"],
+  ["settings", "Settings", "Controls"],
+];
+
+const PROVIDERS = ["Kraken", "tastyfx", "NinjaTrader", "IBKR"];
+
+function providerRows(discovery) {
+  const providers = discovery?.last_result?.providers || {};
+  return PROVIDERS.map((provider) => ({
+    provider,
+    status: "waiting",
+    reason: "waiting_for_discovery_cycle",
+    catalog_count: 0,
+    eligible_count: 0,
+    focus_count: 0,
+    top100: [],
+    ...(providers[provider] || {}),
+  }));
+}
+
+function combinedStrategyRows(strategy) {
+  const seed = strategy?.last_result?.assets || {};
+  const dynamic = strategy?.last_result?.dynamic_assets || {};
+  return Object.entries({ ...seed, ...dynamic })
+    .map(([assetId, row]) => ({ assetId, ...(row || {}) }))
+    .sort((a, b) => {
+      const order = { OPEN: 0, FIRE: 1, WATCH: 2, READY: 3, NO_SETUP: 4 };
+      return (order[String(a.stage || "").toUpperCase()] ?? 9) - (order[String(b.stage || "").toUpperCase()] ?? 9)
+        || a.assetId.localeCompare(b.assetId);
+    });
+}
+
+function Section({ eyebrow, title, action, children, className = "" }) {
   return (
-    <article className={"providerFocusCard " + (online ? "online" : "offline")}>
-      <div className="providerFocusHead">
-        <div>
-          <span>{row.catalog_mode === "provider_native" ? "PROVIDER-NATIVE CATALOG" : "PUBLIC REFERENCE CATALOG"}</span>
-          <h3>{row.provider}</h3>
-        </div>
-        <b className={online ? "state good" : "state bad"}>{online ? "ONLINE" : "UNAVAILABLE"}</b>
+    <section className={`panel ${className}`}>
+      <div className="panelHead">
+        <div><span>{eyebrow}</span><h2>{title}</h2></div>
+        {action ? <div className="panelAction">{action}</div> : null}
       </div>
-      <div className="providerFeedClass">
-        <span>{providerFeedSummary(row)}</span>
-        <b>{row.execution_binding_required ? "REFERENCE FEED" : "DISCOVERY FEED"}</b>
-      </div>
-      <div className="providerFunnelStats">
-        <span><b>{number(row.catalog_count, 0)}</b> catalog</span>
-        <span><b>{number(row.eligible_count, 0)}</b> eligible</span>
-        <span><b>{number(row.focus_count, 0)}</b> focus</span>
-      </div>
-      {online ? (
-        top.length ? (
-          <div className="providerTop100">
-            <div className="providerTop100Header">
-              <span>Rank</span><span>Instrument</span><span>Score</span><span>Move</span><span>Reference</span><span>Feed / Readiness</span>
-            </div>
-            {top.map((item) => (
-              <div key={row.provider + ":" + item.market_data_symbol}>
-                <b>#{item.rank}</b>
-                <strong>{text(item.symbol)}</strong>
-                <span>{number(item.score, 1)}</span>
-                <span className={Number(item.change_pct) < 0 ? "lossText" : Number(item.change_pct) > 0 ? "gainText" : ""}>
-                  {Number(item.change_pct) >= 0 ? "+" : ""}{number(item.change_pct, 2)}%
-                </span>
-                <small>{money(item.price)}</small>
-                <div className="focusFeedState">
-                  <small>{feedClassLabel(item.feed_class)}</small>
-                  <em
-                    className="focusReceived"
-                    title={(item.handoff?.requirements || []).join(", ")}
-                  >
-                    FOCUS ADMITTED
-                  </em>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : <Empty>No eligible instruments in the current discovery cycle.</Empty>
-      ) : (
-        <div className="providerUnavailable">
-          <strong>{text(row.reason, "waiting for provider data")}</strong>
-          <span>No symbols are invented or substituted.</span>
-        </div>
-      )}
+      {children}
+    </section>
+  );
+}
+
+function Metric({ label, value, sub, state }) {
+  return (
+    <article className="metric">
+      <span>{label}</span>
+      <strong className={state ? `metricValue ${tone(state)}` : "metricValue"}>{value}</strong>
+      {sub ? <small>{sub}</small> : null}
     </article>
   );
 }
 
-function ProviderDiscoveryBoard({ discovery, strategy }) {
-  const rows = discoveryProviderRows(discovery);
-  const totalCatalog = rows.reduce((sum, row) => sum + Number(row.catalog_count || 0), 0);
-  const totalEligible = rows.reduce((sum, row) => sum + Number(row.eligible_count || 0), 0);
-  const focusCount = Number(discovery?.last_result?.focus_count || 0);
-  const focusAdmittedCount = Number(discovery?.last_result?.focus_admitted_count || 0);
-  const strategyPipe = strategy?.last_result?.pipeline || {};
-  const scoutIntakeCount = focusAdmittedCount;
-  const roamingBatch = Number(strategyPipe.roaming_batch || 0);
-  const marketReady = Number(strategyPipe.market_ready || 0);
-  const historyReady = Number(strategyPipe.history_ready || 0);
-  const strategyEvaluated = Number(strategyPipe.strategy_evaluated || 0);
-  const running = Boolean(discovery?.running && !discovery?.last_error);
+function RuntimeStrip({ floor, ingress, strategy, discovery, maintenance }) {
+  const pipeline = maintenance?.last_result?.status || "SYNCING";
   return (
-    <section className="floorSection providerDiscoveryBoard">
-      <div className="sectionHead">
-        <div>
-          <p className="eyebrow">PROVIDER DISCOVERY</p>
-          <h2>Catalog → Top 100 per Provider</h2>
-        </div>
-        <span className={running ? "state good" : "state active"}>
-          DISCOVERY {running ? "RUNNING" : "WAITING"}
-        </span>
-      </div>
-      <div className="providerDiscoveryFunnel">
-        <div><span>Provider catalogs</span><strong>{number(totalCatalog, 0)}</strong></div>
-        <i>→</i>
-        <div><span>Eligible / priced</span><strong>{number(totalEligible, 0)}</strong></div>
-        <i>→</i>
-        <div><span>Provider ranking</span><strong>{number(totalEligible, 0)}</strong></div>
-        <i>→</i>
-        <div><span>Focus pool</span><strong>{number(focusCount, 0)}</strong><small>max 100/provider</small></div>
-        <i>→</i>
-        <div><span>Scout intake</span><strong>{number(scoutIntakeCount, 0)}</strong><small>all focused assets received</small></div>
-        <i>→</i>
-        <div><span>Roaming now</span><strong>{number(roamingBatch, 0)}</strong><small>bounded dynamic scan batch</small></div>
-        <i>→</i>
-        <div><span>Market ready</span><strong>{number(marketReady, 0)}</strong><small>current executable observation</small></div>
-        <i>→</i>
-        <div><span>History ready</span><strong>{number(historyReady, 0)}</strong><small>source-backed warm-up complete</small></div>
-        <i>→</i>
-        <div><span>Evaluated</span><strong>{number(strategyEvaluated, 0)}</strong><small>actual strategy pass this cycle</small></div>
-      </div>
-      <div className="providerFocusGrid">
-        {rows.map((row) => <ProviderFocusCard row={row} key={row.provider} />)}
-      </div>
-      <div className="providerFeedLegend">
-        <span><b>NATIVE PUBLIC</b> provider-hosted market reference</span>
-        <span><b>PUBLIC REF</b> non-execution reference data; cadence shown per provider</span>
-        <span><b>FOCUS ADMITTED</b> admitted to the prioritized poll; this is not Scout evaluation and missing runtime facts remain visible requirements</span>
-      </div>
-      <p className="providerDiscoveryLaw">
-        Provider ranking sets attention priority only. “Admitted” is not counted as “evaluated”: the live counters above show how many assets actually reached market, history and strategy evaluation this cycle. Intentional market, strategy, Risk, Clerk, Portfolio, instrument and PAPER-execution laws remain enforced.
-      </p>
-    </section>
-  );
-}
-
-function PipelineView({ universe, queues, cockpits, operator, strategy, discovery, maintenance }) {
-  const queueStages = PIPELINE_QUEUE_SEATS.map((stage) => Object.assign(
-    {},
-    stage,
-    queueSummary(queues, stage.seat),
-  ));
-  const governor = queueSummary(queues, "Governor");
-  const bottleneck = pipelineBottleneck(queues);
-  const queuedItems = queueStages.reduce((sum, row) => sum + row.count, 0);
-  const blockerCount = queueStages.reduce((sum, row) => sum + row.blockers, 0) + governor.blockers;
-  const maxQueue = Math.max(1, ...queueStages.map((row) => row.count));
-  const completedTrades = Number(operator?.blotter?.length || 0);
-  const discoveryProviders = discoveryProviderRows(discovery);
-  const discoveredCatalog = discoveryProviders.reduce((sum, row) => sum + Number(row.catalog_count || 0), 0);
-  const discoveredEligible = discoveryProviders.reduce((sum, row) => sum + Number(row.eligible_count || 0), 0);
-  const focusCount = Number(discovery?.last_result?.focus_count || 0);
-  const focusAdmittedCount = Number(discovery?.last_result?.focus_admitted_count || 0);
-  const scoutIntakeCount = focusAdmittedCount;
-  const strategyPipe = strategy?.last_result?.pipeline || {};
-  const roamingBatch = Number(strategyPipe.roaming_batch || 0);
-  const marketReady = Number(strategyPipe.market_ready || 0);
-  const historyReady = Number(strategyPipe.history_ready || 0);
-  const strategyEvaluated = Number(strategyPipe.strategy_evaluated || 0);
-  const watchThisCycle = Number(strategyPipe.watch || 0);
-  const fireOrBeyond = Number(strategyPipe.fire_or_beyond || 0);
-  const pipelineStatus = governor.count > 0 || governor.blockers > 0
-    ? "GLOBAL HALT"
-    : bottleneck
-      ? "PRESSURE"
-      : "FLOW CLEAR";
-
-  return (
-    <section className="appView pipelineView">
-      <section className={"pipelineHero " + (bottleneck ? "pressure" : "clear")}>
-        <div>
-          <p className="eyebrow">LIVE FIRM FLOW</p>
-          <h2>{bottleneck ? bottleneck.seat + " is the current pressure point" : "No queue bottleneck detected"}</h2>
-          <p>
-            {bottleneck
-              ? bottleneck.reason + ". This is calculated from current vNext queue and blocker telemetry."
-              : "All canonical seat queues are currently clear. AETHER is still scanning for natural setups."}
-          </p>
-        </div>
-        <div className="pipelineHeroStats">
-          <span><b>{pipelineStatus}</b> status</span>
-          <span><b>{queuedItems}</b> queued</span>
-          <span><b>{blockerCount}</b> blockers</span>
-          <span><b>{cockpits.length}</b> open positions</span>
-        </div>
-      </section>
-
-      <section className="floorSection">
-        <div className="sectionHead">
-          <div><p className="eyebrow">AETHER MAINTENANCE</p><h2>Pipeline Self-Diagnosis</h2></div>
-          <span>{text(maintenance?.last_result?.status, maintenance?.running ? "SYNCING" : "OFF")}</span>
-        </div>
-        <div className="settingsGrid">
-          <article className="settingsCard"><span>First causal edge</span><strong>{text(maintenance?.last_result?.first_causal_edge, "waiting")}</strong><small>{text(maintenance?.last_result?.primary_reason, "no diagnosis yet")}</small></article>
-          <article className="settingsCard"><span>Owner</span><strong>{text(maintenance?.last_result?.owner, "waiting")}</strong><small>{text(maintenance?.last_result?.confidence, "—")} confidence</small></article>
-          <article className="settingsCard"><span>Affected</span><strong>{text(maintenance?.last_result?.affected_count, "0")}</strong><small>{text(maintenance?.last_result?.observed, "Establishing healthy baseline")}</small></article>
-          <article className="settingsCard"><span>Repair</span><strong>{maintenance?.last_result?.auto_fix_available ? "AVAILABLE" : "NONE"}</strong><small>{text(maintenance?.last_result?.recommended_action, "No action recommended yet")}</small></article>
-        </div>
-        {(maintenance?.last_result?.stages || []).length ? (
-          <div className="pipelineQueueInspector">
-            {maintenance.last_result.stages.map((row) => <article key={row.stage}><div><strong>{row.stage}</strong><span>{row.pass}/{row.input} pass</span></div></article>)}
-          </div>
-        ) : null}
-      </section>
-
-      <ProviderDiscoveryBoard discovery={discovery} strategy={strategy} />
-
-      <section className="governorGate">
-        <div>
-          <p className="eyebrow">GLOBAL FIRM GATE</p>
-          <h3>Governor</h3>
-          <p>Can stop downstream flow when a Firm-wide hard condition is active.</p>
-        </div>
-        <div className={governor.count || governor.blockers ? "governorStatus halted" : "governorStatus clear"}>
-          <strong>{governor.count || governor.blockers ? "HALT ACTIVE" : "CLEAR"}</strong>
-          <span>{governor.count} queued · {governor.blockers} blockers</span>
-        </div>
-      </section>
-
-      <section className="floorSection pipelineSection">
-        <div className="sectionHead">
-          <div><p className="eyebrow">END-TO-END PIPELINE</p><h2>Firm Seats</h2></div>
-          <span>Live vNext telemetry · no synthetic work</span>
-        </div>
-
-        <div className="pipelineFlow" aria-label="AETHER Firm pipeline">
-          <PipelineStage
-            label="Provider Catalogs"
-            owned="DISCOVER"
-            job="Reads the broad market universe for each execution-provider bucket."
-            metricLabel="symbols"
-            count={discoveredCatalog}
-            tone="context"
-          />
-          <PipelineStage
-            label="Eligibility"
-            owned="FILTER"
-            job="Keeps active instruments with usable reference price or market-activity evidence before ranking."
-            metricLabel="eligible"
-            count={discoveredEligible}
-            tone="context"
-          />
-          <PipelineStage
-            label="Top 100 Focus"
-            owned="RANK"
-            job="Keeps the one hundred strongest attention candidates per provider for deeper strategy work."
-            metricLabel="focused"
-            count={focusCount}
-            tone="context"
-          />
-          <PipelineStage
-            label="Scout Intake"
-            owned="HANDOFF"
-            job="Every focused asset reaches Scout intake. This is receipt only, not proof that the strategy evaluated the asset."
-            metricLabel="received"
-            count={scoutIntakeCount}
-            tone="context"
-          />
-          <PipelineStage
-            label="Roaming Scan"
-            owned="SCOUT"
-            job="Bounded source-backed assets selected for real strategy work in the current cycle."
-            metricLabel="scanning now"
-            count={roamingBatch}
-            tone="context"
-          />
-          <PipelineStage
-            label="Market Ready"
-            owned="MARKET"
-            job="Assets in the roaming batch with a current executable canonical market observation."
-            metricLabel="market ready"
-            count={marketReady}
-            tone="context"
-          />
-          <PipelineStage
-            label="History Ready"
-            owned="HISTORY"
-            job="Assets with the required source-backed completed-bar warm-up for the unchanged strategy rules."
-            metricLabel="history ready"
-            count={historyReady}
-            tone="context"
-          />
-          <PipelineStage
-            label="Strategy Evaluated"
-            owned="SCOUT"
-            job="Assets that actually reached the crypto swing evaluator this cycle."
-            metricLabel="evaluated"
-            count={strategyEvaluated}
-            tone="context"
-          />
-          <PipelineStage
-            label="Natural Setup"
-            owned="WATCH/FIRE"
-            job="Natural setups produced by the configured strategy; no forced entries."
-            metricLabel="WATCH / FIRE+"
-            count={watchThisCycle + fireOrBeyond}
-            tone="context"
-          />
-          {queueStages.map((stage) => (
-            <PipelineStage
-              key={stage.seat}
-              label={stage.seat}
-              owned={stage.owned}
-              job={stage.job}
-              metricLabel={stage.seat === "Scout" ? "WATCH setups" : "in queue"}
-              count={stage.count}
-              blockers={stage.blockers}
-              bottleneck={bottleneck?.seat === stage.seat}
-              states={stage.states}
-            />
-          ))}
-          <PipelineStage
-            label="Open Position"
-            owned="OPEN"
-            job="A PAPER trade that passed admission and is now in the managed book."
-            metricLabel="open"
-            count={cockpits.length}
-            tone="context"
-          />
-          <PipelineStage
-            label="Exit"
-            owned="MANAGE"
-            job="Applies horizon, stop and exit management to the positions currently open."
-            metricLabel="managed"
-            count={cockpits.length}
-            tone="context"
-          />
-          <PipelineStage
-            label="Review"
-            owned="CLOSED"
-            job="Completed PAPER round trips land in the epoch blotter for post-trade review."
-            metricLabel="closed this epoch"
-            count={completedTrades}
-            tone="context"
-          />
-        </div>
-      </section>
-
-      <section className="floorSection">
-        <div className="sectionHead">
-          <div><p className="eyebrow">BOTTLENECK LENS</p><h2>Queue Pressure</h2></div>
-          <span>Longer bars = more work waiting at that seat</span>
-        </div>
-        <div className="pipelinePressure">
-          {queueStages.map((stage) => {
-            const width = stage.count > 0 ? Math.max(8, Math.round((stage.count / maxQueue) * 100)) : 0;
-            return (
-              <div className={"pressureRow " + (bottleneck?.seat === stage.seat ? "hot" : "")} key={"pressure-" + stage.seat}>
-                <div className="pressureLabel">
-                  <strong>{stage.seat}</strong>
-                  <span>{stage.count} queued · {stage.blockers} blockers</span>
-                </div>
-                <div className="pressureTrack">
-                  <span style={{ width: width + "%" }} />
-                </div>
-                <b>{stage.count}</b>
-              </div>
-            );
-          })}
-        </div>
-      </section>
-
-      <section className="split">
-        <section className="floorSection">
-          <div className="sectionHead"><div><p className="eyebrow">QUEUE CONTENTS</p><h2>What Is Waiting</h2></div></div>
-          <div className="pipelineQueueInspector">
-            {queueStages.map((stage) => (
-              <article key={"inspect-" + stage.seat}>
-                <div><strong>{stage.seat}</strong><span>{stage.count} item(s)</span></div>
-                {stage.itemIds.length
-                  ? <div className="pipelineItemIds">{stage.itemIds.slice(0, 8).map((id) => <code key={id}>{id}</code>)}</div>
-                  : <small>Queue clear</small>}
-              </article>
-            ))}
-          </div>
-        </section>
-
-        <section className="floorSection">
-          <div className="sectionHead"><div><p className="eyebrow">SCANNER FEED</p><h2>Current Strategy Decisions</h2></div></div>
-          <div className="strategyDecisionGrid">
-            <StrategyDecision assetId="btc" row={strategy?.last_result?.assets?.btc} />
-            <StrategyDecision assetId="eth" row={strategy?.last_result?.assets?.eth} />
-            {Object.entries(strategy?.last_result?.dynamic_assets || {}).slice(0, 8).map(([assetId, row]) => (
-              <StrategyDecision assetId={assetId} row={row} key={"dynamic-decision-" + assetId} />
-            ))}
-          </div>
-        </section>
-      </section>
-    </section>
-  );
-}
-
-function AppSubview({ activeView, universe, queues, selectedAsset, onSelectAsset, cockpits, strategyAssets, strategy, ingress, discovery, operator, floor, nowMs, maintenance, onMaintenanceToggle, onMaintenanceRepair, maintenanceBusy, maintenanceError }) {
-  if (activeView === "assets") {
-    return <AssetsView universe={universe} selectedAsset={selectedAsset} onSelect={onSelectAsset} strategyAssets={strategyAssets} />;
-  }
-  if (activeView === "pipeline") {
-    return <PipelineView universe={universe} queues={queues} cockpits={cockpits} operator={operator} strategy={strategy} discovery={discovery} maintenance={maintenance} />;
-  }
-  if (activeView === "live") {
-    return <LiveTradesView cockpits={cockpits} strategyAssets={strategyAssets} strategy={strategy} activity={operator?.activity || []} nowMs={nowMs} />;
-  }
-  if (activeView === "blotter") {
-    return <BlotterView rows={operator?.blotter || []} />;
-  }
-  if (activeView === "booth") {
-    return <BoothView floor={floor} ingress={ingress} strategy={strategy} operator={operator} />;
-  }
-  if (activeView === "settings") {
-    return <SettingsView ingress={ingress} strategy={strategy} discovery={discovery} operator={operator} floor={floor} maintenance={maintenance} onMaintenanceToggle={onMaintenanceToggle} onMaintenanceRepair={onMaintenanceRepair} maintenanceBusy={maintenanceBusy} maintenanceError={maintenanceError} />;
-  }
-  return null;
-}
-
-function BottomDock({ activeView, onNavigate }) {
-  const items = [
-    ["floor", "⌂", "Floor"],
-    ["pipeline", "⇢", "Pipeline"],
-    ["assets", "◉", "Assets"],
-    ["live", "⌁", "Live"],
-    ["blotter", "≡", "Blotter"],
-    ["booth", "◇", "Booth"],
-  ];
-  return (
-    <nav className="bottomDock" aria-label="Primary">
-      {items.map(([id, icon, label]) => (
-        <button type="button" className={activeView === id ? "on" : ""} onClick={() => onNavigate(id)} key={id}>
-          <span className="dockIcon" aria-hidden="true">{icon}</span>
-          <span>{label}</span>
-        </button>
-      ))}
-    </nav>
-  );
-}
-
-function AppMenu({ open, activeView, onClose, onNavigate, floor, ingress, strategy }) {
-  return (
-    <>
-      <button type="button" className={"menuScrim " + (open ? "open" : "")} onClick={onClose} aria-label="Close menu" />
-      <aside className={"appMenu " + (open ? "open" : "")} aria-label="AETHER menu">
-        <div className="appMenuHead">
-          <div className="menuBrand">
-            <img src="/vnext/aether-mark.png" alt="" aria-hidden="true" />
-            <div><p className="eyebrow">AETHER</p><h2>Menu</h2></div>
-          </div>
-          <button type="button" onClick={onClose} aria-label="Close menu">×</button>
-        </div>
-        {[
-          ["settings", "⚙", "Settings", "Runtime, data and safety"],
-          ["floor", "⌂", "The Floor", "Portfolio command overview"],
-          ["pipeline", "⇢", "Pipeline", "Seat flow and bottleneck visibility"],
-          ["live", "●", "Live Trades", "Positions, setup watch and activity"],
-          ["blotter", "≡", "Blotter", "Completed PAPER trades"],
-          ["assets", "◉", "Assets", "Sandbox trading stations"],
-          ["booth", "◇", "Booth", "System health and operator visibility"],
-        ].map(([id, icon, label, description]) => (
-          <button
-            type="button"
-            className={"appMenuItem " + (activeView === id ? "on" : "")}
-            key={id}
-            onClick={() => { onNavigate(id); onClose(); }}
-          >
-            <span>{icon}</span>
-            <span><b>{label}</b><small>{description}</small></span>
-            <span>›</span>
-          </button>
-        ))}
-        <div className="appMenuStatus">
-          <span className={ingress?.running ? "state good" : "state bad"}>INGRESS {ingress?.running ? "RUNNING" : "OFF"}</span>
-          <span className={strategy?.running ? "state good" : "state bad"}>STRATEGY {strategy?.running ? "RUNNING" : "OFF"}</span>
-          <small>Build {text(floor?.build?.source_revision?.slice(0, 8), "local")}</small>
-        </div>
-      </aside>
-    </>
-  );
-}
-
-
-function CompactBlotterPreview({ rows }) {
-  const items = (rows || []).slice(0, 6);
-  if (!items.length) {
-    return <Empty>No completed PAPER trades in this epoch yet.</Empty>;
-  }
-  return (
-    <div className="desktopBlotterPreview">
-      {items.map((row) => (
-        <article key={"desktop-blotter-" + row.trade_id}>
-          <div>
-            <strong>{text(row.asset_id).toUpperCase()}</strong>
-            <span>{text(row.side)} · {timestamp(row.closed_at_utc, "—")}</span>
-          </div>
-          <div>
-            <small>Net</small>
-            <b className={Number(row.net_pnl_usd) < 0 ? "lossText" : Number(row.net_pnl_usd) > 0 ? "gainText" : ""}>
-              {money(row.net_pnl_usd)}
-            </b>
-          </div>
-          <div>
-            <small>Exit</small>
-            <b>{number(row.exit_price, 8)}</b>
-          </div>
-          <div>
-            <small>Reason</small>
-            <b>{text(row.exit_reason)}</b>
-          </div>
-        </article>
-      ))}
+    <div className="runtimeStrip">
+      <div><span>BUILD</span><b>{text(floor?.build?.source_revision?.slice(0, 8), "local")}</b></div>
+      <div><span>REFRESHED</span><b>{ts(floor?.as_of_utc)}</b></div>
+      <div><span>INGRESS</span><Badge value={ingress?.last_error ? "FAULT" : ingress?.running ? "RUNNING" : "WAIT"}>{ingress?.last_error ? "FAULT" : ingress?.running ? "RUNNING" : "WAIT"}</Badge></div>
+      <div><span>DISCOVERY</span><Badge value={discovery?.last_error ? "FAULT" : discovery?.running ? "RUNNING" : "WAIT"}>{discovery?.last_error ? "FAULT" : discovery?.running ? "RUNNING" : "WAIT"}</Badge></div>
+      <div><span>STRATEGY</span><Badge value={strategy?.last_error ? "FAULT" : strategy?.running ? "RUNNING" : "WAIT"}>{strategy?.last_error ? "FAULT" : strategy?.running ? "RUNNING" : "WAIT"}</Badge></div>
+      <div><span>PIPELINE</span><Badge value={pipeline}>{pipeline}</Badge></div>
     </div>
   );
 }
 
-function DesktopCommandCenter({ floor, queues, cockpits, operator, ingress, strategy, discovery, nowMs }) {
-  const bottleneck = pipelineBottleneck(queues);
-  const governor = queueSummary(queues, "Governor");
-  const queueStages = PIPELINE_QUEUE_SEATS.map((stage) => Object.assign(
-    {},
-    stage,
-    queueSummary(queues, stage.seat),
-  ));
-  const queued = queueStages.reduce((sum, row) => sum + row.count, 0);
-  const blockers = queueStages.reduce((sum, row) => sum + row.blockers, 0) + governor.blockers;
-  const strategyAssets = strategy?.last_result?.assets || {};
-
+function CommandCenter({ floor, ingress, strategy, discovery, operator, maintenance, nowMs }) {
+  const universe = floor?.full_universe || [];
+  const positions = floor?.open_cockpits || [];
+  const providers = providerRows(discovery);
+  const catalog = providers.reduce((s, r) => s + Number(r.catalog_count || 0), 0);
+  const eligible = providers.reduce((s, r) => s + Number(r.eligible_count || 0), 0);
+  const focus = Number(discovery?.last_result?.focus_admitted_count || 0);
+  const pipe = strategy?.last_result?.pipeline || {};
+  const strategyRows = combinedStrategyRows(strategy).slice(0, 12);
+  const maintenanceState = maintenance?.last_result || {};
+  const bank = operator?.bank || {};
+  const events = operator?.activity || [];
   return (
-    <section className="desktopOnly desktopCommandCenter" aria-label="Desktop command center">
-      <div className="desktopCommandHead">
+    <div className="pageGrid">
+      <div className="hero">
         <div>
-          <p className="eyebrow">DESKTOP COMMAND CENTER</p>
-          <h2>Everything on the Firm floor</h2>
+          <span className="kicker">AETHER SANDBOX OPERATIONS</span>
+          <h2>Autonomous market operations console</h2>
+          <p>Provider-wide discovery, pipeline state, strategy activity, risk and self-healing in one command surface.</p>
         </div>
-        <div className="desktopCommandBadges">
-          <span className={ingress?.running && !ingress?.last_error ? "state good" : "state bad"}>
-            DATA {ingress?.running && !ingress?.last_error ? "LIVE" : "FAULT"}
-          </span>
-          <span className={strategy?.running && !strategy?.last_error ? "state good" : "state bad"}>
-            STRATEGY {strategy?.running && !strategy?.last_error ? "RUNNING" : "FAULT"}
-          </span>
-          <span className="state active">PAPER ONLY</span>
+        <div className="heroModes">
+          <Badge value="GREEN">PAPER ACTIVE</Badge>
+          <Badge value="BLOCKED">LIVE BLOCKED</Badge>
+          <Badge value={maintenanceState.status || "SYNCING"}>{text(maintenanceState.status, "SYNCING")}</Badge>
         </div>
       </div>
 
-      <div className="desktopCommandGrid">
-        <section className="desktopPanel pipelinePanel">
-          <div className="desktopPanelHead">
-            <div><span>PIPELINE</span><strong>Firm flow & bottleneck</strong></div>
-            <b className={bottleneck ? "pressureTag" : "clearTag"}>
-              {bottleneck ? bottleneck.seat + " PRESSURE" : "FLOW CLEAR"}
-            </b>
-          </div>
-          <div className="desktopPipelineSummary">
-            {queueStages.map((stage) => (
-              <div className={"desktopPipelineSeat " + (bottleneck?.seat === stage.seat ? "hot" : "")} key={"desktop-seat-" + stage.seat}>
-                <span>{stage.seat}</span>
-                <strong>{stage.count}</strong>
-                <small>{stage.blockers} blocked</small>
-              </div>
-            ))}
-          </div>
-          <div className="desktopPipelineFooter">
-            <span><b>{Number(discovery?.last_result?.focus_admitted_count || 0)}/{text(discovery?.last_result?.focus_count, "0")}</b> admitted/focused</span>
-            <span><b>{Number(strategy?.last_result?.pipeline?.strategy_evaluated || 0)}</b> evaluated this cycle</span>
-            <span><b>{queued}</b> queued</span>
-            <span><b>{blockers}</b> blockers</span>
-            <span><b>{cockpits.length}</b> open positions</span>
-          </div>
-        </section>
-
-        <section className="desktopPanel systemPanel">
-          <div className="desktopPanelHead">
-            <div><span>SYSTEM</span><strong>Runtime health</strong></div>
-            <b>{text(floor?.build?.source_revision?.slice(0, 8), "local")}</b>
-          </div>
-          <dl className="desktopSystemList">
-            <div><dt>App restarted</dt><dd>{timestamp(floor?.runtime_started_at_utc, "waiting")}</dd></div>
-            <div><dt>Floor refreshed</dt><dd>{timestamp(floor?.as_of_utc, "waiting")}</dd></div>
-            <div><dt>Ingress</dt><dd>#{text(ingress?.cycle_count, "0")} · {text(ingress?.last_error, "healthy")}</dd></div>
-            <div><dt>Strategy</dt><dd>#{text(strategy?.cycle_count, "0")} · next {strategyCountdown(strategy, nowMs)}</dd></div>
-            <div><dt>Observations</dt><dd>{text(strategy?.last_result?.forward_paper_observation_count, "0")}</dd></div>
-            <div><dt>Epoch</dt><dd>{text(operator?.paper_test?.epoch_id, "not started")}</dd></div>
-          </dl>
-        </section>
-
-        <section className="desktopPanel strategyPanel">
-          <div className="desktopPanelHead">
-            <div><span>SCANNER</span><strong>Seed + dynamic roaming</strong></div>
-            <b>NATURAL ONLY</b>
-          </div>
-          <div className="desktopStrategyStack">
-            <StrategyDecision assetId="btc" row={strategyAssets.btc} />
-            <StrategyDecision assetId="eth" row={strategyAssets.eth} />
-            {Object.entries(strategy?.last_result?.dynamic_assets || {}).slice(0, 6).map(([assetId, row]) => (
-              <StrategyDecision assetId={assetId} row={row} key={"desktop-dynamic-" + assetId} />
-            ))}
-          </div>
-        </section>
-
-        <section className="desktopPanel activityPanel">
-          <div className="desktopPanelHead">
-            <div><span>ACTIVITY</span><strong>Latest Firm events</strong></div>
-            <b>{(operator?.activity || []).length}</b>
-          </div>
-          <ActivityFeed rows={operator?.activity || []} limit={10} />
-        </section>
-
-        <section className="desktopPanel blotterPanel">
-          <div className="desktopPanelHead">
-            <div><span>BLOTTER</span><strong>Latest completed trades</strong></div>
-            <b>{(operator?.blotter || []).length}</b>
-          </div>
-          <CompactBlotterPreview rows={operator?.blotter || []} />
-        </section>
+      <div className="metricGrid">
+        <Metric label="Catalog instruments" value={num(catalog)} sub="Across connected provider lanes" />
+        <Metric label="Focus admitted" value={num(focus)} sub={`${num(eligible)} eligible`} />
+        <Metric label="Evaluated this cycle" value={num(pipe.strategy_evaluated || 0)} sub={`${num(pipe.market_ready || 0)} market ready`} />
+        <Metric label="Open positions" value={num(positions.length)} sub="PAPER positions" />
+        <Metric label="Book cash" value={money(bank.book_cash_usd, "$0.00")} sub={`${money(bank.cash_reserved_usd, "$0.00")} reserved`} />
+        <Metric label="Maintenance" value={text(maintenanceState.status, "SYNCING")} sub={text(maintenanceState.primary_reason, "establishing baseline")} state={maintenanceState.status} />
       </div>
-    </section>
+
+      <Section eyebrow="PIPELINE" title="Operational flow" action={<span>{text(maintenanceState.first_causal_edge, "No causal clog")}</span>} className="wide">
+        <div className="stageRail">
+          {(maintenanceState.stages || []).map((row) => (
+            <div className="stageNode" key={row.stage}>
+              <span>{row.stage.replaceAll("_", " ")}</span>
+              <strong>{num(row.pass)}/{num(row.input)}</strong>
+              <small>pass / input</small>
+            </div>
+          ))}
+          {!(maintenanceState.stages || []).length ? <div className="empty">Waiting for Maintenance baseline.</div> : null}
+        </div>
+      </Section>
+
+      <Section eyebrow="OPPORTUNITY TAPE" title="Current strategy activity">
+        <div className="dataTable compact">
+          <div className="tableHead"><span>Instrument</span><span>Stage</span><span>Reason</span><span>Watch</span></div>
+          {strategyRows.length ? strategyRows.map((row) => (
+            <div className="tableRow" key={row.assetId}>
+              <strong>{row.assetId.toUpperCase()}</strong>
+              <Badge value={row.stage}>{text(row.stage, "WAIT")}</Badge>
+              <span>{text(row.reason, "—")}</span>
+              <span>{row.watch_eligible === true ? "YES" : row.watch_eligible === false ? "NO" : "—"}</span>
+            </div>
+          )) : <div className="empty">No strategy activity reported yet.</div>}
+        </div>
+      </Section>
+
+      <Section eyebrow="SYSTEM EVENTS" title="Latest activity">
+        <div className="eventList">
+          {events.slice(0, 12).map((row) => (
+            <div key={row.event_id} className="eventRow">
+              <time>{ts(row.created_at_utc, "—")}</time>
+              <div><strong>{text(row.seat, "Firm")} · {text(row.new_state, "EVENT")}</strong><span>{text(row.reason_code, "recorded")}</span></div>
+            </div>
+          ))}
+          {!events.length ? <div className="empty">No recorded Firm events yet.</div> : null}
+        </div>
+      </Section>
+
+      <Section eyebrow="OPEN RISK" title="Active positions" className="wide">
+        {positions.length ? <div className="positionGrid">
+          {positions.map((row) => <PositionCard row={row} nowMs={nowMs} key={row.position_key} />)}
+        </div> : <div className="empty">No open PAPER positions.</div>}
+      </Section>
+    </div>
   );
 }
 
-function MobileCommandStrip({ queues, cockpits, operator, ingress, strategy, discovery, nowMs }) {
-  const bottleneck = pipelineBottleneck(queues);
+function Markets({ discovery, ingress, nowMs }) {
+  const [filter, setFilter] = useState("");
+  const rows = providerRows(discovery);
+  const quotes = ingress?.last_result?.quotes || [];
+  const quoteMap = Object.fromEntries(quotes.map((q) => [String(q.symbol || "").toUpperCase(), q]));
   return (
-    <section className="mobileOnly mobileCommandStrip" aria-label="Mobile command status">
-      <div>
-        <span>Flow</span>
-        <strong>{bottleneck ? bottleneck.seat : "CLEAR"}</strong>
-        <small>{bottleneck ? bottleneck.reason : "no bottleneck"}</small>
+    <div className="pageGrid">
+      <div className="pageIntro">
+        <div><span className="kicker">MARKET INTELLIGENCE</span><h2>Provider universe</h2><p>Full catalog visibility with provider-level ranking. Priority lists are scheduling signals, not trade permission.</p></div>
+        <input className="search" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter instruments…" />
       </div>
-      <div>
-        <span>Scout</span>
-        <strong>{Number(strategy?.last_result?.pipeline?.strategy_evaluated || 0)}/{text(discovery?.last_result?.focus_admitted_count, "0")}</strong>
-        <small>evaluated this cycle / admitted</small>
-      </div>
-      <div>
-        <span>Open</span>
-        <strong>{cockpits.length}</strong>
-        <small>PAPER trade(s)</small>
-      </div>
-      <div>
-        <span>Next scan</span>
-        <strong>{strategyCountdown(strategy, nowMs)}</strong>
-        <small>strategy #{text(strategy?.cycle_count, "0")}</small>
-      </div>
-      <div>
-        <span>Bank</span>
-        <strong>{money(operator?.bank?.book_cash_usd, "$0.00")}</strong>
-        <small>{ingress?.running ? "market live" : "feed waiting"}</small>
-      </div>
-    </section>
+      {rows.map((row) => {
+        const items = (row.top100 || []).filter((item) => !filter || String(item.symbol || "").toLowerCase().includes(filter.toLowerCase()));
+        return (
+          <Section
+            eyebrow={row.catalog_mode === "provider_native" ? "NATIVE CATALOG" : "REFERENCE CATALOG"}
+            title={row.provider}
+            action={<Badge value={row.status === "online" ? "ONLINE" : "FAULT"}>{String(row.status || "waiting").toUpperCase()}</Badge>}
+            className="wide"
+            key={row.provider}
+          >
+            <div className="providerStats">
+              <Metric label="Catalog" value={num(row.catalog_count)} />
+              <Metric label="Eligible" value={num(row.eligible_count)} />
+              <Metric label="Priority pool" value={num(row.focus_count)} />
+              <Metric label="Data mode" value={text(row.catalog_mode, "reference").replaceAll("_", " ")} />
+            </div>
+            <div className="marketTable">
+              <div className="marketHead"><span>Rank</span><span>Instrument</span><span>Score</span><span>Move</span><span>Reference</span><span>Quote age</span><span>Readiness</span></div>
+              {items.map((item) => {
+                const q = quoteMap[String(item.symbol || "").toUpperCase()] || quoteMap[String(item.market_data_symbol || "").toUpperCase()];
+                return (
+                  <div className="marketRow" key={`${row.provider}:${item.market_data_symbol || item.symbol}`}>
+                    <span>#{num(item.rank)}</span>
+                    <strong>{text(item.symbol)}</strong>
+                    <span>{num(item.score, 1)}</span>
+                    <span className={Number(item.change_pct) < 0 ? "loss" : Number(item.change_pct) > 0 ? "gain" : ""}>{Number(item.change_pct) >= 0 ? "+" : ""}{num(item.change_pct, 2)}%</span>
+                    <span>{money(item.price)}</span>
+                    <span>{age(q?.reference_ts_utc, nowMs)}</span>
+                    <Badge value="ACTIVE">PRIORITY</Badge>
+                  </div>
+                );
+              })}
+              {!items.length ? <div className="empty">{row.status === "online" ? "No matching instruments." : text(row.reason, "Provider data unavailable.")}</div> : null}
+            </div>
+          </Section>
+        );
+      })}
+    </div>
   );
+}
+
+function Pipeline({ strategy, discovery, maintenance, floor }) {
+  const pipe = strategy?.last_result?.pipeline || {};
+  const stages = [
+    ["CATALOG", providerRows(discovery).reduce((s,r)=>s+Number(r.catalog_count||0),0)],
+    ["FOCUS ADMITTED", Number(discovery?.last_result?.focus_admitted_count||0)],
+    ["ROAMING", Number(pipe.roaming_batch||0)],
+    ["MARKET READY", Number(pipe.market_ready||0)],
+    ["HISTORY READY", Number(pipe.history_ready||0)],
+    ["EVALUATED", Number(pipe.strategy_evaluated||0)],
+    ["WATCH", Number(pipe.watch||0)],
+    ["FIRE +", Number(pipe.fire_or_beyond||0)],
+    ["OPEN", (floor?.open_cockpits||[]).length],
+  ];
+  const m = maintenance?.last_result || {};
+  return (
+    <div className="pageGrid">
+      <div className="pageIntro"><div><span className="kicker">STATE MACHINE</span><h2>Pipeline control plane</h2><p>Every instrument should have an explainable current destination. Downstream zeros are not treated as independent faults.</p></div></div>
+      <Section eyebrow="FLOW MAP" title="End-to-end progression" className="wide" action={<Badge value={m.status}>{text(m.status, "SYNCING")}</Badge>}>
+        <div className="flowMap">
+          {stages.map(([label,count], i) => <div className="flowNode" key={label}><span>{label}</span><strong>{num(count)}</strong>{i < stages.length-1 ? <i>→</i> : null}</div>)}
+        </div>
+      </Section>
+      <Section eyebrow="FIRST CAUSAL CLOG" title={text(m.first_causal_edge, "No clog identified")}>
+        <div className="diagnosis">
+          <Badge value={m.status}>{text(m.status, "SYNCING")}</Badge>
+          <dl>
+            <div><dt>Owner</dt><dd>{text(m.owner)}</dd></div>
+            <div><dt>Reason</dt><dd>{text(m.primary_reason)}</dd></div>
+            <div><dt>Affected</dt><dd>{num(m.affected_count)}</dd></div>
+            <div><dt>Confidence</dt><dd>{text(m.confidence)}</dd></div>
+          </dl>
+          <p>{text(m.observed, "Maintenance is establishing the healthy-system baseline.")}</p>
+        </div>
+      </Section>
+      <Section eyebrow="RECOMMENDED ACTION" title="Maintenance guidance">
+        <p className="longText">{text(m.recommended_action, "No corrective action recommended.")}</p>
+        {(m.not_root_causes || []).length ? <div className="chipRow">{m.not_root_causes.map((x)=><span key={x}>{x} not root</span>)}</div> : null}
+      </Section>
+      <Section eyebrow="SEAT QUEUES" title="Current queue pressure" className="wide">
+        <div className="queueTable">
+          {(floor?.seat_queues || []).map((q) => (
+            <div className="queueRow" key={`${q.seat}:${q.state}`}>
+              <strong>{q.seat}</strong><span>{q.state}</span><span>{num(q.count)} queued</span><span>{num(q.blocker_count)} blockers</span><small>{text(q.first_blocker_reason, "clear")}</small>
+            </div>
+          ))}
+          {!(floor?.seat_queues || []).length ? <div className="empty">No queue pressure reported.</div> : null}
+        </div>
+      </Section>
+    </div>
+  );
+}
+
+function TradingFloor({ strategy }) {
+  const rows = combinedStrategyRows(strategy);
+  return (
+    <div className="pageGrid">
+      <div className="pageIntro"><div><span className="kicker">OPPORTUNITY ENGINE</span><h2>Trading floor</h2><p>Live strategy state across every instrument currently reported by the sandbox runtime. No instrument is privileged in the presentation layer.</p></div></div>
+      <Section eyebrow="STRATEGY MATRIX" title="Current opportunity states" className="wide">
+        <div className="tradeMatrix">
+          <div className="tradeHead"><span>Instrument</span><span>Stage</span><span>Reason</span><span>Trigger</span><span>Vol</span><span>Watch</span></div>
+          {rows.map((row) => (
+            <div className="tradeRow" key={row.assetId}>
+              <strong>{row.assetId.toUpperCase()}</strong>
+              <Badge value={row.stage}>{text(row.stage, "WAIT")}</Badge>
+              <span>{text(row.reason)}</span>
+              <span>{ts(row.trigger_close_utc, "—")}</span>
+              <span>{num(row.volatility_percentile, 2)}</span>
+              <span>{row.watch_eligible === true ? "YES" : row.watch_eligible === false ? "NO" : "—"}</span>
+            </div>
+          ))}
+          {!rows.length ? <div className="empty">Waiting for strategy state.</div> : null}
+        </div>
+      </Section>
+    </div>
+  );
+}
+
+function PositionCard({ row, nowMs }) {
+  return (
+    <article className="positionCard">
+      <div className="positionTop"><div><strong>{text(row.asset_id).toUpperCase()}</strong><span>{text(row.horizon)} · {text(row.side)}</span></div><Badge value="OPEN">OPEN</Badge></div>
+      <div className="positionPnl">{duration(row.opened_at_utc, nowMs)}</div>
+      <dl>
+        <div><dt>Qty</dt><dd>{num(row.quantity, 8)}</dd></div>
+        <div><dt>Entry</dt><dd>{num(row.average_entry_price, 8)}</dd></div>
+        <div><dt>Mark</dt><dd>{num(row.mark_price, 8)}</dd></div>
+        <div><dt>Stop</dt><dd>{num(row.hard_stop_price, 8)}</dd></div>
+      </dl>
+    </article>
+  );
+}
+
+function Positions({ floor, nowMs }) {
+  const rows = floor?.open_cockpits || [];
+  return (
+    <div className="pageGrid">
+      <div className="pageIntro"><div><span className="kicker">OPEN RISK</span><h2>Positions</h2><p>Active PAPER positions remain managed regardless of discovery rank changes.</p></div></div>
+      <Section eyebrow="POSITION BOOK" title={`${rows.length} open`} className="wide">
+        {rows.length ? <div className="positionGrid">{rows.map((row)=><PositionCard row={row} nowMs={nowMs} key={row.position_key} />)}</div> : <div className="empty">No open positions.</div>}
+      </Section>
+    </div>
+  );
+}
+
+function Blotter({ operator }) {
+  const rows = operator?.blotter || [];
+  return (
+    <div className="pageGrid">
+      <div className="pageIntro"><div><span className="kicker">EXECUTION HISTORY</span><h2>Blotter</h2><p>Completed PAPER round trips with cost and excursion telemetry.</p></div></div>
+      <Section eyebrow="TRADE LEDGER" title={`${rows.length} completed`} className="wide">
+        <div className="blotterTable">
+          <div className="blotterHead"><span>Closed</span><span>Instrument</span><span>Side</span><span>Qty</span><span>Entry</span><span>Exit</span><span>Net</span><span>MFE</span><span>MAE</span><span>Reason</span></div>
+          {rows.map((row)=>(
+            <div className="blotterRow" key={row.trade_id}>
+              <span>{ts(row.closed_at_utc,"—")}</span><strong>{text(row.asset_id).toUpperCase()}</strong><span>{text(row.side)}</span><span>{num(row.quantity,8)}</span><span>{num(row.avg_entry_price,8)}</span><span>{num(row.exit_price,8)}</span><span className={Number(row.net_pnl_usd)<0?"loss":Number(row.net_pnl_usd)>0?"gain":""}>{money(row.net_pnl_usd)}</span><span>{money(row.mfe_usd)}</span><span>{money(row.mae_usd)}</span><span>{text(row.exit_reason)}</span>
+            </div>
+          ))}
+          {!rows.length ? <div className="empty">No completed trades in this sandbox session.</div> : null}
+        </div>
+      </Section>
+    </div>
+  );
+}
+
+function Maintenance({ maintenance }) {
+  const m = maintenance?.last_result || {};
+  const incidents = maintenance?.incidents || [];
+  return (
+    <div className="pageGrid">
+      <div className="pageIntro"><div><span className="kicker">SELF-HEALING OPERATIONS</span><h2>Maintenance</h2><p>Expected vs observed system behavior, first-cause diagnosis, incident recurrence and repair evidence.</p></div><Badge value={m.status}>{text(m.status, "SYNCING")}</Badge></div>
+      <div className="metricGrid">
+        <Metric label="Status" value={text(m.status,"SYNCING")} state={m.status} />
+        <Metric label="First causal edge" value={text(m.first_causal_edge,"waiting")} />
+        <Metric label="Affected" value={num(m.affected_count)} />
+        <Metric label="Confidence" value={text(m.confidence)} />
+        <Metric label="Auto-fix" value={m.auto_fix_available ? "AVAILABLE" : "NONE"} state={m.auto_fix_available ? "WARN" : "CLEAR"} />
+        <Metric label="Quarantined" value={num((m.quarantined_symbols||[]).length)} />
+      </div>
+      <Section eyebrow="DIAGNOSIS" title={text(m.primary_reason, "No active diagnosis")}>
+        <p className="longText">{text(m.observed, "Waiting for diagnostic cycle.")}</p>
+        <div className="detailGrid">
+          <div><span>Expected</span><strong>{text(m.expected)}</strong></div>
+          <div><span>Owner</span><strong>{text(m.owner)}</strong></div>
+          <div><span>Recommended</span><strong>{text(m.recommended_action)}</strong></div>
+          <div><span>Repair result</span><strong>{text(m.repair?.result, "NO ACTION")}</strong></div>
+        </div>
+      </Section>
+      <Section eyebrow="INCIDENT HISTORY" title="Recurring faults" className="wide">
+        <div className="incidentTable">
+          {incidents.map((row)=>(
+            <div className="incidentRow" key={row.incident_id}>
+              <span>{ts(row.last_seen_at_utc,"—")}</span><Badge value={row.status}>{row.status}</Badge><strong>{row.stage}</strong><span>{row.reason}</span><span>{num(row.affected_count)} affected</span><span>{num(row.recurrence_count)}×</span>
+            </div>
+          ))}
+          {!incidents.length ? <div className="empty">No maintenance incidents recorded.</div> : null}
+        </div>
+      </Section>
+    </div>
+  );
+}
+
+function Settings({ ingress, strategy, discovery, floor, maintenance, onToggle, onRepair, busy, error }) {
+  const [token, setToken] = useState("");
+  const controls = maintenance?.controls || {};
+  const labels = maintenance?.control_labels || {};
+  const unlocked = token.trim().length > 0;
+  return (
+    <div className="pageGrid">
+      <div className="pageIntro"><div><span className="kicker">SYSTEM CONFIGURATION</span><h2>Settings</h2><p>Operational controls only. PAPER execution and LIVE hard block remain locked outside this UI.</p></div></div>
+      <Section eyebrow="RUNTIME" title="Sandbox configuration" className="wide">
+        <div className="settingsMetrics">
+          <Metric label="Execution" value="PAPER" state="GREEN" sub="Continuous sandbox flow" />
+          <Metric label="Live" value="BLOCKED" state="BLOCKED" sub="Not configurable here" />
+          <Metric label="Ingress cadence" value={`${num(ingress?.interval_seconds)}s`} />
+          <Metric label="Strategy cadence" value={`${num(strategy?.interval_seconds)}s`} />
+          <Metric label="Discovery" value={discovery?.running ? "RUNNING" : "WAIT"} state={discovery?.running ? "GREEN":"WARN"} />
+          <Metric label="Build" value={text(floor?.build?.source_revision?.slice(0,8),"local")} />
+        </div>
+      </Section>
+      <Section eyebrow="MAINTENANCE AUTHORITY" title="Agent controls" className="wide">
+        <label className="tokenField"><span>Operator token</span><input type="password" value={token} onChange={(e)=>setToken(e.target.value)} placeholder="Required to change agent authority" /></label>
+        <div className="controlGrid">
+          {Object.entries(labels).map(([key,label])=>{
+            const enabled = controls[key] !== false;
+            return (
+              <article className="controlCard" key={key}>
+                <div><span>{label}</span><small>{key.replaceAll("_"," ")}</small></div>
+                <button type="button" className={enabled?"toggle on":"toggle"} disabled={!unlocked||busy} onClick={()=>onToggle(key,!enabled,token)}><i />{enabled?"ON":"OFF"}</button>
+              </article>
+            );
+          })}
+        </div>
+        <div className="repairBar">
+          <button type="button" disabled={!unlocked||busy||controls.master_enabled===false} onClick={()=>onRepair(token)}>RUN SAFE REPAIR NOW</button>
+          <span>Master OFF makes the Maintenance Agent inert. Automatic repair remains separately controllable.</span>
+        </div>
+        {error ? <div className="errorBox">{error}</div> : null}
+      </Section>
+    </div>
+  );
+}
+
+function AppPage({ active, data, nowMs, onToggle, onRepair, busy, controlError }) {
+  const { floor, ingress, strategy, discovery, operator, maintenance } = data;
+  if (active === "markets") return <Markets discovery={discovery} ingress={ingress} nowMs={nowMs} />;
+  if (active === "pipeline") return <Pipeline strategy={strategy} discovery={discovery} maintenance={maintenance} floor={floor} />;
+  if (active === "trading") return <TradingFloor strategy={strategy} />;
+  if (active === "positions") return <Positions floor={floor} nowMs={nowMs} />;
+  if (active === "blotter") return <Blotter operator={operator} />;
+  if (active === "maintenance") return <Maintenance maintenance={maintenance} />;
+  if (active === "settings") return <Settings ingress={ingress} strategy={strategy} discovery={discovery} floor={floor} maintenance={maintenance} onToggle={onToggle} onRepair={onRepair} busy={busy} error={controlError} />;
+  return <CommandCenter floor={floor} ingress={ingress} strategy={strategy} discovery={discovery} operator={operator} maintenance={maintenance} nowMs={nowMs} />;
 }
 
 export default function DashboardPage() {
-  const [floor, setFloor] = useState(null);
-  const [ingress, setIngress] = useState(null);
-  const [strategy, setStrategy] = useState(null);
-  const [operator, setOperator] = useState(null);
-  const [discovery, setDiscovery] = useState(null);
-  const [maintenance, setMaintenance] = useState(null);
+  const [active, setActive] = useState("command");
+  const [data, setData] = useState({ floor:null, ingress:null, strategy:null, operator:null, discovery:null, maintenance:null });
+  const [errors, setErrors] = useState([]);
+  const [nowMs, setNowMs] = useState(()=>Date.now());
   const [maintenanceBusy, setMaintenanceBusy] = useState(false);
   const [maintenanceError, setMaintenanceError] = useState("");
-  const [error, setError] = useState("");
-  const [runtimeError, setRuntimeError] = useState("");
-  const [operatorError, setOperatorError] = useState("");
-  const [discoveryError, setDiscoveryError] = useState("");
-  const [selectedAsset, setSelectedAsset] = useState(null);
-  const [activeView, setActiveView] = useState("floor");
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [nowMs, setNowMs] = useState(() => Date.now());
-  const [quoteMoves, setQuoteMoves] = useState({});
-  const previousQuotePrices = useRef({});
 
-  useEffect(() => {
-    const ticker = setInterval(() => setNowMs(Date.now()), 1000);
-    return () => clearInterval(ticker);
-  }, []);
+  useEffect(()=>{
+    const timer=setInterval(()=>setNowMs(Date.now()),1000);
+    return()=>clearInterval(timer);
+  },[]);
 
-  useEffect(() => {
-    let mounted = true;
-    const load = async () => {
-      try {
-        const [floorResult, ingressResult, strategyResult, operatorResult, discoveryResult, maintenanceResult] = await Promise.allSettled([
-          getJson(floorPath),
-          getJson(ingressPath),
-          getJson(strategyPath),
-          getJson(operatorPath),
-          getJson(discoveryPath),
-          getJson(maintenancePath),
-        ]);
-        if (!mounted) return;
-
-        if (floorResult.status === "fulfilled") {
-          const data = floorResult.value;
-          setFloor(data);
-          setError("");
-          setSelectedAsset((current) => {
-            if (current && (data.full_universe || []).some((row) => row.asset_id === current)) {
-              return current;
-            }
-            return null;
-          });
-        } else {
-          setError("Canonical vNext Floor endpoint unavailable.");
-        }
-
-        if (ingressResult.status === "fulfilled") {
-          const nextIngress = ingressResult.value;
-          const rows = nextIngress?.last_result?.quotes || [];
-          const nextPrices = {};
-          for (const row of rows) {
-            const assetId = String(row?.asset_id || "").toLowerCase();
-            const price = quotePrice(row);
-            if (!assetId || price === null) continue;
-            nextPrices[assetId] = price;
-          }
-          setQuoteMoves((current) => {
-            const updated = { ...current };
-            for (const [assetId, price] of Object.entries(nextPrices)) {
-              const prior = previousQuotePrices.current[assetId];
-              if (Number.isFinite(prior) && price !== prior) {
-                updated[assetId] = price > prior ? 1 : -1;
-              }
-            }
-            return updated;
-          });
-          previousQuotePrices.current = nextPrices;
-          setIngress(nextIngress);
-        }
-        if (strategyResult.status === "fulfilled") setStrategy(strategyResult.value);
-        if (operatorResult.status === "fulfilled") {
-          setOperator(operatorResult.value);
-          setOperatorError("");
-        } else {
-          setOperatorError("vNext operator data is temporarily unavailable.");
-        }
-        if (discoveryResult.status === "fulfilled") {
-          setDiscovery(discoveryResult.value);
-          setDiscoveryError("");
-        } else {
-          setDiscoveryError("Provider discovery telemetry is temporarily unavailable.");
-        }
-        if (maintenanceResult.status === "fulfilled") setMaintenance(maintenanceResult.value);
-        setRuntimeError(
-          ingressResult.status === "rejected" || strategyResult.status === "rejected"
-            ? "One or more autonomous runtime telemetry endpoints are unavailable."
-            : "",
-        );
-      } catch {
-        if (mounted) {
-          setError("Canonical vNext Floor endpoint unavailable.");
-          setRuntimeError("Autonomous runtime telemetry unavailable.");
-          setOperatorError("vNext operator data is temporarily unavailable.");
-          setDiscoveryError("Provider discovery telemetry is temporarily unavailable.");
-        }
-      }
+  useEffect(()=>{
+    let mounted=true;
+    const load=async()=>{
+      const results=await Promise.allSettled([
+        getJson(floorPath), getJson(ingressPath), getJson(strategyPath),
+        getJson(operatorPath), getJson(discoveryPath), getJson(maintenancePath),
+      ]);
+      if(!mounted)return;
+      const keys=["floor","ingress","strategy","operator","discovery","maintenance"];
+      const next={}; const nextErrors=[];
+      results.forEach((r,i)=>{
+        if(r.status==="fulfilled") next[keys[i]]=r.value;
+        else nextErrors.push(keys[i]);
+      });
+      setData((current)=>({...current,...next}));
+      setErrors(nextErrors);
     };
     load();
-    const timer = setInterval(load, 5000);
-    return () => {
-      mounted = false;
-      clearInterval(timer);
-    };
-  }, []);
+    const timer=setInterval(load,5000);
+    return()=>{mounted=false;clearInterval(timer);};
+  },[]);
 
-  const universe = floor?.full_universe || [];
-  const top12 = floor?.top12_attention || [];
-  const queues = floor?.seat_queues || [];
-  const cockpits = floor?.open_cockpits || [];
-  const pipelineMode = pipelineRuntimeMode({
-    ingress,
-    strategy,
-    discovery,
-    queues,
-    cockpits,
-  });
-
-  const selectedStation = useMemo(
-    () => universe.find((row) => row.asset_id === selectedAsset) || null,
-    [universe, selectedAsset],
-  );
-
-  const drawer = floor?.inspection_drawer?.asset_id === selectedAsset
-    ? floor.inspection_drawer
-    : null;
-  const drawerOpen = Boolean(selectedStation);
-  const ingressState = runtimeState(ingress?.enabled, ingress?.running, ingress?.last_error);
-  const strategyState = runtimeState(strategy?.enabled, strategy?.running, strategy?.last_error);
-  const strategyAssets = strategy?.last_result?.assets || {};
-  const ingressQuotes = ingress?.last_result?.quotes || [];
-  const quoteByAsset = Object.fromEntries(
-    ingressQuotes.map((row) => [String(row?.asset_id || "").toLowerCase(), row]),
-  );
-  const marketRunning = Boolean(ingress?.enabled && ingress?.running && !ingress?.last_error);
-  const nextStrategyScan = strategyCountdown(strategy, nowMs);
-  const viewMeta = VIEW_META[activeView] || VIEW_META.floor;
-  const navigate = (view) => {
-    setActiveView(view);
-    if (view !== "assets") setSelectedAsset(null);
-    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
-  };
-
-  const onMaintenanceToggle = async (key, enabled, token) => {
+  const onToggle=async(key,enabled,token)=>{
     setMaintenanceBusy(true); setMaintenanceError("");
-    try {
-      const result = await postJson(`${maintenancePath}/controls/${encodeURIComponent(key)}`, { enabled }, token);
-      setMaintenance((current) => ({ ...(current || {}), controls: result.controls }));
-    } catch (err) { setMaintenanceError(err instanceof Error ? err.message : "Maintenance control update failed."); }
-    finally { setMaintenanceBusy(false); }
+    try{
+      const result=await postJson(`${maintenancePath}/controls/${encodeURIComponent(key)}`,{enabled},token);
+      setData((current)=>({...current,maintenance:{...(current.maintenance||{}),controls:result.controls}}));
+    }catch(err){setMaintenanceError(err instanceof Error?err.message:"Maintenance control update failed.");}
+    finally{setMaintenanceBusy(false);}
   };
-  const onMaintenanceRepair = async (token) => {
+  const onRepair=async(token)=>{
     setMaintenanceBusy(true); setMaintenanceError("");
-    try {
-      const result = await postJson(`${maintenancePath}/repair`, undefined, token);
-      setMaintenance((current) => ({ ...(current || {}), last_result: result.result }));
-    } catch (err) { setMaintenanceError(err instanceof Error ? err.message : "Maintenance repair failed."); }
-    finally { setMaintenanceBusy(false); }
+    try{
+      const result=await postJson(`${maintenancePath}/repair`,undefined,token);
+      setData((current)=>({...current,maintenance:{...(current.maintenance||{}),last_result:result.result}}));
+    }catch(err){setMaintenanceError(err instanceof Error?err.message:"Maintenance repair failed.");}
+    finally{setMaintenanceBusy(false);}
   };
 
+  const title = NAV.find(([id])=>id===active)?.[1] || "Command Center";
   return (
-    <main className="floorShell">
-      <header className="floorHeader">
-        <div className="headerIdentity">
-          <button type="button" className="menuButton" onClick={() => setMenuOpen(true)} aria-label="Open AETHER menu">☰</button>
-          <img className="brandMark" src="/vnext/aether-mark.png" alt="AETHER" />
-          <div>
-            <p className="eyebrow">AETHER PROP FIRM</p>
-            <h1>{viewMeta.title}</h1>
-            <p className="subtle">{viewMeta.subtitle}</p>
-          </div>
-        </div>
-        <div className="modeStack">
-          <div className="modeSafetyRow">
-            <span className="mode paper">PAPER ONLY</span>
-            <span className="mode blocked">LIVE BLOCKED</span>
-          </div>
-          <span className={"mode pipeline " + pipelineMode.tone}>{pipelineMode.label}</span>
-        </div>
-      </header>
-
-      {activeView === "floor" ? (
-        <>
-      <section className="marketHeartbeat" aria-label="Live market heartbeat">
-        <div className="heartbeatLead">
-          <span className={`heartbeatDot ${marketRunning ? "running" : ""}`} aria-hidden="true" />
-          <div>
-            <span>MARKET HEARTBEAT</span>
-            <strong>{marketRunning ? "KRAKEN INGEST RUNNING" : "MARKET FEED WAITING"}</strong>
-          </div>
-        </div>
-
-        <div className="heartbeatQuotes">
-          <HeartbeatQuote assetId="btc" row={quoteByAsset.btc} direction={quoteMoves.btc} nowMs={nowMs} />
-          <HeartbeatQuote assetId="eth" row={quoteByAsset.eth} direction={quoteMoves.eth} nowMs={nowMs} />
-        </div>
-
-        <div className="heartbeatMeta">
-          <span><b>Ingress</b> #{text(ingress?.cycle_count, "0")}</span>
-          <span><b>Strategy</b> #{text(strategy?.cycle_count, "0")}</span>
-          <span><b>Next scan</b> {nextStrategyScan}</span>
-          <span><b>Trading</b> NATURAL SETUPS ONLY</span>
-        </div>
-      </section>
-
-      <section className="statusStrip" aria-label="Floor status">
-        <span><b>App restarted</b> {timestamp(floor?.runtime_started_at_utc, "waiting for runtime")}</span>
-        <span><b>Data refreshed</b> {timestamp(floor?.as_of_utc, "waiting for vNext")}</span>
-        <span title={text(floor?.build?.source_revision, "local build")}><b>Build</b> {text(floor?.build?.source_revision?.slice(0, 8), "local")}</span>
-        <span><b>Universe</b> {universe.length}</span>
-        <span><b>Attention</b> {top12.length}/12</span>
-        <span><b>Open cockpits</b> {cockpits.length}</span>
-      </section>
-
-      <section className="testStatus" aria-label="Paper sandbox status">
-        <span><b>Session</b> {text(floor?.paper_test?.epoch_id, "not reset")}</span>
-        <span><b>Starting bank</b> ${number(floor?.paper_test?.seed_bank_usd, 2)}</span>
-        <span><b>Blotter</b> {text(floor?.paper_test?.blotter_trade_count, "0")} trade(s)</span>
-      </section>
-
-      <BankStrip operator={operator} />
-
-      <MobileCommandStrip
-        queues={queues}
-        cockpits={cockpits}
-        operator={operator}
-        ingress={ingress}
-        strategy={strategy}
-        discovery={discovery}
-        nowMs={nowMs}
-      />
-
-      <DesktopCommandCenter
-        floor={floor}
-        queues={queues}
-        cockpits={cockpits}
-        operator={operator}
-        ingress={ingress}
-        strategy={strategy}
-        discovery={discovery}
-        nowMs={nowMs}
-      />
-
-      <section className="runtimeMonitor" aria-label="Autonomous sandbox runtime">
-        <div className="runtimeMonitorHead">
-          <div>
-            <p className="eyebrow">AUTONOMOUS PAPER ENGINE</p>
-            <h2>Live Strategy Monitor</h2>
-          </div>
-          <div className="runtimeBadges">
-            <span className={ingressState.className}>INGRESS {ingressState.label}</span>
-            <span className={strategyState.className}>STRATEGY {strategyState.label}</span>
-          </div>
-        </div>
-
-        <div className="runtimeMetrics">
-          <div><span>Ingress cycles</span><b>{text(ingress?.cycle_count, "0")}</b></div>
-          <div><span>Strategy cycles</span><b>{text(strategy?.cycle_count, "0")}</b></div>
-          <div><span>Forward-paper observations</span><b>{text(strategy?.last_result?.forward_paper_observation_count, "0")}</b></div>
-          <div><span>Last strategy cycle</span><b>{timestamp(strategy?.last_cycle_finished_at_utc, "waiting")}</b></div>
-          <div><span>Last error</span><b className={strategy?.last_error ? "runtimeFault" : ""}>{text(strategy?.last_error, "none")}</b></div>
-        </div>
-
-        <div className="strategyDecisionGrid">
-          <StrategyDecision assetId="btc" row={strategyAssets.btc} />
-          <StrategyDecision assetId="eth" row={strategyAssets.eth} />
-        </div>
-        <p className="runtimeLaw">
-          Read-only telemetry. Natural setups only. PAPER execution only. LIVE remains hard blocked.
-        </p>
-      </section>
-
-      {runtimeError ? (
-        <section className="apiNotice">
-          <strong>RUNTIME TELEMETRY DEGRADED</strong>
-          <span>{runtimeError}</span>
-          <small>Trading controls remain server-side; this panel is inspection only.</small>
-        </section>
-      ) : null}
-
-      {error ? (
-        <section className="apiNotice">
-          <strong>READ-ONLY FLOOR WAITING</strong>
-          <span>{error}</span>
-          <small>No legacy fallback and no placeholder trading state is substituted.</small>
-        </section>
-      ) : null}
-
-      <section className="floorSection">
-        <div className="sectionHead">
-          <div><p className="eyebrow">ATTENTION BOARD</p><h2>Top 12 Attention</h2></div>
-          <span>Rank supplied by canonical upstream state</span>
-        </div>
-        {top12.length ? (
-          <div className="attentionGrid">
-            {top12.map((row) => (
-              <button
-                type="button"
-                className="attentionRow"
-                key={`${row.rank}:${row.asset_id}`}
-                onClick={() => setSelectedAsset(row.asset_id)}
-              >
-                <b>#{row.rank}</b>
-                <strong>{row.asset_id?.toUpperCase()}</strong>
-                <span className={stateClass(row.dominant_state)}>{row.dominant_state}</span>
-                <span>{row.seat_owner}</span>
-                <small>{text(row.first_blocker, "clear")}</small>
-              </button>
-            ))}
-          </div>
-        ) : <Empty>No ranked attention snapshot yet.</Empty>}
-      </section>
-
-      <section className="floorSection">
-        <div className="sectionHead">
-          <div><p className="eyebrow">ALL SUPPORTED ASSETS</p><h2>Full Universe</h2></div>
-          <span>Dominant state · owner seat · first blocker</span>
-        </div>
-        {universe.length ? (
-          <div className="universeGrid">
-            {universe.map((station) => (
-              <UniverseCard
-                station={station}
-                selected={station.asset_id === selectedAsset}
-                onSelect={setSelectedAsset}
-                key={station.asset_id}
-              />
-            ))}
-          </div>
-        ) : <Empty>No canonical universe snapshot yet.</Empty>}
-      </section>
-
-      <section className="split">
-        <section className="floorSection">
-          <div className="sectionHead">
-            <div><p className="eyebrow">FIRM WORKFLOW</p><h2>Seat Queues</h2></div>
-          </div>
-          {queues.length ? (
-            <div className="queueGrid">{queues.map((queue) => <Queue queue={queue} key={`${queue.seat}:${queue.state}`} />)}</div>
-          ) : <Empty>No queue snapshot yet.</Empty>}
-        </section>
-
-        <section className="floorSection">
-          <div className="sectionHead">
-            <div><p className="eyebrow">OPEN RISK</p><h2>Open Position Cockpits</h2></div>
-          </div>
-          {cockpits.length ? (
-            <div className="cockpitList">{cockpits.map((cockpit) => <Cockpit cockpit={cockpit} key={cockpit.position_key} />)}</div>
-          ) : <Empty>No open positions.</Empty>}
-        </section>
-      </section>
-        </>
-      ) : (
-        <AppSubview
-          activeView={activeView}
-          universe={universe}
-          queues={queues}
-          selectedAsset={selectedAsset}
-          onSelectAsset={setSelectedAsset}
-          cockpits={cockpits}
-          strategyAssets={strategyAssets}
-          strategy={strategy}
-          ingress={ingress}
-          discovery={discovery}
-          operator={operator}
-          floor={floor}
-          nowMs={nowMs}
-          maintenance={maintenance}
-          onMaintenanceToggle={onMaintenanceToggle}
-          onMaintenanceRepair={onMaintenanceRepair}
-          maintenanceBusy={maintenanceBusy}
-          maintenanceError={maintenanceError}
-        />
-      )}
-
-      {discoveryError ? (
-        <section className="apiNotice">
-          <strong>PROVIDER DISCOVERY DEGRADED</strong>
-          <span>{discoveryError}</span>
-          <small>No catalog or Top-10 values are fabricated when the feed is unavailable.</small>
-        </section>
-      ) : null}
-
-      {operatorError ? (
-        <section className="apiNotice">
-          <strong>OPERATOR DATA DEGRADED</strong>
-          <span>{operatorError}</span>
-          <small>The app never substitutes legacy trading state.</small>
-        </section>
-      ) : null}
-
-      <aside className={`inspectionDrawer ${drawerOpen ? "open" : ""}`} aria-label="Inspection Drawer">
-        <div className="drawerHead">
-          <div><p className="eyebrow">READ-ONLY INSPECTION</p><h2>Inspection Drawer</h2></div>
-          <button type="button" onClick={() => setSelectedAsset(null)} aria-label="Close inspection drawer">×</button>
-        </div>
-        {selectedStation ? (
-          <>
-            <div className="drawerAsset">
-              <strong>{selectedStation.asset_id?.toUpperCase()}</strong>
-              <span className={stateClass(selectedStation.dominant_state)}>{text(selectedStation.dominant_state, "NO")}</span>
-            </div>
-            <dl className="drawerList">
-              <div><dt>Seat owner</dt><dd>{text(selectedStation.seat_owner)}</dd></div>
-              <div><dt>First blocker</dt><dd>{text(selectedStation.first_blocker, "clear")}</dd></div>
-              <div><dt>First blocker reason</dt><dd>{text(selectedStation.first_blocker_reason)}</dd></div>
-              <div><dt>Open positions</dt><dd>{text(selectedStation.open_position_count, "0")}</dd></div>
-            </dl>
-            {drawer ? (
-              <dl className="drawerList canonicalDetails">
-                <div><dt>Observation</dt><dd>{text(drawer.market_observation_ref)}</dd></div>
-                <div><dt>Decision lineage</dt><dd>{text(drawer.decision_lineage_ref)}</dd></div>
-                <div><dt>Evidence refs</dt><dd>{(drawer.evidence_refs || []).join(", ") || "—"}</dd></div>
-                <div><dt>Blocker refs</dt><dd>{(drawer.blocker_refs || []).join(", ") || "—"}</dd></div>
-              </dl>
-            ) : (
-              <Empty>Canonical lineage drawer details are unavailable for this station in the current snapshot.</Empty>
-            )}
-            <p className="drawerLaw">Inspection only. No order, Risk, Governor, or route-state mutation controls are exposed here.</p>
-          </>
-        ) : <Empty>Select an asset station to inspect it.</Empty>}
+    <main className="appShell">
+      <aside className="sidebar">
+        <div className="brand"><img src="/vnext/aether-mark.png" alt="AETHER" /><div><strong>AETHER</strong><span>Autonomous Market Operations</span></div></div>
+        <nav>
+          {NAV.map(([id,label,sub])=>(
+            <button type="button" className={active===id?"navItem active":"navItem"} onClick={()=>setActive(id)} key={id}>
+              <span>{label}</span><small>{sub}</small>
+            </button>
+          ))}
+        </nav>
+        <div className="sidebarFoot"><Badge value="GREEN">PAPER ACTIVE</Badge><Badge value="BLOCKED">LIVE BLOCKED</Badge></div>
       </aside>
 
-      <AppMenu
-        open={menuOpen}
-        activeView={activeView}
-        onClose={() => setMenuOpen(false)}
-        onNavigate={navigate}
-        floor={floor}
-        ingress={ingress}
-        strategy={strategy}
-      />
-      <BottomDock activeView={activeView} onNavigate={navigate} />
+      <section className="workspace">
+        <header className="topbar">
+          <div><span className="kicker">AETHER / SANDBOX</span><h1>{title}</h1></div>
+          <div className="topbarMeta">
+            <span>App restarted {ts(data.floor?.runtime_started_at_utc,"waiting")}</span>
+            <span>Data refreshed {ts(data.floor?.as_of_utc,"waiting")}</span>
+          </div>
+        </header>
+
+        <RuntimeStrip floor={data.floor} ingress={data.ingress} strategy={data.strategy} discovery={data.discovery} maintenance={data.maintenance} />
+
+        {errors.length ? <div className="errorBox"><strong>Telemetry degraded:</strong> {errors.join(", ")} endpoint(s) unavailable. Existing UI state is preserved; no placeholder trade state is invented.</div> : null}
+
+        <AppPage active={active} data={data} nowMs={nowMs} onToggle={onToggle} onRepair={onRepair} busy={maintenanceBusy} controlError={maintenanceError} />
+      </section>
     </main>
   );
 }
