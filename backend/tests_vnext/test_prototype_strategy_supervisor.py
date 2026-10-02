@@ -16,7 +16,7 @@ from aether_vnext.prototype_strategy_supervisor import (
     _entry_focus_block,
     _dynamic_flow_telemetry,
     _focus_priority_asset_ids,
-    _rotating_dynamic_strategy_batch,
+    _ordered_dynamic_strategy_work,
     _sync_dynamic_kraken_products,
     configured_dynamic_strategy_scan_batch_size,
     configured_strategy_enabled,
@@ -284,57 +284,27 @@ def test_current_dynamic_products_are_not_hard_gated_by_top100_focus() -> None:
     )
 
 
-def test_dynamic_strategy_rotation_prioritizes_open_assets_and_roams() -> None:
-    products = tuple(
-        _dynamic_product(symbol)
-        for symbol in ("ADA/USD", "AVAX/USD", "DOT/USD", "LINK/USD", "SOL/USD")
-    )
-    first = _rotating_dynamic_strategy_batch(
+def test_dynamic_strategy_work_orders_full_universe_open_first() -> None:
+    products = tuple(_dynamic_product(symbol) for symbol in ("ADA/USD", "AVAX/USD", "DOT/USD", "LINK/USD", "SOL/USD"))
+    selected = _ordered_dynamic_strategy_work(
         products,
-        as_of_utc=datetime(2026, 10, 1, 22, 0, tzinfo=timezone.utc),
-        interval_seconds=15.0,
-        batch_size=3,
         priority_asset_ids=("kraken:solusd",),
+        attention_asset_ids=("kraken:adausd",),
     )
-    later = _rotating_dynamic_strategy_batch(
+    assert selected[0].asset_id == "kraken:solusd"
+    assert selected[1].asset_id == "kraken:adausd"
+    assert len(selected) == len(products)
+    assert {row.asset_id for row in selected} == {row.asset_id for row in products}
+
+
+def test_dynamic_strategy_work_never_drops_assets_for_worker_limit() -> None:
+    products = tuple(_dynamic_product(symbol) for symbol in ("ADA/USD", "AVAX/USD", "DOT/USD", "LINK/USD", "SOL/USD"))
+    selected = _ordered_dynamic_strategy_work(
         products,
-        as_of_utc=datetime(2026, 10, 1, 22, 0, 15, tzinfo=timezone.utc),
-        interval_seconds=15.0,
-        batch_size=3,
-        priority_asset_ids=("kraken:solusd",),
+        priority_asset_ids=("kraken:adausd", "kraken:avaxusd", "kraken:dotusd"),
     )
-    assert first[0].asset_id == "kraken:solusd"
-    assert later[0].asset_id == "kraken:solusd"
-    assert len(first) == 3
-    assert len(later) == 3
-    assert {row.asset_id for row in first[1:]} != {
-        row.asset_id for row in later[1:]
-    }
-
-
-
-def test_dynamic_strategy_rotation_never_drops_open_assets_over_batch_limit() -> None:
-    products = tuple(
-        _dynamic_product(symbol)
-        for symbol in ("ADA/USD", "AVAX/USD", "DOT/USD", "LINK/USD", "SOL/USD")
-    )
-    selected = _rotating_dynamic_strategy_batch(
-        products,
-        as_of_utc=datetime(2026, 10, 1, 22, 0, tzinfo=timezone.utc),
-        interval_seconds=15.0,
-        batch_size=2,
-        priority_asset_ids=(
-            "kraken:adausd",
-            "kraken:avaxusd",
-            "kraken:dotusd",
-        ),
-    )
-    assert tuple(row.asset_id for row in selected) == (
-        "kraken:adausd",
-        "kraken:avaxusd",
-        "kraken:dotusd",
-    )
-
+    assert len(selected) == 5
+    assert tuple(row.asset_id for row in selected[:3]) == ("kraken:adausd", "kraken:avaxusd", "kraken:dotusd")
 
 
 def test_coinbase_warmup_cache_requires_full_reference_window() -> None:
@@ -352,26 +322,13 @@ def test_coinbase_warmup_cache_requires_full_reference_window() -> None:
 
 
 def test_dynamic_strategy_attention_priority_never_starves_background_catalog() -> None:
-    products = tuple(
-        _dynamic_product(symbol)
-        for symbol in ("ADA/USD", "AVAX/USD", "DOT/USD", "LINK/USD", "SOL/USD", "XRP/USD")
-    )
-    selected = _rotating_dynamic_strategy_batch(
+    products = tuple(_dynamic_product(symbol) for symbol in ("ADA/USD", "AVAX/USD", "DOT/USD", "LINK/USD", "SOL/USD", "XRP/USD"))
+    selected = _ordered_dynamic_strategy_work(
         products,
-        as_of_utc=datetime(2026, 10, 1, 22, 0, tzinfo=timezone.utc),
-        interval_seconds=15.0,
-        batch_size=4,
-        attention_asset_ids=(
-            "kraken:solusd",
-            "kraken:adausd",
-            "kraken:avaxusd",
-            "kraken:dotusd",
-        ),
+        attention_asset_ids=("kraken:solusd", "kraken:adausd", "kraken:avaxusd", "kraken:dotusd"),
     )
-    selected_ids = {row.asset_id for row in selected}
-    assert len(selected) == 4
-    assert selected_ids & {"kraken:solusd", "kraken:adausd", "kraken:avaxusd", "kraken:dotusd"}
-    assert selected_ids & {"kraken:linkusd", "kraken:xrpusd"}
+    assert len(selected) == len(products)
+    assert {row.asset_id for row in selected} == {row.asset_id for row in products}
 
 
 def test_dynamic_strategy_scan_default_is_four(monkeypatch) -> None:
