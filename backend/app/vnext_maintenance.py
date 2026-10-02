@@ -23,9 +23,18 @@ def _instance():
       _supervisor=PipelineMaintenanceSupervisor(ingress_provider=configured_vnext_ingress_status,discovery_provider=current_discovery_status,strategy_provider=configured_vnext_strategy_status,interval_seconds=configured_maintenance_interval_seconds())
     return _supervisor
 
-async def start_configured_vnext_maintenance(): await _instance().start()
+def configured_maintenance_enabled() -> bool:
+    return os.getenv("AETHER_VNEXT_ENVIRONMENT", "").strip().lower() == "sandbox"
+
+
+async def start_configured_vnext_maintenance():
+    if configured_maintenance_enabled():
+        await _instance().start()
+
+
 async def stop_configured_vnext_maintenance():
-    if _supervisor is not None: await _supervisor.stop()
+    if _supervisor is not None:
+        await _supervisor.stop()
 def configured_vnext_maintenance_status():
     if _supervisor is None: return {"enabled":True,"running":False,"paper_only":True,"live_blocked":True,"cycle_count":0,"interval_seconds":configured_maintenance_interval_seconds(),"last_cycle_started_at_utc":None,"last_cycle_finished_at_utc":None,"last_error":None,"last_result":None}
     return status_payload(_supervisor.status())
