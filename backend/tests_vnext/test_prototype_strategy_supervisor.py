@@ -11,6 +11,7 @@ import pytest
 from aether_vnext.prototype_strategy_supervisor import (
     PrototypeStrategySupervisor,
     _coinbase_warmup_cached,
+    _kraken_history_cached,
     _partition_observations_for_decision_time,
     _current_dynamic_kraken_products,
     _entry_focus_block,
@@ -321,6 +322,31 @@ def test_coinbase_warmup_cache_requires_full_reference_window() -> None:
     assert _coinbase_warmup_cached(mixed) is False
 
 
+def test_kraken_history_cache_tracks_completed_bar_boundaries() -> None:
+    as_of = datetime(2026, 10, 2, 19, 30, tzinfo=timezone.utc)
+    hourly = (
+        SimpleNamespace(
+            source_id="kraken_public_rest_ohlc",
+            bucket_close_utc=datetime(2026, 10, 2, 19, 0, tzinfo=timezone.utc),
+        ),
+    )
+    daily = (
+        SimpleNamespace(
+            source_id="kraken_public_rest_ohlc",
+            bucket_close_utc=datetime(2026, 10, 2, 0, 0, tzinfo=timezone.utc),
+        ),
+    )
+    assert _kraken_history_cached(hourly, daily, as_of_utc=as_of) is True
+
+    stale_hourly = (
+        SimpleNamespace(
+            source_id="kraken_public_rest_ohlc",
+            bucket_close_utc=datetime(2026, 10, 2, 18, 0, tzinfo=timezone.utc),
+        ),
+    )
+    assert _kraken_history_cached(stale_hourly, daily, as_of_utc=as_of) is False
+
+
 def test_dynamic_strategy_attention_priority_never_starves_background_catalog() -> None:
     products = tuple(_dynamic_product(symbol) for symbol in ("ADA/USD", "AVAX/USD", "DOT/USD", "LINK/USD", "SOL/USD", "XRP/USD"))
     selected = _ordered_dynamic_strategy_work(
@@ -331,9 +357,9 @@ def test_dynamic_strategy_attention_priority_never_starves_background_catalog() 
     assert {row.asset_id for row in selected} == {row.asset_id for row in products}
 
 
-def test_dynamic_strategy_scan_default_is_four(monkeypatch) -> None:
+def test_dynamic_strategy_scan_default_is_twelve(monkeypatch) -> None:
     monkeypatch.delenv("AETHER_VNEXT_DYNAMIC_STRATEGY_SCAN_BATCH_SIZE", raising=False)
-    assert configured_dynamic_strategy_scan_batch_size() == 4
+    assert configured_dynamic_strategy_scan_batch_size() == 12
 
 
 def test_dynamic_flow_telemetry_keeps_waiting_assets_owned() -> None:

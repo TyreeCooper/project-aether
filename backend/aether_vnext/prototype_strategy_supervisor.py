@@ -354,7 +354,7 @@ def _sync_dynamic_kraken_products(
 def configured_dynamic_strategy_scan_batch_size() -> int:
     raw = os.getenv(
         "AETHER_VNEXT_DYNAMIC_STRATEGY_SCAN_BATCH_SIZE",
-        "4",
+        "12",
     ).strip()
     value = int(raw)
     if value < 1 or value > 20:
@@ -475,6 +475,44 @@ def _coinbase_warmup_cached(
         1 for row in rows
         if row.source_id == COINBASE_SOURCE_ID
     ) >= minimum_bars
+
+
+def _kraken_history_cached(
+    hourly_rows: Sequence[PrototypeMarketBar],
+    daily_rows: Sequence[PrototypeMarketBar],
+    *,
+    as_of_utc: datetime,
+) -> bool:
+    """Reuse persisted completed Kraken bars until the next bar boundary."""
+    if as_of_utc.tzinfo is None:
+        raise ValueError("as_of_utc must be timezone-aware")
+    required_hour_close = as_of_utc.astimezone(UTC).replace(
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    required_day_close = as_of_utc.astimezone(UTC).replace(
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    hourly_closes = tuple(
+        row.bucket_close_utc.astimezone(UTC)
+        for row in hourly_rows
+        if row.source_id == KRAKEN_DAILY_SOURCE_ID
+    )
+    daily_closes = tuple(
+        row.bucket_close_utc.astimezone(UTC)
+        for row in daily_rows
+        if row.source_id == KRAKEN_DAILY_SOURCE_ID
+    )
+    return (
+        bool(hourly_closes)
+        and bool(daily_closes)
+        and max(hourly_closes) >= required_hour_close
+        and max(daily_closes) >= required_day_close
+    )
 
 
 async def _fetch_dynamic_strategy_history(
@@ -658,16 +696,29 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     for product in batch
                 }
                 warmup_cached = {}
+                kraken_history_cached = {}
                 for product in batch:
-                    rows = load_prototype_market_bars(
+                    hourly_rows = load_prototype_market_bars(
                         sync_conn,
                         store,
                         asset_id=product.asset_id,
                         interval_seconds=3600,
                         end_at_utc=as_of_utc,
                     )
+                    daily_rows = load_prototype_market_bars(
+                        sync_conn,
+                        store,
+                        asset_id=product.asset_id,
+                        interval_seconds=86400,
+                        end_at_utc=as_of_utc,
+                    )
                     warmup_cached[product.asset_id] = _coinbase_warmup_cached(
-                        rows
+                        hourly_rows
+                    )
+                    kraken_history_cached[product.asset_id] = _kraken_history_cached(
+                        hourly_rows,
+                        daily_rows,
+                        as_of_utc=as_of_utc,
                     )
                 return (
                     registry_status,
@@ -676,6 +727,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     dynamic_open_ids,
                     market_ready,
                     warmup_cached,
+                    kraken_history_cached,
                     attention_ids,
                 )
 
@@ -686,6 +738,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                 dynamic_open_ids,
                 prepared_dynamic_observations,
                 dynamic_warmup_cached,
+                dynamic_kraken_history_cached,
                 dynamic_attention_ids,
             ) = await connection.run_sync(prepare)
 
@@ -695,6 +748,12 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
             "worker_concurrency": configured_dynamic_strategy_scan_batch_size(),
             "configured_worker_concurrency_range": {"minimum": 1, "maximum": 20},
             "work_candidate_count": len(dynamic_batch),
+            "history_cache_hit_count": sum(
+                1
+                for product in dynamic_batch
+                if dynamic_warmup_cached.get(product.asset_id, False)
+                and dynamic_kraken_history_cached.get(product.asset_id, False)
+            ),
             "work_candidate_asset_ids": [row.asset_id for row in dynamic_batch],
             "open_priority_asset_ids": list(dynamic_open_ids),
             "attention_priority_asset_ids": list(dynamic_attention_ids),
@@ -743,6 +802,23 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                 product.asset_id,
                 False,
             )
+            history_current = dynamic_kraken_history_cached.get(
+                product.asset_id,
+                False,
+            )
+            if not needs_warmup and history_current:
+                # The asset stays fully eligible and is evaluated from persisted
+                # source-bound bars; provider history I/O resumes at the next
+                # completed-bar boundary instead of repeating every 15 seconds.
+                history_by_asset[product.asset_id] = DynamicStrategyHistory(
+                    asset_id=product.asset_id,
+                    coinbase_product=None,
+                    coinbase_hourly=(),
+                    kraken_hourly=(),
+                    kraken_daily=(),
+                    error=None,
+                )
+                continue
             if needs_warmup and coinbase_catalog_error is not None:
                 history_by_asset[product.asset_id] = DynamicStrategyHistory(
                     asset_id=product.asset_id,
@@ -1246,6 +1322,12 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                             product.asset_id,
                             False,
                         )
+                    ),
+                    "history_cache_hits": sum(
+                        1
+                        for product in dynamic_batch
+                        if dynamic_warmup_cached.get(product.asset_id, False)
+                        and dynamic_kraken_history_cached.get(product.asset_id, False)
                     ),
                     "strategy_evaluated": evaluated,
                     "watch": _stage_count(dynamic_results, "WATCH"),

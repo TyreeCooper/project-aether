@@ -171,6 +171,7 @@ jobs:
             AETHER_VNEXT_PROVIDER_FETCH_TIMEOUT_SECONDS=60
             AETHER_VNEXT_SANDBOX_TRADING_ENABLED=true
             AETHER_VNEXT_SANDBOX_TRADING_INTERVAL_SECONDS=15
+            AETHER_VNEXT_DYNAMIC_STRATEGY_SCAN_BATCH_SIZE=12
           )
 
           # Public/reference discovery is intentionally keyless in the sandbox.
