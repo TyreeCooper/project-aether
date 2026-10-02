@@ -191,6 +191,49 @@ def _latest_observation(
     )
 
 
+def _partition_observations_for_decision_time(
+    observations: Mapping[str, object],
+    *,
+    decision_at_utc: datetime,
+) -> tuple[dict[str, object], dict[str, str], tuple[str, ...]]:
+    """Keep one clock-skewed market row from aborting the entire PAPER funnel.
+
+    received_ts is the local causal boundary: a locally received observation cannot
+    be used before its receive time. exchange_ts belongs to the remote venue clock,
+    so positive exchange-clock skew is retained as telemetry instead of becoming a
+    cycle-wide fatal error.
+    """
+    if decision_at_utc.tzinfo is None:
+        raise ValueError("decision_at_utc must be timezone-aware")
+
+    accepted: dict[str, object] = {}
+    rejected: dict[str, str] = {}
+    exchange_clock_ahead: list[str] = []
+    for raw_asset_id, observation in observations.items():
+        asset_id = str(raw_asset_id).strip().lower()
+        received_ts = getattr(observation, "received_ts", None)
+        exchange_ts = getattr(observation, "exchange_ts", None)
+        if received_ts is None or received_ts.tzinfo is None:
+            rejected[asset_id] = "received_timestamp_missing_or_naive"
+            continue
+        if received_ts > decision_at_utc:
+            rejected[asset_id] = "received_timestamp_after_decision_time"
+            continue
+        if exchange_ts is not None:
+            if exchange_ts.tzinfo is None:
+                rejected[asset_id] = "exchange_timestamp_naive"
+                continue
+            if exchange_ts > decision_at_utc:
+                exchange_clock_ahead.append(asset_id)
+        accepted[asset_id] = observation
+
+    return (
+        accepted,
+        rejected,
+        tuple(sorted(exchange_clock_ahead)),
+    )
+
+
 def _entry_focus_block(
     *,
     asset_id: str,
@@ -764,16 +807,21 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                 }
 
                 decision_at_utc = datetime.now(UTC)
-                for observation in observations.values():
-                    for stamp in (
-                        observation.exchange_ts,
-                        observation.received_ts,
-                    ):
-                        if stamp is not None and stamp > decision_at_utc:
-                            raise ValueError(
-                                "market timestamp cannot be after decision time"
-                            )
+                (
+                    observations,
+                    clock_rejections,
+                    exchange_clock_ahead_asset_ids,
+                ) = _partition_observations_for_decision_time(
+                    observations,
+                    decision_at_utc=decision_at_utc,
+                )
                 result["decision_at_utc"] = decision_at_utc.isoformat()
+                result["market_clock"] = {
+                    "rejected_asset_ids": dict(sorted(clock_rejections.items())),
+                    "exchange_clock_ahead_asset_ids": list(
+                        exchange_clock_ahead_asset_ids
+                    ),
+                }
 
                 open_table = store.tables["open_trades"]
                 open_rows = tuple(
@@ -796,7 +844,10 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     if observation is None:
                         exit_results[asset_id] = {
                             "stage": "OPEN",
-                            "reason": "current_executable_observation_missing",
+                            "reason": clock_rejections.get(
+                                asset_id,
+                                "current_executable_observation_missing",
+                            ),
                             "trade_id": str(trade["trade_id"]),
                         }
                         continue
@@ -824,7 +875,10 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     if observation is None:
                         seed_results[asset_id] = {
                             "stage": "MARKET_NOT_READY",
-                            "reason": "current_executable_observation_missing",
+                            "reason": clock_rejections.get(
+                                asset_id,
+                                "current_executable_observation_missing",
+                            ),
                         }
                         continue
                     if asset_id in assets_open_at_start:
@@ -973,7 +1027,10 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     if observation is None:
                         dynamic_results[asset_id] = {
                             "stage": "MARKET_NOT_READY",
-                            "reason": "current_executable_observation_missing",
+                            "reason": clock_rejections.get(
+                                asset_id,
+                                "current_executable_observation_missing",
+                            ),
                         }
                         continue
                     if asset_id in assets_open_at_start:

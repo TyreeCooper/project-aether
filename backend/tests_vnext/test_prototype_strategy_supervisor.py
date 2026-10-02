@@ -11,6 +11,7 @@ import pytest
 from aether_vnext.prototype_strategy_supervisor import (
     PrototypeStrategySupervisor,
     _coinbase_warmup_cached,
+    _partition_observations_for_decision_time,
     _current_dynamic_kraken_products,
     _entry_focus_block,
     _rotating_dynamic_strategy_batch,
@@ -103,6 +104,29 @@ async def test_strategy_supervisor_records_fault_and_recovers() -> None:
     assert status.last_result == {"ok": True}
     await supervisor.stop()
 
+
+
+def test_remote_exchange_clock_skew_does_not_abort_strategy_cycle() -> None:
+    decision_at = datetime(2026, 10, 1, 20, 0, tzinfo=timezone.utc)
+    accepted, rejected, exchange_ahead = _partition_observations_for_decision_time(
+        {
+            "kraken:solusd": SimpleNamespace(
+                received_ts=datetime(2026, 10, 1, 19, 59, 59, tzinfo=timezone.utc),
+                exchange_ts=datetime(2026, 10, 1, 20, 0, 1, tzinfo=timezone.utc),
+            ),
+            "kraken:adausd": SimpleNamespace(
+                received_ts=datetime(2026, 10, 1, 20, 0, 1, tzinfo=timezone.utc),
+                exchange_ts=datetime(2026, 10, 1, 19, 59, 59, tzinfo=timezone.utc),
+            ),
+        },
+        decision_at_utc=decision_at,
+    )
+
+    assert tuple(accepted) == ("kraken:solusd",)
+    assert rejected == {
+        "kraken:adausd": "received_timestamp_after_decision_time",
+    }
+    assert exchange_ahead == ("kraken:solusd",)
 
 
 def test_entry_focus_is_advisory_for_new_entries() -> None:
