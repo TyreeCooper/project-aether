@@ -49,16 +49,16 @@ def test_focus_handoff_queues_all_focused_assets_and_marks_commissioned_assets_r
         },
     ])
     by_key = {row.focus_key: row for row in rows}
-    assert by_key["Kraken:BTC/USD"].state == "SCOUT_RECEIVED"
+    assert by_key["Kraken:BTC/USD"].state == "FOCUS_ADMITTED"
     assert by_key["Kraken:BTC/USD"].canonical_asset_id == "btc"
-    assert by_key["Kraken:SOL/USD"].state == "SCOUT_RECEIVED"
+    assert by_key["Kraken:SOL/USD"].state == "FOCUS_ADMITTED"
     assert "dynamic_crypto_playbook_binding_required" in by_key["Kraken:SOL/USD"].requirements
-    assert by_key["IBKR:NVDA"].state == "SCOUT_RECEIVED"
+    assert by_key["IBKR:NVDA"].state == "FOCUS_ADMITTED"
     assert "strategy_supervisor_not_commissioned_for_asset" in by_key["IBKR:NVDA"].requirements
     assert by_key["IBKR:AAPL"].canonical_asset_id is None
     assert "dynamic_product_registry_binding_required" in by_key["IBKR:AAPL"].requirements
 
-    assert by_key["IBKR:AAPL"].state == "SCOUT_RECEIVED"
+    assert by_key["IBKR:AAPL"].state == "FOCUS_ADMITTED"
 
     assert by_key["Kraken:BTC/USD"].runtime_evaluable is True
     assert by_key["Kraken:SOL/USD"].runtime_evaluable is False
@@ -66,7 +66,7 @@ def test_focus_handoff_queues_all_focused_assets_and_marks_commissioned_assets_r
     assert by_key["IBKR:AAPL"].runtime_evaluable is False
 
     payload = handoff_payload(rows)
-    assert sum(row["state"] == "SCOUT_RECEIVED" for row in payload) == 4
+    assert sum(row["state"] == "FOCUS_ADMITTED" for row in payload) == 4
     assert sum(row["runtime_evaluable"] is True for row in payload) == 1
     assert all(row["state"] != "DISCOVERY_ONLY" for row in payload)
     assert all(row["state"] != "SCOUT_QUEUED" for row in payload)

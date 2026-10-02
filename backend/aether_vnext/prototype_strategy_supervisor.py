@@ -1201,8 +1201,9 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                             "watch_eligible": feature.watch_eligible,
                         }
 
-                focus_received = int(
-                    (focus_snapshot or {}).get("scout_received_count")
+                focus_admitted = int(
+                    (focus_snapshot or {}).get("focus_admitted_count")
+                    or (focus_snapshot or {}).get("scout_received_count")
                     or (focus_snapshot or {}).get("focus_count")
                     or 0
                 )
@@ -1217,7 +1218,8 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     }
                 )
                 result["pipeline"] = {
-                    "focus_received": focus_received,
+                    "focus_admitted": focus_admitted,
+                    "focus_received": focus_admitted,  # deprecated compatibility alias
                     "dynamic_kraken_available": len(dynamic_products),
                     "roaming_batch": len(dynamic_batch),
                     "market_ready": sum(

@@ -236,6 +236,10 @@ def build_provider_focus_snapshot(
         "providers": providers,
         "focus_pool": focus_pool,
         "focus_count": len(focus_pool),
+        "focus_handoff": handoff_rows,
+        "focus_admitted_count": len(handoff_rows),
+        # Compatibility aliases for older burn-in readers. These are deprecated;
+        # FOCUS_ADMITTED is not a Scout decision or queue state.
         "scout_handoff": handoff_rows,
         "scout_received_count": len(handoff_rows),
         "runtime_evaluable_count": sum(

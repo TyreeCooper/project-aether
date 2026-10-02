@@ -1,8 +1,10 @@
 """Safe Top-100 discovery handoff into Scout intake and the deep trading runtime.
 
-Every focused instrument advances to Scout intake as SCOUT_RECEIVED. Runtime
-requirements remain visible as facts, but they do not create a pre-Scout hold. Provider ranking is an
-attention priority, never an execution veto for an otherwise commissioned strategy.
+Every focused instrument advances to neutral focus intake as FOCUS_ADMITTED. This is
+not Scout evaluation: it only means discovery admitted the row to the prioritized poll.
+Runtime requirements remain visible as facts, but they do not create a pre-Scout hold.
+Provider ranking is an attention priority, never an execution veto for an otherwise
+commissioned strategy.
 """
 from __future__ import annotations
 
@@ -104,7 +106,7 @@ def focus_handoff_rows(
                 focus_key=focus_key,
                 provider_rank=rank,
                 canonical_asset_id=canonical,
-                state="SCOUT_RECEIVED",
+                state="FOCUS_ADMITTED",
                 runtime_evaluable=runtime_evaluable,
                 requirements=tuple(requirements),
             )

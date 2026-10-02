@@ -451,7 +451,7 @@ function SettingsView({ ingress, strategy, discovery, operator, floor }) {
         </article>
         <article className="settingsCard">
           <span>Provider discovery</span><strong>{text(discovery?.last_result?.focus_count, "0")} FOCUSED</strong>
-          <small>{text(discovery?.last_result?.scout_received_count, "0")} Scout-received · {text(discovery?.last_result?.runtime_evaluable_count, "0")} immediately runtime-evaluable</small>
+          <small>{text(discovery?.last_result?.focus_admitted_count, "0")} Focus-admitted · {text(discovery?.last_result?.runtime_evaluable_count, "0")} immediately runtime-evaluable</small>
         </article>
         <article className="settingsCard">
           <span>Ingress interval</span><strong>{number(ingress?.interval_seconds, 0)}s</strong>
@@ -722,7 +722,7 @@ function ProviderFocusCard({ row }) {
                     className="focusReceived"
                     title={(item.handoff?.requirements || []).join(", ")}
                   >
-                    SCOUT RECEIVED
+                    FOCUS ADMITTED
                   </em>
                 </div>
               </div>
@@ -744,9 +744,9 @@ function ProviderDiscoveryBoard({ discovery, strategy }) {
   const totalCatalog = rows.reduce((sum, row) => sum + Number(row.catalog_count || 0), 0);
   const totalEligible = rows.reduce((sum, row) => sum + Number(row.eligible_count || 0), 0);
   const focusCount = Number(discovery?.last_result?.focus_count || 0);
-  const scoutReceivedCount = Number(discovery?.last_result?.scout_received_count || 0);
+  const focusAdmittedCount = Number(discovery?.last_result?.focus_admitted_count || 0);
   const strategyPipe = strategy?.last_result?.pipeline || {};
-  const scoutIntakeCount = scoutReceivedCount;
+  const scoutIntakeCount = focusAdmittedCount;
   const roamingBatch = Number(strategyPipe.roaming_batch || 0);
   const marketReady = Number(strategyPipe.market_ready || 0);
   const historyReady = Number(strategyPipe.history_ready || 0);
@@ -788,10 +788,10 @@ function ProviderDiscoveryBoard({ discovery, strategy }) {
       <div className="providerFeedLegend">
         <span><b>NATIVE PUBLIC</b> provider-hosted market reference</span>
         <span><b>PUBLIC REF</b> non-execution reference data; cadence shown per provider</span>
-        <span><b>SCOUT RECEIVED</b> handed into Scout immediately; missing runtime facts remain visible requirements, not holds</span>
+        <span><b>FOCUS ADMITTED</b> admitted to the prioritized poll; this is not Scout evaluation and missing runtime facts remain visible requirements</span>
       </div>
       <p className="providerDiscoveryLaw">
-        Provider ranking sets attention priority only. “Received” is not counted as “evaluated”: the live counters above show how many assets actually reached market, history and strategy evaluation this cycle. Intentional market, strategy, Risk, Clerk, Portfolio, instrument and PAPER-execution laws remain enforced.
+        Provider ranking sets attention priority only. “Admitted” is not counted as “evaluated”: the live counters above show how many assets actually reached market, history and strategy evaluation this cycle. Intentional market, strategy, Risk, Clerk, Portfolio, instrument and PAPER-execution laws remain enforced.
       </p>
     </section>
   );
@@ -813,8 +813,8 @@ function PipelineView({ universe, queues, cockpits, operator, strategy, discover
   const discoveredCatalog = discoveryProviders.reduce((sum, row) => sum + Number(row.catalog_count || 0), 0);
   const discoveredEligible = discoveryProviders.reduce((sum, row) => sum + Number(row.eligible_count || 0), 0);
   const focusCount = Number(discovery?.last_result?.focus_count || 0);
-  const scoutReceivedCount = Number(discovery?.last_result?.scout_received_count || 0);
-  const scoutIntakeCount = scoutReceivedCount;
+  const focusAdmittedCount = Number(discovery?.last_result?.focus_admitted_count || 0);
+  const scoutIntakeCount = focusAdmittedCount;
   const strategyPipe = strategy?.last_result?.pipeline || {};
   const roamingBatch = Number(strategyPipe.roaming_batch || 0);
   const marketReady = Number(strategyPipe.market_ready || 0);
@@ -1202,7 +1202,7 @@ function DesktopCommandCenter({ floor, queues, cockpits, operator, ingress, stra
             ))}
           </div>
           <div className="desktopPipelineFooter">
-            <span><b>{Number(discovery?.last_result?.scout_received_count || 0)}/{text(discovery?.last_result?.focus_count, "0")}</b> received/focused</span>
+            <span><b>{Number(discovery?.last_result?.focus_admitted_count || 0)}/{text(discovery?.last_result?.focus_count, "0")}</b> admitted/focused</span>
             <span><b>{Number(strategy?.last_result?.pipeline?.strategy_evaluated || 0)}</b> evaluated this cycle</span>
             <span><b>{queued}</b> queued</span>
             <span><b>{blockers}</b> blockers</span>
@@ -1270,8 +1270,8 @@ function MobileCommandStrip({ queues, cockpits, operator, ingress, strategy, dis
       </div>
       <div>
         <span>Scout</span>
-        <strong>{Number(strategy?.last_result?.pipeline?.strategy_evaluated || 0)}/{text(discovery?.last_result?.scout_received_count, "0")}</strong>
-        <small>evaluated this cycle / received</small>
+        <strong>{Number(strategy?.last_result?.pipeline?.strategy_evaluated || 0)}/{text(discovery?.last_result?.focus_admitted_count, "0")}</strong>
+        <small>evaluated this cycle / admitted</small>
       </div>
       <div>
         <span>Open</span>
