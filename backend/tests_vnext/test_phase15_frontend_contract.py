@@ -75,7 +75,7 @@ def test_floor_header_surfaces_runtime_restart_and_data_refresh_times() -> None:
     assert 'timeZoneName: "short"' in page
 
 
-def test_floor_surfaces_fresh_test_epoch_bank_and_blotter_confirmation() -> None:
+def test_floor_surfaces_sandbox_session_bank_and_blotter_confirmation() -> None:
     page = (_repo_root() / "frontend" / "app" / "page.js").read_text(
         encoding="utf-8"
     )
@@ -83,8 +83,8 @@ def test_floor_surfaces_fresh_test_epoch_bank_and_blotter_confirmation() -> None
         encoding="utf-8"
     )
 
-    assert "Paper test status" in page
-    assert "Test run" in page
+    assert "Paper sandbox status" in page
+    assert "Session" in page
     assert "Starting bank" in page
     assert "Blotter" in page
     assert "paper_test" in page
