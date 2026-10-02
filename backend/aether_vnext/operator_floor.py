@@ -9,6 +9,7 @@ authority is introduced here.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 from datetime import datetime, timezone
 import math
 from typing import Any, Mapping
@@ -239,6 +240,8 @@ class InspectionDrawer:
 @dataclass(frozen=True, slots=True)
 class UnifiedFirmFloorSnapshot:
     as_of_utc: datetime
+    snapshot_id: str | None = None
+    binding_state: str = "BOUND"
     full_universe: tuple[FloorUniverseStation, ...]
     top12_attention: tuple[AttentionStation, ...]
     seat_queues: tuple[SeatQueueSnapshot, ...]
@@ -254,6 +257,10 @@ class UnifiedFirmFloorSnapshot:
     def __post_init__(self) -> None:
         if self.as_of_utc.tzinfo is None:
             raise ValueError("as_of_utc must be timezone-aware")
+        if self.snapshot_id is not None:
+            _text("snapshot_id", self.snapshot_id)
+        if self.binding_state not in {"BOUND", "NOT_BOUND", "BASELINE_PENDING"}:
+            raise ValueError("invalid binding_state")
         if self.paper_only is not True or self.live_blocked is not True:
             raise ValueError("Unified Firm Floor must remain PAPER ONLY / LIVE BLOCKED")
         if self.paper_test_epoch_id is not None:
@@ -331,8 +338,14 @@ def build_unified_firm_floor(
             "route_ids": list(row.route_ids),
         }
 
+    refresh_time = snapshot.as_of_utc.astimezone(timezone.utc).isoformat()
+    snapshot_id = snapshot.snapshot_id or hashlib.sha256(refresh_time.encode("utf-8")).hexdigest()[:24]
+    bound = snapshot.binding_state == "BOUND"
     return {
-        "as_of_utc": snapshot.as_of_utc.astimezone(timezone.utc).isoformat(),
+        "snapshot_id": snapshot_id,
+        "refresh_time_utc": refresh_time,
+        "as_of_utc": refresh_time,
+        "binding_state": snapshot.binding_state,
         "mode": {
             "paper_only": True,
             "live_blocked": True,
@@ -344,7 +357,7 @@ def build_unified_firm_floor(
             "second_runtime": False,
         },
         "paper_test": {
-            "epoch_id": snapshot.paper_test_epoch_id,
+            "epoch_id": snapshot.paper_test_epoch_id if bound else None,
             "started_at_utc": (
                 None
                 if snapshot.paper_test_started_at_utc is None
@@ -352,8 +365,8 @@ def build_unified_firm_floor(
                     timezone.utc
                 ).isoformat()
             ),
-            "seed_bank_usd": snapshot.paper_test_seed_bank_usd,
-            "blotter_trade_count": snapshot.paper_test_closed_trade_count,
+            "seed_bank_usd": snapshot.paper_test_seed_bank_usd if bound else None,
+            "blotter_trade_count": snapshot.paper_test_closed_trade_count if bound else None,
         },
         "full_universe": [station(row) for row in snapshot.full_universe],
         "top12_attention": [

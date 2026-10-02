@@ -182,3 +182,17 @@ def test_floor_cannot_enable_live_mode() -> None:
             open_cockpits=(),
             live_blocked=False,
         )
+
+
+def test_floor_cold_start_is_not_fabricated_zero_book() -> None:
+    snapshot = UnifiedFirmFloorSnapshot(
+        as_of_utc=T0,
+        binding_state="NOT_BOUND",
+        full_universe=(), top12_attention=(), seat_queues=(), open_cockpits=(),
+    )
+    floor = build_unified_firm_floor(snapshot)
+    assert floor["binding_state"] == "NOT_BOUND"
+    assert floor["paper_test"]["seed_bank_usd"] is None
+    assert floor["paper_test"]["blotter_trade_count"] is None
+    assert floor["snapshot_id"]
+    assert floor["refresh_time_utc"] == T0.isoformat()
