@@ -119,16 +119,23 @@ const PROVIDERS = ["Kraken", "tastyfx", "NinjaTrader", "IBKR"];
 
 function providerRows(discovery) {
   const providers = discovery?.last_result?.providers || {};
-  return PROVIDERS.map((provider) => ({
-    provider,
-    status: "waiting",
-    reason: "waiting_for_discovery_cycle",
-    catalog_count: 0,
-    eligible_count: 0,
-    focus_count: 0,
-    top100: [],
-    ...(providers[provider] || {}),
-  }));
+  return PROVIDERS.map((provider) => {
+    const observed = providers[provider];
+    return observed ? { provider, ...observed } : {
+      provider,
+      status: "NOT OBSERVED",
+      reason: "waiting_for_discovery_cycle",
+      catalog_count: null,
+      eligible_count: null,
+      focus_count: null,
+      top100: [],
+    };
+  });
+}
+
+function observedSum(values) {
+  if (values.some((value) => value === null || value === undefined || !Number.isFinite(Number(value)))) return null;
+  return values.reduce((sum, value) => sum + Number(value), 0);
 }
 
 function combinedStrategyRows(strategy) {
@@ -170,7 +177,8 @@ function RuntimeStrip({ floor, ingress, strategy, discovery, maintenance }) {
   return (
     <div className="runtimeStrip">
       <div><span>BUILD</span><b>{text(floor?.build?.source_revision?.slice(0, 8), "local")}</b></div>
-      <div><span>REFRESHED</span><b>{ts(floor?.as_of_utc)}</b></div>
+      <div><span>SNAPSHOT</span><b>{text(floor?.snapshot_id, "NOT OBSERVED")}</b></div>
+      <div><span>REFRESHED</span><b>{ts(floor?.refresh_time_utc || floor?.as_of_utc, "NOT OBSERVED")}</b></div>
       <div><span>INGRESS</span><Badge value={ingress?.last_error ? "FAULT" : ingress?.running ? "RUNNING" : "WAIT"}>{ingress?.last_error ? "FAULT" : ingress?.running ? "RUNNING" : "WAIT"}</Badge></div>
       <div><span>DISCOVERY</span><Badge value={discovery?.last_error ? "FAULT" : discovery?.running ? "RUNNING" : "WAIT"}>{discovery?.last_error ? "FAULT" : discovery?.running ? "RUNNING" : "WAIT"}</Badge></div>
       <div><span>STRATEGY</span><Badge value={strategy?.last_error ? "FAULT" : strategy?.running ? "RUNNING" : "WAIT"}>{strategy?.last_error ? "FAULT" : strategy?.running ? "RUNNING" : "WAIT"}</Badge></div>
@@ -183,9 +191,10 @@ function CommandCenter({ floor, ingress, strategy, discovery, operator, maintena
   const universe = floor?.full_universe || [];
   const positions = floor?.open_cockpits || [];
   const providers = providerRows(discovery);
-  const catalog = providers.reduce((s, r) => s + Number(r.catalog_count || 0), 0);
-  const eligible = providers.reduce((s, r) => s + Number(r.eligible_count || 0), 0);
-  const focus = Number(discovery?.last_result?.focus_admitted_count || 0);
+  const catalog = observedSum(providers.map((r) => r.catalog_count));
+  const eligible = observedSum(providers.map((r) => r.eligible_count));
+  const focusRaw = discovery?.last_result?.focus_admitted_count;
+  const focus = focusRaw === null || focusRaw === undefined ? null : Number(focusRaw);
   const pipe = strategy?.last_result?.pipeline || {};
   const strategyRows = combinedStrategyRows(strategy).slice(0, 12);
   const maintenanceState = maintenance?.last_result || {};
@@ -207,11 +216,11 @@ function CommandCenter({ floor, ingress, strategy, discovery, operator, maintena
       </div>
 
       <div className="metricGrid">
-        <Metric label="Catalog instruments" value={num(catalog)} sub="Across connected provider lanes" />
-        <Metric label="Focus admitted" value={num(focus)} sub={`${num(eligible)} eligible`} />
-        <Metric label="Evaluated this cycle" value={num(pipe.strategy_evaluated || 0)} sub={`${num(pipe.market_ready || 0)} market ready`} />
+        <Metric label="Catalog instruments" value={catalog === null ? "NOT OBSERVED" : num(catalog)} sub="Across connected provider lanes" />
+        <Metric label="Focus admitted" value={focus === null ? "NOT OBSERVED" : num(focus)} sub={eligible === null ? "eligibility NOT OBSERVED" : `${num(eligible)} eligible`} />
+        <Metric label="Evaluated this cycle" value={pipe.strategy_evaluated === undefined ? "NOT OBSERVED" : num(pipe.strategy_evaluated)} sub={pipe.market_ready === undefined ? "market readiness NOT OBSERVED" : `${num(pipe.market_ready)} market ready`} />
         <Metric label="Open positions" value={num(positions.length)} sub="PAPER positions" />
-        <Metric label="Book cash" value={money(bank.book_cash_usd, "$0.00")} sub={`${money(bank.cash_reserved_usd, "$0.00")} reserved`} />
+        <Metric label="Book cash" value={money(bank.book_cash_usd, "NOT OBSERVED")} sub={bank.cash_reserved_usd === null || bank.cash_reserved_usd === undefined ? "reserved NOT OBSERVED" : `${money(bank.cash_reserved_usd)} reserved`} />
         <Metric label="Maintenance" value={text(maintenanceState.status, "SYNCING")} sub={text(maintenanceState.primary_reason, "establishing baseline")} state={maintenanceState.status} />
       </div>
 
@@ -523,8 +532,8 @@ function Pipeline({ strategy, discovery, ingress, maintenance, floor, operator }
   const registry = strategy?.last_result?.dynamic_product_registry || {};
   const queue = (seat, state) => floorQueueCount(floor, seat, state);
   const counts = {
-    CATALOG: providerRows(discovery).reduce((sum, row) => sum + Number(row.catalog_count || 0), 0),
-    FOCUS_ADMITTED: Number(discovery?.last_result?.focus_admitted_count || 0),
+    CATALOG: observedSum(providerRows(discovery).map((row) => row.catalog_count)),
+    FOCUS_ADMITTED: discovery?.last_result?.focus_admitted_count === undefined ? null : Number(discovery.last_result.focus_admitted_count),
     PRODUCT_BOUND: registry.persisted === undefined || registry.persisted === null ? null : Number(registry.persisted),
     ROAMING_SCAN: pipe.roaming_batch === undefined ? null : Number(pipe.roaming_batch || 0),
     MARKET_READY: pipe.market_ready === undefined ? null : Number(pipe.market_ready || 0),
