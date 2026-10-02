@@ -354,12 +354,12 @@ def _sync_dynamic_kraken_products(
 def configured_dynamic_strategy_scan_batch_size() -> int:
     raw = os.getenv(
         "AETHER_VNEXT_DYNAMIC_STRATEGY_SCAN_BATCH_SIZE",
-        "20",
+        "4",
     ).strip()
     value = int(raw)
-    if value < 1 or value > 100:
+    if value < 1 or value > 20:
         raise ValueError(
-            "AETHER_VNEXT_DYNAMIC_STRATEGY_SCAN_BATCH_SIZE must be between 1 and 100"
+            "AETHER_VNEXT_DYNAMIC_STRATEGY_SCAN_BATCH_SIZE must be between 1 and 20"
         )
     return value
 
@@ -745,6 +745,8 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
         result["dynamic_product_registry"] = registry_status
         result["dynamic_roam"] = {
             "available": len(dynamic_products),
+            "configured_scan_batch_size": configured_dynamic_strategy_scan_batch_size(),
+            "configured_scan_batch_range": {"minimum": 1, "maximum": 20},
             "batch_size": len(dynamic_batch),
             "batch_asset_ids": [row.asset_id for row in dynamic_batch],
             "open_priority_asset_ids": list(dynamic_open_ids),

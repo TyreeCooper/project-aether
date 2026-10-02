@@ -252,8 +252,8 @@ def _dynamic_product(symbol: str):
 def test_dynamic_strategy_scan_batch_size_is_bounded(monkeypatch) -> None:
     monkeypatch.setenv("AETHER_VNEXT_DYNAMIC_STRATEGY_SCAN_BATCH_SIZE", "4")
     assert configured_dynamic_strategy_scan_batch_size() == 4
-    monkeypatch.setenv("AETHER_VNEXT_DYNAMIC_STRATEGY_SCAN_BATCH_SIZE", "101")
-    with pytest.raises(ValueError, match="between 1 and 100"):
+    monkeypatch.setenv("AETHER_VNEXT_DYNAMIC_STRATEGY_SCAN_BATCH_SIZE", "21")
+    with pytest.raises(ValueError, match="between 1 and 20"):
         configured_dynamic_strategy_scan_batch_size()
 
 
@@ -373,6 +373,6 @@ def test_dynamic_strategy_attention_priority_never_starves_background_catalog() 
     assert selected_ids & {"kraken:linkusd", "kraken:xrpusd"}
 
 
-def test_dynamic_strategy_scan_default_is_twenty(monkeypatch) -> None:
+def test_dynamic_strategy_scan_default_is_four(monkeypatch) -> None:
     monkeypatch.delenv("AETHER_VNEXT_DYNAMIC_STRATEGY_SCAN_BATCH_SIZE", raising=False)
-    assert configured_dynamic_strategy_scan_batch_size() == 20
+    assert configured_dynamic_strategy_scan_batch_size() == 4
