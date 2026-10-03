@@ -646,6 +646,23 @@ def _stage_count(
     return sum(1 for row in rows.values() if str(row.get("stage")) in wanted)
 
 
+def _successful_strategy_evaluation_count(
+    rows: Mapping[str, Mapping[str, object]],
+) -> int:
+    """Count only assets that produced a clean post-evaluation terminal/runtime stage."""
+    failed_or_not_evaluated = {
+        "MARKET_NOT_READY",
+        "HISTORY_NOT_READY",
+        "EVALUATION_ERROR",
+        "PIPELINE_ERROR",
+    }
+    return sum(
+        1
+        for row in rows.values()
+        if str(row.get("stage")) not in failed_or_not_evaluated
+    )
+
+
 async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
     """Run one crash-safe seed + dynamic Kraken PAPER strategy pass."""
     if not PAPER_ONLY or not LIVE_BLOCKED:
@@ -1389,15 +1406,8 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     or (focus_snapshot or {}).get("focus_count")
                     or 0
                 )
-                evaluated = sum(
-                    1
-                    for row in dynamic_results.values()
-                    if str(row.get("stage"))
-                    not in {
-                        "MARKET_NOT_READY",
-                        "HISTORY_NOT_READY",
-                        "EVALUATION_ERROR",
-                    }
+                evaluated = _successful_strategy_evaluation_count(
+                    dynamic_results
                 )
                 result["pipeline"] = {
                     "focus_admitted": focus_admitted,
