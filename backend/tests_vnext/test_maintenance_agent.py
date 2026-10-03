@@ -321,6 +321,14 @@ async def test_maintenance_supervisor_reads_tape_status(monkeypatch) -> None:
         return dict(CONTROL_DEFAULTS)
     monkeypatch.setattr(maintenance_agent, "load_controls", controls)
 
+    async def close_incidents(_diagnosis):
+        return None
+    monkeypatch.setattr(
+        maintenance_agent,
+        "close_cleared_incidents",
+        close_incidents,
+    )
+
     base_status = {
         "enabled": True,
         "running": True,

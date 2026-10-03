@@ -46,6 +46,7 @@ def test_health_uses_vnext_runtime_truth_in_sandbox(monkeypatch):
     monkeypatch.setattr(main, "configured_vnext_ingress_status", lambda: dict(active))
     monkeypatch.setattr(main, "current_discovery_status", lambda: dict(active, interval_seconds=300.0))
     monkeypatch.setattr(main, "configured_vnext_strategy_status", lambda: dict(active))
+    monkeypatch.setattr(main, "configured_vnext_tape_status", lambda: dict(active, interval_seconds=5.0))
     monkeypatch.setattr(main, "configured_vnext_maintenance_status", lambda: dict(active))
 
     response = client.get("/api/v1/health")
@@ -56,6 +57,7 @@ def test_health_uses_vnext_runtime_truth_in_sandbox(monkeypatch):
     assert body["live_blocked"] is True
     assert body["pipeline_state"] == "ACTIVE"
     assert body["supervisor_state"]["ingress"] == "ACTIVE"
+    assert body["supervisor_state"]["tape"] == "ACTIVE"
     assert body["supervisors"]["ingress"]["cycle_count"] == 3
     assert body["supervisors"]["ingress"]["progress"]["cycle_state"] == "complete"
     assert "last_result" not in body["supervisors"]["ingress"]
