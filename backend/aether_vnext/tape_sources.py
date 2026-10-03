@@ -7,6 +7,7 @@ and never replaced with synthetic market truth.
 """
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
@@ -14,6 +15,8 @@ import json
 import math
 import os
 from typing import Any, Final, Mapping
+
+import httpx
 
 from aether_vnext.tape import TapeSourceObservation, TapeSourceQuality
 
@@ -25,6 +28,7 @@ BINANCE_US_TAPE_SOURCE_ID: Final = "binance_us_tape"
 DATABENTO_GLBX_TAPE_SOURCE_ID: Final = "databento_glbx_mbp1"
 
 COINBASE_EXCHANGE_WS: Final = "wss://ws-feed.exchange.coinbase.com"
+COINBASE_EXCHANGE_BOOK: Final = "https://api.exchange.coinbase.com/products/{product_id}/book"
 KRAKEN_REST_TICKER: Final = "https://api.kraken.com/0/public/Ticker"
 BINANCE_US_BOOK_TICKER: Final = "https://api.binance.us/api/v3/ticker/bookTicker"
 DATABENTO_GLBX_DATASET: Final = "GLBX.MDP3"
@@ -251,6 +255,43 @@ def parse_kraken_rest_ticker(
     )
 
 
+def parse_coinbase_exchange_book(
+    payload: Mapping[str, Any],
+    *,
+    asset_id: str,
+    product_id: str,
+    received_at_utc: datetime,
+) -> TapeSourceObservation | None:
+    bids = payload.get("bids")
+    asks = payload.get("asks")
+    if not isinstance(bids, list) or not bids or not isinstance(asks, list) or not asks:
+        return None
+    try:
+        bid = _positive(bids[0][0])
+        ask = _positive(asks[0][0])
+    except (IndexError, TypeError):
+        return None
+    if bid is None or ask is None:
+        return None
+    product = str(product_id).strip().upper()
+    if not product:
+        return None
+    return _build_observation(
+        asset_id=asset_id,
+        source_id=COINBASE_TAPE_SOURCE_ID,
+        venue="Coinbase Exchange",
+        source_symbol=product,
+        contract_id=None,
+        bid=bid,
+        ask=ask,
+        last=None,
+        exchange_ts=None,
+        received_at_utc=received_at_utc,
+        source_data_version="coinbase_exchange_book_l1_v1",
+        source_ref=f"coinbase:exchange:book:level1:{product}",
+    )
+
+
 def parse_coinbase_exchange_ticker(
     payload: Mapping[str, Any],
     *,
@@ -370,3 +411,175 @@ def parse_databento_mbp1(
 def configured_databento_api_key() -> str | None:
     value = os.getenv("DATABENTO_API_KEY", "").strip()
     return value or None
+
+
+@dataclass(frozen=True, slots=True)
+class TapeFetchResult:
+    observations: tuple[TapeSourceObservation, ...]
+    failures: dict[str, str]
+
+
+async def fetch_public_crypto_tape(
+    *,
+    asset_id: str,
+    base_symbol: str,
+    kraken_pair: str,
+    timeout_s: float = 6.0,
+) -> TapeFetchResult:
+    """Fetch three independent public BBO lanes without coupling their failures."""
+    if timeout_s <= 0:
+        raise ValueError("timeout_s must be positive")
+    base = str(base_symbol).strip().upper()
+    pair = str(kraken_pair).strip().upper()
+    if not base or not pair:
+        raise ValueError("base_symbol and kraken_pair are required")
+    coinbase_product = f"{base}-USD"
+    binance_symbol = f"{base}USD"
+
+    async def kraken():
+        async with httpx.AsyncClient(timeout=timeout_s) as client:
+            response = await client.get(KRAKEN_REST_TICKER, params={"pair": pair})
+            response.raise_for_status()
+            now = datetime.now(UTC)
+            row = parse_kraken_rest_ticker(
+                response.json(),
+                asset_id=asset_id,
+                source_symbol=pair,
+                received_at_utc=now,
+            )
+            if row is None:
+                raise RuntimeError("kraken_ticker_unavailable")
+            return row
+
+    async def coinbase():
+        async with httpx.AsyncClient(timeout=timeout_s) as client:
+            response = await client.get(
+                COINBASE_EXCHANGE_BOOK.format(product_id=coinbase_product),
+                params={"level": 1},
+            )
+            response.raise_for_status()
+            now = datetime.now(UTC)
+            row = parse_coinbase_exchange_book(
+                response.json(),
+                asset_id=asset_id,
+                product_id=coinbase_product,
+                received_at_utc=now,
+            )
+            if row is None:
+                raise RuntimeError("coinbase_book_unavailable")
+            return row
+
+    async def binance():
+        async with httpx.AsyncClient(timeout=timeout_s) as client:
+            response = await client.get(
+                BINANCE_US_BOOK_TICKER,
+                params={"symbol": binance_symbol},
+            )
+            response.raise_for_status()
+            now = datetime.now(UTC)
+            row = parse_binance_us_book_ticker(
+                response.json(),
+                asset_id=asset_id,
+                received_at_utc=now,
+            )
+            if row is None:
+                raise RuntimeError("binance_us_book_unavailable")
+            return row
+
+    fetches = (
+        (KRAKEN_TAPE_SOURCE_ID, kraken()),
+        (COINBASE_TAPE_SOURCE_ID, coinbase()),
+        (BINANCE_US_TAPE_SOURCE_ID, binance()),
+    )
+    results = await asyncio.gather(
+        *(coroutine for _, coroutine in fetches),
+        return_exceptions=True,
+    )
+    observations: list[TapeSourceObservation] = []
+    failures: dict[str, str] = {}
+    for (source_id, _), result in zip(fetches, results):
+        if isinstance(result, BaseException):
+            failures[source_id] = f"{type(result).__name__}:{result}"
+        else:
+            observations.append(result)
+    return TapeFetchResult(
+        observations=tuple(sorted(observations, key=lambda row: row.source_id)),
+        failures=dict(sorted(failures.items())),
+    )
+
+
+async def fetch_databento_glbx_mbp1(
+    *,
+    asset_id: str,
+    source_symbol: str,
+    timeout_s: float = 6.0,
+) -> TapeSourceObservation:
+    """Fetch one credentialed CME Globex BBO snapshot through Databento Live.
+
+    This is deliberately one source lane, not a broker route. Missing credentials
+    fail explicitly and cannot be replaced by NinjaTrader/IBKR execution state.
+    """
+    key = configured_databento_api_key()
+    if key is None:
+        raise RuntimeError("databento_api_key_missing")
+    if timeout_s <= 0:
+        raise ValueError("timeout_s must be positive")
+    symbol = str(source_symbol).strip().upper()
+    if not symbol:
+        raise ValueError("source_symbol is required")
+
+    def run_sync() -> TapeSourceObservation:
+        import databento as db
+
+        result: list[TapeSourceObservation] = []
+        error: list[BaseException] = []
+        done = __import__("threading").Event()
+        client = db.Live(key=key)
+
+        def on_record(record) -> None:
+            if result or error:
+                return
+            try:
+                row = parse_databento_mbp1(
+                    record,
+                    asset_id=asset_id,
+                    source_symbol=symbol,
+                    received_at_utc=datetime.now(UTC),
+                )
+                if row is not None:
+                    result.append(row)
+                    done.set()
+            except BaseException as exc:
+                error.append(exc)
+                done.set()
+
+        def on_error(exc: Exception) -> None:
+            error.append(exc)
+            done.set()
+
+        client.subscribe(
+            dataset=DATABENTO_GLBX_DATASET,
+            schema=DATABENTO_SCHEMA,
+            symbols=symbol,
+            stype_in="raw_symbol",
+        )
+        client.add_callback(
+            record_callback=on_record,
+            exception_callback=on_error,
+        )
+        client.start()
+        try:
+            if not done.wait(timeout_s):
+                raise TimeoutError("databento_mbp1_snapshot_timeout")
+        finally:
+            client.stop()
+            client.block_for_close(timeout=2.0)
+        if error:
+            raise RuntimeError(
+                f"databento_live_error:{type(error[0]).__name__}:{error[0]}"
+            )
+        if not result:
+            raise RuntimeError("databento_mbp1_not_observed")
+        return result[0]
+
+    return await asyncio.to_thread(run_sync)
