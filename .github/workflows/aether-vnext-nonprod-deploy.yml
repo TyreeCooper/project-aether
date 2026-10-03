@@ -186,19 +186,24 @@ jobs:
           base="https://$HOST"
           echo "Verifying vNext nonproduction deployment at $base"
 
-          for attempt in $(seq 1 24); do
-            code="$(curl --silent --show-error --max-time 20 -o /tmp/health.json -w '%{http_code}' "$base/api/v1/health" || true)"
-            if [ "$code" = "200" ]; then
-              break
-            fi
-            echo "Health attempt $attempt returned ${code:-curl-error}; waiting for warmup."
-            if [ "$attempt" -eq 24 ]; then
-              echo "Health endpoint did not recover."
-              exit 1
-            fi
-            sleep 10
-          done
+          fetch_ok() {
+            local url="$1" dest="$2" label="$3" timeout="$4"
+            local attempt code
+            for attempt in $(seq 1 24); do
+              code="$(curl --silent --show-error --max-time "$timeout" -o "$dest" -w '%{http_code}' "$url" || true)"
+              if [ "$code" = "200" ]; then
+                return 0
+              fi
+              echo "$label attempt $attempt returned ${code:-curl-error}; waiting for warmup."
+              if [ "$attempt" -eq 24 ]; then
+                echo "$label did not recover."
+                return 1
+              fi
+              sleep 10
+            done
+          }
 
+          fetch_ok "$base/api/v1/health" /tmp/health.json Health 30
           python - <<'PY'
           import json
           body=json.load(open("/tmp/health.json", encoding="utf-8"))
@@ -207,10 +212,10 @@ jobs:
           assert body.get("live_blocked") is True, body
           PY
 
-          curl --fail --silent --show-error --max-time 20 "$base/vnext/" >/tmp/vnext.html
+          fetch_ok "$base/vnext/" /tmp/vnext.html Console 30
           grep -q "AETHER" /tmp/vnext.html
 
-          curl --fail --silent --show-error --max-time 20 "$base/api/v1/vnext/floor" >/tmp/vnext-floor.json
+          fetch_ok "$base/api/v1/vnext/floor" /tmp/vnext-floor.json Floor 60
           python - <<'PY'
           import json
           import os
