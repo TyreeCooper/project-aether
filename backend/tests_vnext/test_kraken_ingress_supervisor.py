@@ -11,6 +11,7 @@ from aether_vnext.kraken_ingress_supervisor import (
     _chunks,
     _dynamic_kraken_symbol_map,
     _quote_telemetry,
+    _quotes_by_asset,
     configured_dynamic_ingress_batch_size,
     configured_dynamic_ingress_worker_concurrency,
     configured_ingress_enabled,
@@ -61,6 +62,38 @@ def test_quote_telemetry_exposes_real_kraken_quote_and_timestamp() -> None:
     assert payload["mark"] == 65000.5
     assert payload["reference_ts_utc"] == ts.isoformat()
     assert payload["received_ts_utc"] == ts.isoformat()
+
+
+def test_quotes_are_partitioned_once_by_canonical_asset_id() -> None:
+    stamp = datetime(2026, 10, 2, 20, 0, tzinfo=timezone.utc)
+    btc = RawQuote(
+        asset_id="btc",
+        venue="kraken",
+        source_id="kraken_public_ticker_v2",
+        bid=1.0,
+        ask=2.0,
+        last=1.5,
+        mark=1.5,
+        exchange_ts=stamp,
+        received_ts=stamp,
+        adapter_version="test",
+    )
+    eth = RawQuote(
+        asset_id="eth",
+        venue="kraken",
+        source_id="kraken_public_ticker_v2",
+        bid=3.0,
+        ask=4.0,
+        last=3.5,
+        mark=3.5,
+        exchange_ts=stamp,
+        received_ts=stamp,
+        adapter_version="test",
+    )
+    grouped = _quotes_by_asset((eth, btc))
+    assert tuple(grouped) == ("btc", "eth")
+    assert grouped["btc"] == (btc,)
+    assert grouped["eth"] == (eth,)
 
 
 @pytest.mark.asyncio

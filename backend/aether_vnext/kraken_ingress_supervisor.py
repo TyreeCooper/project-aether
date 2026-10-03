@@ -183,6 +183,22 @@ def _quote_telemetry(
     }
 
 
+def _quotes_by_asset(
+    quotes: Sequence[object],
+) -> dict[str, tuple[object, ...]]:
+    """Partition a provider batch once so ingress does not rescan N quotes N times."""
+    grouped: dict[str, list[object]] = {}
+    for quote in quotes:
+        asset_id = str(getattr(quote, "asset_id", "") or "").strip().lower()
+        if not asset_id:
+            raise ValueError("provider quote asset_id is required")
+        grouped.setdefault(asset_id, []).append(quote)
+    return {
+        asset_id: tuple(rows)
+        for asset_id, rows in sorted(grouped.items())
+    }
+
+
 def _dynamic_kraken_symbol_map(
     states: Sequence[Mapping[str, object]],
 ) -> dict[str, str]:
@@ -295,35 +311,45 @@ async def run_configured_kraken_ingress_cycle() -> dict[str, object]:
 
         attempted_assets = CRYPTO_ASSETS + dynamic_assets
         quote_rows = tuple(all_quotes)
-        async with engine.begin() as connection:
+        quotes_by_asset = _quotes_by_asset(quote_rows)
+        # Capture one post-I/O decision timestamp for the entire ingress cycle.
+        # Every asset sees the same causal boundary. Each ingress call receives
+        # only that asset's quote set rather than rescanning the full provider
+        # payload for every asset.
+        ingress_decision_at_utc = datetime.now(timezone.utc)
+
+        def persist_ingress_cycle(sync_conn):
+            cycle_results = []
             for asset_id in attempted_assets:
-                # Decide only after provider I/O has completed. Capturing this
-                # timestamp before an awaited fetch made every newly received
-                # quote appear to come from the future.
-                asset_as_of_utc = datetime.now(timezone.utc)
-                result = await connection.run_sync(
-                    lambda sync_conn, aid=asset_id, now=asset_as_of_utc: ingest_market_quotes(
+                cycle_results.append(
+                    ingest_market_quotes(
                         sync_conn,
                         store,
-                        asset_id=aid,
-                        quotes=quote_rows,
+                        asset_id=asset_id,
+                        quotes=quotes_by_asset.get(asset_id, ()),
                         calendar_provider=None,
-                        as_of_utc=now,
+                        as_of_utc=ingress_decision_at_utc,
                     )
                 )
-                results.append(
-                    {
-                        "asset_id": result.asset_id,
-                        "executable": result.executable,
-                        "reason": result.reason,
-                        "observation_id": (
-                            None
-                            if result.observation is None
-                            else result.observation.observation_id
-                        ),
-                        "rejection_reasons": list(result.rejection_reasons),
-                    }
-                )
+            return tuple(cycle_results)
+
+        async with engine.begin() as connection:
+            ingress_results = await connection.run_sync(persist_ingress_cycle)
+
+        for result in ingress_results:
+            results.append(
+                {
+                    "asset_id": result.asset_id,
+                    "executable": result.executable,
+                    "reason": result.reason,
+                    "observation_id": (
+                        None
+                        if result.observation is None
+                        else result.observation.observation_id
+                    ),
+                    "rejection_reasons": list(result.rejection_reasons),
+                }
+            )
 
     return {
         "provider": "kraken_public",
@@ -334,6 +360,8 @@ async def run_configured_kraken_ingress_cycle() -> dict[str, object]:
         "dynamic_batch_count": len(dynamic_chunks),
         "dynamic_batch_size": configured_dynamic_ingress_batch_size(),
         "dynamic_worker_concurrency": dynamic_worker_concurrency,
+        "ingress_decision_at_utc": ingress_decision_at_utc.isoformat(),
+        "quote_partition_asset_count": len(quotes_by_asset),
         "attempted_asset_count": len(CRYPTO_ASSETS) + len(dynamic_assets),
         "quoted_asset_count": len({
             str(getattr(quote, "asset_id")).strip().lower()
