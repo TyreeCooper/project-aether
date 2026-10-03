@@ -268,6 +268,55 @@ def _chunks(values: tuple[str, ...], size: int) -> tuple[tuple[str, ...], ...]:
     )
 
 
+def _is_subscription_rejection(exc: Exception) -> bool:
+    message = f"{type(exc).__name__}:{exc}".lower()
+    return (
+        "kraken_ticker_subscription_failed" in message
+        or "unsupported aether kraken v2 symbol" in message
+    )
+
+
+async def _fetch_dynamic_chunk_resilient(
+    chunk: tuple[str, ...],
+    *,
+    dynamic_symbols: Mapping[str, str],
+    timeout_s: float = 10.0,
+    fetcher=fetch_kraken_public_tickers,
+) -> tuple[tuple[tuple[str, ...], object | None, str | None], ...]:
+    """Isolate explicit provider symbol rejects without dropping healthy peers.
+
+    Only deterministic subscription/symbol rejection is bisected. Timeouts and
+    transport faults remain one batch-level error so transient provider trouble
+    cannot explode into dozens of retry sockets.
+    """
+    chunk_symbols = {asset: dynamic_symbols[asset] for asset in chunk}
+    try:
+        batch = await fetcher(
+            assets=chunk,
+            symbol_by_asset=chunk_symbols,
+            timeout_s=timeout_s,
+        )
+        return ((chunk, batch, None),)
+    except Exception as exc:
+        error = f"{type(exc).__name__}:{exc}"
+        if len(chunk) <= 1 or not _is_subscription_rejection(exc):
+            return ((chunk, None, error),)
+        midpoint = len(chunk) // 2
+        left = await _fetch_dynamic_chunk_resilient(
+            chunk[:midpoint],
+            dynamic_symbols=dynamic_symbols,
+            timeout_s=timeout_s,
+            fetcher=fetcher,
+        )
+        right = await _fetch_dynamic_chunk_resilient(
+            chunk[midpoint:],
+            dynamic_symbols=dynamic_symbols,
+            timeout_s=timeout_s,
+            fetcher=fetcher,
+        )
+        return (*left, *right)
+
+
 async def run_configured_kraken_ingress_cycle() -> dict[str, object]:
     """Ingest seed plus verified dynamic Kraken BBO using bounded subscriptions."""
     store = VNextStore(schema="aether_vnext")
@@ -325,19 +374,15 @@ async def run_configured_kraken_ingress_cycle() -> dict[str, object]:
 
         async def fetch_dynamic_chunk(
             chunk: tuple[str, ...],
-        ) -> tuple[tuple[str, ...], object | None, str | None]:
+        ) -> tuple[tuple[tuple[str, ...], object | None, str | None], ...]:
             nonlocal completed_dynamic_chunks
-            chunk_symbols = {asset: dynamic_symbols[asset] for asset in chunk}
             async with dynamic_semaphore:
                 try:
-                    batch = await fetch_kraken_public_tickers(
-                        assets=chunk,
-                        symbol_by_asset=chunk_symbols,
+                    return await _fetch_dynamic_chunk_resilient(
+                        chunk,
+                        dynamic_symbols=dynamic_symbols,
                         timeout_s=10.0,
                     )
-                    return chunk, batch, None
-                except Exception as exc:
-                    return chunk, None, f"{type(exc).__name__}:{exc}"
                 finally:
                     completed_dynamic_chunks += 1
                     _publish_ingress_progress(
@@ -350,16 +395,17 @@ async def run_configured_kraken_ingress_cycle() -> dict[str, object]:
         dynamic_fetches = await asyncio.gather(
             *(fetch_dynamic_chunk(chunk) for chunk in dynamic_chunks)
         )
-        for chunk, dynamic_batch, error in dynamic_fetches:
-            if dynamic_batch is not None:
-                all_quotes.extend(dynamic_batch.quotes)
-            if error is not None:
-                # A failed dynamic batch becomes explicit quote_missing attempts;
-                # the seed lane and every other dynamic batch keep running.
-                batch_errors.append({
-                    "assets": list(chunk),
-                    "error": error,
-                })
+        for outcomes in dynamic_fetches:
+            for chunk, dynamic_batch, error in outcomes:
+                if dynamic_batch is not None:
+                    all_quotes.extend(dynamic_batch.quotes)
+                if error is not None:
+                    # Explicit provider symbol rejection is isolated to the
+                    # smallest failing subset; healthy peers retain their quotes.
+                    batch_errors.append({
+                        "assets": list(chunk),
+                        "error": error,
+                    })
 
         attempted_assets = CRYPTO_ASSETS + dynamic_assets
         quote_rows = tuple(all_quotes)
