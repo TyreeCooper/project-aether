@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 import sqlalchemy as sa
+import pytest
 
 from aether_vnext.freeze import CONFIGURATION_HASH
 from aether_vnext.prototype_forward_paper_evidence import (
@@ -100,3 +101,56 @@ def test_observation_identity_changes_with_closed_trigger_bar() -> None:
         reason="structure_fail",
     )
     assert first != later
+
+
+def test_dynamic_kraken_no_setup_observation_uses_same_immutable_evidence_lane() -> None:
+    engine, store, observation = _store_fixture()
+    kwargs = dict(
+        paper_epoch_id="aether-prototype-new-system-test-001",
+        asset_id="kraken:solusd",
+        trigger_close_utc=T0,
+        evaluated_at_utc=T0 + timedelta(seconds=3),
+        market_observation_id=observation.observation_id,
+        reason="structure_fail",
+        watch_eligible=False,
+        volatility_percentile=42.0,
+        setup_id="setup-dynamic-sol-test",
+        ticket_id="ticket-dynamic-sol-test",
+        order_intent_id="intent-dynamic-sol-test",
+    )
+    with engine.begin() as conn:
+        assert persist_prototype_no_setup_observation(conn, store, **kwargs) is True
+        rows = tuple(
+            conn.execute(
+                sa.select(store.tables["event_ledger"]).where(
+                    store.tables["event_ledger"].c.aggregate_type == AGGREGATE_TYPE
+                )
+            ).mappings()
+        )
+    assert len(rows) == 1
+    payload = dict(rows[0]["payload"])
+    assert payload["asset_id"] == "kraken:solusd"
+    assert payload["phase18_evidence"] is False
+    assert payload["paper_only"] is True
+    assert payload["live_blocked"] is True
+
+
+def test_prototype_observation_rejects_uncommissioned_provider_namespace() -> None:
+    engine, store, observation = _store_fixture()
+    with engine.begin() as conn:
+        with pytest.raises(ValueError, match="commissioned Kraken assets only"):
+            persist_prototype_no_setup_observation(
+                conn,
+                store,
+                paper_epoch_id="aether-prototype-new-system-test-001",
+                asset_id="ibkr:265598",
+                trigger_close_utc=T0,
+                evaluated_at_utc=T0 + timedelta(seconds=3),
+                market_observation_id=observation.observation_id,
+                reason="structure_fail",
+                watch_eligible=False,
+                volatility_percentile=42.0,
+                setup_id="setup-uncommissioned-test",
+                ticket_id="ticket-uncommissioned-test",
+                order_intent_id="intent-uncommissioned-test",
+            )

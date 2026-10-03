@@ -1,7 +1,8 @@
 """Immutable prototype forward-paper strategy-observation evidence.
 
-This module records natural NO_SETUP decisions produced by the live BTC/ETH PAPER
-prototype. These observations are operational forward-paper audit evidence only:
+This module records natural NO_SETUP decisions produced by the live PAPER crypto
+strategy, including seed BTC/ETH and commissioned dynamic Kraken products. These
+observations are operational forward-paper audit evidence only:
 they are not held-out research evidence and must never satisfy Phase 18 gates.
 """
 from __future__ import annotations
@@ -20,6 +21,14 @@ from aether_vnext.store import VNextStore
 
 AGGREGATE_TYPE = "prototype_strategy_observation"
 SAMPLE_DOMAIN = "prototype_forward_paper_observation"
+
+
+def _supports_prototype_observation_asset(asset_id: str) -> bool:
+    """Bound this evidence lane to the currently commissioned PAPER crypto route."""
+    asset = str(asset_id).strip().lower()
+    return asset in {"btc", "eth"} or (
+        asset.startswith("kraken:") and len(asset) > len("kraken:")
+    )
 
 
 def prototype_strategy_observation_event_id(
@@ -109,8 +118,11 @@ def persist_prototype_no_setup_observation(
     if evaluated_at_utc < trigger_close_utc:
         raise ValueError("prototype evidence cannot predate trigger close")
     asset = str(asset_id).strip().lower()
-    if asset not in {"btc", "eth"}:
-        raise ValueError("prototype forward-paper evidence supports btc/eth only")
+    if not _supports_prototype_observation_asset(asset):
+        raise ValueError(
+            "prototype forward-paper evidence supports seed btc/eth and "
+            "commissioned Kraken assets only"
+        )
     epoch = str(paper_epoch_id).strip()
     reason_text = str(reason).strip()
     observation_id = str(market_observation_id).strip()
