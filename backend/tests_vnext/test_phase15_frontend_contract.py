@@ -208,7 +208,7 @@ def test_frontend_recovery_state_matches_backend_health_semantics() -> None:
     assert fault_index > busy_index
     assert "REFERENCE CATALOG ONLINE" in page
     assert "CATALOG PRIORITY" in page
-    assert "grid-template-columns:repeat(7,minmax(0,1fr))" in css
+    assert "grid-template-columns:repeat(8,minmax(0,1fr))" in css
 
 
 def test_frontend_distinguishes_catalog_from_runtime_universes() -> None:
