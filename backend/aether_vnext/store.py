@@ -73,6 +73,12 @@ from aether_vnext.source_registry import (
     SourceTrustDecision,
     apply_trust_decision,
 )
+from aether_vnext.tape import (
+    TapeCompositeObservation,
+    TapeConsensusState,
+    TapeSourceObservation,
+    TapeSourceQuality,
+)
 from aether_vnext.exit_plan import ExitPlan
 from aether_vnext.evidence import (
     CostSensitivity,
@@ -1027,6 +1033,180 @@ class VNextStore:
             ),
             received_at_utc=_stored_utc(row["received_at_utc"]),
             adapter_version=str(row["adapter_version"]),
+        )
+
+    def record_tape_source_observation(
+        self,
+        conn: Connection,
+        observation: TapeSourceObservation,
+        *,
+        recorded_at_utc: datetime,
+    ) -> None:
+        if recorded_at_utc.tzinfo is None:
+            raise ValueError("recorded_at_utc must be timezone-aware")
+        table = self.tables["tape_source_observations"]
+        conn.execute(
+            table.insert().values(
+                observation_id=observation.observation_id,
+                asset_id=observation.asset_id,
+                source_id=observation.source_id,
+                venue=observation.venue,
+                source_symbol=observation.source_symbol,
+                contract_id=observation.contract_id,
+                bid=observation.bid,
+                ask=observation.ask,
+                last=observation.last,
+                mark=observation.mark,
+                exchange_ts=observation.exchange_ts,
+                received_ts=observation.received_ts,
+                age_ms=observation.age_ms,
+                quality=observation.quality.value,
+                source_data_version=observation.source_data_version,
+                source_ref=observation.source_ref,
+                recorded_at_utc=recorded_at_utc,
+            )
+        )
+
+    def load_tape_source_observation(
+        self,
+        conn: Connection,
+        *,
+        observation_id: str,
+    ) -> TapeSourceObservation | None:
+        key = str(observation_id).strip()
+        if not key:
+            return None
+        table = self.tables["tape_source_observations"]
+        row = conn.execute(
+            sa.select(table).where(table.c.observation_id == key)
+        ).mappings().first()
+        if row is None:
+            return None
+        return TapeSourceObservation(
+            observation_id=str(row["observation_id"]),
+            asset_id=str(row["asset_id"]),
+            source_id=str(row["source_id"]),
+            venue=str(row["venue"]),
+            source_symbol=str(row["source_symbol"]),
+            contract_id=(
+                None if row["contract_id"] is None else str(row["contract_id"])
+            ),
+            bid=None if row["bid"] is None else float(row["bid"]),
+            ask=None if row["ask"] is None else float(row["ask"]),
+            last=None if row["last"] is None else float(row["last"]),
+            mark=None if row["mark"] is None else float(row["mark"]),
+            exchange_ts=(
+                None
+                if row["exchange_ts"] is None
+                else _stored_utc(row["exchange_ts"])
+            ),
+            received_ts=_stored_utc(row["received_ts"]),
+            age_ms=int(row["age_ms"]),
+            quality=TapeSourceQuality(str(row["quality"])),
+            source_data_version=str(row["source_data_version"]),
+            source_ref=str(row["source_ref"]),
+        )
+
+    def record_tape_composite(
+        self,
+        conn: Connection,
+        composite: TapeCompositeObservation,
+        *,
+        recorded_at_utc: datetime,
+    ) -> None:
+        if recorded_at_utc.tzinfo is None:
+            raise ValueError("recorded_at_utc must be timezone-aware")
+        missing = [
+            observation_id
+            for observation_id in composite.source_observation_ids
+            if self.load_tape_source_observation(
+                conn,
+                observation_id=observation_id,
+            ) is None
+        ]
+        if missing:
+            raise ValueError(
+                "tape composite source lineage missing: " + ",".join(missing)
+            )
+        table = self.tables["tape_composites"]
+        conn.execute(
+            table.insert().values(
+                composite_id=composite.composite_id,
+                asset_id=composite.asset_id,
+                observed_at_utc=composite.observed_at_utc,
+                state=composite.state.value,
+                composite_mark=composite.composite_mark,
+                median_mark=composite.median_mark,
+                accepted_source_ids=list(composite.accepted_source_ids),
+                rejected_source_ids=list(composite.rejected_source_ids),
+                source_observation_ids=list(composite.source_observation_ids),
+                source_count=composite.source_count,
+                quorum_required=composite.quorum_required,
+                max_source_age_ms=composite.max_source_age_ms,
+                agreement_bps=composite.agreement_bps,
+                provenance_complete=composite.provenance_complete,
+                recorded_at_utc=recorded_at_utc,
+            )
+        )
+
+    def latest_tape_composite(
+        self,
+        conn: Connection,
+        *,
+        asset_id: str,
+    ) -> TapeCompositeObservation | None:
+        aid = str(asset_id).strip().lower()
+        if not aid:
+            return None
+        table = self.tables["tape_composites"]
+        row = conn.execute(
+            sa.select(table)
+            .where(table.c.asset_id == aid)
+            .order_by(
+                table.c.observed_at_utc.desc(),
+                table.c.composite_id.desc(),
+            )
+            .limit(1)
+        ).mappings().first()
+        if row is None:
+            return None
+        return TapeCompositeObservation(
+            composite_id=str(row["composite_id"]),
+            asset_id=str(row["asset_id"]),
+            observed_at_utc=_stored_utc(row["observed_at_utc"]),
+            state=TapeConsensusState(str(row["state"])),
+            composite_mark=(
+                None
+                if row["composite_mark"] is None
+                else float(row["composite_mark"])
+            ),
+            median_mark=(
+                None
+                if row["median_mark"] is None
+                else float(row["median_mark"])
+            ),
+            accepted_source_ids=tuple(
+                str(value) for value in (row["accepted_source_ids"] or [])
+            ),
+            rejected_source_ids=tuple(
+                str(value) for value in (row["rejected_source_ids"] or [])
+            ),
+            source_observation_ids=tuple(
+                str(value) for value in (row["source_observation_ids"] or [])
+            ),
+            source_count=int(row["source_count"]),
+            quorum_required=int(row["quorum_required"]),
+            max_source_age_ms=(
+                None
+                if row["max_source_age_ms"] is None
+                else int(row["max_source_age_ms"])
+            ),
+            agreement_bps=(
+                None
+                if row["agreement_bps"] is None
+                else float(row["agreement_bps"])
+            ),
+            provenance_complete=bool(row["provenance_complete"]),
         )
 
     def record_market_observation(
