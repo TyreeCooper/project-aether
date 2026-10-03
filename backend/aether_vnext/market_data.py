@@ -149,6 +149,7 @@ class SourceSelection:
     observation: MarketObservation | None
     attempted_sources: tuple[str, ...]
     rejection_reasons: tuple[str, ...]
+    rejected_observation: MarketObservation | None = None
 
 
 def select_source(
@@ -169,6 +170,7 @@ def select_source(
     }
     attempted: list[str] = []
     rejections: list[str] = []
+    rejected_observations: list[MarketObservation] = []
 
     ordered_sources = [
         registry_row.primary_market_source_id,
@@ -206,9 +208,21 @@ def select_source(
         rejections.append(
             f"{source_id}:{observation.quality_state.value}"
         )
+        rejected_observations.append(observation)
 
+    # Preserve the best observed-but-non-executable quote for audit and
+    # decision-time diagnostics. It remains explicitly non-executable.
+    rejected_observation = next(
+        (
+            observation
+            for observation in rejected_observations
+            if observation.quality_state is QualityState.STALE
+        ),
+        rejected_observations[0] if rejected_observations else None,
+    )
     return SourceSelection(
         observation=None,
         attempted_sources=tuple(attempted),
         rejection_reasons=tuple(rejections),
+        rejected_observation=rejected_observation,
     )

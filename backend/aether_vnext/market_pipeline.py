@@ -72,7 +72,7 @@ class MarketDataPipeline:
             reason = _selection_failure_reason(selection)
             return MarketPipelineResult(
                 asset_id=aid,
-                observation=None,
+                observation=selection.rejected_observation,
                 executable=False,
                 reason=reason,
                 attempted_sources=selection.attempted_sources,

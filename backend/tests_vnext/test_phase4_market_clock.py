@@ -220,6 +220,8 @@ def test_crossed_book_is_invalid_and_never_selected() -> None:
         stale_threshold_ms=1_000,
     )
     assert selection.observation is None
+    assert selection.rejected_observation is not None
+    assert selection.rejected_observation.quality_state is QualityState.INVALID
     assert "primary:invalid" in selection.rejection_reasons
 
 
@@ -572,3 +574,28 @@ def test_degraded_fallback_is_preserved_but_cannot_authorize_execution() -> None
     assert result.observation is not None
     assert result.observation.quality_state is QualityState.DEGRADED
     assert result.executable is False
+
+
+def test_market_pipeline_preserves_stale_quote_as_nonexecutable_audit_truth() -> None:
+    row = bind_market_data(
+        SEED_REGISTRY["btc"],
+        primary_source_id="primary",
+        stale_threshold_ms=1_000,
+    )
+    result = MarketDataPipeline(registry={"btc": row}).evaluate(
+        asset_id="btc",
+        quotes=(
+            _quote(
+                source_id="primary",
+                exchange_ts=T0 - timedelta(seconds=2),
+                received_ts=T0 - timedelta(seconds=2),
+            ),
+        ),
+        calendar=_calendar(),
+        as_of_utc=T0,
+    )
+    assert result.executable is False
+    assert result.reason == "quote_stale"
+    assert result.observation is not None
+    assert result.observation.quality_state is QualityState.STALE
+    assert result.observation.age_ms == 2000

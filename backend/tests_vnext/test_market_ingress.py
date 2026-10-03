@@ -9,6 +9,7 @@ from aether_vnext.calendars import (
     CalendarExceptionKind,
 )
 from aether_vnext.dynamic_products import project_kraken_spot_product
+from aether_vnext.domain import QualityState
 from aether_vnext.freeze import CONFIGURATION_HASH
 from aether_vnext.market_data import RawQuote
 from aether_vnext.market_ingress import (
@@ -120,7 +121,7 @@ def test_crypto_ingress_persists_observation_and_append_only_attempt() -> None:
     assert attempt["executable"] is True
 
 
-def test_stale_quote_records_failed_attempt_without_inventing_observation() -> None:
+def test_stale_quote_persists_nonexecutable_observation_and_exact_reason() -> None:
     engine, store = _store()
     with engine.begin() as conn:
         record_test_runtime_binding(
@@ -154,10 +155,14 @@ def test_stale_quote_records_failed_attempt_without_inventing_observation() -> N
 
     assert result.executable is False
     assert result.reason == "quote_stale"
-    assert result.observation is None
+    assert result.observation is not None
+    assert result.observation.quality_state is QualityState.STALE
+    assert result.observation.age_ms == 2000
     assert attempt is not None
-    assert attempt["observation_id"] is None
-    assert observation_count == 0
+    assert attempt["observation_id"] == result.observation.observation_id
+    assert attempt["reason"] == "quote_stale"
+    assert attempt["executable"] is False
+    assert observation_count == 1
 
 
 def test_exchange_ingress_requires_bound_calendar_provider_identity() -> None:
@@ -454,4 +459,7 @@ def test_dynamic_product_still_rejects_stale_market_truth() -> None:
 
     assert result.executable is False
     assert result.reason == "quote_stale"
-    assert result.observation is None
+    assert result.observation is not None
+    assert result.observation.asset_id == projection.asset_id
+    assert result.observation.quality_state is QualityState.STALE
+    assert result.observation.age_ms == 2000

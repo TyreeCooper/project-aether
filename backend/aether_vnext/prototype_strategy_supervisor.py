@@ -766,26 +766,43 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                 observation_ids = tuple(
                     str(attempt["observation_id"])
                     for attempt in latest_attempts.values()
-                    if bool(attempt.get("executable"))
-                    and attempt.get("observation_id")
+                    if attempt.get("observation_id")
                 )
                 observations_by_id = store.load_market_observations(
                     sync_conn,
                     observation_ids=observation_ids,
                 )
                 market_ready = {}
+                market_not_ready = {}
                 for product in batch:
                     attempt = latest_attempts.get(product.asset_id)
                     observation_id = (
-                        None
-                        if attempt is None or not bool(attempt.get("executable"))
-                        else attempt.get("observation_id")
+                        None if attempt is None else attempt.get("observation_id")
                     )
-                    market_ready[product.asset_id] = (
+                    observed = (
                         None
                         if not observation_id
                         else observations_by_id.get(str(observation_id))
                     )
+                    if (
+                        attempt is not None
+                        and bool(attempt.get("executable"))
+                        and observed is not None
+                    ):
+                        market_ready[product.asset_id] = observed
+                        continue
+                    market_ready[product.asset_id] = None
+                    market_not_ready[product.asset_id] = {
+                        "reason": (
+                            "market_ingress_not_observed"
+                            if attempt is None
+                            else str(
+                                attempt.get("reason")
+                                or "current_executable_observation_missing"
+                            )
+                        ),
+                        "observation": observed,
+                    }
 
                 history_summary = summarize_prototype_market_history(
                     sync_conn,
@@ -836,6 +853,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     batch,
                     dynamic_open_ids,
                     market_ready,
+                    market_not_ready,
                     warmup_cached,
                     kraken_history_cached,
                     attention_ids,
@@ -847,6 +865,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                 dynamic_batch,
                 dynamic_open_ids,
                 prepared_dynamic_observations,
+                prepared_dynamic_market_not_ready,
                 dynamic_warmup_cached,
                 dynamic_kraken_history_cached,
                 dynamic_attention_ids,
@@ -874,6 +893,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
             "open_priority_asset_ids": list(dynamic_open_ids),
             "attention_priority_asset_ids": list(dynamic_attention_ids),
             "priority_is_allowlist": False,
+            "market_not_ready_count": len(prepared_dynamic_market_not_ready),
         }
 
         # Resolve a real cross-venue warm-up product once per cycle. A catalog
@@ -1001,25 +1021,42 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                 observation_ids = tuple(
                     str(attempt["observation_id"])
                     for attempt in latest_attempts.values()
-                    if bool(attempt.get("executable"))
-                    and attempt.get("observation_id")
+                    if attempt.get("observation_id")
                 )
                 observations_by_id = store.load_market_observations(
                     sync_conn,
                     observation_ids=observation_ids,
                 )
                 observations = {}
+                ingress_rejections = {}
                 for asset_id in scan_asset_ids:
                     attempt = latest_attempts.get(asset_id)
                     observation_id = (
-                        None
-                        if attempt is None or not bool(attempt.get("executable"))
-                        else attempt.get("observation_id")
+                        None if attempt is None else attempt.get("observation_id")
                     )
-                    if observation_id:
-                        observation = observations_by_id.get(str(observation_id))
-                        if observation is not None:
-                            observations[asset_id] = observation
+                    observed = (
+                        None
+                        if not observation_id
+                        else observations_by_id.get(str(observation_id))
+                    )
+                    if (
+                        attempt is not None
+                        and bool(attempt.get("executable"))
+                        and observed is not None
+                    ):
+                        observations[asset_id] = observed
+                    else:
+                        ingress_rejections[asset_id] = {
+                            "reason": (
+                                "market_ingress_not_observed"
+                                if attempt is None
+                                else str(
+                                    attempt.get("reason")
+                                    or "current_executable_observation_missing"
+                                )
+                            ),
+                            "observation": observed,
+                        }
 
                 decision_at_utc = datetime.now(UTC)
                 (
@@ -1037,6 +1074,44 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         exchange_clock_ahead_asset_ids
                     ),
                 }
+
+                def market_not_ready_payload(asset_id: str) -> dict[str, object]:
+                    if asset_id in clock_rejections:
+                        return {
+                            "reason": clock_rejections[asset_id],
+                            "quote_age_ms": None,
+                        }
+                    state = ingress_rejections.get(asset_id) or {}
+                    observed = state.get("observation")
+                    quote_age_ms = None
+                    received_ts = getattr(observed, "received_ts", None)
+                    if received_ts is not None:
+                        quote_age_ms = max(
+                            0,
+                            int(
+                                (decision_at_utc - received_ts).total_seconds()
+                                * 1000
+                            ),
+                        )
+                    return {
+                        "reason": str(
+                            state.get("reason")
+                            or "current_executable_observation_missing"
+                        ),
+                        "quote_age_ms": quote_age_ms,
+                    }
+
+                def executable_quote_age_ms(observation: object) -> int | None:
+                    received_ts = getattr(observation, "received_ts", None)
+                    if received_ts is None:
+                        return None
+                    return max(
+                        0,
+                        int(
+                            (decision_at_utc - received_ts).total_seconds()
+                            * 1000
+                        ),
+                    )
 
                 # Only materialize full bar histories for assets that have
                 # current executable market truth. The whole commissioned universe
@@ -1084,10 +1159,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     if observation is None:
                         exit_results[asset_id] = {
                             "stage": "OPEN",
-                            "reason": clock_rejections.get(
-                                asset_id,
-                                "current_executable_observation_missing",
-                            ),
+                            **market_not_ready_payload(asset_id),
                             "trade_id": str(trade["trade_id"]),
                         }
                         continue
@@ -1109,10 +1181,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     if observation is None:
                         seed_results[asset_id] = {
                             "stage": "MARKET_NOT_READY",
-                            "reason": clock_rejections.get(
-                                asset_id,
-                                "current_executable_observation_missing",
-                            ),
+                            **market_not_ready_payload(asset_id),
                         }
                         continue
                     if asset_id in assets_open_at_start:
@@ -1225,6 +1294,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     seed_results[asset_id] = asset_result
 
                 dynamic_results: dict[str, object] = {}
+                history_ready_asset_ids: set[str] = set()
                 product_by_id = {
                     product.asset_id: product
                     for product in dynamic_batch
@@ -1234,10 +1304,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     if observation is None:
                         dynamic_results[asset_id] = {
                             "stage": "MARKET_NOT_READY",
-                            "reason": clock_rejections.get(
-                                asset_id,
-                                "current_executable_observation_missing",
-                            ),
+                            **market_not_ready_payload(asset_id),
                         }
                         continue
                     if asset_id in assets_open_at_start:
@@ -1252,12 +1319,15 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         dynamic_results[asset_id] = {
                             "stage": "HISTORY_NOT_READY",
                             "reason": "history_not_fetched",
+                            "quote_age_ms": executable_quote_age_ms(observation),
                         }
                         continue
                     if history.error is not None:
                         dynamic_results[asset_id] = {
                             "stage": "HISTORY_NOT_READY",
                             "reason": history.error,
+                            "quote_age_ms": executable_quote_age_ms(observation),
+                            "history_source_gaps": list(history.source_gaps),
                         }
                         continue
 
@@ -1305,9 +1375,12 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         dynamic_results[asset_id] = {
                             "stage": "HISTORY_NOT_READY",
                             "reason": f"warmup:{type(exc).__name__}:{exc}",
+                            "quote_age_ms": executable_quote_age_ms(observation),
+                            "history_source_gaps": list(history.source_gaps),
                         }
                         continue
 
+                    history_ready_asset_ids.add(asset_id)
                     feature = warmup.feature_snapshot
                     try:
                         plan = build_prototype_crypto_entry_plan(
@@ -1335,6 +1408,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                                 feature.trigger_close_utc.isoformat()
                             ),
                             "watch_eligible": feature.watch_eligible,
+                            "quote_age_ms": executable_quote_age_ms(observation),
                         }
                         continue
 
@@ -1356,6 +1430,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                             ),
                             "coinbase_product": history.coinbase_product,
                             "history_source_gaps": list(history.source_gaps),
+                            "quote_age_ms": executable_quote_age_ms(observation),
                         }
                         if advanced.stage == "NO_SETUP":
                             observation_new = (
@@ -1416,11 +1491,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         for asset_id in product_by_id
                         if asset_id in observations
                     ),
-                    "history_ready": sum(
-                        1
-                        for row in history_by_asset.values()
-                        if row.error is None
-                    ),
+                    "history_ready": len(history_ready_asset_ids),
                     "warmup_cache_hits": sum(
                         1
                         for product in dynamic_batch
@@ -1450,6 +1521,20 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         dynamic_results,
                         "MARKET_NOT_READY",
                     ),
+                    "market_not_ready_reasons": {
+                        reason: sum(
+                            1
+                            for row in dynamic_results.values()
+                            if row.get("stage") == "MARKET_NOT_READY"
+                            and str(row.get("reason")) == reason
+                        )
+                        for reason in sorted({
+                            str(row.get("reason"))
+                            for row in dynamic_results.values()
+                            if row.get("stage") == "MARKET_NOT_READY"
+                            and row.get("reason")
+                        })
+                    },
                     "history_not_ready": _stage_count(
                         dynamic_results,
                         "HISTORY_NOT_READY",
