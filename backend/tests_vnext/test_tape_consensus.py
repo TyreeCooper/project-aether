@@ -4,8 +4,15 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from aether_vnext.tape import TapeSourceObservation, TapeSourceQuality
-from aether_vnext.tape_consensus import qualify_tape_sources
+from aether_vnext.tape import (
+    TapeConsensusState,
+    TapeSourceObservation,
+    TapeSourceQuality,
+)
+from aether_vnext.tape_consensus import (
+    decide_tape_consensus,
+    qualify_tape_sources,
+)
 from aether_vnext.tape_policy import TapeAssetClass, TapeQuorumPolicy
 
 
@@ -96,3 +103,69 @@ def test_unbound_policy_cannot_qualify_sources() -> None:
             as_of_utc=NOW,
             expected_contract_id="MESZ26",
         )
+
+
+def _decision(*rows: TapeSourceObservation):
+    qualification = qualify_tape_sources(
+        rows,
+        asset_id="mes",
+        policy=POLICY,
+        as_of_utc=NOW,
+        expected_contract_id="MESZ26",
+    )
+    return decide_tape_consensus(
+        qualification,
+        policy=POLICY,
+        as_of_utc=NOW,
+    )
+
+
+def test_three_agreeing_sources_form_full_consensus() -> None:
+    decision = _decision(
+        _obs("a", mark=6800.00),
+        _obs("b", mark=6800.25),
+        _obs("c", mark=6800.50),
+    )
+    assert decision.state is TapeConsensusState.FULL
+    assert len(decision.inliers) == 3
+    assert decision.outliers == ()
+    assert decision.median_mark == 6800.25
+
+
+def test_one_bad_feed_cannot_drag_four_agreeing_sources() -> None:
+    decision = _decision(
+        _obs("a", mark=6800.00),
+        _obs("b", mark=6800.25),
+        _obs("c", mark=6800.50),
+        _obs("d", mark=6800.25),
+        _obs("bad", mark=6500.00),
+    )
+    assert decision.state is TapeConsensusState.FULL
+    assert {row.source_id for row in decision.inliers} == {"a", "b", "c", "d"}
+    assert tuple(row.source_id for row in decision.outliers) == ("bad",)
+
+
+def test_three_fresh_sources_without_three_source_agreement_are_contested() -> None:
+    decision = _decision(
+        _obs("a", mark=6800.00),
+        _obs("b", mark=6800.25),
+        _obs("c", mark=7000.00),
+    )
+    assert decision.state is TapeConsensusState.CONTESTED
+    assert len(decision.inliers) == 2
+    assert tuple(row.source_id for row in decision.outliers) == ("c",)
+
+
+def test_two_agreeing_sources_are_degraded_not_full() -> None:
+    decision = _decision(
+        _obs("a", mark=6800.00),
+        _obs("b", mark=6800.25),
+    )
+    assert decision.state is TapeConsensusState.DEGRADED
+    assert len(decision.inliers) == 2
+
+
+def test_single_qualified_source_stays_single_source() -> None:
+    decision = _decision(_obs("a", mark=6800.00))
+    assert decision.state is TapeConsensusState.SINGLE_SOURCE
+    assert len(decision.inliers) == 1
