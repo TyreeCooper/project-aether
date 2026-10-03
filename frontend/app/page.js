@@ -246,6 +246,14 @@ function telemetryWatermark(data) {
   return new Date(Math.min(...stamps)).toISOString();
 }
 
+
+function strategySnapshotId(strategy) {
+  const finished = strategy?.last_result?.finished_at_utc || strategy?.last_cycle_finished_at_utc;
+  const cycle = strategy?.cycle_count;
+  if (!finished && !isObservedNumber(cycle)) return null;
+  return `strategy-${cycle ?? "na"}-${finished || "open"}`;
+}
+
 function RuntimeStrip({ floor, ingress, strategy, discovery, maintenance, nowMs }) {
   const ingressState = supervisorState(ingress, nowMs);
   const discoveryState = supervisorState(discovery, nowMs);
@@ -254,8 +262,8 @@ function RuntimeStrip({ floor, ingress, strategy, discovery, maintenance, nowMs 
   return (
     <div className="runtimeStrip">
       <div><span>BUILD</span><b>{text(floor?.build?.source_revision?.slice(0, 8), "NOT OBSERVED")}</b></div>
-      <div><span>SNAPSHOT</span><b>{text(floor?.snapshot_id, "NOT OBSERVED")}</b></div>
-      <div><span>FLOOR REFRESHED</span><b>{ts(floor?.refresh_time_utc || floor?.as_of_utc, "NOT OBSERVED")}</b></div>
+      <div><span>SNAPSHOT</span><b>{text(floor?.snapshot_id || strategySnapshotId(strategy), "NOT OBSERVED")}</b></div>
+      <div><span>FLOOR REFRESHED</span><b>{ts(floor?.refresh_time_utc || floor?.as_of_utc || strategy?.last_result?.finished_at_utc, "NOT OBSERVED")}</b></div>
       <div><span>INGRESS</span><Badge value={ingressState}>{ingressState}</Badge></div>
       <div><span>DISCOVERY</span><Badge value={discoveryState}>{discoveryState}</Badge></div>
       <div><span>STRATEGY</span><Badge value={strategyState}>{strategyState}</Badge></div>
@@ -320,7 +328,7 @@ function CommandCenter({ floor, ingress, strategy, discovery, operator, maintena
         <p className="universeTruth">Catalog-visible ≠ commissioned ≠ market-ready ≠ setup-qualified. AETHER keeps these populations separate so a large provider catalog cannot be mistaken for trade permission.</p>
       </Section>
 
-      <Section eyebrow="PIPELINE" title="Operational flow" action={<span>{text(maintenanceState.first_causal_edge, "No causal clog")}</span>} className="wide">
+      <Section eyebrow="PIPELINE" title="Operational flow" action={<span>{text(maintenanceState.first_causal_edge, maintenance ? "No causal clog" : "NOT OBSERVED")}</span>} className="wide">
         <div className="stageRail">
           {(maintenanceState.stages || []).map((row) => (
             <div className="stageNode" key={row.stage}>
@@ -711,15 +719,21 @@ function Pipeline({ strategy, discovery, ingress, maintenance, floor, operator, 
     if (stage === "STRATEGY_EVALUATED") {
       const qualifiedObserved = isObservedNumber(pipe.watch) && isObservedNumber(pipe.fire_or_beyond);
       const qualified = qualifiedObserved ? Number(pipe.watch) + Number(pipe.fire_or_beyond) : null;
-      const noSetup = dynamicAssetsObserved ? dynamicRows.filter((row) => row?.stage === "NO_SETUP").length : null;
-      const complete = isObservedNumber(counts.STRATEGY_EVALUATED) && isObservedNumber(qualified) && isObservedNumber(noSetup);
+      const decisionRows = combinedStrategyRows(strategy);
+      const noSetup = decisionRows.filter((row) => row?.stage === "NO_SETUP").length;
+      const rowFaults = decisionRows.filter((row) => ["EVALUATION_ERROR", "PIPELINE_ERROR"].includes(row?.stage)).length;
+      const declared = isObservedNumber(counts.STRATEGY_EVALUATED) ? Number(counts.STRATEGY_EVALUATED) : null;
+      const evidenced = noSetup + (qualified || 0) + rowFaults;
+      const input = declared === null ? (decisionRows.length ? evidenced : null) : Math.max(declared, evidenced);
+      const complete = input !== null && qualified !== null && input === qualified + noSetup + rowFaults;
       return reconcileGate({
-        input: counts.STRATEGY_EVALUATED,
+        input,
         pass: qualified,
         wait: complete ? 0 : null,
-        reject: noSetup,
-        exact: complete && counts.STRATEGY_EVALUATED === qualified + noSetup,
-        reasons: reasonHistogram(dynamicRows, (row) => row?.stage === "NO_SETUP"),
+        reject: decisionRows.length || declared !== null ? noSetup : null,
+        fault: rowFaults || (isObservedNumber(pipe.evaluation_error) ? Number(pipe.evaluation_error) : 0),
+        exact: complete,
+        reasons: reasonHistogram(decisionRows, (row) => row?.stage === "NO_SETUP"),
       });
     }
     if (stage === "OPEN" && exitRows.length) {
@@ -967,8 +981,8 @@ function PositionCard({ row, nowMs }) {
   );
 }
 
-function Positions({ floor, nowMs }) {
-  const observed = Array.isArray(floor?.open_cockpits);
+function Positions({ floor, nowMs, endpointHealth }) {
+  const observed = endpointHealth?.floor === "live" && Array.isArray(floor?.open_cockpits);
   const rows = observed ? floor.open_cockpits : [];
   return (
     <div className="pageGrid">
@@ -980,8 +994,8 @@ function Positions({ floor, nowMs }) {
   );
 }
 
-function Blotter({ operator }) {
-  const observed = Array.isArray(operator?.blotter);
+function Blotter({ operator, endpointHealth }) {
+  const observed = endpointHealth?.operator === "live" && Array.isArray(operator?.blotter);
   const rows = observed ? operator.blotter : [];
   return (
     <div className="pageGrid">
@@ -994,7 +1008,7 @@ function Blotter({ operator }) {
               <span>{ts(row.closed_at_utc,"—")}</span><strong>{text(row.asset_id).toUpperCase()}</strong><span>{text(row.side)}</span><span>{num(row.quantity,8)}</span><span>{num(row.avg_entry_price,8)}</span><span>{num(row.exit_price,8)}</span><span className={Number(row.net_pnl_usd)<0?"loss":Number(row.net_pnl_usd)>0?"gain":""}>{money(row.net_pnl_usd)}</span><span>{money(row.mfe_usd)}</span><span>{money(row.mae_usd)}</span><span>{text(row.exit_reason)}</span>
             </div>
           ))}
-          {!observed ? <div className="empty">Trade ledger NOT OBSERVED.</div> : !rows.length ? <div className="empty">No completed trades in this sandbox session.</div> : null}
+          {!observed ? <div className="empty">Trade ledger NOT OBSERVED. No completed-trade count is asserted while the operator endpoint is unavailable.</div> : !rows.length ? <div className="empty">No completed trades in this sandbox session.</div> : null}
         </div>
       </Section>
     </div>
@@ -1033,7 +1047,7 @@ function Maintenance({ maintenance }) {
               <span>{ts(row.last_seen_at_utc,"—")}</span><Badge value={row.status}>{row.status}</Badge><strong>{row.stage}</strong><span>{row.reason}</span><span>{num(row.affected_count)} affected</span><span>{num(row.recurrence_count)}×</span>
             </div>
           ))}
-          {!incidents.length ? <div className="empty">No maintenance incidents recorded.</div> : null}
+          {!incidents.length ? <div className="empty">{maintenance?.incident_read_warning ? `Incident ledger NOT OBSERVED: ${maintenance.incident_read_warning}` : "No maintenance incidents recorded."}</div> : null}
         </div>
       </Section>
     </div>
@@ -1113,13 +1127,13 @@ function Settings({ ingress, strategy, discovery, floor, maintenance, onToggle, 
   );
 }
 
-function AppPage({ active, data, nowMs, onToggle, onRepair, busy, controlError }) {
+function AppPage({ active, data, nowMs, onToggle, onRepair, busy, controlError, endpointHealth }) {
   const { floor, ingress, strategy, discovery, operator, maintenance } = data;
   if (active === "markets") return <Markets discovery={discovery} ingress={ingress} nowMs={nowMs} />;
   if (active === "pipeline") return <Pipeline strategy={strategy} discovery={discovery} ingress={ingress} maintenance={maintenance} floor={floor} operator={operator} nowMs={nowMs} />;
   if (active === "trading") return <TradingFloor strategy={strategy} />;
-  if (active === "positions") return <Positions floor={floor} nowMs={nowMs} />;
-  if (active === "blotter") return <Blotter operator={operator} />;
+  if (active === "positions") return <Positions floor={floor} nowMs={nowMs} endpointHealth={endpointHealth} />;
+  if (active === "blotter") return <Blotter operator={operator} endpointHealth={endpointHealth} />;
   if (active === "maintenance") return <Maintenance maintenance={maintenance} />;
   if (active === "settings") return <Settings ingress={ingress} strategy={strategy} discovery={discovery} floor={floor} maintenance={maintenance} onToggle={onToggle} onRepair={onRepair} busy={busy} error={controlError} />;
   return <CommandCenter floor={floor} ingress={ingress} strategy={strategy} discovery={discovery} operator={operator} maintenance={maintenance} nowMs={nowMs} />;
@@ -1129,6 +1143,7 @@ export default function DashboardPage() {
   const [active, setActive] = useState("command");
   const [data, setData] = useState({ floor:null, ingress:null, strategy:null, operator:null, discovery:null, maintenance:null });
   const [errors, setErrors] = useState([]);
+  const [endpointHealth, setEndpointHealth] = useState({});
   const [nowMs, setNowMs] = useState(()=>Date.now());
   const [maintenanceBusy, setMaintenanceBusy] = useState(false);
   const [maintenanceError, setMaintenanceError] = useState("");
@@ -1147,12 +1162,13 @@ export default function DashboardPage() {
       ]);
       if(!mounted)return;
       const keys=["floor","ingress","strategy","operator","discovery","maintenance"];
-      const next={}; const nextErrors=[];
+      const next={}; const nextErrors=[]; const health={};
       results.forEach((r,i)=>{
-        if(r.status==="fulfilled") next[keys[i]]=r.value;
-        else nextErrors.push(keys[i]);
+        if(r.status==="fulfilled") { next[keys[i]]=r.value; health[keys[i]]="live"; }
+        else { nextErrors.push(keys[i]); health[keys[i]]="unavailable"; }
       });
       setData((current)=>({...current,...next}));
+      setEndpointHealth((current)=>({...current,...health}));
       setErrors(nextErrors);
     };
     load();
@@ -1226,7 +1242,7 @@ export default function DashboardPage() {
 
         {errors.length ? <div className="errorBox"><strong>Telemetry degraded:</strong> {errors.join(", ")} endpoint(s) unavailable. Existing UI state is preserved; no placeholder trade state is invented.</div> : null}
 
-        <AppPage active={active} data={data} nowMs={nowMs} onToggle={onToggle} onRepair={onRepair} busy={maintenanceBusy} controlError={maintenanceError} />
+        <AppPage active={active} data={data} nowMs={nowMs} onToggle={onToggle} onRepair={onRepair} busy={maintenanceBusy} controlError={maintenanceError} endpointHealth={endpointHealth} />
       </section>
     </main>
   );
