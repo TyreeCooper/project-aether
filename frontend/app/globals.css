@@ -44,6 +44,12 @@ button{cursor:pointer}
 .positionGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.positionCard{padding:13px;border:1px solid var(--line);border-radius:11px;background:var(--panel2)}.positionTop{display:flex;justify-content:space-between;gap:8px}.positionTop>div{display:grid;gap:2px}.positionTop strong{font-size:14px}.positionTop span{font-size:9px;color:var(--muted)}.positionPnl{font-size:24px;font-weight:750;margin:16px 0}.positionCard dl,.diagnosis dl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;background:var(--line);margin:0;border-radius:8px;overflow:hidden}.positionCard dl div,.diagnosis dl div{background:#08121c;padding:7px}.positionCard dt,.diagnosis dt{font-size:7px;color:var(--muted)}.positionCard dd,.diagnosis dd{margin:3px 0 0;font-size:9px}
 .search,.tokenField input{min-width:260px;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:#07101a;color:var(--text);outline:none}.search:focus,.tokenField input:focus{border-color:var(--accent)}
 .providerStats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:10px}
+.universeContract{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.universeContract>div{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:10px;display:grid;gap:4px}
+.universeContract span{font-size:8px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase}
+.universeContract strong{font-size:15px}
+.universeContract small{font-size:8px;color:var(--muted);line-height:1.35}
+.universeTruth{margin:10px 0 0;color:var(--muted);font-size:9px;line-height:1.45}
 .marketTable{max-height:390px;overflow:auto}.marketHead,.marketRow{display:grid;grid-template-columns:55px minmax(120px,1.3fr) 70px 80px 90px 80px 90px;gap:8px;align-items:center;padding:7px 9px;background:var(--panel2)}.marketHead{position:sticky;top:0;z-index:2;font-size:7px;color:var(--muted);text-transform:uppercase}.marketRow{font-size:9px}.marketRow strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gain{color:var(--good)}.loss{color:var(--bad)}
 .flowMap{display:flex;overflow-x:auto;gap:0;padding-bottom:3px}.flowNode{position:relative;min-width:145px;display:grid;gap:4px;padding:12px 24px 12px 12px;border:1px solid var(--line);background:var(--panel2)}.flowNode:first-child{border-radius:10px 0 0 10px}.flowNode:last-child{border-radius:0 10px 10px 0}.flowNode span{font-size:8px;color:var(--muted)}.flowNode strong{font-size:19px}.flowNode i{position:absolute;right:7px;top:50%;transform:translateY(-50%);font-style:normal;color:var(--accent)}
@@ -71,12 +77,12 @@ button{cursor:pointer}
   .workspace{padding:16px}.topbar{align-items:flex-start}.topbarMeta{display:none}.runtimeStrip{grid-template-columns:repeat(3,minmax(0,1fr))}
   .pageGrid{grid-template-columns:1fr}.panel.wide{grid-column:auto}.hero,.pageIntro{grid-column:auto;align-items:flex-start}.heroModes{justify-content:flex-start}
   .metricGrid,.settingsMetrics{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .positionGrid,.controlGrid,.providerStats{grid-template-columns:1fr 1fr}
+  .positionGrid,.controlGrid,.providerStats,.universeContract{grid-template-columns:1fr 1fr}
   .marketTable,.tradeMatrix,.blotterTable,.incidentTable,.queueTable{overflow-x:auto}.marketHead,.marketRow{min-width:780px}.tradeHead,.tradeRow{min-width:820px}.blotterHead,.blotterRow{min-width:1050px}.incidentRow{min-width:820px}.queueRow{min-width:700px}
 }
 @media(max-width:560px){
   .workspace{padding:12px}.topbar h1{font-size:22px}.hero,.pageIntro{padding:16px}.hero h2,.pageIntro h2{font-size:20px}
-  .runtimeStrip{grid-template-columns:repeat(2,minmax(0,1fr))}.metricGrid,.settingsMetrics,.positionGrid,.controlGrid,.providerStats,.detailGrid{grid-template-columns:1fr}
+  .runtimeStrip{grid-template-columns:repeat(2,minmax(0,1fr))}.metricGrid,.settingsMetrics,.positionGrid,.controlGrid,.providerStats,.universeContract,.detailGrid{grid-template-columns:1fr}
   .search,.tokenField input{width:100%;min-width:0}.pageIntro{display:grid}.repairActionRow{align-items:stretch;flex-direction:column}.repairButton{width:100%}.repairTelemetry{grid-template-columns:repeat(2,minmax(0,1fr))}.repairProgress{grid-template-columns:1fr}
 }
 

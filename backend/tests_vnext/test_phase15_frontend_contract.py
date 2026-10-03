@@ -209,3 +209,22 @@ def test_frontend_recovery_state_matches_backend_health_semantics() -> None:
     assert "REFERENCE CATALOG ONLINE" in page
     assert "CATALOG PRIORITY" in page
     assert "grid-template-columns:repeat(7,minmax(0,1fr))" in css
+
+
+def test_frontend_distinguishes_catalog_from_runtime_universes() -> None:
+    root = _repo_root()
+    page = (root / "frontend" / "app" / "page.js").read_text(encoding="utf-8")
+    css = (root / "frontend" / "app" / "globals.css").read_text(encoding="utf-8")
+    for required in (
+        "UNIVERSE CONTRACT",
+        "Catalog → commissioned → active work",
+        "Kraken commissioned",
+        "Current roaming workset",
+        "Floor seed registry",
+        "Catalog-visible ≠ commissioned ≠ market-ready ≠ setup-qualified.",
+        "NATIVE CATALOG ONLINE",
+        "REFERENCE CATALOG ONLINE",
+    ):
+        assert required in page
+    assert "MARKET DATA ONLINE" not in page
+    assert ".universeContract" in css

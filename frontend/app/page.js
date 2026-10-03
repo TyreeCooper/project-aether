@@ -300,13 +300,25 @@ function CommandCenter({ floor, ingress, strategy, discovery, operator, maintena
       </div>
 
       <div className="metricGrid">
-        <Metric label="Catalog instruments" value={catalog === null ? "NOT OBSERVED" : num(catalog)} sub="Across connected provider lanes" />
-        <Metric label="Focus admitted" value={focus === null ? "NOT OBSERVED" : num(focus)} sub={eligible === null ? "eligibility NOT OBSERVED" : `${num(eligible)} eligible`} />
+        <Metric label="Catalog instruments" value={catalog === null ? "NOT OBSERVED" : num(catalog)} sub="Discovery-visible; not execution permission" />
+        <Metric label="Focus admitted" value={focus === null ? "NOT OBSERVED" : num(focus)} sub={eligible === null ? "eligibility NOT OBSERVED" : `${num(eligible)} eligible · priority only`} />
         <Metric label="Evaluated this cycle" value={pipe.strategy_evaluated === undefined ? "NOT OBSERVED" : num(pipe.strategy_evaluated)} sub={pipe.market_ready === undefined ? "market readiness NOT OBSERVED" : `${num(pipe.market_ready)} market ready`} />
         <Metric label="Open positions" value={positionsObserved ? num(positions.length) : "NOT OBSERVED"} sub="PAPER positions" />
         <Metric label="Book cash" value={money(bank.book_cash_usd, "NOT OBSERVED")} sub={bank.cash_reserved_usd === null || bank.cash_reserved_usd === undefined ? "reserved NOT OBSERVED" : `${money(bank.cash_reserved_usd)} reserved`} />
         <Metric label="Maintenance" value={text(maintenanceState.status, "SYNCING")} sub={text(maintenanceState.primary_reason, "establishing baseline")} state={maintenanceState.status} />
       </div>
+
+      <Section eyebrow="UNIVERSE CONTRACT" title="Catalog → commissioned → active work" className="wide">
+        <div className="universeContract">
+          <div><span>Provider catalog</span><strong>{catalog === null ? "NOT OBSERVED" : num(catalog)}</strong><small>Discovery-visible across providers; not execution permission.</small></div>
+          <div><span>Catalog eligible</span><strong>{eligible === null ? "NOT OBSERVED" : num(eligible)}</strong><small>Provider discovery eligibility only.</small></div>
+          <div><span>Kraken commissioned</span><strong>{pipe.dynamic_kraken_available === undefined ? "NOT OBSERVED" : num(pipe.dynamic_kraken_available)}</strong><small>Runtime-bound products with the current commissioned strategy route.</small></div>
+          <div><span>Current roaming workset</span><strong>{pipe.roaming_batch === undefined ? "NOT OBSERVED" : num(pipe.roaming_batch)}</strong><small>All commissioned products remain owned; worker concurrency schedules I/O only.</small></div>
+          <div><span>Market ready this cycle</span><strong>{pipe.market_ready === undefined ? "NOT OBSERVED" : num(pipe.market_ready)}</strong><small>Executable market evidence observed this cycle.</small></div>
+          <div><span>Floor seed registry</span><strong>{Array.isArray(floor?.full_universe) ? num(universe.length) : "NOT OBSERVED"}</strong><small>Compatibility Floor projection; not the provider catalog.</small></div>
+        </div>
+        <p className="universeTruth">Catalog-visible ≠ commissioned ≠ market-ready ≠ setup-qualified. AETHER keeps these populations separate so a large provider catalog cannot be mistaken for trade permission.</p>
+      </Section>
 
       <Section eyebrow="PIPELINE" title="Operational flow" action={<span>{text(maintenanceState.first_causal_edge, "No causal clog")}</span>} className="wide">
         <div className="stageRail">
@@ -366,7 +378,7 @@ function Markets({ discovery, ingress, nowMs }) {
   return (
     <div className="pageGrid">
       <div className="pageIntro">
-        <div><span className="kicker">MARKET INTELLIGENCE</span><h2>Provider universe</h2><p>Full catalog visibility with provider-level ranking. Priority lists are scheduling signals, not trade permission.</p></div>
+        <div><span className="kicker">MARKET INTELLIGENCE</span><h2>Provider universe</h2><p>Catalog visibility is discovery truth. Priority is scheduling only; execution readiness requires a commissioned product, market ingress, strategy evaluation, and the downstream Firm gates.</p></div>
         <input className="search" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter instruments…" />
       </div>
       {rows.map((row) => {
@@ -375,7 +387,7 @@ function Markets({ discovery, ingress, nowMs }) {
           <Section
             eyebrow={row.catalog_mode === "provider_native" ? "NATIVE CATALOG" : "REFERENCE CATALOG"}
             title={row.provider}
-            action={<Badge value={row.status === "online" ? "ONLINE" : row.status === "NOT OBSERVED" ? "NOT OBSERVED" : "FAULT"}>{row.status === "online" ? (row.catalog_mode === "provider_native" ? "MARKET DATA ONLINE" : "REFERENCE CATALOG ONLINE") : String(row.status || "NOT OBSERVED").toUpperCase()}</Badge>}
+            action={<Badge value={row.status === "online" ? "ONLINE" : row.status === "NOT OBSERVED" ? "NOT OBSERVED" : "FAULT"}>{row.status === "online" ? (row.catalog_mode === "provider_native" ? "NATIVE CATALOG ONLINE" : "REFERENCE CATALOG ONLINE") : String(row.status || "NOT OBSERVED").toUpperCase()}</Badge>}
             className="wide"
             key={row.provider}
           >
