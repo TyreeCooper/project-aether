@@ -1067,6 +1067,63 @@ class VNextStore:
             )
         )
 
+    def load_tape_source_observations(
+        self,
+        conn: Connection,
+        *,
+        observation_ids: Sequence[str],
+    ) -> tuple[TapeSourceObservation, ...]:
+        ids = tuple(
+            dict.fromkeys(
+                str(value).strip()
+                for value in observation_ids
+                if str(value).strip()
+            )
+        )
+        if not ids:
+            return ()
+        table = self.tables["tape_source_observations"]
+        rows = tuple(
+            conn.execute(
+                sa.select(table).where(table.c.observation_id.in_(ids))
+            ).mappings()
+        )
+        by_id = {str(row["observation_id"]): row for row in rows}
+        out: list[TapeSourceObservation] = []
+        for observation_id in ids:
+            row = by_id.get(observation_id)
+            if row is None:
+                continue
+            out.append(
+                TapeSourceObservation(
+                    observation_id=str(row["observation_id"]),
+                    asset_id=str(row["asset_id"]),
+                    source_id=str(row["source_id"]),
+                    venue=str(row["venue"]),
+                    source_symbol=str(row["source_symbol"]),
+                    contract_id=(
+                        None
+                        if row["contract_id"] is None
+                        else str(row["contract_id"])
+                    ),
+                    bid=None if row["bid"] is None else float(row["bid"]),
+                    ask=None if row["ask"] is None else float(row["ask"]),
+                    last=None if row["last"] is None else float(row["last"]),
+                    mark=None if row["mark"] is None else float(row["mark"]),
+                    exchange_ts=(
+                        None
+                        if row["exchange_ts"] is None
+                        else _stored_utc(row["exchange_ts"])
+                    ),
+                    received_ts=_stored_utc(row["received_ts"]),
+                    age_ms=int(row["age_ms"]),
+                    quality=TapeSourceQuality(str(row["quality"])),
+                    source_data_version=str(row["source_data_version"]),
+                    source_ref=str(row["source_ref"]),
+                )
+            )
+        return tuple(out)
+
     def load_tape_source_observation(
         self,
         conn: Connection,
