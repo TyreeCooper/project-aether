@@ -1,0 +1,138 @@
+name: AETHER vNext Bootstrap Prototype History
+
+on:
+  push:
+    branches:
+      - aether-vnext-swapout
+    paths:
+      - ".github/workflows/aether-vnext-bootstrap-prototype-history.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aether-vnext-bootstrap-prototype-history
+  cancel-in-progress: false
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: aether-vnext-burnin
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      AETHER_VNEXT_ENVIRONMENT: burnin
+      AETHER_VNEXT_DATABASE_URL: ${{ secrets.AETHER_VNEXT_BURNIN_DATABASE_URL }}
+
+    steps:
+      - name: Checkout exact vNext head
+        uses: actions/checkout@v4
+
+      - name: Verify branch and protected database
+        shell: bash
+        working-directory: .
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "aether-vnext-swapout"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -n "$AETHER_VNEXT_DATABASE_URL"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Refuse legacy production database target
+        env:
+          PYTHONPATH: .
+        run: python scripts/aether_vnext_check_db_isolation.py
+
+      - name: Verify schema 0033 is present
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import asyncio
+          import sqlalchemy as sa
+          from aether_vnext.db_runtime import open_vnext_engine
+
+          async def main():
+              async with open_vnext_engine() as engine:
+                  async with engine.connect() as conn:
+                      def verify(sync_conn):
+                          revision = sync_conn.execute(
+                              sa.text("SELECT version_num FROM alembic_version")
+                          ).scalar_one()
+                          exists = sync_conn.execute(
+                              sa.text(
+                                  """
+                                  SELECT EXISTS (
+                                      SELECT 1
+                                      FROM information_schema.tables
+                                      WHERE table_schema='aether_vnext'
+                                        AND table_name='prototype_market_bars'
+                                  )
+                                  """
+                              )
+                          ).scalar_one()
+                          return str(revision), bool(exists)
+                      revision, exists = await conn.run_sync(verify)
+              assert revision == "0033", revision
+              assert exists is True
+
+          asyncio.run(main())
+          PY
+
+      - name: Execute guarded prototype history bootstrap
+        env:
+          PYTHONPATH: .
+        run: |
+          python scripts/aether_vnext_prototype_history_bootstrap.py \
+            --execute \
+            --confirm BOOTSTRAP-VNEXT-PROTOTYPE-HISTORY \
+            --output aether-vnext-prototype-history-bootstrap.json
+
+      - name: Verify history and feature readiness
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          body = json.loads(
+              Path("aether-vnext-prototype-history-bootstrap.json").read_text()
+          )
+          assert body["mode"] == "executed"
+          assert body["mutation_performed"] is True
+          assert body["paper_only"] is True
+          assert body["live_blocked"] is True
+          assert body["phase18_evidence"] is False
+          assert body["paper_epoch_id"] == "aether-prototype-new-system-test-001"
+          assert body["prototype_market_bar_count_after"] >= body["prototype_market_bar_count_before"]
+          for asset in ("btc", "eth"):
+              row = body[asset]
+              assert row["hourly_total"] >= 2200
+              assert row["coinbase_reference_bar_count"] >= 1400
+              assert row["kraken_hourly_bar_count"] >= 600
+              assert row["kraken_daily_bar_count"] >= 50
+              features = row["features"]
+              assert features["volatility_reference_count"] > 0
+              assert features["atr14"] > 0
+              assert features["prior_20h_high"] >= features["prior_20h_low"]
+          print(json.dumps(body, indent=2, sort_keys=True))
+          PY
+
+      - name: Upload immutable bootstrap record
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-vnext-prototype-history-bootstrap-${{ github.run_id }}
+          path: backend/aether-vnext-prototype-history-bootstrap.json
+          if-no-files-found: error
+          retention-days: 90

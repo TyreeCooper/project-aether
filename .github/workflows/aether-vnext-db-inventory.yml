@@ -1,0 +1,41 @@
+name: AETHER vNext Azure DB Inventory
+
+on:
+  push:
+    branches:
+      - aether-vnext-swapout
+    paths:
+      - ".github/workflows/aether-vnext-db-inventory.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Login to Azure with dedicated vNext identity
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_E2CE53939F2D406CBA8FB39DB4948C7B }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_0E83D5CA9CF543228DA7FA7818D7C998 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_B530D2ECBF5549A39B4758868409068A }}
+
+      - name: Inventory PostgreSQL targets and vNext setting presence
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "=== PostgreSQL flexible servers visible to dedicated vNext identity ==="
+          az postgres flexible-server list \
+            --query "[].{name:name,resourceGroup:resourceGroup,state:state,version:version,location:location}" \
+            -o json
+
+          echo "=== vNext app-setting presence (values are not printed) ==="
+          az webapp config appsettings list \
+            --name aether-vnext-nonprod \
+            --resource-group aether-rg \
+            --query "[?name=='AETHER_VNEXT_ENVIRONMENT' || name=='AETHER_VNEXT_DATABASE_URL' || name=='AETHER_VNEXT_AZURE_POSTGRESQL_CONNECTIONSTRING'].name" \
+            -o json

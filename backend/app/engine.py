@@ -861,13 +861,26 @@ class PaperEngine:
             self._task = asyncio.create_task(self.loop())
 
     async def shutdown(self) -> None:
-        if self._task is not None and not self._task.done():
-            self._task.cancel()
+        task = self._task
+        self._task = None
+        if task is not None and not task.done():
+            task.cancel()
             try:
-                await self._task
+                await asyncio.wait_for(task, timeout=5.0)
             except asyncio.CancelledError:
                 pass
-        await db_store.flush()
+            except TimeoutError:
+                self._log(
+                    "WARN",
+                    "Engine task did not stop within 5s; continuing bounded shutdown.",
+                )
+        try:
+            await asyncio.wait_for(db_store.flush(), timeout=5.0)
+        except TimeoutError:
+            self._log(
+                "WARN",
+                "Persistence flush exceeded 5s during shutdown; continuing shutdown.",
+            )
 
     async def update_config(self, config: dict[str, Any]):
         async with self._lock:

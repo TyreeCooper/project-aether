@@ -1,0 +1,165 @@
+name: AETHER vNext Azure Target Discovery
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - labeled
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: aether-vnext-azure-target-discovery-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  discover:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'aether-vnext-swapout' &&
+      github.event.label.name == 'aether-vnext-azure-discovery-approved'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: aether-vnext-burnin
+
+    steps:
+      - name: Checkout exact vNext revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Verify discovery revision
+        shell: bash
+        working-directory: .
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$EXPECTED_SHA"
+          test "$GITHUB_HEAD_REF" = "aether-vnext-swapout"
+          echo "Azure target discovery head: $actual"
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_530CF31F9C844B6BBFDBCED78DB6E9E4 }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_C8115A17EE8945578F04F145FD68F4CE }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_AD212BE4448A497488FE91D5E47F27B6 }}
+
+      - name: Discover eligible AETHER nonproduction targets
+        shell: bash
+        env:
+          SOURCE_REVISION: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          apps_json="$(az webapp list             --query "[?starts_with(name, 'aether-')].{name:name,resourceGroup:resourceGroup,defaultHostName:defaultHostName,state:state}"             -o json)"
+
+          APPS_JSON="$apps_json" python - <<'PY'
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          source_revision = os.environ["SOURCE_REVISION"]
+          apps = json.loads(os.environ["APPS_JSON"])
+          candidates = []
+
+          for app in apps:
+              name = str(app.get("name") or "").strip()
+              resource_group = str(app.get("resourceGroup") or "").strip()
+              host = str(app.get("defaultHostName") or "").strip()
+              state = str(app.get("state") or "").strip()
+
+              if not name or not resource_group:
+                  continue
+
+              # A dedicated app is eligible only when it is not the known
+              # production app and does not resolve to the production hostname.
+              if (
+                  name != "aether-prod-api"
+                  and host != "aether-prod-api.azurewebsites.net"
+              ):
+                  candidates.append(
+                      {
+                          "kind": "dedicated_app",
+                          "app_name": name,
+                          "slot_name": None,
+                          "default_host_name": host or None,
+                          "state": state or None,
+                      }
+                  )
+
+              # Non-production deployment slots on any AETHER app are eligible.
+              # Query metadata only; do not read app settings, connection
+              # strings, identities, credentials, or secrets.
+              proc = subprocess.run(
+                  [
+                      "az",
+                      "webapp",
+                      "deployment",
+                      "slot",
+                      "list",
+                      "--name",
+                      name,
+                      "--resource-group",
+                      resource_group,
+                      "--query",
+                      "[].{name:name,defaultHostName:defaultHostName,state:state}",
+                      "-o",
+                      "json",
+                  ],
+                  check=True,
+                  text=True,
+                  capture_output=True,
+              )
+              slots = json.loads(proc.stdout or "[]")
+              for slot in slots:
+                  slot_name = str(slot.get("name") or "").strip()
+                  slot_host = str(slot.get("defaultHostName") or "").strip()
+                  slot_state = str(slot.get("state") or "").strip()
+                  if not slot_name or slot_name.lower() == "production":
+                      continue
+                  if slot_host == "aether-prod-api.azurewebsites.net":
+                      continue
+                  candidates.append(
+                      {
+                          "kind": "slot",
+                          "app_name": name,
+                          "slot_name": slot_name,
+                          "default_host_name": slot_host or None,
+                          "state": slot_state or None,
+                      }
+                  )
+
+          candidates.sort(
+              key=lambda row: (
+                  row["kind"],
+                  row["app_name"],
+                  row["slot_name"] or "",
+              )
+          )
+          payload = {
+              "source_revision": source_revision,
+              "read_only": True,
+              "production_target_excluded": True,
+              "candidate_count": len(candidates),
+              "candidates": candidates,
+          }
+          Path("aether-vnext-azure-targets.json").write_text(
+              json.dumps(payload, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(payload, indent=2, sort_keys=True))
+          PY
+
+      - name: Upload Azure target discovery
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-vnext-azure-targets-${{ github.run_id }}
+          path: aether-vnext-azure-targets.json
+          if-no-files-found: error
+          retention-days: 7

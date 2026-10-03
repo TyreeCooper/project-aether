@@ -1,0 +1,324 @@
+name: AETHER vNext Burn-in Control Plane
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "initialize applies migrations/bootstrap; start_campaign persists only after canonical preflight"
+        required: true
+        default: "preflight"
+        type: choice
+        options:
+          - preflight
+          - readiness_report
+          - initialize_and_preflight
+          - initialize_calendar_probe
+          - start_campaign
+      campaign_id:
+        description: "Forward-paper campaign identity to inspect or start"
+        required: true
+        type: string
+  pull_request:
+    branches:
+      - main
+    types:
+      - labeled
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: aether-vnext-burnin-control-plane
+  cancel-in-progress: false
+
+jobs:
+  burnin-control:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event_name == 'pull_request' &&
+        github.event.action == 'labeled' &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        github.event.pull_request.head.ref == 'aether-vnext-swapout' &&
+        (
+          github.event.label.name == 'aether-vnext-burnin-preflight-approved' ||
+          github.event.label.name == 'aether-vnext-burnin-readiness-approved' ||
+          github.event.label.name == 'aether-vnext-calendar-probe-approved' ||
+          github.event.label.name == 'aether-vnext-burnin-start-approved'
+        )
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: aether-vnext-burnin
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      AETHER_VNEXT_ENVIRONMENT: burnin
+      AETHER_VNEXT_DATABASE_URL: ${{ secrets.AETHER_VNEXT_BURNIN_DATABASE_URL }}
+      AETHER_VNEXT_AZURE_POSTGRESQL_CONNECTIONSTRING: ${{ secrets.AETHER_VNEXT_BURNIN_POSTGRESQL_CONNECTIONSTRING }}
+      AETHER_VNEXT_RUNTIME_BINDINGS_JSON: ${{ secrets.AETHER_VNEXT_RUNTIME_BINDINGS_JSON }}
+      AETHER_VNEXT_TRADINGHOURS_API_TOKEN: ${{ secrets.AETHER_VNEXT_TRADINGHOURS_API_TOKEN }}
+
+    steps:
+      - name: Resolve authorized burn-in request
+        id: request
+        shell: bash
+        working-directory: .
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REQUESTED_ACTION: ${{ inputs.action }}
+          REQUESTED_CAMPAIGN_ID: ${{ inputs.campaign_id }}
+          PR_LABEL: ${{ github.event.label.name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            if [ "$PR_HEAD_REPO" != "$GITHUB_REPOSITORY" ]; then
+              echo "Burn-in PR trigger requires a same-repository head."
+              exit 1
+            fi
+            if [ "$PR_HEAD_REF" != "aether-vnext-swapout" ]; then
+              echo "Burn-in PR trigger requires aether-vnext-swapout."
+              exit 1
+            fi
+            case "$PR_LABEL" in
+              aether-vnext-burnin-preflight-approved)
+                action="initialize_and_preflight"
+                ;;
+              aether-vnext-burnin-readiness-approved)
+                action="readiness_report"
+                ;;
+              aether-vnext-calendar-probe-approved)
+                action="initialize_calendar_probe"
+                ;;
+              aether-vnext-burnin-start-approved)
+                action="start_campaign"
+                ;;
+              *)
+                echo "Unapproved burn-in label."
+                exit 1
+                ;;
+            esac
+            campaign_id="aether-vnext-burnin-pr-${PR_NUMBER}"
+          else
+            action="$REQUESTED_ACTION"
+            campaign_id="$REQUESTED_CAMPAIGN_ID"
+            if [ "$GITHUB_REF_NAME" = "main" ]; then
+              echo "Manual burn-in execution refuses the default branch."
+              exit 1
+            fi
+          fi
+          if [ -z "$campaign_id" ]; then
+            echo "campaign_id is required."
+            exit 1
+          fi
+          echo "action=$action" >> "$GITHUB_OUTPUT"
+          echo "campaign_id=$campaign_id" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout authorized vNext head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify checked-out commit identity
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$EXPECTED_SHA"
+          echo "authorized head: $actual"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Azure login for dedicated burn-in managed identity
+        if: ${{ env.AETHER_VNEXT_AZURE_POSTGRESQL_CONNECTIONSTRING != '' }}
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AETHER_VNEXT_BURNIN_CLIENT_ID }}
+          tenant-id: ${{ secrets.AETHER_VNEXT_BURNIN_TENANT_ID }}
+          subscription-id: ${{ secrets.AETHER_VNEXT_BURNIN_SUBSCRIPTION_ID }}
+
+      - name: Validate isolated database configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from aether_vnext.db_runtime import VNextDatabaseConfig
+          cfg = VNextDatabaseConfig.from_environment()
+          print("vNext environment:", cfg.environment)
+          print("connection mode:", "database-url" if cfg.database_url else "managed-identity")
+          PY
+
+      - name: Refuse legacy production database target
+        env:
+          PYTHONPATH: .
+        run: python scripts/aether_vnext_check_db_isolation.py
+
+      - name: Apply vNext schema migrations
+        if: ${{ steps.request.outputs.action == 'initialize_and_preflight' || steps.request.outputs.action == 'initialize_calendar_probe' }}
+        env:
+          PYTHONPATH: .
+        run: python scripts/aether_vnext_migrate.py
+
+      - name: Bootstrap canonical policy snapshot
+        if: ${{ steps.request.outputs.action == 'initialize_and_preflight' || steps.request.outputs.action == 'initialize_calendar_probe' }}
+        env:
+          PYTHONPATH: .
+        run: python scripts/aether_vnext_bootstrap_policy.py
+
+      - name: Apply reviewed runtime Product Registry bindings
+        id: bindings
+        if: ${{ steps.request.outputs.action == 'initialize_and_preflight' || steps.request.outputs.action == 'initialize_calendar_probe' }}
+        env:
+          PYTHONPATH: .
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${AETHER_VNEXT_RUNTIME_BINDINGS_JSON:-}" ]; then
+            echo "AETHER_VNEXT_RUNTIME_BINDINGS_JSON is required for real burn-in initialization."
+            exit 2
+          fi
+          args=(
+            --manifest-json "$AETHER_VNEXT_RUNTIME_BINDINGS_JSON"
+            --require-complete
+            --require-seed-universe
+            --require-implemented-calendar
+            --require-implemented-shortability
+            --output aether-vnext-runtime-bindings.json
+          )
+          if [ "${{ steps.request.outputs.action }}" != "initialize_calendar_probe" ]; then
+            args+=(--require-implemented-source)
+          fi
+          python scripts/aether_vnext_registry_bindings.py "${args[@]}"
+
+      - name: Upload runtime Product Registry binding report
+        if: ${{ always() && steps.bindings.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-vnext-runtime-bindings-${{ github.run_id }}
+          path: backend/aether-vnext-runtime-bindings.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Probe authoritative TradingHours calendar snapshot
+        id: calendar_probe
+        if: ${{ steps.request.outputs.action == 'initialize_calendar_probe' }}
+        env:
+          PYTHONPATH: .
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${AETHER_VNEXT_TRADINGHOURS_API_TOKEN:-}" ]; then
+            echo "AETHER_VNEXT_TRADINGHOURS_API_TOKEN is required."
+            exit 2
+          fi
+          python scripts/aether_vnext_tradinghours_calendar_probe.py \
+            --output aether-vnext-tradinghours-calendar-probe.json
+
+      - name: Upload authoritative calendar probe
+        if: ${{ always() && steps.calendar_probe.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-vnext-tradinghours-calendar-probe-${{ github.run_id }}
+          path: backend/aether-vnext-tradinghours-calendar-probe.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Run read-only burn-in readiness audit
+        id: readiness
+        if: ${{ steps.request.outputs.action == 'readiness_report' }}
+        env:
+          PYTHONPATH: .
+          AETHER_BURNIN_CAMPAIGN_ID: ${{ steps.request.outputs.campaign_id }}
+        shell: bash
+        run: |
+          set +e
+          python scripts/aether_vnext_burnin_readiness.py \
+            --campaign-id "$AETHER_BURNIN_CAMPAIGN_ID" \
+            --output aether-vnext-burnin-readiness.json
+          status=$?
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload burn-in readiness audit
+        if: ${{ always() && steps.readiness.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-vnext-burnin-readiness-${{ github.run_id }}
+          path: backend/aether-vnext-burnin-readiness.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Propagate burn-in readiness result
+        if: ${{ steps.request.outputs.action == 'readiness_report' && steps.readiness.outputs.exit_code != '0' }}
+        shell: bash
+        run: |
+          echo "Burn-in readiness is not green; inspect the JSON artifact."
+          exit "${{ steps.readiness.outputs.exit_code }}"
+
+      - name: Run canonical read-only burn-in preflight
+        id: preflight
+        if: ${{ steps.request.outputs.action != 'initialize_calendar_probe' && steps.request.outputs.action != 'readiness_report' }}
+        env:
+          PYTHONPATH: .
+          AETHER_BURNIN_CAMPAIGN_ID: ${{ steps.request.outputs.campaign_id }}
+        shell: bash
+        run: |
+          set +e
+          python scripts/aether_vnext_burnin_preflight.py \
+            --campaign-id "$AETHER_BURNIN_CAMPAIGN_ID" \
+            --output aether-vnext-burnin-preflight.json
+          status=$?
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload canonical burn-in preflight
+        if: ${{ always() && steps.preflight.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-vnext-burnin-preflight-${{ github.run_id }}
+          path: backend/aether-vnext-burnin-preflight.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Propagate canonical preflight result
+        if: ${{ steps.request.outputs.action != 'initialize_calendar_probe' && steps.request.outputs.action != 'readiness_report' && steps.preflight.outputs.exit_code != '0' }}
+        shell: bash
+        run: |
+          echo "Canonical burn-in preflight is not startable; inspect the JSON artifact."
+          exit "${{ steps.preflight.outputs.exit_code }}"
+
+      - name: Start canonical forward-paper campaign
+        id: campaign_start
+        if: ${{ steps.request.outputs.action == 'start_campaign' }}
+        env:
+          PYTHONPATH: .
+          AETHER_BURNIN_CAMPAIGN_ID: ${{ steps.request.outputs.campaign_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/aether_vnext_burnin_start.py \
+            --campaign-id "$AETHER_BURNIN_CAMPAIGN_ID" \
+            --output aether-vnext-burnin-start.json
+
+      - name: Upload canonical campaign-start record
+        if: ${{ always() && steps.campaign_start.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-vnext-burnin-start-${{ github.run_id }}
+          path: backend/aether-vnext-burnin-start.json
+          if-no-files-found: error
+          retention-days: 30

@@ -1,0 +1,115 @@
+name: AETHER vNext Bind Burn-in Database
+
+on:
+  push:
+    branches:
+      - aether-vnext-swapout
+    paths:
+      - ".github/workflows/aether-vnext-bind-burnin-db.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  bind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment: aether-vnext-burnin
+    steps:
+      - name: Require protected burn-in database URL
+        shell: bash
+        env:
+          BURNIN_DATABASE_URL: ${{ secrets.AETHER_VNEXT_BURNIN_DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          test -n "$BURNIN_DATABASE_URL"
+          echo "Protected burn-in database URL is present."
+
+      - name: Login to Azure with dedicated vNext deployment identity
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_E2CE53939F2D406CBA8FB39DB4948C7B }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_0E83D5CA9CF543228DA7FA7818D7C998 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_B530D2ECBF5549A39B4758868409068A }}
+
+      - name: Bind isolated vNext database to prototype
+        shell: bash
+        env:
+          BURNIN_DATABASE_URL: ${{ secrets.AETHER_VNEXT_BURNIN_DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          app_name="aether-vnext-nonprod"
+          resource_group="aether-rg"
+
+          az webapp config appsettings delete \
+            --name "$app_name" \
+            --resource-group "$resource_group" \
+            --setting-names AETHER_VNEXT_AZURE_POSTGRESQL_CONNECTIONSTRING \
+            --output none || true
+
+          az webapp config appsettings set \
+            --name "$app_name" \
+            --resource-group "$resource_group" \
+            --settings \
+              AETHER_VNEXT_ENVIRONMENT=burnin \
+              AETHER_VNEXT_DATABASE_URL="$BURNIN_DATABASE_URL" \
+            --output none
+
+          names="$(az webapp config appsettings list \
+            --name "$app_name" \
+            --resource-group "$resource_group" \
+            --query "[?name=='AETHER_VNEXT_ENVIRONMENT' || name=='AETHER_VNEXT_DATABASE_URL'].name" \
+            -o tsv)"
+          grep -qx "AETHER_VNEXT_DATABASE_URL" <<<"$names"
+          grep -qx "AETHER_VNEXT_ENVIRONMENT" <<<"$names"
+          echo "Required vNext database setting names are present; values were not printed."
+
+      - name: Restart prototype app only
+        shell: bash
+        run: |
+          set -euo pipefail
+          az webapp restart \
+            --name aether-vnext-nonprod \
+            --resource-group aether-rg
+          echo "Prototype restart requested."
+
+      - name: Verify prototype health and vNext Floor
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://aether-vnext-nonprod-gpcrcme8czarbnfy.centralus-01.azurewebsites.net"
+
+          for attempt in $(seq 1 24); do
+            health="$(curl --silent --show-error --max-time 20 -o /tmp/health.json -w '%{http_code}' "$base/api/v1/health" || true)"
+            floor="$(curl --silent --show-error --max-time 20 -o /tmp/floor.json -w '%{http_code}' "$base/api/v1/vnext/floor" || true)"
+            echo "attempt $attempt health=$health floor=$floor"
+            if [ "$health" = "200" ] && [ "$floor" = "200" ]; then
+              break
+            fi
+            if [ "$attempt" -eq 24 ]; then
+              echo "Prototype did not reach healthy Floor state."
+              echo "health body:"
+              head -c 1200 /tmp/health.json 2>/dev/null || true
+              echo
+              echo "floor body:"
+              head -c 1600 /tmp/floor.json 2>/dev/null || true
+              echo
+              exit 1
+            fi
+            sleep 10
+          done
+
+          python - <<'PY'
+          import json
+          health=json.load(open("/tmp/health.json", encoding="utf-8"))
+          floor=json.load(open("/tmp/floor.json", encoding="utf-8"))
+          assert health.get("ok") is True, health
+          assert health.get("paper_mode") is True, health
+          assert health.get("live_blocked") is True, health
+          mode=floor.get("mode") or {}
+          assert mode.get("paper_only") is True, floor
+          assert mode.get("live_blocked") is True, floor
+          print("Prototype health and vNext Floor verified.")
+          PY

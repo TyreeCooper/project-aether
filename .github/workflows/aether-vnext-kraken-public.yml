@@ -1,0 +1,118 @@
+name: AETHER vNext Kraken Public Commissioning
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    types:
+      - labeled
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aether-vnext-kraken-public-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kraken-public:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        github.event.pull_request.head.ref == 'aether-vnext-swapout' &&
+        github.event.label.name == 'aether-vnext-kraken-probe-approved'
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout exact vNext revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify public commissioning revision
+        shell: bash
+        working-directory: .
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$EXPECTED_SHA"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$GITHUB_REF_NAME" = "main" ]; then
+            echo "Kraken public commissioning refuses manual execution from main."
+            exit 1
+          fi
+          echo "Kraken public commissioning head: $actual"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Probe Kraken BTC/ETH public BBO and matched trades
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          python scripts/aether_vnext_kraken_public_probe.py \
+            --assets btc,eth \
+            --ticker-timeout-seconds 15 \
+            --trade-timeout-seconds 30 \
+            --output aether-vnext-kraken-public-commissioning.json
+
+      - name: Measure Kraken BTC/ETH freshness evidence
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          python scripts/aether_vnext_kraken_freshness_probe.py \
+            --assets btc,eth \
+            --rounds 6 \
+            --timeout-seconds 10 \
+            --pause-seconds 0.5 \
+            --output aether-vnext-kraken-freshness.json
+
+      - name: Attach exact revision
+        shell: bash
+        env:
+          SOURCE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          for name in (
+              "aether-vnext-kraken-public-commissioning.json",
+              "aether-vnext-kraken-freshness.json",
+          ):
+              path = Path(name)
+              payload = json.loads(path.read_text(encoding="utf-8"))
+              payload["source_revision"] = os.environ["SOURCE_REVISION"]
+              path.write_text(
+                  json.dumps(payload, indent=2, sort_keys=True) + "\n",
+                  encoding="utf-8",
+              )
+          PY
+
+      - name: Upload Kraken public commissioning evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-vnext-kraken-public-${{ github.run_id }}
+          path: |
+            backend/aether-vnext-kraken-public-commissioning.json
+            backend/aether-vnext-kraken-freshness.json
+          if-no-files-found: error
+          retention-days: 30

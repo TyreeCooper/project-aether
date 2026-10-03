@@ -1,0 +1,161 @@
+name: AETHER vNext Runtime Recovery Probe
+
+on:
+  push:
+    branches:
+      - aether-vnext-swapout
+    paths:
+      - ".github/workflows/aether-vnext-runtime-recovery-probe.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - name: Prove deployed autonomous PAPER continuity
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://aether-vnext-nonprod-gpcrcme8czarbnfy.centralus-01.azurewebsites.net"
+
+          snapshot () {
+            prefix="$1"
+            for spec in               "health:/api/v1/health"               "ingress:/api/v1/vnext/ingress-runtime"               "strategy:/api/v1/vnext/strategy-runtime"               "floor:/api/v1/vnext/floor"
+            do
+              name="${spec%%:*}"
+              path="${spec#*:}"
+              out="/tmp/${prefix}_${name}.json"
+              code="$(curl --silent --show-error --max-time 30                 -o "$out" -w '%{http_code}' "$base$path" || true)"
+              echo "=== ${prefix} ${name} HTTP ${code} ==="
+              test "$code" = "200"
+              test -s "$out"
+            done
+          }
+
+          snapshot first
+          sleep 90
+          snapshot second
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          def load(prefix, name):
+              return json.loads(Path(f"/tmp/{prefix}_{name}.json").read_text(encoding="utf-8"))
+
+          first = {name: load("first", name) for name in ("health", "ingress", "strategy", "floor")}
+          second = {name: load("second", name) for name in ("health", "ingress", "strategy", "floor")}
+
+          for snap in (first, second):
+              health = snap["health"]
+              assert health.get("ok") is True, health
+              assert health.get("paper_mode") is True, health
+              assert health.get("live_blocked") is True, health
+
+              floor = snap["floor"]
+              mode = floor.get("mode") or {}
+              paper = floor.get("paper_test") or {}
+              assert mode.get("paper_only") is True, mode
+              assert mode.get("live_blocked") is True, mode
+              assert paper.get("epoch_id") == "aether-prototype-new-system-test-001", paper
+              assert paper.get("seed_bank_usd") == 10000.0, paper
+
+              ingress = snap["ingress"]
+              assert ingress.get("enabled") is True, ingress
+              assert ingress.get("running") is True, ingress
+              assert ingress.get("last_error") is None, ingress
+              assert ingress.get("paper_only") is True, ingress
+              assert ingress.get("live_blocked") is True, ingress
+
+              strategy = snap["strategy"]
+              assert strategy.get("enabled") is True, strategy
+              assert strategy.get("running") is True, strategy
+              assert strategy.get("last_error") is None, strategy
+              assert strategy.get("paper_only") is True, strategy
+              assert strategy.get("live_blocked") is True, strategy
+
+          first_revision = (first["floor"].get("build") or {}).get("source_revision")
+          second_revision = (second["floor"].get("build") or {}).get("source_revision")
+          assert isinstance(first_revision, str) and first_revision.strip(), first["floor"].get("build")
+          assert second_revision == first_revision, (first_revision, second_revision)
+
+          first_ingress_cycles = int(first["ingress"].get("cycle_count") or 0)
+          second_ingress_cycles = int(second["ingress"].get("cycle_count") or 0)
+          assert second_ingress_cycles > first_ingress_cycles, (
+              first_ingress_cycles,
+              second_ingress_cycles,
+          )
+
+          first_strategy_cycles = int(first["strategy"].get("cycle_count") or 0)
+          second_strategy_cycles = int(second["strategy"].get("cycle_count") or 0)
+          assert second_strategy_cycles > first_strategy_cycles, (
+              first_strategy_cycles,
+              second_strategy_cycles,
+          )
+
+          first_result = first["strategy"].get("last_result") or {}
+          second_result = second["strategy"].get("last_result") or {}
+          for result in (first_result, second_result):
+              assert result.get("paper_only") is True, result
+              assert result.get("live_blocked") is True, result
+              assert result.get("phase18_evidence") is False, result
+              assert result.get("paper_epoch_id") == "aether-prototype-new-system-test-001", result
+
+          first_observations = int(first_result.get("forward_paper_observation_count") or 0)
+          second_observations = int(second_result.get("forward_paper_observation_count") or 0)
+          assert second_observations >= first_observations, (
+              first_observations,
+              second_observations,
+          )
+
+          no_setup = [
+              row
+              for row in (second_result.get("assets") or {}).values()
+              if isinstance(row, dict) and row.get("stage") == "NO_SETUP"
+          ]
+          assert all(
+              row.get("forward_paper_observation_recorded") is True
+              for row in no_setup
+          ), no_setup
+
+          summary = {
+              "source_revision": second_revision,
+              "paper_epoch_id": second_result.get("paper_epoch_id"),
+              "ingress_cycles_before": first_ingress_cycles,
+              "ingress_cycles_after": second_ingress_cycles,
+              "strategy_cycles_before": first_strategy_cycles,
+              "strategy_cycles_after": second_strategy_cycles,
+              "forward_paper_observations_before": first_observations,
+              "forward_paper_observations_after": second_observations,
+              "paper_only": True,
+              "live_blocked": True,
+              "phase18_evidence": False,
+          }
+          Path("/tmp/continuity.json").write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(summary, indent=2, sort_keys=True))
+          PY
+
+      - name: Upload continuity proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-vnext-runtime-continuity-${{ github.run_id }}
+          path: |
+            /tmp/first_health.json
+            /tmp/first_ingress.json
+            /tmp/first_strategy.json
+            /tmp/first_floor.json
+            /tmp/second_health.json
+            /tmp/second_ingress.json
+            /tmp/second_strategy.json
+            /tmp/second_floor.json
+            /tmp/continuity.json
+          if-no-files-found: error
+          retention-days: 90

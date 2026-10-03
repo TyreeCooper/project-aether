@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 import hmac
 import logging
@@ -26,8 +27,46 @@ from app.paper_exec import (
     install as install_harsh_paper,
 )
 from app.universe import public_catalog
+from app.vnext_shadow import mount_configured_vnext_shadow_floor
+from aether_vnext.build_info import load_build_info
+from app.vnext_runtime_mode import (
+    configured_vnext_runtime_only,
+    validate_vnext_runtime_only_environment,
+)
+from app.vnext_operator import mount_configured_vnext_operator
+from app.vnext_maintenance import (
+    configured_vnext_maintenance_status,
+    mount_vnext_maintenance,
+    start_configured_vnext_maintenance,
+    stop_configured_vnext_maintenance,
+)
+from app.vnext_ingress import (
+    configured_vnext_ingress_status,
+    mount_vnext_ingress_status,
+    start_configured_vnext_ingress,
+    stop_configured_vnext_ingress,
+)
+from app.vnext_strategy import (
+    configured_vnext_strategy_status,
+    mount_vnext_strategy_status,
+    start_configured_vnext_strategy,
+    stop_configured_vnext_strategy,
+)
+from app.vnext_discovery import (
+    current_discovery_status,
+    mount_vnext_discovery_status,
+    start_configured_vnext_discovery,
+    stop_configured_vnext_discovery,
+)
+from app.vnext_tape import (
+    configured_vnext_tape_status,
+    mount_configured_vnext_tape,
+    start_configured_vnext_tape,
+    stop_configured_vnext_tape,
+)
 
 STATIC = Path(__file__).parent / "static"
+VNEXT_UI = Path(__file__).parent / "vnext_ui"
 ICON_LINKS = (
     '<link rel="icon" href="/favicon.svg?v=3" type="image/svg+xml"/>'
     '<link rel="icon" href="/static/aether-mark.svg?v=3" type="image/svg+xml"/>'
@@ -51,7 +90,18 @@ async def lifespan(_: FastAPI):
     await engine.initialize_persistence()
     await desk.initialize_history_persistence()
     install_harsh_paper(engine)
-    engine.start_loop()
+    validate_vnext_runtime_only_environment()
+    if configured_vnext_runtime_only():
+        logger.info(
+            "event=legacy_engine_loop state=disabled reason=vnext_runtime_only"
+        )
+    else:
+        engine.start_loop()
+    await start_configured_vnext_ingress()
+    await start_configured_vnext_discovery()
+    await start_configured_vnext_tape()
+    await start_configured_vnext_strategy()
+    await start_configured_vnext_maintenance()
     logger.info(
         "event=app_start phase=ready version=2.1.0 storage_configured=%s storage_initialized=%s live_ready=%s",
         db_store.status().get("configured"),
@@ -62,6 +112,11 @@ async def lifespan(_: FastAPI):
         yield
     finally:
         logger.info("event=app_shutdown phase=begin")
+        await stop_configured_vnext_maintenance()
+        await stop_configured_vnext_strategy()
+        await stop_configured_vnext_tape()
+        await stop_configured_vnext_discovery()
+        await stop_configured_vnext_ingress()
         await engine.shutdown()
         await db_store.close()
         logger.info("event=app_shutdown phase=complete")
@@ -75,6 +130,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Phase 16: GET-only shadow mount; no database is opened until the route is read.
+mount_configured_vnext_shadow_floor(app)
+mount_vnext_ingress_status(app)
+mount_vnext_strategy_status(app)
+mount_vnext_discovery_status(app)
+mount_configured_vnext_operator(app)
+mount_vnext_maintenance(app)
+mount_configured_vnext_tape(app)
 
 
 @app.middleware("http")
@@ -197,12 +261,142 @@ async def favicon_ico():
     return FileResponse(STATIC / "aether-mark.svg", media_type="image/svg+xml")
 
 
+@app.get("/api/v1/vnext/build")
+async def vnext_build_identity():
+    """Return immutable package identity without opening the vNext database."""
+    return {
+        "ok": True,
+        "paper_only": True,
+        "live_blocked": True,
+        "build": load_build_info(),
+    }
+
+
+def _parse_runtime_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _supervisor_operating_state(
+    status: dict[str, object],
+    *,
+    now: datetime,
+) -> str:
+    if status.get("enabled") is False:
+        return "OFF"
+    running = status.get("running") is True
+    cycles = int(status.get("cycle_count") or 0)
+    if not running:
+        return "BLOCKED" if cycles > 0 else "STARTING"
+
+    interval = float(status.get("interval_seconds") or 15.0)
+    stale_after = max(90.0, interval * 4.0)
+    started = _parse_runtime_timestamp(status.get("last_cycle_started_at_utc"))
+    finished = _parse_runtime_timestamp(status.get("last_cycle_finished_at_utc"))
+    progress = status.get("progress")
+    progress = progress if isinstance(progress, dict) else {}
+    progress_heartbeat = _parse_runtime_timestamp(progress.get("last_progress_at_utc"))
+    progress_state = str(progress.get("cycle_state") or "").strip().lower()
+    cycle_busy = progress_state == "running" or (
+        started is not None and (finished is None or started > finished)
+    )
+
+    if cycle_busy:
+        heartbeat = progress_heartbeat or started
+        provider_deadline = progress.get("provider_deadline_seconds")
+        try:
+            busy_stale_after = max(90.0, float(provider_deadline) * 1.5)
+        except (TypeError, ValueError):
+            busy_stale_after = 90.0
+        if heartbeat is not None and (now - heartbeat).total_seconds() > busy_stale_after:
+            return "STALLED"
+        # last_error belongs to the previously completed attempt. A new cycle
+        # with a fresh progress heartbeat is active recovery, not a current FAULT.
+        return "BUSY"
+    if status.get("last_error"):
+        return "FAULT"
+    if cycles == 0:
+        return "STARTING"
+    heartbeat = finished or progress_heartbeat or started
+    if heartbeat is not None and (now - heartbeat).total_seconds() > stale_after:
+        return "STALLED"
+    return "ACTIVE"
+
+
 @app.get("/api/v1/health")
 async def health():
+    if configured_vnext_runtime_only():
+        now = datetime.now(timezone.utc)
+        supervisors = {
+            "ingress": configured_vnext_ingress_status(),
+            "discovery": current_discovery_status(),
+            "strategy": configured_vnext_strategy_status(),
+            "tape": configured_vnext_tape_status(),
+            "maintenance": configured_vnext_maintenance_status(),
+        }
+        operating = {
+            name: _supervisor_operating_state(status, now=now)
+            for name, status in supervisors.items()
+        }
+        primary = tuple(
+            operating[name]
+            for name in ("ingress", "discovery", "tape", "strategy")
+        )
+        if any(state == "FAULT" for state in primary):
+            pipeline_state = "DEGRADED"
+        elif any(state == "STALLED" for state in primary):
+            pipeline_state = "STALLED"
+        elif any(state in {"BLOCKED", "OFF"} for state in primary):
+            pipeline_state = "BLOCKED"
+        elif any(state in {"STARTING", "BUSY"} for state in primary):
+            pipeline_state = "BUSY"
+        elif all(state == "ACTIVE" for state in primary):
+            pipeline_state = "ACTIVE"
+        else:
+            pipeline_state = "NOT_OBSERVED"
+
+        compact_supervisors = {
+            name: {
+                "enabled": status.get("enabled"),
+                "running": status.get("running"),
+                "cycle_count": status.get("cycle_count"),
+                "interval_seconds": status.get("interval_seconds"),
+                "last_cycle_started_at_utc": status.get("last_cycle_started_at_utc"),
+                "last_cycle_finished_at_utc": status.get("last_cycle_finished_at_utc"),
+                "last_error": status.get("last_error"),
+                "progress": (
+                    status.get("progress")
+                    if isinstance(status.get("progress"), dict)
+                    else None
+                ),
+            }
+            for name, status in supervisors.items()
+        }
+
+        return {
+            "ok": True,
+            "env": "paper",
+            "runtime": "vnext",
+            "paper_mode": True,
+            "live_blocked": True,
+            "build": load_build_info(),
+            "pipeline_state": pipeline_state,
+            "supervisor_state": operating,
+            "supervisors": compact_supervisors,
+        }
+
     snap = engine.snapshot()
     return {
         "ok": True,
         "env": "paper",
+        "runtime": "legacy",
         "venue": snap.get("mark_source"),
         "watch": "binance.us",
         "symbols": [a["pair"] for a in public_catalog()],
@@ -647,5 +841,8 @@ async def flatten(_: None = Depends(require_operator)):
 async def unlock(_: None = Depends(require_operator)):
     return await engine.unlock()
 
+
+if VNEXT_UI.exists():
+    app.mount("/vnext", StaticFiles(directory=VNEXT_UI, html=True), name="vnext-ui")
 
 app.mount("/static", StaticFiles(directory=STATIC), name="static")

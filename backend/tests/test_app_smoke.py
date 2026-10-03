@@ -1,7 +1,15 @@
+import pytest
 from fastapi.testclient import TestClient
 
+from app.engine import engine
 from app.main import app
 from app.universe import ASSETS
+
+
+@pytest.fixture(autouse=True)
+def isolate_smoke_contracts_from_external_market_loop(monkeypatch):
+    """Smoke tests validate HTTP contracts, not live public-market networking."""
+    monkeypatch.setattr(engine, "start_loop", lambda: None)
 
 
 READ_ENDPOINTS = [

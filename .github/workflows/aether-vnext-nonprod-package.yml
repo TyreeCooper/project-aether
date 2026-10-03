@@ -1,0 +1,135 @@
+name: AETHER vNext Nonprod Package
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "frontend/**"
+      - "backend/**"
+      - ".github/workflows/aether-vnext-nonprod-package.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aether-vnext-nonprod-package-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.head.ref == 'aether-vnext-swapout'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout selected revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify non-default branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF_NAME" = "main" ] && [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Nonprod packaging refuses manual execution from main."
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build Unified Firm Floor static export
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_API_BASE: ""
+          NEXT_PUBLIC_AETHER_FLOOR_PATH: "/api/v1/vnext/floor"
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+          test -f out/index.html
+          test -d out/_next
+
+      - name: Embed exact vNext build identity
+        shell: bash
+        env:
+          SOURCE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python - <<'PY'
+          from datetime import datetime, timezone
+          import json
+          import os
+          from pathlib import Path
+
+          revision = os.environ["SOURCE_REVISION"].strip()
+          if len(revision) != 40:
+              raise SystemExit("SOURCE_REVISION must be a full commit SHA")
+          payload = {
+              "source_revision": revision,
+              "package_built_at_utc": datetime.now(timezone.utc).isoformat(),
+          }
+          Path("backend/aether_vnext/build_manifest.json").write_text(
+              json.dumps(payload, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Embed vNext UI into backend package
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf backend/app/vnext_ui
+          mkdir -p backend/app/vnext_ui
+          cp -R frontend/out/. backend/app/vnext_ui/
+          test -f backend/app/vnext_ui/index.html
+          test -d backend/app/vnext_ui/_next
+          grep -q '/vnext/_next/' backend/app/vnext_ui/index.html
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate backend package
+        working-directory: backend
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          test -f startup.sh
+          test -f app/main.py
+          test -f app/vnext_ui/index.html
+          python -m pytest -q \
+            tests_vnext/test_phase15_frontend_contract.py \
+            tests_vnext/test_phase16_shadow_mount.py \
+            tests_vnext/test_phase17_floor_test_status.py
+
+      - name: Create Azure-ready package
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import zipfile
+
+          root = Path("backend")
+          target = Path("aether-vnext-nonprod.zip")
+          with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+              for path in root.rglob("*"):
+                  if path.is_file() and "__pycache__" not in path.parts:
+                      zf.write(path, path.relative_to(root))
+          PY
+          test -s aether-vnext-nonprod.zip
+
+      - name: Upload non-production package
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-vnext-nonprod-${{ github.sha }}
+          path: aether-vnext-nonprod.zip
+          if-no-files-found: error
+          retention-days: 14

@@ -1,0 +1,128 @@
+name: AETHER vNext Paper Reset Execute
+
+on:
+  push:
+    branches:
+      - aether-vnext-swapout
+    paths:
+      - ".github/workflows/aether-vnext-paper-reset-execute.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reset:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: aether-vnext-burnin
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      AETHER_VNEXT_ENVIRONMENT: burnin
+      AETHER_VNEXT_DATABASE_URL: ${{ secrets.AETHER_VNEXT_BURNIN_DATABASE_URL }}
+      AETHER_RESET_EPOCH_ID: aether-prototype-new-system-test-001
+
+    steps:
+      - name: Checkout exact vNext head
+        uses: actions/checkout@v4
+
+      - name: Verify branch and safety boundary
+        shell: bash
+        working-directory: .
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "aether-vnext-swapout"
+          echo "Paper reset head: $(git rev-parse HEAD)"
+          echo "Environment: $AETHER_VNEXT_ENVIRONMENT"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Execute guarded fresh paper-test reset
+        env:
+          PYTHONPATH: .
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/aether_vnext_new_test_reset.py             --epoch-id "$AETHER_RESET_EPOCH_ID"             --reason "whole new system / whole new tests"             --execute             --confirm RESET-VNEXT-PAPER-TEST             --output aether-vnext-paper-reset-executed.json
+
+      - name: Verify canonical reset result
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          body = json.loads(Path("aether-vnext-paper-reset-executed.json").read_text())
+          assert body["mode"] == "executed", body
+          assert body["mutation_performed"] is True, body
+          assert body["paper_only"] is True, body
+          assert body["live_blocked"] is True, body
+          assert body["resettable"] is True, body
+          assert body["blockers"] == [], body
+          assert body["seed_bank_total_usd"] == 10000.0, body
+          assert body["epoch"]["epoch_id"] == os.environ["AETHER_RESET_EPOCH_ID"], body
+
+          expected = {
+              "kraken_paper": 4000.0,
+              "tastyfx_paper": 2000.0,
+              "ninja_paper": 2000.0,
+              "ibkr_paper": 2000.0,
+          }
+          rows = {row["broker_account_id"]: row for row in body["current_ledgers"]}
+          assert set(rows) == set(expected), rows
+          for broker, cash in expected.items():
+              row = rows[broker]
+              assert row["cash_available_usd"] == cash, row
+              assert row["cash_reserved_usd"] == 0.0, row
+              assert row["margin_used_usd"] == 0.0, row
+              assert row["realized_pnl_usd"] == 0.0, row
+              assert row["unrealized_pnl_usd"] == 0.0, row
+              assert row["fees_accrued_usd"] == 0.0, row
+              assert row["carry_accrued_usd"] == 0.0, row
+              assert row["reconciliation_state"] == "clean", row
+
+          print(json.dumps({
+              "epoch_id": body["epoch"]["epoch_id"],
+              "seed_bank_total_usd": body["seed_bank_total_usd"],
+              "paper_only": body["paper_only"],
+              "live_blocked": body["live_blocked"],
+              "ledger_accounts": sorted(rows),
+          }, indent=2, sort_keys=True))
+          PY
+
+      - name: Verify deployed Floor sees fresh epoch
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://aether-vnext-nonprod-gpcrcme8czarbnfy.centralus-01.azurewebsites.net"
+          curl --fail --silent --show-error --max-time 30             "$base/api/v1/vnext/floor" > /tmp/floor.json
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          body = json.loads(Path("/tmp/floor.json").read_text())
+          paper = body["paper_test"]
+          assert paper["epoch_id"] == os.environ["AETHER_RESET_EPOCH_ID"], paper
+          assert paper["seed_bank_usd"] == 10000.0, paper
+          assert paper["blotter_trade_count"] == 0, paper
+          print(json.dumps(paper, indent=2, sort_keys=True))
+          PY
+
+      - name: Upload immutable reset record
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-vnext-paper-reset-executed-${{ github.run_id }}
+          path: backend/aether-vnext-paper-reset-executed.json
+          if-no-files-found: error
+          retention-days: 90

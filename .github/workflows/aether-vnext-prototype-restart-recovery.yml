@@ -1,0 +1,274 @@
+name: AETHER vNext Prototype Restart Recovery
+
+on:
+  push:
+    branches:
+      - aether-vnext-swapout
+    paths:
+      - ".github/workflows/aether-vnext-prototype-restart-recovery.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: aether-vnext-prototype-restart-recovery
+  cancel-in-progress: false
+
+jobs:
+  restart-recovery:
+    if: github.ref_name == 'aether-vnext-swapout'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment: aether-vnext-burnin
+
+    steps:
+      - name: Checkout trace revision
+        uses: actions/checkout@v4
+
+      - name: Verify authorized branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "aether-vnext-swapout"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+      - name: Login to Azure with dedicated vNext identity
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_E2CE53939F2D406CBA8FB39DB4948C7B }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_0E83D5CA9CF543228DA7FA7818D7C998 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_B530D2ECBF5549A39B4758868409068A }}
+
+      - name: Resolve protected prototype target
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="aether-vnext-nonprod"
+          rg="aether-rg"
+          test "$app" != "aether-prod-api"
+          host="$(az webapp show             --name "$app"             --resource-group "$rg"             --query defaultHostName -o tsv)"
+          case "$host" in
+            aether-vnext-nonprod-*.azurewebsites.net|aether-vnext-nonprod.azurewebsites.net) ;;
+            *) echo "Forbidden/unexpected target: $host"; exit 2 ;;
+          esac
+          echo "app_name=$app" >> "$GITHUB_ENV"
+          echo "resource_group=$rg" >> "$GITHUB_ENV"
+          echo "prototype_host=$host" >> "$GITHUB_ENV"
+
+      - name: Capture pre-restart PAPER state
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://$prototype_host"
+
+          capture () {
+            name="$1"
+            path="$2"
+            out="/tmp/pre_$name.json"
+            ready=0
+            for attempt in $(seq 1 6); do
+              code="$(curl --silent --show-error --max-time 30                 -o "$out" -w '%{http_code}' "$base$path" || true)"
+              if [ "$code" = "200" ] && [ -s "$out" ]; then
+                ready=1
+                break
+              fi
+              sleep 10
+            done
+            test "$ready" = "1"
+          }
+
+          capture health "/api/v1/health"
+          capture ingress "/api/v1/vnext/ingress-runtime"
+          capture strategy "/api/v1/vnext/strategy-runtime"
+          capture floor "/api/v1/vnext/floor"
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          health=json.loads(Path("/tmp/pre_health.json").read_text())
+          ingress=json.loads(Path("/tmp/pre_ingress.json").read_text())
+          strategy=json.loads(Path("/tmp/pre_strategy.json").read_text())
+          floor=json.loads(Path("/tmp/pre_floor.json").read_text())
+          mode=floor.get("mode") or {}
+          paper=floor.get("paper_test") or {}
+          build=floor.get("build") or {}
+          result=strategy.get("last_result") or {}
+
+          assert health.get("ok") is True, health
+          assert health.get("paper_mode") is True, health
+          assert health.get("live_blocked") is True, health
+          assert ingress.get("enabled") is True and ingress.get("running") is True, ingress
+          assert ingress.get("last_error") is None, ingress
+          assert strategy.get("enabled") is True and strategy.get("running") is True, strategy
+          assert strategy.get("last_error") is None, strategy
+          assert mode.get("paper_only") is True and mode.get("live_blocked") is True, mode
+          assert result.get("phase18_evidence") is False, result
+          assert paper.get("epoch_id") == "aether-prototype-new-system-test-001", paper
+          assert paper.get("seed_bank_usd") == 10000.0, paper
+          revision=str(build.get("source_revision") or "").strip()
+          started=str(floor.get("runtime_started_at_utc") or "").strip()
+          assert revision, build
+          assert started, floor
+
+          baseline={
+              "source_revision": revision,
+              "runtime_started_at_utc": started,
+              "paper_epoch_id": paper.get("epoch_id"),
+              "seed_bank_usd": paper.get("seed_bank_usd"),
+              "blotter_trade_count": int(paper.get("blotter_trade_count") or 0),
+              "forward_paper_observation_count": int(
+                  result.get("forward_paper_observation_count") or 0
+              ),
+          }
+          Path("/tmp/pre_baseline.json").write_text(
+              json.dumps(baseline, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(baseline, indent=2, sort_keys=True))
+          PY
+
+      - name: Restart prototype only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$app_name" = "aether-vnext-nonprod"
+          test "$app_name" != "aether-prod-api"
+          az webapp restart             --name "$app_name"             --resource-group "$resource_group"
+
+      - name: Prove post-restart recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://$prototype_host"
+          expected_revision="$(python -c 'import json; print(json.load(open("/tmp/pre_baseline.json"))["source_revision"])')"
+          expected_started="$(python -c 'import json; print(json.load(open("/tmp/pre_baseline.json"))["runtime_started_at_utc"])')"
+
+          floor_ready=0
+          for attempt in $(seq 1 48); do
+            code="$(curl --silent --show-error --max-time 45               -o /tmp/post_floor.json -w '%{http_code}'               "$base/api/v1/vnext/floor" || true)"
+            if [ "$code" = "200" ] && EXPECTED_REVISION="$expected_revision" EXPECTED_STARTED="$expected_started" python - <<'PY'
+          import json, os, sys
+          body=json.load(open("/tmp/post_floor.json"))
+          mode=body.get("mode") or {}
+          build=body.get("build") or {}
+          paper=body.get("paper_test") or {}
+          ok=(
+              mode.get("paper_only") is True
+              and mode.get("live_blocked") is True
+              and build.get("source_revision") == os.environ["EXPECTED_REVISION"]
+              and str(body.get("runtime_started_at_utc") or "") != os.environ["EXPECTED_STARTED"]
+              and paper.get("epoch_id") == "aether-prototype-new-system-test-001"
+              and paper.get("seed_bank_usd") == 10000.0
+          )
+          sys.exit(0 if ok else 1)
+          PY
+            then
+              floor_ready=1
+              break
+            fi
+            echo "Waiting for restarted prototype worker (attempt $attempt/48)"
+            sleep 10
+          done
+          test "$floor_ready" = "1"
+
+          runtime_ready=0
+          for attempt in $(seq 1 30); do
+            ingress_code="$(curl --silent --show-error --max-time 45               -o /tmp/post_ingress.json -w '%{http_code}'               "$base/api/v1/vnext/ingress-runtime" || true)"
+            strategy_code="$(curl --silent --show-error --max-time 60               -o /tmp/post_strategy.json -w '%{http_code}'               "$base/api/v1/vnext/strategy-runtime" || true)"
+            if [ "$ingress_code" = "200" ] && [ "$strategy_code" = "200" ] && python - <<'PY'
+          import json, sys
+          ingress=json.load(open("/tmp/post_ingress.json"))
+          strategy=json.load(open("/tmp/post_strategy.json"))
+          result=strategy.get("last_result") or {}
+          ok=(
+              ingress.get("enabled") is True
+              and ingress.get("running") is True
+              and int(ingress.get("cycle_count") or 0) >= 1
+              and ingress.get("last_error") is None
+              and ingress.get("paper_only") is True
+              and ingress.get("live_blocked") is True
+              and strategy.get("enabled") is True
+              and strategy.get("running") is True
+              and int(strategy.get("cycle_count") or 0) >= 1
+              and strategy.get("last_error") is None
+              and strategy.get("paper_only") is True
+              and strategy.get("live_blocked") is True
+              and result.get("paper_only") is True
+              and result.get("live_blocked") is True
+              and result.get("phase18_evidence") is False
+              and result.get("paper_epoch_id") == "aether-prototype-new-system-test-001"
+          )
+          sys.exit(0 if ok else 1)
+          PY
+            then
+              runtime_ready=1
+              break
+            fi
+            sleep 10
+          done
+          test "$runtime_ready" = "1"
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          pre=json.loads(Path("/tmp/pre_baseline.json").read_text())
+          floor=json.loads(Path("/tmp/post_floor.json").read_text())
+          strategy=json.loads(Path("/tmp/post_strategy.json").read_text())
+          paper=floor.get("paper_test") or {}
+          result=strategy.get("last_result") or {}
+
+          post_blotter=int(paper.get("blotter_trade_count") or 0)
+          post_observations=int(result.get("forward_paper_observation_count") or 0)
+
+          assert (floor.get("build") or {}).get("source_revision") == pre["source_revision"], floor
+          assert floor.get("runtime_started_at_utc") != pre["runtime_started_at_utc"], floor
+          assert paper.get("epoch_id") == pre["paper_epoch_id"], paper
+          assert paper.get("seed_bank_usd") == pre["seed_bank_usd"], paper
+          assert post_blotter >= int(pre["blotter_trade_count"]), (pre, paper)
+          assert post_observations >= int(pre["forward_paper_observation_count"]), (
+              pre,
+              post_observations,
+          )
+
+          proof={
+              "source_revision": pre["source_revision"],
+              "runtime_started_before": pre["runtime_started_at_utc"],
+              "runtime_started_after": floor.get("runtime_started_at_utc"),
+              "paper_epoch_id": paper.get("epoch_id"),
+              "seed_bank_usd": paper.get("seed_bank_usd"),
+              "blotter_before": pre["blotter_trade_count"],
+              "blotter_after": post_blotter,
+              "forward_paper_observations_before": pre["forward_paper_observation_count"],
+              "forward_paper_observations_after": post_observations,
+              "paper_only": True,
+              "live_blocked": True,
+              "phase18_evidence": False,
+              "scope": "prototype_service_restart_recovery",
+          }
+          Path("/tmp/restart_recovery_proof.json").write_text(
+              json.dumps(proof, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(proof, indent=2, sort_keys=True))
+          PY
+
+      - name: Upload restart recovery proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-vnext-prototype-restart-recovery-${{ github.run_id }}
+          path: |
+            /tmp/pre_health.json
+            /tmp/pre_ingress.json
+            /tmp/pre_strategy.json
+            /tmp/pre_floor.json
+            /tmp/pre_baseline.json
+            /tmp/post_ingress.json
+            /tmp/post_strategy.json
+            /tmp/post_floor.json
+            /tmp/restart_recovery_proof.json
+          if-no-files-found: error
+          retention-days: 90

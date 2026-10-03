@@ -1,0 +1,241 @@
+name: AETHER vNext Nonprod Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_head_sha:
+        description: "Exact aether-vnext-swapout commit SHA approved for deployment"
+        required: true
+        type: string
+  pull_request:
+    branches:
+      - main
+    types:
+      - labeled
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: aether-vnext-nonprod-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      (
+        github.event_name == 'workflow_dispatch' &&
+        github.ref_name == 'aether-vnext-swapout'
+      ) ||
+      (
+        github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        github.event.pull_request.head.ref == 'aether-vnext-swapout' &&
+        github.event.label.name == 'aether-vnext-nonprod-deploy-approved'
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout authorized vNext revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify exact branch and revision
+        id: revision
+        shell: bash
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || inputs.expected_head_sha }}
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$EXPECTED_HEAD_SHA"
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            test "$GITHUB_HEAD_REF" = "aether-vnext-swapout"
+          else
+            test "$GITHUB_REF_NAME" = "aether-vnext-swapout"
+            test "$actual" = "$GITHUB_SHA"
+          fi
+          echo "source_revision=$actual" >> "$GITHUB_OUTPUT"
+          echo "authorized vNext revision: $actual"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build Unified Firm Floor static export
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_API_BASE: ""
+          NEXT_PUBLIC_AETHER_FLOOR_PATH: "/api/v1/vnext/floor"
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+          test -f out/index.html
+          test -d out/_next
+
+      - name: Embed exact vNext build identity
+        shell: bash
+        env:
+          SOURCE_REVISION: ${{ steps.revision.outputs.source_revision }}
+        run: |
+          python - <<'PY'
+          from datetime import datetime, timezone
+          import json
+          import os
+          from pathlib import Path
+
+          revision = os.environ["SOURCE_REVISION"].strip()
+          if len(revision) != 40:
+              raise SystemExit("SOURCE_REVISION must be a full commit SHA")
+          payload = {
+              "source_revision": revision,
+              "package_built_at_utc": datetime.now(timezone.utc).isoformat(),
+          }
+          Path("backend/aether_vnext/build_manifest.json").write_text(
+              json.dumps(payload, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Embed vNext UI into backend package
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf backend/app/vnext_ui
+          mkdir -p backend/app/vnext_ui
+          cp -R frontend/out/. backend/app/vnext_ui/
+          test -f backend/app/vnext_ui/index.html
+          test -d backend/app/vnext_ui/_next
+          grep -q '/vnext/_next/' backend/app/vnext_ui/index.html
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate package before Azure login
+        working-directory: backend
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python -m pytest -q \
+            tests_vnext/test_phase15_frontend_contract.py \
+            tests_vnext/test_phase16_shadow_mount.py \
+            tests_vnext/test_phase17_floor_test_status.py \
+            tests_vnext/test_phase17_paper_test_reset.py
+          test -f startup.sh
+          test -f app/main.py
+          test -f app/vnext_ui/index.html
+
+      - name: Login to Azure with dedicated vNext identity
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_E2CE53939F2D406CBA8FB39DB4948C7B }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_0E83D5CA9CF543228DA7FA7818D7C998 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_B530D2ECBF5549A39B4758868409068A }}
+
+      - name: Resolve and verify dedicated nonproduction target
+        id: azure_target
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_name="aether-vnext-nonprod"
+          resource_group="aether-rg"
+          host="$(az webapp show \
+            --name "$app_name" \
+            --resource-group "$resource_group" \
+            --query defaultHostName \
+            -o tsv)"
+          if [ -z "$host" ]; then
+            echo "Dedicated vNext nonproduction target is not visible."
+            exit 2
+          fi
+          if [ "$app_name" = "aether-prod-api" ] || [ "$host" = "aether-prod-api.azurewebsites.net" ]; then
+            echo "Production target is forbidden."
+            exit 2
+          fi
+          case "$host" in
+            aether-vnext-nonprod-*.azurewebsites.net|aether-vnext-nonprod.azurewebsites.net)
+              ;;
+            *)
+              echo "Unexpected nonproduction hostname: $host"
+              exit 2
+              ;;
+          esac
+          echo "app_name=$app_name" >> "$GITHUB_OUTPUT"
+          echo "resource_group=$resource_group" >> "$GITHUB_OUTPUT"
+          echo "host=$host" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy exact vNext nonproduction package
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ steps.azure_target.outputs.app_name }}
+          package: backend
+
+      - name: Verify deployed paper-only vNext surface
+        shell: bash
+        env:
+          HOST: ${{ steps.azure_target.outputs.host }}
+          EXPECTED_SHA: ${{ steps.revision.outputs.source_revision }}
+        run: |
+          set -euo pipefail
+          base="https://$HOST"
+          echo "Verifying vNext nonproduction deployment at $base"
+
+          fetch_ok() {
+            local url="$1" dest="$2" label="$3" timeout="$4"
+            local attempt code
+            for attempt in $(seq 1 24); do
+              code="$(curl --silent --show-error --max-time "$timeout" -o "$dest" -w '%{http_code}' "$url" || true)"
+              if [ "$code" = "200" ]; then
+                return 0
+              fi
+              echo "$label attempt $attempt returned ${code:-curl-error}; waiting for warmup."
+              if [ "$attempt" -eq 24 ]; then
+                echo "$label did not recover."
+                return 1
+              fi
+              sleep 10
+            done
+          }
+
+          fetch_ok "$base/api/v1/health" /tmp/health.json Health 30
+          python - <<'PY'
+          import json
+          body=json.load(open("/tmp/health.json", encoding="utf-8"))
+          assert body.get("ok") is True, body
+          assert body.get("paper_mode") is True, body
+          assert body.get("live_blocked") is True, body
+          PY
+
+          fetch_ok "$base/vnext/" /tmp/vnext.html Console 30
+          grep -q "AETHER" /tmp/vnext.html
+
+          fetch_ok "$base/api/v1/vnext/floor" /tmp/vnext-floor.json Floor 60
+          python - <<'PY'
+          import json
+          import os
+
+          body=json.load(open("/tmp/vnext-floor.json", encoding="utf-8"))
+          mode=body.get("mode") or {}
+          assert mode.get("paper_only") is True, body
+          assert mode.get("live_blocked") is True, body
+          assert body.get("runtime_started_at_utc"), body
+          build=body.get("build") or {}
+          assert build.get("source_revision") == os.environ["EXPECTED_SHA"], build
+          assert build.get("package_built_at_utc"), build
+          paper_test=body.get("paper_test") or {}
+          assert "seed_bank_usd" in paper_test, body
+          assert "blotter_trade_count" in paper_test, body
+          PY
+
+          for method in POST PUT PATCH DELETE; do
+            code="$(curl --silent --show-error --max-time 20 -o /tmp/mutation.json -w '%{http_code}' -X "$method" "$base/api/v1/vnext/floor")"
+            test "$code" = "405"
+          done
+
+          echo "vNext nonproduction deployment verified."
