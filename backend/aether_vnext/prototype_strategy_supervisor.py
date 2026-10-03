@@ -47,6 +47,7 @@ from aether_vnext.prototype_market_history import (
     load_prototype_market_bars,
     load_prototype_market_bars_for_assets,
     persist_prototype_market_bars,
+    summarize_prototype_market_history,
 )
 from aether_vnext.provider_discovery_supervisor import (
     current_deep_trade_focus_asset_ids,
@@ -761,32 +762,48 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         else observations_by_id.get(str(observation_id))
                     )
 
-                hourly_by_asset = load_prototype_market_bars_for_assets(
+                history_summary = summarize_prototype_market_history(
                     sync_conn,
                     store,
                     asset_ids=product_ids,
-                    interval_seconds=3600,
                     end_at_utc=as_of_utc,
                 )
-                daily_by_asset = load_prototype_market_bars_for_assets(
-                    sync_conn,
-                    store,
-                    asset_ids=product_ids,
-                    interval_seconds=86400,
-                    end_at_utc=as_of_utc,
+                required_hour_close = as_of_utc.astimezone(UTC).replace(
+                    minute=0,
+                    second=0,
+                    microsecond=0,
+                )
+                required_day_close = as_of_utc.astimezone(UTC).replace(
+                    hour=0,
+                    minute=0,
+                    second=0,
+                    microsecond=0,
                 )
                 warmup_cached = {}
                 kraken_history_cached = {}
                 for product in batch:
-                    hourly_rows = hourly_by_asset.get(product.asset_id, ())
-                    daily_rows = daily_by_asset.get(product.asset_id, ())
-                    warmup_cached[product.asset_id] = _coinbase_warmup_cached(
-                        hourly_rows
+                    coinbase_meta = history_summary.get(
+                        (product.asset_id, 3600, COINBASE_SOURCE_ID),
+                        {},
                     )
-                    kraken_history_cached[product.asset_id] = _kraken_history_cached(
-                        hourly_rows,
-                        daily_rows,
-                        as_of_utc=as_of_utc,
+                    kraken_hour_meta = history_summary.get(
+                        (product.asset_id, 3600, KRAKEN_DAILY_SOURCE_ID),
+                        {},
+                    )
+                    kraken_day_meta = history_summary.get(
+                        (product.asset_id, 86400, KRAKEN_DAILY_SOURCE_ID),
+                        {},
+                    )
+                    warmup_cached[product.asset_id] = (
+                        int(coinbase_meta.get("bar_count") or 0) >= 2200
+                    )
+                    hour_close = kraken_hour_meta.get("latest_close_utc")
+                    day_close = kraken_day_meta.get("latest_close_utc")
+                    kraken_history_cached[product.asset_id] = (
+                        isinstance(hour_close, datetime)
+                        and isinstance(day_close, datetime)
+                        and hour_close.astimezone(UTC) >= required_hour_close
+                        and day_close.astimezone(UTC) >= required_day_close
                     )
                 return (
                     registry_status,
@@ -1008,17 +1025,26 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     ),
                 }
 
+                # Only materialize full bar histories for assets that have
+                # current executable market truth. The whole commissioned universe
+                # remains eligible/work-tracked, but missing-market assets do not
+                # force millions of historical rows through every 15-second cycle.
+                history_asset_ids = tuple(
+                    dict.fromkeys(
+                        ("btc", *observations.keys())
+                    )
+                )
                 hourly_by_asset = load_prototype_market_bars_for_assets(
                     sync_conn,
                     store,
-                    asset_ids=scan_asset_ids,
+                    asset_ids=history_asset_ids,
                     interval_seconds=3600,
                     end_at_utc=decision_at_utc,
                 )
                 daily_by_asset = load_prototype_market_bars_for_assets(
                     sync_conn,
                     store,
-                    asset_ids=scan_asset_ids,
+                    asset_ids=history_asset_ids,
                     interval_seconds=86400,
                     end_at_utc=decision_at_utc,
                 )

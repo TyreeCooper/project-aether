@@ -184,6 +184,70 @@ def _bar_from_row(row) -> PrototypeMarketBar:
     )
 
 
+def summarize_prototype_market_history(
+    conn: Connection,
+    store: VNextStore,
+    *,
+    asset_ids: Sequence[str],
+    end_at_utc: datetime,
+) -> dict[tuple[str, int, str], dict[str, object]]:
+    """Return compact cache metadata without materializing every historical bar.
+
+    This is the planning-path query for large universes. It keeps the strategy
+    supervisor O(number of assets/sources) instead of pulling millions of rows
+    simply to answer whether warm-up history is already current.
+    """
+    assets = tuple(
+        dict.fromkeys(
+            str(asset_id).strip().lower()
+            for asset_id in asset_ids
+            if str(asset_id).strip()
+        )
+    )
+    if not assets:
+        return {}
+    if end_at_utc.tzinfo is None:
+        raise ValueError("end_at_utc must be timezone-aware")
+
+    table = store.tables["prototype_market_bars"]
+    rows = conn.execute(
+        sa.select(
+            table.c.asset_id,
+            table.c.interval_seconds,
+            table.c.source_id,
+            sa.func.count(table.c.bar_id).label("bar_count"),
+            sa.func.max(table.c.bucket_close_utc).label("latest_close_utc"),
+        )
+        .where(
+            table.c.asset_id.in_(assets),
+            table.c.bucket_close_utc <= end_at_utc,
+            table.c.available_at_utc <= end_at_utc,
+        )
+        .group_by(
+            table.c.asset_id,
+            table.c.interval_seconds,
+            table.c.source_id,
+        )
+    ).mappings()
+
+    out: dict[tuple[str, int, str], dict[str, object]] = {}
+    for row in rows:
+        latest = row["latest_close_utc"]
+        out[
+            (
+                str(row["asset_id"]),
+                int(row["interval_seconds"]),
+                str(row["source_id"]),
+            )
+        ] = {
+            "bar_count": int(row["bar_count"] or 0),
+            "latest_close_utc": (
+                None if latest is None else _restore_utc(latest)
+            ),
+        }
+    return out
+
+
 def load_prototype_market_bars_for_assets(
     conn: Connection,
     store: VNextStore,

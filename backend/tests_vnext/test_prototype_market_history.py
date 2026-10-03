@@ -10,6 +10,7 @@ from aether_vnext.prototype_market_history import (
     load_prototype_market_bars_for_assets,
     persist_prototype_market_bars,
     prototype_market_bar_id,
+    summarize_prototype_market_history,
 )
 from aether_vnext.store import VNextStore
 
@@ -180,3 +181,42 @@ def test_idempotent_bar_persistence_uses_bounded_bulk_lookup() -> None:
     inserts = [s for s in statements if s.lstrip().upper().startswith("INSERT")]
     assert len(selects) == 1
     assert inserts == []
+
+
+
+def test_history_summary_uses_one_grouped_query_without_loading_bar_rows() -> None:
+    engine = sa.create_engine("sqlite+pysqlite:///:memory:")
+    store = VNextStore(schema=None)
+    store.create_all_for_test(engine)
+
+    bars = tuple(_bar(hour, 100_000.0 + hour) for hour in range(20))
+    with engine.begin() as conn:
+        assert persist_prototype_market_bars(
+            conn,
+            store,
+            bars,
+            ingested_at_utc=T0 + timedelta(days=2),
+        ) == len(bars)
+
+    statements = []
+    def record_statement(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    sa.event.listen(engine, "before_cursor_execute", record_statement)
+    try:
+        with engine.begin() as conn:
+            summary = summarize_prototype_market_history(
+                conn,
+                store,
+                asset_ids=("btc", "eth"),
+                end_at_utc=T0 + timedelta(days=2),
+            )
+    finally:
+        sa.event.remove(engine, "before_cursor_execute", record_statement)
+
+    key = ("btc", 3600, "kraken_public_trades")
+    assert summary[key]["bar_count"] == 20
+    assert summary[key]["latest_close_utc"] == T0 + timedelta(hours=20)
+    selects = [s for s in statements if s.lstrip().upper().startswith("SELECT")]
+    assert len(selects) == 1
+    assert "GROUP BY" in selects[0].upper()
