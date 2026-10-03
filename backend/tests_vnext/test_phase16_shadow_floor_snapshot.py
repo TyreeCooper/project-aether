@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 
 import sqlalchemy as sa
 
+from aether_vnext.dynamic_products import project_kraken_spot_product
+from aether_vnext.freeze import CONFIGURATION_HASH
 from aether_vnext.domain import (
     CalendarState,
     MarketObservation,
@@ -171,3 +173,113 @@ def test_open_cockpit_helper_preserves_canonical_identity_and_stop() -> None:
     assert cockpit.mark_price == 101.0
     assert cockpit.hard_stop_price == 95.0
     assert cockpit.dominant_state == "OPEN"
+
+
+def test_dynamic_commissioned_product_is_first_class_floor_station() -> None:
+    engine, store = _store()
+    projection = project_kraken_spot_product(
+        {
+            "provider": "Kraken",
+            "symbol": "SOL/USD",
+            "execution_symbol": "SOLUSD",
+            "asset_class": "spot_crypto",
+            "base_currency": "SOL",
+            "quote_currency": "USD",
+            "quantity_step": 0.001,
+            "minimum_quantity": 0.01,
+            "minimum_notional": 0.5,
+            "tick_size": 0.0001,
+        },
+        primary_market_source_id="kraken_public_ticker_v2",
+        stale_threshold_ms=15000,
+    )
+    assert projection.product is not None
+    observation = MarketObservation(
+        observation_id="obs-sol-shadow",
+        asset_id="kraken:solusd",
+        venue="Kraken",
+        bid=149.0,
+        ask=151.0,
+        last=150.0,
+        mark=150.0,
+        source="kraken_public_ticker_v2",
+        exchange_ts=T0,
+        received_ts=T0,
+        age_ms=1,
+        spread_abs=2.0,
+        spread_bps=133.3333333333,
+        session_state=SessionState.ACTIVE,
+        quality_state=QualityState.HEALTHY,
+        fallback_reason=None,
+        calendar_state=CalendarState.ALWAYS_OPEN,
+        data_version="v1",
+    )
+
+    with engine.begin() as conn:
+        conn.execute(
+            store.tables["policy_snapshots"].insert().values(
+                configuration_hash=CONFIGURATION_HASH,
+                policy_version="dynamic-floor-test-v1",
+                effective_at_utc=T0,
+                changed_by="test",
+                change_reason="dynamic Floor projection",
+                payload={},
+                created_at_utc=T0,
+            )
+        )
+        store.upsert_dynamic_product_state(
+            conn,
+            projection.product,
+            source_ref="kraken_public_rest:SOLUSD",
+            registry_version="dynamic-kraken-v1",
+            configuration_hash=CONFIGURATION_HASH,
+            updated_at_utc=T0,
+        )
+        store.record_market_observation(conn, observation)
+        conn.execute(
+            store.tables["setups"].insert().values(
+                setup_id="setup-sol-shadow",
+                firm_event_id=None,
+                asset_id="kraken:solusd",
+                route_id="kraken:solusd:1h:trend",
+                state="WATCH",
+                side="long",
+                horizon="1h",
+                playbook_id="pb_crypto_swing_v1_2",
+                playbook_version="v1",
+                risk_cluster_id="crypto",
+                asset_risk_hitches={},
+                trigger_bar_close_exchange_ts=T0,
+                exit_contract_complete=True,
+                exit_contract_gap=None,
+                invalidation=None,
+                quality=None,
+                intel_pack={},
+                regime_tags={},
+                policy_version="dynamic-floor-test-v1",
+                configuration_hash=CONFIGURATION_HASH,
+                market_observation_id=observation.observation_id,
+                first_killed_by=None,
+                first_kill_reason=None,
+                created_at_utc=T0,
+            )
+        )
+
+    with engine.begin() as conn:
+        floor = build_shadow_floor_snapshot(conn, store=store, as_of_utc=T0)
+
+    assert len(floor.full_universe) == 13
+    sol = next(
+        row for row in floor.full_universe
+        if row.asset_id == "kraken:solusd"
+    )
+    assert sol.symbol == "SOL/USD"
+    assert sol.dominant_state == "WATCH"
+    assert sol.seat_owner == "Scout"
+    assert sol.mark == 150.0
+    assert sol.route_ids == ("kraken:solusd:1h:trend",)
+    watch = next(
+        row for row in floor.seat_queues
+        if row.seat == "Scout" and row.state == "WATCH"
+    )
+    assert watch.item_ids == ("setup-sol-shadow",)

@@ -134,6 +134,22 @@ def build_shadow_floor_snapshot(
         else float(paper_epoch["seed_bank_total_usd"])
     )
 
+    # The Floor universe is the commissioned runtime universe, not only the
+    # frozen seed registry. Dynamic products are source-backed registry rows and
+    # become first-class Floor stations once persisted. Provider catalog rows that
+    # were never commissioned remain outside this execution projection.
+    registry_by_asset = dict(SEED_REGISTRY)
+    for state in store.list_dynamic_product_states(conn):
+        product = state["product"]
+        asset_id = str(product.asset_id).strip().lower()
+        if not asset_id:
+            raise RuntimeError("dynamic product asset_id is blank")
+        if asset_id in registry_by_asset:
+            raise RuntimeError(
+                f"dynamic product collides with existing Floor asset: {asset_id}"
+            )
+        registry_by_asset[asset_id] = product
+
     latest_mark: dict[str, float | None] = {}
     observations = conn.execute(
         sa.select(t["market_observations"])
@@ -150,8 +166,8 @@ def build_shadow_floor_snapshot(
     candidates: dict[
         str,
         list[tuple[int, str, str | None, str | None]],
-    ] = {asset_id: [] for asset_id in SEED_REGISTRY}
-    routes: dict[str, set[str]] = {asset_id: set() for asset_id in SEED_REGISTRY}
+    ] = {asset_id: [] for asset_id in registry_by_asset}
+    routes: dict[str, set[str]] = {asset_id: set() for asset_id in registry_by_asset}
 
     lineages = conn.execute(
         sa.select(t["decision_lineage"]).where(
@@ -258,7 +274,7 @@ def build_shadow_floor_snapshot(
     active_positions = tuple(
         conn.execute(sa.select(t["active_positions"])).mappings()
     )
-    open_count = {asset_id: 0 for asset_id in SEED_REGISTRY}
+    open_count = {asset_id: 0 for asset_id in registry_by_asset}
     open_cockpits: list[OpenPositionCockpit] = []
     for active in active_positions:
         asset_id = str(active["asset_id"])
@@ -305,7 +321,7 @@ def build_shadow_floor_snapshot(
         scope_id = row["scope_id"]
         reason = None if row["reason"] is None else str(row["reason"])
         if scope_type == "desk":
-            affected = tuple(SEED_REGISTRY)
+            affected = tuple(registry_by_asset)
         elif scope_type == "product" and scope_id is not None:
             affected = (str(scope_id).lower(),)
         elif scope_type == "route" and scope_id is not None:
@@ -328,8 +344,8 @@ def build_shadow_floor_snapshot(
                 )
 
     full_universe: list[FloorUniverseStation] = []
-    for asset_id in sorted(SEED_REGISTRY):
-        registry = SEED_REGISTRY[asset_id]
+    for asset_id in sorted(registry_by_asset):
+        registry = registry_by_asset[asset_id]
         state, seat, blocker, blocker_reason = _select_dominant(
             candidates[asset_id]
         )
