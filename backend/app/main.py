@@ -58,7 +58,11 @@ from app.vnext_discovery import (
     start_configured_vnext_discovery,
     stop_configured_vnext_discovery,
 )
-from app.vnext_tape import mount_configured_vnext_tape
+from app.vnext_tape import (
+    mount_configured_vnext_tape,
+    start_configured_vnext_tape,
+    stop_configured_vnext_tape,
+)
 
 STATIC = Path(__file__).parent / "static"
 VNEXT_UI = Path(__file__).parent / "vnext_ui"
@@ -94,6 +98,7 @@ async def lifespan(_: FastAPI):
         engine.start_loop()
     await start_configured_vnext_ingress()
     await start_configured_vnext_discovery()
+    await start_configured_vnext_tape()
     await start_configured_vnext_strategy()
     await start_configured_vnext_maintenance()
     logger.info(
@@ -108,6 +113,7 @@ async def lifespan(_: FastAPI):
         logger.info("event=app_shutdown phase=begin")
         await stop_configured_vnext_maintenance()
         await stop_configured_vnext_strategy()
+        await stop_configured_vnext_tape()
         await stop_configured_vnext_discovery()
         await stop_configured_vnext_ingress()
         await engine.shutdown()

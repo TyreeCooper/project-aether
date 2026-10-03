@@ -25,12 +25,14 @@ UTC = timezone.utc
 KRAKEN_TAPE_SOURCE_ID: Final = "kraken_public_tape"
 COINBASE_TAPE_SOURCE_ID: Final = "coinbase_exchange_tape"
 BINANCE_US_TAPE_SOURCE_ID: Final = "binance_us_tape"
+GEMINI_TAPE_SOURCE_ID: Final = "gemini_public_tape"
 DATABENTO_GLBX_TAPE_SOURCE_ID: Final = "databento_glbx_mbp1"
 
 COINBASE_EXCHANGE_WS: Final = "wss://ws-feed.exchange.coinbase.com"
 COINBASE_EXCHANGE_BOOK: Final = "https://api.exchange.coinbase.com/products/{product_id}/book"
 KRAKEN_REST_TICKER: Final = "https://api.kraken.com/0/public/Ticker"
 BINANCE_US_BOOK_TICKER: Final = "https://api.binance.us/api/v3/ticker/bookTicker"
+GEMINI_PUBLIC_TICKER: Final = "https://api.gemini.com/v1/pubticker/{symbol}"
 DATABENTO_GLBX_DATASET: Final = "GLBX.MDP3"
 DATABENTO_SCHEMA: Final = "mbp-1"
 FIXED_PRICE_SCALE: Final = 1_000_000_000
@@ -73,6 +75,14 @@ TAPE_SOURCE_SPECS: Final = {
     BINANCE_US_TAPE_SOURCE_ID: TapeSourceSpec(
         source_id=BINANCE_US_TAPE_SOURCE_ID,
         provider="Binance.US public market data",
+        market="spot_crypto",
+        independent=True,
+        credential_env=None,
+        implemented=True,
+    ),
+    GEMINI_TAPE_SOURCE_ID: TapeSourceSpec(
+        source_id=GEMINI_TAPE_SOURCE_ID,
+        provider="Gemini public market data",
         market="spot_crypto",
         independent=True,
         credential_env=None,
@@ -349,6 +359,35 @@ def parse_binance_us_book_ticker(
     )
 
 
+def parse_gemini_public_ticker(
+    payload: Mapping[str, Any],
+    *,
+    asset_id: str,
+    source_symbol: str,
+    received_at_utc: datetime,
+) -> TapeSourceObservation | None:
+    bid = _positive(payload.get("bid"))
+    ask = _positive(payload.get("ask"))
+    last = _positive(payload.get("last"))
+    symbol = str(source_symbol).strip().upper()
+    if not symbol or bid is None or ask is None:
+        return None
+    return _build_observation(
+        asset_id=asset_id,
+        source_id=GEMINI_TAPE_SOURCE_ID,
+        venue="Gemini",
+        source_symbol=symbol,
+        contract_id=None,
+        bid=bid,
+        ask=ask,
+        last=last,
+        exchange_ts=None,
+        received_at_utc=received_at_utc,
+        source_data_version="gemini_pubticker_v1",
+        source_ref=f"gemini:/v1/pubticker/{symbol.lower()}",
+    )
+
+
 def _databento_price(value: object | None) -> float | None:
     if value is None:
         return None
@@ -435,6 +474,7 @@ async def fetch_public_crypto_tape(
         raise ValueError("base_symbol and kraken_pair are required")
     coinbase_product = f"{base}-USD"
     binance_symbol = f"{base}USD"
+    gemini_symbol = f"{base}USD"
 
     async def kraken():
         async with httpx.AsyncClient(timeout=timeout_s) as client:
@@ -486,10 +526,28 @@ async def fetch_public_crypto_tape(
                 raise RuntimeError("binance_us_book_unavailable")
             return row
 
+    async def gemini():
+        async with httpx.AsyncClient(timeout=timeout_s) as client:
+            response = await client.get(
+                GEMINI_PUBLIC_TICKER.format(symbol=gemini_symbol.lower()),
+            )
+            response.raise_for_status()
+            now = datetime.now(UTC)
+            row = parse_gemini_public_ticker(
+                response.json(),
+                asset_id=asset_id,
+                source_symbol=gemini_symbol,
+                received_at_utc=now,
+            )
+            if row is None:
+                raise RuntimeError("gemini_ticker_unavailable")
+            return row
+
     fetches = (
         (KRAKEN_TAPE_SOURCE_ID, kraken()),
         (COINBASE_TAPE_SOURCE_ID, coinbase()),
         (BINANCE_US_TAPE_SOURCE_ID, binance()),
+        (GEMINI_TAPE_SOURCE_ID, gemini()),
     )
     results = await asyncio.gather(
         *(coroutine for _, coroutine in fetches),

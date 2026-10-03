@@ -56,6 +56,7 @@ from aether_vnext.provider_discovery_supervisor import (
 from aether_vnext.registry import ProductRegistryRow, SEED_REGISTRY
 from aether_vnext.runtime_product_policy import runtime_playbook_for_product
 from aether_vnext.store import VNextStore
+from aether_vnext.tape_market_bridge import load_preferred_tape_market_observation
 
 
 UTC = timezone.utc
@@ -1059,6 +1060,31 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         }
 
                 decision_at_utc = datetime.now(UTC)
+                tape_market: dict[str, object] = {}
+                for asset_id in ASSETS:
+                    tape_projection = load_preferred_tape_market_observation(
+                        sync_conn,
+                        store,
+                        asset_id=asset_id,
+                        calendar_id=SEED_REGISTRY[asset_id].calendar_id,
+                        as_of_utc=decision_at_utc,
+                    )
+                    tape_market[asset_id] = {
+                        "strategy_ready": tape_projection.strategy_ready,
+                        "reason": tape_projection.reason,
+                        "observation_id": (
+                            None
+                            if tape_projection.observation is None
+                            else tape_projection.observation.observation_id
+                        ),
+                    }
+                    if (
+                        tape_projection.strategy_ready
+                        and tape_projection.observation is not None
+                    ):
+                        observations[asset_id] = tape_projection.observation
+                        ingress_rejections.pop(asset_id, None)
+
                 (
                     observations,
                     clock_rejections,
@@ -1074,6 +1100,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         exchange_clock_ahead_asset_ids
                     ),
                 }
+                result["tape_market"] = tape_market
 
                 def market_not_ready_payload(asset_id: str) -> dict[str, object]:
                     if asset_id in clock_rejections:

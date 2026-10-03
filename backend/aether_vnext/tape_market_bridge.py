@@ -6,12 +6,13 @@ but fail closed for new-entry authority.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
+import hashlib
 from statistics import mean
 from typing import Sequence
 
-from aether_vnext.calendars import CalendarDecision
+from aether_vnext.calendars import CalendarDecision, calendar_decision
 from aether_vnext.domain import MarketObservation, QualityState
 from aether_vnext.tape import (
     TapeCompositeObservation,
@@ -146,4 +147,60 @@ def project_tape_market_observation(
         observation=observation,
         strategy_ready=ready,
         reason="tape_market_ready" if ready else "tape_not_full_or_session_ineligible",
+    )
+
+
+
+def load_preferred_tape_market_observation(
+    conn,
+    store,
+    *,
+    asset_id: str,
+    calendar_id: str,
+    as_of_utc: datetime,
+) -> TapeMarketProjection:
+    """Load the latest persisted FULL Tape and project it into the canonical market ledger."""
+    composite = store.latest_tape_composite(conn, asset_id=asset_id)
+    if composite is None:
+        return TapeMarketProjection(None, False, "tape_not_observed")
+    source_observations = store.load_tape_source_observations(
+        conn,
+        observation_ids=composite.source_observation_ids,
+    )
+    projection = project_tape_market_observation(
+        composite,
+        source_observations=source_observations,
+        calendar=calendar_decision(
+            calendar_id=calendar_id,
+            at_utc=as_of_utc,
+            exception_provider=None,
+        ),
+        as_of_utc=as_of_utc,
+    )
+    if not projection.strategy_ready or projection.observation is None:
+        return projection
+
+    identity = f"{composite.composite_id}|{as_of_utc.isoformat()}"
+    observation_id = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    observation = replace(
+        projection.observation,
+        observation_id=observation_id,
+        data_version=(
+            projection.observation.data_version
+            + ":composite="
+            + composite.composite_id[:16]
+        ),
+    )
+    existing = store.load_market_observation(
+        conn,
+        observation_id=observation.observation_id,
+    )
+    if existing is None:
+        store.record_market_observation(conn, observation)
+    else:
+        observation = existing
+    return TapeMarketProjection(
+        observation=observation,
+        strategy_ready=True,
+        reason="tape_market_ready",
     )

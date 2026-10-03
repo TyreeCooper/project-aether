@@ -11,9 +11,60 @@ from aether_vnext.db_runtime import VNextDatabaseConfig, open_vnext_engine
 from aether_vnext.freeze import LIVE_BLOCKED, PAPER_ONLY
 from aether_vnext.store import VNextStore
 from aether_vnext.tape_sources import tape_source_status
+from aether_vnext.tape_supervisor import (
+    TapeSupervisor,
+    configured_tape_enabled,
+    configured_tape_interval_seconds,
+    run_configured_tape_cycle,
+    status_payload as tape_runtime_status_payload,
+    validate_configured_tape_environment,
+)
 
 
 UTC = timezone.utc
+_tape_supervisor: TapeSupervisor | None = None
+
+
+def _runtime_instance() -> TapeSupervisor:
+    global _tape_supervisor
+    if _tape_supervisor is None:
+        _tape_supervisor = TapeSupervisor(
+            cycle_runner=run_configured_tape_cycle,
+            interval_seconds=configured_tape_interval_seconds(),
+        )
+    return _tape_supervisor
+
+
+async def start_configured_vnext_tape() -> None:
+    if not configured_tape_enabled():
+        return
+    validate_configured_tape_environment()
+    await _runtime_instance().start()
+
+
+async def stop_configured_vnext_tape() -> None:
+    if _tape_supervisor is not None:
+        await _tape_supervisor.stop()
+
+
+def configured_vnext_tape_status() -> dict[str, object]:
+    enabled = configured_tape_enabled()
+    if _tape_supervisor is None:
+        return {
+            "enabled": enabled,
+            "running": False,
+            "paper_only": True,
+            "live_blocked": True,
+            "cycle_count": 0,
+            "interval_seconds": configured_tape_interval_seconds(),
+            "last_cycle_started_at_utc": None,
+            "last_cycle_finished_at_utc": None,
+            "last_error": None,
+            "last_result": None,
+            "progress": None,
+        }
+    return tape_runtime_status_payload(_tape_supervisor.status(enabled=enabled))
+
 
 
 def _stored_utc(value: datetime) -> datetime:
@@ -171,7 +222,9 @@ async def load_configured_vnext_tape_snapshot() -> dict[str, object]:
                         as_of_utc=as_of_utc,
                     )
 
-                return await connection.run_sync(read)
+                payload = await connection.run_sync(read)
+                payload["runtime"] = configured_vnext_tape_status()
+                return payload
     except HTTPException:
         raise
     except Exception as exc:
