@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import math
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 import sqlalchemy as sa
 from sqlalchemy.engine import Connection
@@ -734,6 +734,90 @@ class VNextStore:
             "updated_at_utc": _stored_utc(row["updated_at_utc"]),
         }
 
+    def upsert_dynamic_product_states(
+        self,
+        conn: Connection,
+        products: Sequence[tuple[ProductRegistryRow, str]],
+        *,
+        registry_version: str,
+        configuration_hash: str,
+        updated_at_utc: datetime,
+    ) -> dict[str, str]:
+        """Bulk persist source-backed dynamic products without N+1 registry reads."""
+        rows = tuple(products)
+        if not rows:
+            return {}
+        if updated_at_utc.tzinfo is None:
+            raise ValueError("updated_at_utc must be timezone-aware")
+        version = str(registry_version).strip()
+        if not version:
+            raise ValueError("registry_version is required")
+
+        asset_ids = [product.asset_id for product, _ in rows]
+        if len(set(asset_ids)) != len(asset_ids):
+            raise ValueError("duplicate dynamic product asset_id")
+        if any(asset_id in SEED_REGISTRY for asset_id in asset_ids):
+            raise ValueError("seed products must use the frozen runtime binding path")
+
+        policies = self.tables["policy_snapshots"]
+        if conn.execute(
+            sa.select(policies.c.configuration_hash).where(
+                policies.c.configuration_hash == configuration_hash
+            )
+        ).first() is None:
+            raise KeyError(f"unknown configuration_hash: {configuration_hash}")
+
+        table = self.tables["product_registry_state"]
+        existing_rows = conn.execute(
+            sa.select(table).where(table.c.asset_id.in_(asset_ids))
+        ).mappings()
+        existing_by_id = {
+            str(row["asset_id"]): row
+            for row in existing_rows
+        }
+
+        inserts: list[dict[str, Any]] = []
+        updates: list[tuple[str, dict[str, Any]]] = []
+        digests: dict[str, str] = {}
+        for product, source_ref in rows:
+            payload = dynamic_product_payload(product, source_ref=source_ref)
+            digest = str(payload["product_hash"])
+            values = {
+                "asset_id": product.asset_id,
+                "registry_version": version,
+                "configuration_hash": str(configuration_hash),
+                "lifecycle_state": product.lifecycle_state.value,
+                "payload": payload,
+                "updated_at_utc": updated_at_utc,
+            }
+            existing = existing_by_id.get(product.asset_id)
+            if existing is None:
+                inserts.append(values)
+            else:
+                existing_payload = dict(existing["payload"] or {})
+                unchanged = (
+                    existing_payload.get("payload_kind")
+                    == DYNAMIC_PRODUCT_PAYLOAD_KIND
+                    and str(existing_payload.get("product_hash") or "") == digest
+                    and str(existing["registry_version"]) == version
+                    and str(existing["configuration_hash"]) == str(configuration_hash)
+                    and str(existing["lifecycle_state"]) == product.lifecycle_state.value
+                )
+                if not unchanged:
+                    updates.append((product.asset_id, values))
+            register_runtime_product(product)
+            digests[product.asset_id] = digest
+
+        if inserts:
+            conn.execute(table.insert(), inserts)
+        for asset_id, values in updates:
+            conn.execute(
+                table.update()
+                .where(table.c.asset_id == asset_id)
+                .values(**values)
+            )
+        return digests
+
     def upsert_dynamic_product_state(
         self,
         conn: Connection,
@@ -744,59 +828,14 @@ class VNextStore:
         configuration_hash: str,
         updated_at_utc: datetime,
     ) -> str:
-        """Persist one source-backed dynamic product without mutating seed truth."""
-        if product.asset_id in SEED_REGISTRY:
-            raise ValueError(
-                "seed products must use the frozen runtime binding path"
-            )
-        if updated_at_utc.tzinfo is None:
-            raise ValueError("updated_at_utc must be timezone-aware")
-        if not str(registry_version).strip():
-            raise ValueError("registry_version is required")
-        policies = self.tables["policy_snapshots"]
-        if conn.execute(
-            sa.select(policies.c.configuration_hash).where(
-                policies.c.configuration_hash == configuration_hash
-            )
-        ).first() is None:
-            raise KeyError(f"unknown configuration_hash: {configuration_hash}")
-
-        payload = dynamic_product_payload(product, source_ref=source_ref)
-        digest = str(payload["product_hash"])
-        table = self.tables["product_registry_state"]
-        values = {
-            "asset_id": product.asset_id,
-            "registry_version": str(registry_version),
-            "configuration_hash": str(configuration_hash),
-            "lifecycle_state": product.lifecycle_state.value,
-            "payload": payload,
-            "updated_at_utc": updated_at_utc,
-        }
-        existing = conn.execute(
-            sa.select(table).where(
-                table.c.asset_id == product.asset_id
-            )
-        ).mappings().first()
-        if existing is None:
-            conn.execute(table.insert().values(**values))
-        else:
-            existing_payload = dict(existing["payload"] or {})
-            unchanged = (
-                existing_payload.get("payload_kind")
-                == DYNAMIC_PRODUCT_PAYLOAD_KIND
-                and str(existing_payload.get("product_hash") or "") == digest
-                and str(existing["registry_version"]) == str(registry_version)
-                and str(existing["configuration_hash"]) == str(configuration_hash)
-                and str(existing["lifecycle_state"]) == product.lifecycle_state.value
-            )
-            if not unchanged:
-                conn.execute(
-                    table.update()
-                    .where(table.c.asset_id == product.asset_id)
-                    .values(**values)
-                )
-        register_runtime_product(product)
-        return digest
+        """Persist one dynamic product through the bulk-safe implementation."""
+        return self.upsert_dynamic_product_states(
+            conn,
+            ((product, source_ref),),
+            registry_version=registry_version,
+            configuration_hash=configuration_hash,
+            updated_at_utc=updated_at_utc,
+        )[product.asset_id]
 
     def load_dynamic_product_state(
         self,
@@ -831,22 +870,30 @@ class VNextStore:
         self,
         conn: Connection,
     ) -> tuple[dict[str, Any], ...]:
-        """Load every verified dynamic product projection in stable asset order."""
+        """Load every verified dynamic product projection with one registry query."""
         table = self.tables["product_registry_state"]
-        asset_ids = tuple(
-            str(row[0])
-            for row in conn.execute(
-                sa.select(table.c.asset_id).order_by(table.c.asset_id.asc())
-            )
-        )
+        rows = conn.execute(
+            sa.select(table).order_by(table.c.asset_id.asc())
+        ).mappings()
+
         out: list[dict[str, Any]] = []
-        for asset_id in asset_ids:
-            loaded = self.load_dynamic_product_state(
-                conn,
-                asset_id=asset_id,
+        for row in rows:
+            payload = dict(row["payload"] or {})
+            if payload.get("payload_kind") != DYNAMIC_PRODUCT_PAYLOAD_KIND:
+                continue
+            product = product_from_dynamic_payload(payload)
+            register_runtime_product(product)
+            out.append(
+                {
+                    "product": product,
+                    "product_hash": str(payload["product_hash"]),
+                    "source_ref": str(payload["source_ref"]),
+                    "registry_version": str(row["registry_version"]),
+                    "configuration_hash": str(row["configuration_hash"]),
+                    "lifecycle_state": str(row["lifecycle_state"]),
+                    "updated_at_utc": _stored_utc(row["updated_at_utc"]),
+                }
             )
-            if loaded is not None:
-                out.append(loaded)
         return tuple(out)
 
     def list_runtime_registry_bindings(

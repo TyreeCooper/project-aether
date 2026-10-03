@@ -336,7 +336,7 @@ def _sync_dynamic_kraken_products(
         else []
     )
 
-    persisted = 0
+    pending: list[tuple[ProductRegistryRow, str]] = []
     requirement_counts: dict[str, int] = {}
     for raw in rows:
         if not isinstance(raw, dict):
@@ -356,24 +356,30 @@ def _sync_dynamic_kraken_products(
         if projection.asset_id in SEED_REGISTRY:
             # Frozen BTC/ETH continue using their canonical seed binding path.
             continue
-        store.upsert_dynamic_product_state(
+        pending.append(
+            (
+                projection.product,
+                (
+                    str(raw.get("source") or "kraken_public")
+                    + ":"
+                    + str(raw.get("execution_symbol") or raw.get("symbol") or "")
+                ),
+            )
+        )
+
+    if pending:
+        store.upsert_dynamic_product_states(
             sync_conn,
-            projection.product,
-            source_ref=(
-                str(raw.get("source") or "kraken_public")
-                + ":"
-                + str(raw.get("execution_symbol") or raw.get("symbol") or "")
-            ),
+            pending,
             registry_version="dynamic-kraken-v1",
             configuration_hash=CONFIGURATION_HASH,
             updated_at_utc=as_of_utc,
         )
-        persisted += 1
 
     return {
         "status": "synced",
         "received": len(rows),
-        "persisted": persisted,
+        "persisted": len(pending),
         "requirements": dict(sorted(requirement_counts.items())),
     }
 

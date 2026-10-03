@@ -180,9 +180,10 @@ def test_dynamic_kraken_registry_sync_uses_existing_provider_policy_without_gues
                 )
             }
 
-        def upsert_dynamic_product_state(self, conn, product, **kwargs):
-            self.rows.append((product, kwargs))
-            return "hash"
+        def upsert_dynamic_product_states(self, conn, products, **kwargs):
+            for product, source_ref in products:
+                self.rows.append((product, {**kwargs, "source_ref": source_ref}))
+            return {product.asset_id: "hash" for product, _ in products}
 
     snapshot = {
         "providers": {

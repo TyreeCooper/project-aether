@@ -509,3 +509,98 @@ def test_list_dynamic_product_states_returns_only_dynamic_products() -> None:
 
     assert len(rows) == 1
     assert rows[0]["product"].asset_id == "kraken:solusd"
+
+
+
+def test_list_dynamic_product_states_uses_one_registry_select() -> None:
+    engine, store = _store()
+    symbols = ("SOL/USD", "ADA/USD", "DOT/USD")
+    with engine.begin() as conn:
+        for symbol in symbols:
+            base = symbol.split("/", 1)[0]
+            projection = project_kraken_spot_product(
+                {
+                    "provider": "Kraken",
+                    "symbol": symbol,
+                    "execution_symbol": symbol.replace("/", ""),
+                    "asset_class": "spot_crypto",
+                    "base_currency": base,
+                    "quote_currency": "USD",
+                    "quantity_step": 0.001,
+                    "minimum_quantity": 0.01,
+                    "minimum_notional": 0.5,
+                    "tick_size": 0.0001,
+                },
+                primary_market_source_id="kraken_public",
+                stale_threshold_ms=15000,
+            )
+            assert projection.product is not None
+            store.upsert_dynamic_product_state(
+                conn,
+                projection.product,
+                source_ref=f"kraken:AssetPairs:{symbol.replace('/', '')}",
+                registry_version="dynamic-kraken-v1",
+                configuration_hash=CONFIGURATION_HASH,
+                updated_at_utc=T0,
+            )
+
+    statements = []
+    def record_statement(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    sa.event.listen(engine, "before_cursor_execute", record_statement)
+    try:
+        with engine.begin() as conn:
+            rows = store.list_dynamic_product_states(conn)
+    finally:
+        sa.event.remove(engine, "before_cursor_execute", record_statement)
+
+    assert len(rows) == 3
+    selects = [statement for statement in statements if statement.lstrip().upper().startswith("SELECT")]
+    assert len(selects) == 1
+
+
+def test_bulk_dynamic_product_upsert_uses_constant_read_count() -> None:
+    engine, store = _store()
+    pending = []
+    for symbol in ("SOL/USD", "ADA/USD", "DOT/USD"):
+        base = symbol.split("/", 1)[0]
+        projection = project_kraken_spot_product(
+            {
+                "provider": "Kraken",
+                "symbol": symbol,
+                "execution_symbol": symbol.replace("/", ""),
+                "asset_class": "spot_crypto",
+                "base_currency": base,
+                "quote_currency": "USD",
+                "quantity_step": 0.001,
+                "minimum_quantity": 0.01,
+                "minimum_notional": 0.5,
+                "tick_size": 0.0001,
+            },
+            primary_market_source_id="kraken_public",
+            stale_threshold_ms=15000,
+        )
+        assert projection.product is not None
+        pending.append((projection.product, f"kraken:AssetPairs:{symbol.replace('/', '')}"))
+
+    statements = []
+    def record_statement(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    sa.event.listen(engine, "before_cursor_execute", record_statement)
+    try:
+        with engine.begin() as conn:
+            digests = store.upsert_dynamic_product_states(
+                conn,
+                pending,
+                registry_version="dynamic-kraken-v1",
+                configuration_hash=CONFIGURATION_HASH,
+                updated_at_utc=T0,
+            )
+    finally:
+        sa.event.remove(engine, "before_cursor_execute", record_statement)
+
+    assert set(digests) == {"kraken:solusd", "kraken:adausd", "kraken:dotusd"}
+    selects = [statement for statement in statements if statement.lstrip().upper().startswith("SELECT")]
+    assert len(selects) == 2
