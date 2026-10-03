@@ -45,6 +45,7 @@ from aether_vnext.prototype_history_sources import (
 from aether_vnext.prototype_market_history import (
     PrototypeMarketBar,
     load_prototype_market_bars,
+    load_prototype_market_bars_for_assets,
     persist_prototype_market_bars,
 )
 from aether_vnext.provider_discovery_supervisor import (
@@ -731,31 +732,54 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     priority_asset_ids=dynamic_open_ids,
                     attention_asset_ids=attention_ids,
                 )
-                market_ready = {
-                    product.asset_id: _latest_observation(
-                        sync_conn,
-                        store,
-                        asset_id=product.asset_id,
+                product_ids = tuple(product.asset_id for product in batch)
+                latest_attempts = store.latest_market_ingress_attempts(
+                    sync_conn,
+                    asset_ids=product_ids,
+                )
+                observation_ids = tuple(
+                    str(attempt["observation_id"])
+                    for attempt in latest_attempts.values()
+                    if bool(attempt.get("executable"))
+                    and attempt.get("observation_id")
+                )
+                observations_by_id = store.load_market_observations(
+                    sync_conn,
+                    observation_ids=observation_ids,
+                )
+                market_ready = {}
+                for product in batch:
+                    attempt = latest_attempts.get(product.asset_id)
+                    observation_id = (
+                        None
+                        if attempt is None or not bool(attempt.get("executable"))
+                        else attempt.get("observation_id")
                     )
-                    for product in batch
-                }
+                    market_ready[product.asset_id] = (
+                        None
+                        if not observation_id
+                        else observations_by_id.get(str(observation_id))
+                    )
+
+                hourly_by_asset = load_prototype_market_bars_for_assets(
+                    sync_conn,
+                    store,
+                    asset_ids=product_ids,
+                    interval_seconds=3600,
+                    end_at_utc=as_of_utc,
+                )
+                daily_by_asset = load_prototype_market_bars_for_assets(
+                    sync_conn,
+                    store,
+                    asset_ids=product_ids,
+                    interval_seconds=86400,
+                    end_at_utc=as_of_utc,
+                )
                 warmup_cached = {}
                 kraken_history_cached = {}
                 for product in batch:
-                    hourly_rows = load_prototype_market_bars(
-                        sync_conn,
-                        store,
-                        asset_id=product.asset_id,
-                        interval_seconds=3600,
-                        end_at_utc=as_of_utc,
-                    )
-                    daily_rows = load_prototype_market_bars(
-                        sync_conn,
-                        store,
-                        asset_id=product.asset_id,
-                        interval_seconds=86400,
-                        end_at_utc=as_of_utc,
-                    )
+                    hourly_rows = hourly_by_asset.get(product.asset_id, ())
+                    daily_rows = daily_by_asset.get(product.asset_id, ())
                     warmup_cached[product.asset_id] = _coinbase_warmup_cached(
                         hourly_rows
                     )
@@ -905,19 +929,19 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
         # Second transaction: persist history and execute every eligible scan item.
         async with engine.begin() as connection:
             def cycle(sync_conn):
-                inserted = 0
-                for asset_id in ASSETS:
-                    inserted += persist_prototype_market_bars(
-                        sync_conn,
-                        store,
-                        tuple(
-                            (
-                                *fetched_hourly[asset_id],
-                                *fetched_daily[asset_id],
-                            )
-                        ),
-                        ingested_at_utc=as_of_utc,
-                    )
+                inserted = persist_prototype_market_bars(
+                    sync_conn,
+                    store,
+                    tuple(
+                        bar
+                        for asset_id in ASSETS
+                        for bar in (
+                            *fetched_hourly[asset_id],
+                            *fetched_daily[asset_id],
+                        )
+                    ),
+                    ingested_at_utc=as_of_utc,
+                )
 
                 for history in history_by_asset.values():
                     if history.error is not None:
@@ -940,17 +964,32 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         (*ASSETS, *(row.asset_id for row in dynamic_batch))
                     )
                 )
-                observations = {
-                    asset_id: observation
-                    for asset_id in scan_asset_ids
-                    if (
-                        observation := _latest_observation(
-                            sync_conn,
-                            store,
-                            asset_id=asset_id,
-                        )
-                    ) is not None
-                }
+                latest_attempts = store.latest_market_ingress_attempts(
+                    sync_conn,
+                    asset_ids=scan_asset_ids,
+                )
+                observation_ids = tuple(
+                    str(attempt["observation_id"])
+                    for attempt in latest_attempts.values()
+                    if bool(attempt.get("executable"))
+                    and attempt.get("observation_id")
+                )
+                observations_by_id = store.load_market_observations(
+                    sync_conn,
+                    observation_ids=observation_ids,
+                )
+                observations = {}
+                for asset_id in scan_asset_ids:
+                    attempt = latest_attempts.get(asset_id)
+                    observation_id = (
+                        None
+                        if attempt is None or not bool(attempt.get("executable"))
+                        else attempt.get("observation_id")
+                    )
+                    if observation_id:
+                        observation = observations_by_id.get(str(observation_id))
+                        if observation is not None:
+                            observations[asset_id] = observation
 
                 decision_at_utc = datetime.now(UTC)
                 (
@@ -968,6 +1007,22 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         exchange_clock_ahead_asset_ids
                     ),
                 }
+
+                hourly_by_asset = load_prototype_market_bars_for_assets(
+                    sync_conn,
+                    store,
+                    asset_ids=scan_asset_ids,
+                    interval_seconds=3600,
+                    end_at_utc=decision_at_utc,
+                )
+                daily_by_asset = load_prototype_market_bars_for_assets(
+                    sync_conn,
+                    store,
+                    asset_ids=scan_asset_ids,
+                    interval_seconds=86400,
+                    end_at_utc=decision_at_utc,
+                )
+                btc_daily = daily_by_asset.get("btc", ())
 
                 open_table = store.tables["open_trades"]
                 open_rows = tuple(
@@ -997,13 +1052,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                             "trade_id": str(trade["trade_id"]),
                         }
                         continue
-                    hourly_rows = load_prototype_market_bars(
-                        sync_conn,
-                        store,
-                        asset_id=asset_id,
-                        interval_seconds=3600,
-                        end_at_utc=decision_at_utc,
-                    )
+                    hourly_rows = hourly_by_asset.get(asset_id, ())
                     latest_bar = hourly_rows[-1] if hourly_rows else None
                     advanced = advance_prototype_crypto_exit(
                         sync_conn,
@@ -1039,27 +1088,8 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         }
                         continue
 
-                    hourly = load_prototype_market_bars(
-                        sync_conn,
-                        store,
-                        asset_id=asset_id,
-                        interval_seconds=3600,
-                        end_at_utc=decision_at_utc,
-                    )
-                    asset_daily = load_prototype_market_bars(
-                        sync_conn,
-                        store,
-                        asset_id=asset_id,
-                        interval_seconds=86400,
-                        end_at_utc=decision_at_utc,
-                    )
-                    btc_daily = load_prototype_market_bars(
-                        sync_conn,
-                        store,
-                        asset_id="btc",
-                        interval_seconds=86400,
-                        end_at_utc=decision_at_utc,
-                    )
+                    hourly = hourly_by_asset.get(asset_id, ())
+                    asset_daily = daily_by_asset.get(asset_id, ())
                     warmup = assemble_prototype_crypto_warmup(
                         asset_id=asset_id,
                         coinbase_hourly=tuple(
@@ -1160,14 +1190,6 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     product.asset_id: product
                     for product in dynamic_batch
                 }
-                btc_daily = load_prototype_market_bars(
-                    sync_conn,
-                    store,
-                    asset_id="btc",
-                    interval_seconds=86400,
-                    end_at_utc=decision_at_utc,
-                )
-
                 for asset_id, product in product_by_id.items():
                     observation = observations.get(asset_id)
                     if observation is None:
@@ -1212,20 +1234,8 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         }
                         continue
 
-                    hourly = load_prototype_market_bars(
-                        sync_conn,
-                        store,
-                        asset_id=asset_id,
-                        interval_seconds=3600,
-                        end_at_utc=decision_at_utc,
-                    )
-                    asset_daily = load_prototype_market_bars(
-                        sync_conn,
-                        store,
-                        asset_id=asset_id,
-                        interval_seconds=86400,
-                        end_at_utc=decision_at_utc,
-                    )
+                    hourly = hourly_by_asset.get(asset_id, ())
+                    asset_daily = daily_by_asset.get(asset_id, ())
                     try:
                         warmup = assemble_prototype_crypto_warmup(
                             asset_id=asset_id,

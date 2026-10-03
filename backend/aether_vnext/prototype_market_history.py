@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import math
+from typing import Sequence
 
 import sqlalchemy as sa
 from sqlalchemy.engine import Connection
@@ -87,6 +88,13 @@ def prototype_market_bar_id(bar: PrototypeMarketBar) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def _chunks(values: Sequence[str], size: int = 500) -> tuple[tuple[str, ...], ...]:
+    if size <= 0:
+        raise ValueError("chunk size must be positive")
+    rows = tuple(values)
+    return tuple(rows[start:start + size] for start in range(0, len(rows), size))
+
+
 def persist_prototype_market_bars(
     conn: Connection,
     store: VNextStore,
@@ -94,40 +102,58 @@ def persist_prototype_market_bars(
     *,
     ingested_at_utc: datetime,
 ) -> int:
+    """Persist immutable bars with bounded bulk existence checks and inserts."""
     if ingested_at_utc.tzinfo is None:
         raise ValueError("ingested_at_utc must be timezone-aware")
     if not bars:
         return 0
+
+    ordered = tuple(
+        sorted(
+            bars,
+            key=lambda row: (
+                row.asset_id,
+                row.interval_seconds,
+                row.bucket_open_utc,
+            ),
+        )
+    )
+    by_id = [(prototype_market_bar_id(bar), bar) for bar in ordered]
     table = store.tables["prototype_market_bars"]
-    inserted = 0
-    for bar in sorted(bars, key=lambda row: (row.asset_id, row.interval_seconds, row.bucket_open_utc)):
-        bar_id = prototype_market_bar_id(bar)
-        existing = conn.execute(
-            sa.select(table.c.bar_id).where(table.c.bar_id == bar_id)
-        ).first()
-        if existing is not None:
-            continue
-        conn.execute(
-            table.insert().values(
-                bar_id=bar_id,
-                asset_id=bar.asset_id,
-                interval_seconds=bar.interval_seconds,
-                bucket_open_utc=bar.bucket_open_utc,
-                bucket_close_utc=bar.bucket_close_utc,
-                open=float(bar.open),
-                high=float(bar.high),
-                low=float(bar.low),
-                close=float(bar.close),
-                volume=float(bar.volume),
-                trade_count=int(bar.trade_count),
-                source_id=bar.source_id,
-                source_ref=bar.source_ref,
-                available_at_utc=bar.available_at_utc,
-                ingested_at_utc=ingested_at_utc,
+
+    existing_ids: set[str] = set()
+    for chunk in _chunks(tuple(bar_id for bar_id, _ in by_id)):
+        existing_ids.update(
+            str(row[0])
+            for row in conn.execute(
+                sa.select(table.c.bar_id).where(table.c.bar_id.in_(chunk))
             )
         )
-        inserted += 1
-    return inserted
+
+    values = [
+        {
+            "bar_id": bar_id,
+            "asset_id": bar.asset_id,
+            "interval_seconds": bar.interval_seconds,
+            "bucket_open_utc": bar.bucket_open_utc,
+            "bucket_close_utc": bar.bucket_close_utc,
+            "open": float(bar.open),
+            "high": float(bar.high),
+            "low": float(bar.low),
+            "close": float(bar.close),
+            "volume": float(bar.volume),
+            "trade_count": int(bar.trade_count),
+            "source_id": bar.source_id,
+            "source_ref": bar.source_ref,
+            "available_at_utc": bar.available_at_utc,
+            "ingested_at_utc": ingested_at_utc,
+        }
+        for bar_id, bar in by_id
+        if bar_id not in existing_ids
+    ]
+    if values:
+        conn.execute(table.insert(), values)
+    return len(values)
 
 
 def _restore_utc(value: datetime) -> datetime:
@@ -138,6 +164,76 @@ def _restore_utc(value: datetime) -> datetime:
     tooling must restore the declared UTC contract explicitly.
     """
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+
+
+def _bar_from_row(row) -> PrototypeMarketBar:
+    return PrototypeMarketBar(
+        asset_id=str(row["asset_id"]),
+        interval_seconds=int(row["interval_seconds"]),
+        bucket_open_utc=_restore_utc(row["bucket_open_utc"]),
+        bucket_close_utc=_restore_utc(row["bucket_close_utc"]),
+        open=float(row["open"]),
+        high=float(row["high"]),
+        low=float(row["low"]),
+        close=float(row["close"]),
+        volume=float(row["volume"]),
+        trade_count=int(row["trade_count"]),
+        source_id=str(row["source_id"]),
+        source_ref=str(row["source_ref"]),
+        available_at_utc=_restore_utc(row["available_at_utc"]),
+    )
+
+
+def load_prototype_market_bars_for_assets(
+    conn: Connection,
+    store: VNextStore,
+    *,
+    asset_ids: Sequence[str],
+    interval_seconds: int,
+    end_at_utc: datetime,
+    start_at_utc: datetime | None = None,
+) -> dict[str, tuple[PrototypeMarketBar, ...]]:
+    assets = tuple(
+        dict.fromkeys(
+            str(asset_id).strip().lower()
+            for asset_id in asset_ids
+            if str(asset_id).strip()
+        )
+    )
+    if not assets:
+        return {}
+    if interval_seconds <= 0:
+        raise ValueError("interval_seconds must be positive")
+    if end_at_utc.tzinfo is None:
+        raise ValueError("end_at_utc must be timezone-aware")
+    if start_at_utc is not None and start_at_utc.tzinfo is None:
+        raise ValueError("start_at_utc must be timezone-aware")
+
+    table = store.tables["prototype_market_bars"]
+    stmt = sa.select(table).where(
+        table.c.asset_id.in_(assets),
+        table.c.interval_seconds == int(interval_seconds),
+        table.c.bucket_close_utc <= end_at_utc,
+        table.c.available_at_utc <= end_at_utc,
+    )
+    if start_at_utc is not None:
+        stmt = stmt.where(table.c.bucket_open_utc >= start_at_utc)
+
+    grouped: dict[str, list[PrototypeMarketBar]] = {
+        asset_id: [] for asset_id in assets
+    }
+    rows = conn.execute(
+        stmt.order_by(
+            table.c.asset_id.asc(),
+            table.c.bucket_open_utc.asc(),
+        )
+    ).mappings()
+    for row in rows:
+        grouped[str(row["asset_id"])].append(_bar_from_row(row))
+    return {
+        asset_id: tuple(grouped[asset_id])
+        for asset_id in assets
+    }
 
 
 def load_prototype_market_bars(
@@ -152,37 +248,11 @@ def load_prototype_market_bars(
     asset = str(asset_id).strip().lower()
     if not asset:
         raise ValueError("asset_id is required")
-    if interval_seconds <= 0:
-        raise ValueError("interval_seconds must be positive")
-    if end_at_utc.tzinfo is None:
-        raise ValueError("end_at_utc must be timezone-aware")
-    if start_at_utc is not None and start_at_utc.tzinfo is None:
-        raise ValueError("start_at_utc must be timezone-aware")
-    table = store.tables["prototype_market_bars"]
-    stmt = sa.select(table).where(
-        table.c.asset_id == asset,
-        table.c.interval_seconds == int(interval_seconds),
-        table.c.bucket_close_utc <= end_at_utc,
-        table.c.available_at_utc <= end_at_utc,
-    )
-    if start_at_utc is not None:
-        stmt = stmt.where(table.c.bucket_open_utc >= start_at_utc)
-    rows = conn.execute(stmt.order_by(table.c.bucket_open_utc.asc())).mappings()
-    return tuple(
-        PrototypeMarketBar(
-            asset_id=str(row["asset_id"]),
-            interval_seconds=int(row["interval_seconds"]),
-            bucket_open_utc=_restore_utc(row["bucket_open_utc"]),
-            bucket_close_utc=_restore_utc(row["bucket_close_utc"]),
-            open=float(row["open"]),
-            high=float(row["high"]),
-            low=float(row["low"]),
-            close=float(row["close"]),
-            volume=float(row["volume"]),
-            trade_count=int(row["trade_count"]),
-            source_id=str(row["source_id"]),
-            source_ref=str(row["source_ref"]),
-            available_at_utc=_restore_utc(row["available_at_utc"]),
-        )
-        for row in rows
-    )
+    return load_prototype_market_bars_for_assets(
+        conn,
+        store,
+        asset_ids=(asset,),
+        interval_seconds=interval_seconds,
+        end_at_utc=end_at_utc,
+        start_at_utc=start_at_utc,
+    )[asset]

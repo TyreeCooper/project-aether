@@ -1058,20 +1058,8 @@ class VNextStore:
             )
         )
 
-    def load_market_observation(
-        self,
-        conn: Connection,
-        *,
-        observation_id: str,
-    ) -> MarketObservation | None:
-        table = self.tables["market_observations"]
-        row = conn.execute(
-            sa.select(table).where(
-                table.c.observation_id == str(observation_id)
-            )
-        ).mappings().first()
-        if row is None:
-            return None
+    @staticmethod
+    def _market_observation_from_row(row: Mapping[str, Any]) -> MarketObservation:
         return MarketObservation(
             observation_id=str(row["observation_id"]),
             asset_id=str(row["asset_id"]),
@@ -1108,6 +1096,44 @@ class VNextStore:
             calendar_state=CalendarState(str(row["calendar_state"])),
             data_version=row["data_version"],
         )
+
+    def load_market_observations(
+        self,
+        conn: Connection,
+        *,
+        observation_ids: Sequence[str],
+    ) -> dict[str, MarketObservation]:
+        ids = tuple(
+            dict.fromkeys(
+                str(observation_id).strip()
+                for observation_id in observation_ids
+                if str(observation_id).strip()
+            )
+        )
+        if not ids:
+            return {}
+        table = self.tables["market_observations"]
+        rows = conn.execute(
+            sa.select(table).where(table.c.observation_id.in_(ids))
+        ).mappings()
+        return {
+            str(row["observation_id"]): self._market_observation_from_row(row)
+            for row in rows
+        }
+
+    def load_market_observation(
+        self,
+        conn: Connection,
+        *,
+        observation_id: str,
+    ) -> MarketObservation | None:
+        key = str(observation_id).strip()
+        if not key:
+            return None
+        return self.load_market_observations(
+            conn,
+            observation_ids=(key,),
+        ).get(key)
 
     def record_market_ingress_attempt(
         self,
@@ -1169,23 +1195,60 @@ class VNextStore:
             )
         )
 
+    def latest_market_ingress_attempts(
+        self,
+        conn: Connection,
+        *,
+        asset_ids: Sequence[str],
+    ) -> dict[str, dict[str, Any]]:
+        assets = tuple(
+            dict.fromkeys(
+                str(asset_id).strip().lower()
+                for asset_id in asset_ids
+                if str(asset_id).strip()
+            )
+        )
+        if not assets:
+            return {}
+
+        table = self.tables["market_ingress_attempts"]
+        row_rank = sa.func.row_number().over(
+            partition_by=table.c.asset_id,
+            order_by=(
+                table.c.as_of_utc.desc(),
+                table.c.attempt_id.desc(),
+            ),
+        ).label("_row_rank")
+        ranked = (
+            sa.select(table, row_rank)
+            .where(table.c.asset_id.in_(assets))
+            .subquery()
+        )
+        rows = conn.execute(
+            sa.select(ranked).where(ranked.c._row_rank == 1)
+        ).mappings()
+        return {
+            str(row["asset_id"]): {
+                key: value
+                for key, value in row.items()
+                if key != "_row_rank"
+            }
+            for row in rows
+        }
+
     def latest_market_ingress_attempt(
         self,
         conn: Connection,
         *,
         asset_id: str,
     ) -> dict[str, Any] | None:
-        table = self.tables["market_ingress_attempts"]
-        row = conn.execute(
-            sa.select(table)
-            .where(table.c.asset_id == str(asset_id).strip().lower())
-            .order_by(
-                table.c.as_of_utc.desc(),
-                table.c.attempt_id.desc(),
-            )
-            .limit(1)
-        ).mappings().first()
-        return None if row is None else dict(row)
+        asset = str(asset_id).strip().lower()
+        if not asset:
+            return None
+        return self.latest_market_ingress_attempts(
+            conn,
+            asset_ids=(asset,),
+        ).get(asset)
 
     def record_watch_setup(
         self,
