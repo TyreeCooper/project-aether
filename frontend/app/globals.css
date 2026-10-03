@@ -22,7 +22,7 @@ button{cursor:pointer}
 .topbar h1,.pageIntro h2,.hero h2,.panel h2{margin:0}.topbar h1{font-size:26px;letter-spacing:-.02em}
 .kicker,.panelHead>div>span{font-size:9px;font-weight:800;letter-spacing:.12em;color:var(--accent);text-transform:uppercase}
 .topbarMeta{display:grid;gap:4px;text-align:right;color:var(--muted);font-size:9px}
-.runtimeStrip{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--line);margin-bottom:14px}
+.runtimeStrip{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--line);margin-bottom:14px}
 .runtimeStrip>div{background:var(--panel);padding:9px 10px;display:grid;gap:4px}
 .runtimeStrip span{font-size:7px;color:var(--muted);letter-spacing:.08em}.runtimeStrip b{font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .badge{display:inline-flex;align-items:center;width:max-content;max-width:100%;padding:4px 7px;border:1px solid var(--line);border-radius:999px;font-size:8px;font-weight:850;letter-spacing:.05em;white-space:nowrap}

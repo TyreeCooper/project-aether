@@ -218,10 +218,11 @@ function supervisorState(supervisor, nowMs) {
   return "ACTIVE";
 }
 
-function pipelineRuntimeState(ingress, discovery, strategy, maintenance, nowMs) {
+function pipelineRuntimeState(ingress, discovery, tape, strategy, maintenance, nowMs) {
   const states = [
     supervisorState(ingress, nowMs),
     supervisorState(discovery, nowMs),
+    supervisorState(tape?.runtime, nowMs),
     supervisorState(strategy, nowMs),
   ];
   if (states.includes("FAULT")) return "DEGRADED";
@@ -242,9 +243,10 @@ function telemetryWatermark(data) {
     data.ingress?.last_cycle_finished_at_utc,
     data.strategy?.last_cycle_finished_at_utc,
     data.discovery?.last_cycle_finished_at_utc,
+    data.tape?.runtime?.last_cycle_finished_at_utc || data.tape?.as_of_utc,
     data.maintenance?.last_result?.as_of_utc || data.maintenance?.as_of_utc,
   ].map((value) => Date.parse(value || "")).filter(Number.isFinite);
-  if (stamps.length < 5) return null;
+  if (stamps.length < 6) return null;
   return new Date(Math.min(...stamps)).toISOString();
 }
 
@@ -256,11 +258,12 @@ function strategySnapshotId(strategy) {
   return `strategy-${cycle ?? "na"}-${finished || "open"}`;
 }
 
-function RuntimeStrip({ floor, ingress, strategy, discovery, maintenance, nowMs }) {
+function RuntimeStrip({ floor, ingress, strategy, discovery, tape, maintenance, nowMs }) {
   const ingressState = supervisorState(ingress, nowMs);
   const discoveryState = supervisorState(discovery, nowMs);
+  const tapeState = supervisorState(tape?.runtime, nowMs);
   const strategyState = supervisorState(strategy, nowMs);
-  const pipeline = pipelineRuntimeState(ingress, discovery, strategy, maintenance, nowMs);
+  const pipeline = pipelineRuntimeState(ingress, discovery, tape, strategy, maintenance, nowMs);
   return (
     <div className="runtimeStrip">
       <div><span>BUILD</span><b>{text(floor?.build?.source_revision?.slice(0, 8), "NOT OBSERVED")}</b></div>
@@ -268,13 +271,14 @@ function RuntimeStrip({ floor, ingress, strategy, discovery, maintenance, nowMs 
       <div><span>FLOOR REFRESHED</span><b>{ts(floor?.refresh_time_utc || floor?.as_of_utc || strategy?.last_result?.finished_at_utc, "NOT OBSERVED")}</b></div>
       <div><span>INGRESS</span><Badge value={ingressState}>{ingressState}</Badge></div>
       <div><span>DISCOVERY</span><Badge value={discoveryState}>{discoveryState}</Badge></div>
+      <div><span>TAPE</span><Badge value={tapeState}>{tapeState}</Badge></div>
       <div><span>STRATEGY</span><Badge value={strategyState}>{strategyState}</Badge></div>
       <div><span>PIPELINE</span><Badge value={pipeline}>{pipeline}</Badge></div>
     </div>
   );
 }
 
-function CommandCenter({ floor, ingress, strategy, discovery, operator, maintenance, nowMs }) {
+function CommandCenter({ floor, ingress, strategy, discovery, tape, operator, maintenance, nowMs }) {
   const universe = Array.isArray(floor?.full_universe) ? floor.full_universe : [];
   const positionsObserved = Array.isArray(floor?.open_cockpits);
   const positions = positionsObserved ? floor.open_cockpits : [];
@@ -287,6 +291,11 @@ function CommandCenter({ floor, ingress, strategy, discovery, operator, maintena
   const strategyObserved = Boolean(strategy?.last_result && (strategy.last_result.assets || strategy.last_result.dynamic_assets));
   const strategyRows = combinedStrategyRows(strategy).slice(0, 12);
   const maintenanceState = maintenance?.last_result || {};
+  const tapeSummary = tape?.summary || {};
+  const tapeStates = tapeSummary.state_counts || {};
+  const tapeFull = Number(tapeStates.FULL || 0);
+  const tapeObserved = isObservedNumber(tapeSummary.asset_count) ? Number(tapeSummary.asset_count) : null;
+  const tapeRuntimeState = supervisorState(tape?.runtime, nowMs);
   const bank = operator?.bank || {};
   const eventsObserved = Array.isArray(operator?.activity);
   const events = eventsObserved ? operator.activity : [];
@@ -316,6 +325,7 @@ function CommandCenter({ floor, ingress, strategy, discovery, operator, maintena
         <Metric label="Open positions" value={positionsObserved ? num(positions.length) : "NOT OBSERVED"} sub="PAPER positions" />
         <Metric label="Book cash" value={money(bank.book_cash_usd, "NOT OBSERVED")} sub={bank.cash_reserved_usd === null || bank.cash_reserved_usd === undefined ? "reserved NOT OBSERVED" : `${money(bank.cash_reserved_usd)} reserved`} />
         <Metric label="Maintenance" value={text(maintenanceState.status, "SYNCING")} sub={text(maintenanceState.primary_reason, "establishing baseline")} state={maintenanceState.status} />
+        <Metric label="Consensus Tape" value={tapeObserved === null ? "NOT OBSERVED" : `${num(tapeFull)}/${num(tapeObserved)} FULL`} sub={`runtime ${tapeRuntimeState}`} state={tapeFull > 0 ? "FULL" : tapeObserved ? "DEGRADED" : tapeRuntimeState} />
       </div>
 
       <Section eyebrow="UNIVERSE CONTRACT" title="Catalog → commissioned → active work" className="wide">
@@ -325,6 +335,7 @@ function CommandCenter({ floor, ingress, strategy, discovery, operator, maintena
           <div><span>Kraken commissioned</span><strong>{pipe.dynamic_kraken_available === undefined ? "NOT OBSERVED" : num(pipe.dynamic_kraken_available)}</strong><small>Runtime-bound products with the current commissioned strategy route.</small></div>
           <div><span>Current roaming workset</span><strong>{pipe.roaming_batch === undefined ? "NOT OBSERVED" : num(pipe.roaming_batch)}</strong><small>All commissioned products remain owned; worker concurrency schedules I/O only.</small></div>
           <div><span>Market ready this cycle</span><strong>{pipe.market_ready === undefined ? "NOT OBSERVED" : num(pipe.market_ready)}</strong><small>Executable market evidence observed this cycle.</small></div>
+          <div><span>Tape-governed seeds</span><strong>{pipe.tape_seed_required === undefined ? "NOT OBSERVED" : `${num(pipe.tape_seed_ready)}/${num(pipe.tape_seed_required)}`}</strong><small>FULL independent consensus required for covered seed strategy market truth.</small></div>
           <div><span>Floor runtime registry</span><strong>{Array.isArray(floor?.full_universe) ? num(universe.length) : "NOT OBSERVED"}</strong><small>Seed + commissioned dynamic products; not the provider catalog.</small></div>
         </div>
         <p className="universeTruth">Catalog-visible ≠ commissioned ≠ market-ready ≠ setup-qualified. AETHER keeps these populations separate so a large provider catalog cannot be mistaken for trade permission.</p>
@@ -380,7 +391,7 @@ function CommandCenter({ floor, ingress, strategy, discovery, operator, maintena
   );
 }
 
-function Markets({ discovery, ingress, nowMs }) {
+function Markets({ discovery, ingress, tape, nowMs }) {
   const [filter, setFilter] = useState("");
   const rows = providerRows(discovery);
   const quotes = ingress?.last_result?.quotes || [];
@@ -388,9 +399,18 @@ function Markets({ discovery, ingress, nowMs }) {
   return (
     <div className="pageGrid">
       <div className="pageIntro">
-        <div><span className="kicker">MARKET INTELLIGENCE</span><h2>Provider universe</h2><p>Catalog visibility is discovery truth. Priority is scheduling only; execution readiness requires a commissioned product, market ingress, strategy evaluation, and the downstream Firm gates.</p></div>
+        <div><span className="kicker">MARKET INTELLIGENCE</span><h2>Provider universe</h2><p>Catalog visibility is execution-provider discovery truth. Independent price authority lives in AETHER Tape; provider availability and Tape-source availability are separate failure domains.</p></div>
         <input className="search" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter instruments…" />
       </div>
+      <Section eyebrow="MARKET DATA PLANE" title="Tape independence" className="wide">
+        <div className="providerStats">
+          <Metric label="Tape runtime" value={supervisorState(tape?.runtime, nowMs)} state={supervisorState(tape?.runtime, nowMs)} />
+          <Metric label="Observed Tape assets" value={num(tape?.summary?.asset_count)} />
+          <Metric label="FULL consensus" value={num(tape?.summary?.state_counts?.FULL, 0, "0")} state={Number(tape?.summary?.state_counts?.FULL || 0) ? "FULL" : "NOT OBSERVED"} />
+          <Metric label="Independent sources" value={num((tape?.source_registry || []).filter((row) => row?.independent === true).length)} />
+        </div>
+        <p className="repairNote">Execution providers below can fail independently. A broker catalog being online does not make its quote the official Tape mark.</p>
+      </Section>
       {rows.map((row) => {
         const items = (row.top100 || []).filter((item) => !filter || String(item.symbol || "").toLowerCase().includes(filter.toLowerCase()));
         return (
@@ -439,6 +459,9 @@ function Tape({ tape, nowMs }) {
   const sources = Array.isArray(tape?.source_registry) ? tape.source_registry : [];
   const summary = tape?.summary || {};
   const states = summary.state_counts || {};
+  const runtime = tape?.runtime || {};
+  const runtimeState = supervisorState(runtime, nowMs);
+  const runtimeProgress = runtime?.progress || {};
   return (
     <div className="pageGrid">
       <div className="pageIntro">
@@ -447,9 +470,12 @@ function Tape({ tape, nowMs }) {
           <h2>AETHER Consensus Tape</h2>
           <p>Independent market truth is reconciled before strategy. Broker/execution-provider health does not define the Tape, and Tape consensus never substitutes for an actual execution fill.</p>
         </div>
-        <Badge value={Number(states.FULL || 0) > 0 ? "FULL" : assets.length ? "DEGRADED" : "NOT OBSERVED"}>
-          {Number(states.FULL || 0) > 0 ? "CONSENSUS ACTIVE" : assets.length ? "CONSENSUS PARTIAL" : "NOT OBSERVED"}
-        </Badge>
+        <div className="heroModes">
+          <Badge value={runtimeState}>{runtimeState}</Badge>
+          <Badge value={Number(states.FULL || 0) > 0 ? "FULL" : assets.length ? "DEGRADED" : "NOT OBSERVED"}>
+            {Number(states.FULL || 0) > 0 ? "CONSENSUS ACTIVE" : assets.length ? "CONSENSUS PARTIAL" : "NOT OBSERVED"}
+          </Badge>
+        </div>
       </div>
 
       <Section eyebrow="CONSENSUS HEALTH" title="Current Tape coverage" className="wide">
@@ -460,6 +486,8 @@ function Tape({ tape, nowMs }) {
           <Metric label="Contested" value={num(states.CONTESTED, 0, "0")} state={Number(states.CONTESTED || 0) ? "CONTESTED" : "CLEAR"} />
           <Metric label="Accepted feeds" value={num(summary.accepted_source_count)} />
           <Metric label="Rejected feeds" value={num(summary.rejected_source_count)} />
+          <Metric label="Tape cycles" value={num(runtime?.cycle_count)} sub={text(runtimeProgress.phase, "idle").replaceAll("_", " ")} />
+          <Metric label="Tape heartbeat" value={age(runtimeProgress.last_progress_at_utc || runtime?.last_cycle_finished_at_utc, nowMs)} />
         </div>
       </Section>
 
@@ -527,7 +555,7 @@ const PIPELINE_TRUE_PREDICATES = {
   CATALOG: "eligible provider row → FOCUS_ADMITTED; provider rank is priority telemetry, not execution permission",
   FOCUS_ADMITTED: "projection.product != null && runtime_playbook_for_product(...) succeeds",
   PRODUCT_BOUND: "full commissioned compatible universe ordered OPEN/attention first; worker concurrency affects scheduling only and assets_dropped=0",
-  ROAMING_SCAN: "binding_blockers == () && product.market_data_ready() && lifecycle_fire_eligible() && decision-time observation is valid",
+  ROAMING_SCAN: "Tape-governed assets require FULL AETHER consensus; otherwise canonical decision-time ingress observation must be valid, with binding/lifecycle gates still enforced",
   MARKET_READY: "history.error is None && source-bound warm-up snapshot assembles successfully",
   HISTORY_READY: "completed trigger bar closes at/before as_of_utc && setup identity has not already completed",
   STRATEGY_EVALUATED: "plan.eligible === true → WATCH; otherwise terminal NO_SETUP evidence",
@@ -721,7 +749,7 @@ const PIPELINE_GATE_BLUEPRINT = [
   },
 ];
 
-function Pipeline({ strategy, discovery, ingress, maintenance, floor, operator, nowMs }) {
+function Pipeline({ strategy, discovery, ingress, tape, maintenance, floor, operator, nowMs }) {
   const pipe = strategy?.last_result?.pipeline || {};
   const registry = strategy?.last_result?.dynamic_product_registry || {};
   const roam = strategy?.last_result?.dynamic_roam || {};
@@ -870,7 +898,10 @@ function Pipeline({ strategy, discovery, ingress, maintenance, floor, operator, 
   const ingressProgress = ingress?.progress || {};
   const discoveryProgress = discovery?.progress || {};
   const strategyProgress = strategy?.progress || {};
-  const pipelineState = pipelineRuntimeState(ingress, discovery, strategy, maintenance, nowMs);
+  const tapeRuntime = tape?.runtime || {};
+  const tapeProgress = tapeRuntime?.progress || {};
+  const tapeStates = tape?.summary?.state_counts || {};
+  const pipelineState = pipelineRuntimeState(ingress, discovery, tape, strategy, maintenance, nowMs);
   const progressRatio = (done, total) => (
     isObservedNumber(done) && isObservedNumber(total)
       ? `${num(done)}/${num(total)}`
@@ -899,6 +930,11 @@ function Pipeline({ strategy, discovery, ingress, maintenance, floor, operator, 
             <span>Discovery agents</span>
             <strong>{supervisorState(discovery, nowMs)} · {text(discoveryProgress.cycle_state, "NOT OBSERVED").replaceAll("_", " ")}</strong>
             <small>Active providers {Array.isArray(discoveryProgress.active_providers) ? (discoveryProgress.active_providers.join(", ") || "none") : "NOT OBSERVED"} · current {text(discoveryProgress.current_provider, "none")} · heartbeat {age(discoveryProgress.last_progress_at_utc || discovery?.last_cycle_finished_at_utc, nowMs)}</small>
+          </div>
+          <div>
+            <span>Tape agent</span>
+            <strong>{supervisorState(tapeRuntime, nowMs)} · {text(tapeProgress.phase, "NOT OBSERVED").replaceAll("_", " ")}</strong>
+            <small>FULL {num(tapeStates.FULL, 0, "0")} · degraded {num(tapeStates.DEGRADED, 0, "0")} · contested {num(tapeStates.CONTESTED, 0, "0")} · heartbeat {age(tapeProgress.last_progress_at_utc || tapeRuntime?.last_cycle_finished_at_utc, nowMs)}</small>
           </div>
           <div>
             <span>Strategy agents</span>
@@ -930,6 +966,15 @@ function Pipeline({ strategy, discovery, ingress, maintenance, floor, operator, 
           <div><span>Crypto regime input</span><strong>btc_kraken_daily still exists in warm-up</strong><small>This is a real code dependency to remove/generalize later, not a UI preference.</small></div>
           <div><span>Telemetry coverage</span><strong>{fullCoverage}/{PIPELINE_GATE_BLUEPRINT.length} gates fully reconcilable</strong><small>Unknown outcomes stay NOT OBSERVED; the UI does not invent zeroes.</small></div>
           <div className={unexplainedTotal ? "constraintFault" : ""}><span>Unexplained flow loss</span><strong>{num(unexplainedTotal)}</strong><small>{unexplainedTotal ? "Observed counts do not reconcile at one or more fully measured gates." : "No unexplained loss in fully measured gates."}</small></div>
+        </div>
+      </Section>
+
+      <Section eyebrow="MARKET TRUTH DEPENDENCY" title="Tape → Gate 04" className="wide">
+        <div className="constraintGrid">
+          <div><span>Tape runtime</span><strong>{supervisorState(tapeRuntime, nowMs)}</strong><small>Independent from Kraken / NinjaTrader / tastyfx / IBKR execution-provider health.</small></div>
+          <div><span>Seed quorum</span><strong>{pipe.tape_seed_required === undefined ? "NOT OBSERVED" : `${num(pipe.tape_seed_ready)}/${num(pipe.tape_seed_required)} ready`}</strong><small>Covered seed assets require FULL consensus before strategy market readiness.</small></div>
+          <div><span>FULL composites</span><strong>{num(tapeStates.FULL, 0, "0")}</strong><small>3+ qualified agreeing independent feeds.</small></div>
+          <div><span>Tape exceptions</span><strong>{num(Number(tapeStates.DEGRADED || 0) + Number(tapeStates.SINGLE_SOURCE || 0) + Number(tapeStates.CONTESTED || 0))}</strong><small>Degraded/single/contested remains visible but cannot silently become seed strategy authority.</small></div>
         </div>
       </Section>
 
@@ -1140,7 +1185,7 @@ function Maintenance({ maintenance }) {
   );
 }
 
-function Settings({ ingress, strategy, discovery, floor, maintenance, onToggle, onRepair, busy, error }) {
+function Settings({ ingress, strategy, discovery, tape, floor, maintenance, onToggle, onRepair, busy, error }) {
   const [token, setToken] = useState("");
   const controls = maintenance?.controls || {};
   const labels = maintenance?.control_labels || {};
@@ -1155,6 +1200,7 @@ function Settings({ ingress, strategy, discovery, floor, maintenance, onToggle, 
           <Metric label="Ingress cadence" value={`${num(ingress?.interval_seconds)}s`} />
           <Metric label="Strategy cadence" value={`${num(strategy?.interval_seconds)}s`} />
           <Metric label="Discovery" value={discovery?.running ? "RUNNING" : "WAIT"} state={discovery?.running ? "GREEN":"WARN"} />
+          <Metric label="Tape" value={supervisorState(tape?.runtime, Date.now())} state={supervisorState(tape?.runtime, Date.now())} sub={isObservedNumber(tape?.runtime?.interval_seconds) ? `${num(tape.runtime.interval_seconds)}s cadence · quorum 3` : "cadence NOT OBSERVED"} />
           <Metric label="Build" value={text(floor?.build?.source_revision?.slice(0,8),"local")} />
         </div>
       </Section>
@@ -1215,15 +1261,15 @@ function Settings({ ingress, strategy, discovery, floor, maintenance, onToggle, 
 
 function AppPage({ active, data, nowMs, onToggle, onRepair, busy, controlError, endpointHealth }) {
   const { floor, ingress, strategy, discovery, operator, maintenance, tape } = data;
-  if (active === "markets") return <Markets discovery={discovery} ingress={ingress} nowMs={nowMs} />;
+  if (active === "markets") return <Markets discovery={discovery} ingress={ingress} tape={tape} nowMs={nowMs} />;
   if (active === "tape") return <Tape tape={tape} nowMs={nowMs} />;
-  if (active === "pipeline") return <Pipeline strategy={strategy} discovery={discovery} ingress={ingress} maintenance={maintenance} floor={floor} operator={operator} nowMs={nowMs} />;
+  if (active === "pipeline") return <Pipeline strategy={strategy} discovery={discovery} ingress={ingress} tape={tape} maintenance={maintenance} floor={floor} operator={operator} nowMs={nowMs} />;
   if (active === "trading") return <TradingFloor strategy={strategy} />;
   if (active === "positions") return <Positions floor={floor} nowMs={nowMs} endpointHealth={endpointHealth} />;
   if (active === "blotter") return <Blotter operator={operator} endpointHealth={endpointHealth} />;
   if (active === "maintenance") return <Maintenance maintenance={maintenance} />;
-  if (active === "settings") return <Settings ingress={ingress} strategy={strategy} discovery={discovery} floor={floor} maintenance={maintenance} onToggle={onToggle} onRepair={onRepair} busy={busy} error={controlError} />;
-  return <CommandCenter floor={floor} ingress={ingress} strategy={strategy} discovery={discovery} operator={operator} maintenance={maintenance} nowMs={nowMs} />;
+  if (active === "settings") return <Settings ingress={ingress} strategy={strategy} discovery={discovery} tape={tape} floor={floor} maintenance={maintenance} onToggle={onToggle} onRepair={onRepair} busy={busy} error={controlError} />;
+  return <CommandCenter floor={floor} ingress={ingress} strategy={strategy} discovery={discovery} tape={tape} operator={operator} maintenance={maintenance} nowMs={nowMs} />;
 }
 
 export default function DashboardPage() {
@@ -1325,7 +1371,7 @@ export default function DashboardPage() {
           </div>
         </header>
 
-        <RuntimeStrip floor={data.floor} ingress={data.ingress} strategy={data.strategy} discovery={data.discovery} maintenance={data.maintenance} nowMs={nowMs} />
+        <RuntimeStrip floor={data.floor} ingress={data.ingress} strategy={data.strategy} discovery={data.discovery} tape={data.tape} maintenance={data.maintenance} nowMs={nowMs} />
 
         {errors.length ? <div className="errorBox"><strong>Telemetry degraded:</strong> {errors.join(", ")} endpoint(s) unavailable. Existing UI state is preserved; no placeholder trade state is invented.</div> : null}
 
