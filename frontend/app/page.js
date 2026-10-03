@@ -178,7 +178,6 @@ function Metric({ label, value, sub, state }) {
 
 function supervisorState(supervisor, nowMs) {
   if (!supervisor) return "NOT OBSERVED";
-  if (supervisor.last_error) return "FAULT";
   if (supervisor.enabled === false) return "OFF";
   if (!isObservedNumber(supervisor.cycle_count) || typeof supervisor.running !== "boolean") return "NOT OBSERVED";
   const cycles = Number(supervisor.cycle_count);
@@ -204,6 +203,9 @@ function supervisorState(supervisor, nowMs) {
     if (Number.isFinite(busyHeartbeat) && nowMs - busyHeartbeat > busyStaleAfterMs) return "STALLED";
     return "BUSY";
   }
+  // Match backend health semantics exactly: a previous-cycle error is not a
+  // current FAULT while a fresh recovery cycle is actively making progress.
+  if (supervisor.last_error) return "FAULT";
   if (cycles === 0) return "STARTING";
   const heartbeat = Number.isFinite(finished)
     ? finished
@@ -373,7 +375,7 @@ function Markets({ discovery, ingress, nowMs }) {
           <Section
             eyebrow={row.catalog_mode === "provider_native" ? "NATIVE CATALOG" : "REFERENCE CATALOG"}
             title={row.provider}
-            action={<Badge value={row.status === "online" ? "ONLINE" : row.status === "NOT OBSERVED" ? "NOT OBSERVED" : "FAULT"}>{String(row.status || "NOT OBSERVED").toUpperCase()}</Badge>}
+            action={<Badge value={row.status === "online" ? "ONLINE" : row.status === "NOT OBSERVED" ? "NOT OBSERVED" : "FAULT"}>{row.status === "online" ? (row.catalog_mode === "provider_native" ? "MARKET DATA ONLINE" : "REFERENCE CATALOG ONLINE") : String(row.status || "NOT OBSERVED").toUpperCase()}</Badge>}
             className="wide"
             key={row.provider}
           >
@@ -397,7 +399,7 @@ function Markets({ discovery, ingress, nowMs }) {
                       : <span>NOT OBSERVED</span>}
                     <span>{money(item.price)}</span>
                     <span>{age(q?.reference_ts_utc, nowMs)}</span>
-                    <Badge value="ACTIVE">PRIORITY</Badge>
+                    <Badge value="PRIORITY">CATALOG PRIORITY</Badge>
                   </div>
                 );
               })}

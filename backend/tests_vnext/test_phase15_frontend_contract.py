@@ -197,3 +197,15 @@ def test_pipeline_surfaces_live_agent_progress_and_uses_progress_heartbeat() -> 
         "State is derived from observed supervisor movement",
     ):
         assert required in page
+
+
+def test_frontend_recovery_state_matches_backend_health_semantics() -> None:
+    root = _repo_root()
+    page = (root / "frontend" / "app" / "page.js").read_text(encoding="utf-8")
+    css = (root / "frontend" / "app" / "globals.css").read_text(encoding="utf-8")
+    busy_index = page.index('return "BUSY";', page.index("function supervisorState"))
+    fault_index = page.index('if (supervisor.last_error) return "FAULT";', page.index("function supervisorState"))
+    assert fault_index > busy_index
+    assert "REFERENCE CATALOG ONLINE" in page
+    assert "CATALOG PRIORITY" in page
+    assert "grid-template-columns:repeat(7,minmax(0,1fr))" in css
