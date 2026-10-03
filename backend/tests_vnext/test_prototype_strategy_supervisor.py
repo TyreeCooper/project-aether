@@ -19,6 +19,7 @@ from aether_vnext.prototype_strategy_supervisor import (
     _focus_priority_asset_ids,
     _ordered_dynamic_strategy_work,
     _sync_dynamic_kraken_products,
+    _successful_strategy_evaluation_count,
     configured_dynamic_strategy_scan_batch_size,
     configured_strategy_enabled,
     configured_strategy_interval_seconds,
@@ -380,3 +381,15 @@ def test_dynamic_flow_telemetry_keeps_waiting_assets_owned() -> None:
     assert flow["wake_condition"] == "worker_slot_available"
     assert flow["assets_dropped"] == 0
     assert flow["priority_is_allowlist"] is False
+
+
+def test_successful_strategy_evaluation_count_excludes_pipeline_faults() -> None:
+    rows = {
+        "sol": {"stage": "NO_SETUP"},
+        "ada": {"stage": "WATCH"},
+        "dot": {"stage": "PIPELINE_ERROR"},
+        "link": {"stage": "EVALUATION_ERROR"},
+        "avax": {"stage": "HISTORY_NOT_READY"},
+        "uni": {"stage": "MARKET_NOT_READY"},
+    }
+    assert _successful_strategy_evaluation_count(rows) == 2

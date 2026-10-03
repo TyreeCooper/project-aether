@@ -10,6 +10,7 @@ from aether_vnext.kraken_ingress_supervisor import (
     KrakenIngressSupervisor,
     _chunks,
     _dynamic_kraken_symbol_map,
+    _fetch_dynamic_chunk_resilient,
     _quote_telemetry,
     _quotes_by_asset,
     configured_dynamic_ingress_batch_size,
@@ -229,3 +230,51 @@ def test_quote_telemetry_accepts_dynamic_provider_symbol() -> None:
     )
     assert payload["asset_id"] == "kraken:solusd"
     assert payload["symbol"] == "SOL/USD"
+
+
+@pytest.mark.asyncio
+async def test_dynamic_chunk_rejection_isolates_bad_symbol_without_losing_peers() -> None:
+    calls = []
+
+    async def fake_fetcher(*, assets, symbol_by_asset, timeout_s):
+        calls.append(tuple(assets))
+        if "bad" in assets:
+            raise RuntimeError("kraken_ticker_subscription_failed:unsupported pair")
+        return type("Batch", (), {"quotes": tuple(assets)})()
+
+    symbols = {"good-a": "A/USD", "bad": "BAD/USD", "good-b": "B/USD"}
+    outcomes = await _fetch_dynamic_chunk_resilient(
+        ("good-a", "bad", "good-b"),
+        dynamic_symbols=symbols,
+        timeout_s=1.0,
+        fetcher=fake_fetcher,
+    )
+
+    successes = [chunk for chunk, batch, error in outcomes if batch is not None and error is None]
+    failures = [chunk for chunk, batch, error in outcomes if batch is None and error is not None]
+    assert ("good-a",) in successes
+    assert ("good-b",) in successes
+    assert failures == [("bad",)]
+    assert ("good-a", "bad", "good-b") in calls
+
+
+@pytest.mark.asyncio
+async def test_dynamic_chunk_timeout_stays_one_batch_error_without_retry_explosion() -> None:
+    calls = []
+
+    async def fake_fetcher(*, assets, symbol_by_asset, timeout_s):
+        calls.append(tuple(assets))
+        raise TimeoutError("provider slow")
+
+    chunk = ("a", "b", "c")
+    outcomes = await _fetch_dynamic_chunk_resilient(
+        chunk,
+        dynamic_symbols={"a": "A/USD", "b": "B/USD", "c": "C/USD"},
+        timeout_s=1.0,
+        fetcher=fake_fetcher,
+    )
+    assert len(outcomes) == 1
+    assert outcomes[0][0] == chunk
+    assert outcomes[0][1] is None
+    assert "TimeoutError" in outcomes[0][2]
+    assert calls == [chunk]
