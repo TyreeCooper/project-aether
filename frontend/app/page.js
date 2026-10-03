@@ -9,6 +9,7 @@ const strategyPath = "/api/v1/vnext/strategy-runtime";
 const operatorPath = "/api/v1/vnext/operator";
 const discoveryPath = "/api/v1/vnext/discovery-runtime";
 const maintenancePath = "/api/v1/vnext/maintenance";
+const tapePath = "/api/v1/vnext/tape";
 
 async function getJson(path) {
   const response = await fetch(`${apiBase}${path}`, { cache: "no-store" });
@@ -98,9 +99,9 @@ function duration(value, nowMs) {
 
 function tone(value) {
   const v = String(value || "").toUpperCase();
-  if (["CLEAR","RUNNING","ONLINE","OPEN","READY","GREEN","ACTIVE"].includes(v)) return "good";
-  if (["FAULT","BLOCKED","HALT","REJECT","ERROR","OFFLINE","STALLED","UNSAFE"].includes(v)) return "bad";
-  if (["DEGRADED","WAIT","WATCH","FIRE","STARTING","SYNCING","BUSY","CATCHING_UP","BASELINE_PENDING","RECOVERY","RECOVERY_BEFORE_BASELINE"].includes(v)) return "warn";
+  if (["CLEAR","RUNNING","ONLINE","OPEN","READY","GREEN","ACTIVE","FULL","HIGH"].includes(v)) return "good";
+  if (["FAULT","BLOCKED","HALT","REJECT","ERROR","OFFLINE","STALLED","UNSAFE","CONTESTED"].includes(v)) return "bad";
+  if (["DEGRADED","SINGLE_SOURCE","CREDENTIAL_REQUIRED","WAIT","WATCH","FIRE","STARTING","SYNCING","BUSY","CATCHING_UP","BASELINE_PENDING","RECOVERY","RECOVERY_BEFORE_BASELINE"].includes(v)) return "warn";
   return "neutral";
 }
 
@@ -111,6 +112,7 @@ function Badge({ children, value }) {
 const NAV = [
   ["command", "Command Center", "Overview"],
   ["markets", "Markets", "Provider universe"],
+  ["tape", "Tape", "Consensus market truth"],
   ["pipeline", "Pipeline", "Flow & diagnostics"],
   ["trading", "Trading Floor", "Opportunities"],
   ["positions", "Positions", "Open risk"],
@@ -428,6 +430,90 @@ function Markets({ discovery, ingress, nowMs }) {
           </Section>
         );
       })}
+    </div>
+  );
+}
+
+function Tape({ tape, nowMs }) {
+  const assets = Array.isArray(tape?.assets) ? tape.assets : [];
+  const sources = Array.isArray(tape?.source_registry) ? tape.source_registry : [];
+  const summary = tape?.summary || {};
+  const states = summary.state_counts || {};
+  return (
+    <div className="pageGrid">
+      <div className="pageIntro">
+        <div>
+          <span className="kicker">AETHER MARKET DATA PLANE</span>
+          <h2>AETHER Consensus Tape</h2>
+          <p>Independent market truth is reconciled before strategy. Broker/execution-provider health does not define the Tape, and Tape consensus never substitutes for an actual execution fill.</p>
+        </div>
+        <Badge value={Number(states.FULL || 0) > 0 ? "FULL" : assets.length ? "DEGRADED" : "NOT OBSERVED"}>
+          {Number(states.FULL || 0) > 0 ? "CONSENSUS ACTIVE" : assets.length ? "CONSENSUS PARTIAL" : "NOT OBSERVED"}
+        </Badge>
+      </div>
+
+      <Section eyebrow="CONSENSUS HEALTH" title="Current Tape coverage" className="wide">
+        <div className="providerStats">
+          <Metric label="Observed assets" value={num(summary.asset_count)} />
+          <Metric label="Full quorum" value={num(states.FULL, 0, "0")} state={Number(states.FULL || 0) ? "FULL" : "NOT OBSERVED"} />
+          <Metric label="Degraded" value={num(states.DEGRADED, 0, "0")} state={Number(states.DEGRADED || 0) ? "DEGRADED" : "CLEAR"} />
+          <Metric label="Contested" value={num(states.CONTESTED, 0, "0")} state={Number(states.CONTESTED || 0) ? "CONTESTED" : "CLEAR"} />
+          <Metric label="Accepted feeds" value={num(summary.accepted_source_count)} />
+          <Metric label="Rejected feeds" value={num(summary.rejected_source_count)} />
+        </div>
+      </Section>
+
+      <Section eyebrow="SOURCE REGISTRY" title="Independent Tape dependencies" className="wide">
+        <div className="marketTable">
+          <div className="marketHead"><span>Source</span><span>Provider</span><span>Market</span><span>Implemented</span><span>Configured</span><span>Independent</span><span>State</span></div>
+          {sources.map((row) => (
+            <div className="marketRow" key={row.source_id}>
+              <strong>{text(row.source_id)}</strong>
+              <span>{text(row.provider)}</span>
+              <span>{text(row.market).replaceAll("_", " ")}</span>
+              <span>{row.implemented === true ? "YES" : row.implemented === false ? "NO" : "NOT OBSERVED"}</span>
+              <span>{row.configured === true ? "YES" : row.configured === false ? "NO" : "NOT OBSERVED"}</span>
+              <span>{row.independent === true ? "YES" : row.independent === false ? "NO" : "NOT OBSERVED"}</span>
+              <Badge value={row.state}>{text(row.state, "NOT OBSERVED")}</Badge>
+            </div>
+          ))}
+          {!sources.length ? <div className="empty">Tape source registry NOT OBSERVED.</div> : null}
+        </div>
+      </Section>
+
+      <Section eyebrow="OFFICIAL TAPE" title="Composite market truth" className="wide">
+        <div className="marketTable">
+          <div className="marketHead"><span>Instrument</span><span>Composite</span><span>State</span><span>Sources</span><span>Quorum</span><span>Agreement</span><span>Oldest source</span></div>
+          {assets.map((row) => (
+            <div className="marketRow" key={row.composite_id || row.asset_id}>
+              <strong>{text(row.asset_id)}</strong>
+              <span>{num(row.composite_mark, 6)}</span>
+              <Badge value={row.state}>{text(row.state, "NOT OBSERVED")}</Badge>
+              <span>{num(row.source_count)}</span>
+              <span>{isObservedNumber(row.source_count) && isObservedNumber(row.quorum_required) ? (num(row.source_count) + "/" + num(row.quorum_required)) : "NOT OBSERVED"}</span>
+              <span>{isObservedNumber(row.agreement_bps) ? (num(row.agreement_bps, 3) + " bps") : "NOT OBSERVED"}</span>
+              <span>{isObservedNumber(row.max_source_age_ms) ? (num(row.max_source_age_ms) + " ms") : "NOT OBSERVED"}</span>
+            </div>
+          ))}
+          {!assets.length ? <div className="empty">No persisted Tape composite has been observed yet. No price or zero is invented.</div> : null}
+        </div>
+        <p className="repairNote">FULL requires the reviewed independent-source quorum. CONTESTED and NOT OBSERVED do not publish an authoritative composite mark. Execution-provider prices remain separate for Clerk/fill validation.</p>
+      </Section>
+
+      <Section eyebrow="PROVENANCE" title="Latest constituent observations" className="wide">
+        <div className="eventList">
+          {assets.flatMap((asset) => (asset.sources || []).map((row) => ({ ...row, asset_id: asset.asset_id }))).slice(0, 60).map((row) => (
+            <div className="eventRow" key={row.observation_id}>
+              <time>{age(row.received_ts, nowMs)}</time>
+              <div>
+                <strong>{text(row.asset_id)} · {text(row.source_id)} · {num(row.mark, 6)}</strong>
+                <span>{text(row.quality)} · {text(row.source_symbol)} · {text(row.source_ref)}</span>
+              </div>
+            </div>
+          ))}
+          {!assets.some((asset) => Array.isArray(asset.sources) && asset.sources.length) ? <div className="empty">Constituent Tape observations NOT OBSERVED.</div> : null}
+        </div>
+      </Section>
     </div>
   );
 }
@@ -1128,8 +1214,9 @@ function Settings({ ingress, strategy, discovery, floor, maintenance, onToggle, 
 }
 
 function AppPage({ active, data, nowMs, onToggle, onRepair, busy, controlError, endpointHealth }) {
-  const { floor, ingress, strategy, discovery, operator, maintenance } = data;
+  const { floor, ingress, strategy, discovery, operator, maintenance, tape } = data;
   if (active === "markets") return <Markets discovery={discovery} ingress={ingress} nowMs={nowMs} />;
+  if (active === "tape") return <Tape tape={tape} nowMs={nowMs} />;
   if (active === "pipeline") return <Pipeline strategy={strategy} discovery={discovery} ingress={ingress} maintenance={maintenance} floor={floor} operator={operator} nowMs={nowMs} />;
   if (active === "trading") return <TradingFloor strategy={strategy} />;
   if (active === "positions") return <Positions floor={floor} nowMs={nowMs} endpointHealth={endpointHealth} />;
@@ -1141,7 +1228,7 @@ function AppPage({ active, data, nowMs, onToggle, onRepair, busy, controlError, 
 
 export default function DashboardPage() {
   const [active, setActive] = useState("command");
-  const [data, setData] = useState({ floor:null, ingress:null, strategy:null, operator:null, discovery:null, maintenance:null });
+  const [data, setData] = useState({ floor:null, ingress:null, strategy:null, operator:null, discovery:null, maintenance:null, tape:null });
   const [errors, setErrors] = useState([]);
   const [endpointHealth, setEndpointHealth] = useState({});
   const [nowMs, setNowMs] = useState(()=>Date.now());
@@ -1158,10 +1245,10 @@ export default function DashboardPage() {
     const load=async()=>{
       const results=await Promise.allSettled([
         getJson(floorPath), getJson(ingressPath), getJson(strategyPath),
-        getJson(operatorPath), getJson(discoveryPath), getJson(maintenancePath),
+        getJson(operatorPath), getJson(discoveryPath), getJson(maintenancePath), getJson(tapePath),
       ]);
       if(!mounted)return;
-      const keys=["floor","ingress","strategy","operator","discovery","maintenance"];
+      const keys=["floor","ingress","strategy","operator","discovery","maintenance","tape"];
       const next={}; const nextErrors=[]; const health={};
       results.forEach((r,i)=>{
         if(r.status==="fulfilled") { next[keys[i]]=r.value; health[keys[i]]="live"; }
