@@ -111,6 +111,7 @@ class DynamicStrategyHistory:
     kraken_hourly: tuple[PrototypeMarketBar, ...]
     kraken_daily: tuple[PrototypeMarketBar, ...]
     error: str | None
+    source_gaps: tuple[str, ...] = ()
 
 
 class PrototypeStrategySupervisor:
@@ -556,6 +557,7 @@ async def _fetch_dynamic_strategy_history(
     coinbase_products: Mapping[tuple[str, str], str],
     end_at_utc: datetime,
     fetch_coinbase_warmup: bool,
+    coinbase_catalog_error: str | None = None,
 ) -> DynamicStrategyHistory:
     """Fetch one dynamic asset's history without allowing it to fail the cycle."""
     asset_id = str(product.asset_id).strip().lower()
@@ -574,22 +576,23 @@ async def _fetch_dynamic_strategy_history(
         )
 
     coinbase_product = coinbase_products.get((base, "USD"))
+    source_gaps: tuple[str, ...] = ()
+    use_coinbase_warmup = fetch_coinbase_warmup and bool(coinbase_product)
     if fetch_coinbase_warmup and not coinbase_product:
-        return DynamicStrategyHistory(
-            asset_id=asset_id,
-            coinbase_product=None,
-            coinbase_hourly=(),
-            kraken_hourly=(),
-            kraken_daily=(),
-            error="coinbase_warmup_product_unavailable",
+        source_gaps = (
+            (
+                "coinbase_catalog_error:" + coinbase_catalog_error
+                if coinbase_catalog_error
+                else "coinbase_warmup_product_unavailable"
+            ),
         )
 
     try:
-        if fetch_coinbase_warmup:
+        if use_coinbase_warmup:
             coinbase_hourly, kraken_hourly, kraken_daily = await asyncio.gather(
                 fetch_coinbase_hourly_history(
                     asset_id=asset_id,
-                    coinbase_product=coinbase_product,
+                    coinbase_product=str(coinbase_product),
                     end_at_utc=end_at_utc,
                     minimum_bars=2200,
                 ),
@@ -605,6 +608,10 @@ async def _fetch_dynamic_strategy_history(
                 ),
             )
         else:
+            # Coinbase is historical backfill, not admission permission. A
+            # commissioned Kraken product with no Coinbase USD listing still gets
+            # its direct Kraken history and lets the warm-up assembler decide
+            # whether the observed bars are sufficient.
             kraken_hourly, kraken_daily = await asyncio.gather(
                 fetch_kraken_completed_hourly(
                     asset_id=asset_id,
@@ -635,6 +642,7 @@ async def _fetch_dynamic_strategy_history(
         kraken_hourly=tuple(kraken_hourly),
         kraken_daily=tuple(kraken_daily),
         error=None,
+        source_gaps=source_gaps,
     )
 
 
@@ -906,6 +914,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         coinbase_products=coinbase_catalog,
                         end_at_utc=as_of_utc,
                         fetch_coinbase_warmup=needs_warmup,
+                        coinbase_catalog_error=coinbase_catalog_error,
                     )
                 finally:
                     history_fetch_completed += 1
@@ -933,19 +942,6 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     kraken_hourly=(),
                     kraken_daily=(),
                     error=None,
-                )
-                continue
-            if needs_warmup and coinbase_catalog_error is not None:
-                history_by_asset[product.asset_id] = DynamicStrategyHistory(
-                    asset_id=product.asset_id,
-                    coinbase_product=None,
-                    coinbase_hourly=(),
-                    kraken_hourly=(),
-                    kraken_daily=(),
-                    error=(
-                        "coinbase_catalog_error:"
-                        + coinbase_catalog_error
-                    ),
                 )
                 continue
             history_tasks.append(fetch_bounded(product, needs_warmup=needs_warmup))
@@ -1359,6 +1355,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                                 feature.volatility.percentile
                             ),
                             "coinbase_product": history.coinbase_product,
+                            "history_source_gaps": list(history.source_gaps),
                         }
                         if advanced.stage == "NO_SETUP":
                             observation_new = (
