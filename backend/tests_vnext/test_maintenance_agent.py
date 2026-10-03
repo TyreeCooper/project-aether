@@ -1,5 +1,7 @@
 from __future__ import annotations
 from pathlib import Path
+import pytest
+import aether_vnext.maintenance_agent as maintenance_agent
 from aether_vnext.maintenance_agent import (
     CONTROL_DEFAULTS,
     MaintenanceIdleTimeout,
@@ -149,8 +151,6 @@ def test_maintenance_idle_timeout_has_bounded_configuration(monkeypatch) -> None
     monkeypatch.setenv("AETHER_VNEXT_MAINTENANCE_IDLE_TIMEOUT_SECONDS","15")
     assert configured_maintenance_idle_timeout_seconds()==15
     monkeypatch.setenv("AETHER_VNEXT_MAINTENANCE_IDLE_TIMEOUT_SECONDS","2")
-    import pytest
-import aether_vnext.maintenance_agent as maintenance_agent
     with pytest.raises(ValueError,match="3..60"):
         configured_maintenance_idle_timeout_seconds()
 
