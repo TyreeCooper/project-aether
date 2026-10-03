@@ -220,7 +220,7 @@ def test_frontend_distinguishes_catalog_from_runtime_universes() -> None:
         "Catalog → commissioned → active work",
         "Kraken commissioned",
         "Current roaming workset",
-        "Floor seed registry",
+        "Floor runtime registry",
         "Catalog-visible ≠ commissioned ≠ market-ready ≠ setup-qualified.",
         "NATIVE CATALOG ONLINE",
         "REFERENCE CATALOG ONLINE",

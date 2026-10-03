@@ -315,7 +315,7 @@ function CommandCenter({ floor, ingress, strategy, discovery, operator, maintena
           <div><span>Kraken commissioned</span><strong>{pipe.dynamic_kraken_available === undefined ? "NOT OBSERVED" : num(pipe.dynamic_kraken_available)}</strong><small>Runtime-bound products with the current commissioned strategy route.</small></div>
           <div><span>Current roaming workset</span><strong>{pipe.roaming_batch === undefined ? "NOT OBSERVED" : num(pipe.roaming_batch)}</strong><small>All commissioned products remain owned; worker concurrency schedules I/O only.</small></div>
           <div><span>Market ready this cycle</span><strong>{pipe.market_ready === undefined ? "NOT OBSERVED" : num(pipe.market_ready)}</strong><small>Executable market evidence observed this cycle.</small></div>
-          <div><span>Floor seed registry</span><strong>{Array.isArray(floor?.full_universe) ? num(universe.length) : "NOT OBSERVED"}</strong><small>Compatibility Floor projection; not the provider catalog.</small></div>
+          <div><span>Floor runtime registry</span><strong>{Array.isArray(floor?.full_universe) ? num(universe.length) : "NOT OBSERVED"}</strong><small>Seed + commissioned dynamic products; not the provider catalog.</small></div>
         </div>
         <p className="universeTruth">Catalog-visible ≠ commissioned ≠ market-ready ≠ setup-qualified. AETHER keeps these populations separate so a large provider catalog cannot be mistaken for trade permission.</p>
       </Section>
