@@ -533,11 +533,11 @@ jobs:
           assert health.get("pipeline_state") not in {"BLOCKED", "STALLED", "DEGRADED"}, health
           assert tape_second.get("paper_only") is True, tape_second
           assert tape_second.get("live_blocked") is True, tape_second
-          assert any(
-              isinstance(row, dict) and row.get("state") == "FULL"
-              for row in (tape_second.get("assets") or [])
-          ), tape_second
 
+          # Tape quorum is market-data readiness, not deployment validity. A temporary
+          # external-source outage must remain fail-closed for strategy admission, but
+          # it must not falsely mark an exact-revision PAPER deployment as failed.
+          # Supervisor movement below still proves the Tape lane is operating.
           proof={
               "ingress": assert_moving("ingress", ingress_first, ingress_second),
               "strategy": assert_moving("strategy", strategy_first, strategy_second),
@@ -548,6 +548,7 @@ jobs:
                       if isinstance(row, dict) and row.get("state") == "FULL"
                   ),
                   "asset_count": len(tape_second.get("assets") or []),
+                  "state_counts": (tape_second.get("summary") or {}).get("state_counts") or {},
               },
               "discovery": {
                   "cycle_count": int(discovery.get("cycle_count") or 0),
