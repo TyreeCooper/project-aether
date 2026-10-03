@@ -32,6 +32,14 @@ class TapeConsensusState(StrEnum):
     NOT_OBSERVED = "NOT_OBSERVED"
 
 
+class TapeConfidence(StrEnum):
+    HIGH = "HIGH"
+    MEDIUM = "MEDIUM"
+    LOW = "LOW"
+    CONTESTED = "CONTESTED"
+    NONE = "NONE"
+
+
 @dataclass(frozen=True, slots=True)
 class TapeSourceObservation:
     observation_id: str
@@ -139,6 +147,16 @@ class TapeCompositeObservation:
             raise ValueError("CONTESTED cannot publish an executable composite mark")
         if self.source_count > MAX_TAPE_SOURCES:
             raise ValueError("Tape supports at most five accepted sources")
+
+    @property
+    def confidence(self) -> TapeConfidence:
+        return {
+            TapeConsensusState.FULL: TapeConfidence.HIGH,
+            TapeConsensusState.DEGRADED: TapeConfidence.MEDIUM,
+            TapeConsensusState.SINGLE_SOURCE: TapeConfidence.LOW,
+            TapeConsensusState.CONTESTED: TapeConfidence.CONTESTED,
+            TapeConsensusState.NOT_OBSERVED: TapeConfidence.NONE,
+        }[self.state]
 
     @property
     def can_authorize_execution(self) -> bool:

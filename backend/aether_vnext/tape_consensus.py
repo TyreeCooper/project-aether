@@ -3,10 +3,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from statistics import median
+import hashlib
+import json
+from statistics import mean, median
 from typing import Sequence
 
 from aether_vnext.tape import (
+    TapeCompositeObservation,
     TapeConsensusState,
     TapeSourceObservation,
     TapeSourceQuality,
@@ -267,4 +270,83 @@ def decide_tape_consensus(
         qualification_rejections=qualification.rejected,
         agreement_bps=agreement_bps,
         max_source_age_ms=max_age,
+    )
+
+
+def build_tape_composite(
+    decision: TapeConsensusDecision,
+    *,
+    policy: TapeQuorumPolicy,
+    observed_at_utc: datetime,
+) -> TapeCompositeObservation:
+    """Publish one provenance-complete Tape output from an already reconciled decision."""
+    if observed_at_utc.tzinfo is None:
+        raise ValueError("observed_at_utc must be timezone-aware")
+
+    inlier_marks = tuple(
+        float(row.mark) for row in decision.inliers if row.mark is not None
+    )
+    publish_mark = decision.state not in {
+        TapeConsensusState.CONTESTED,
+        TapeConsensusState.NOT_OBSERVED,
+    }
+    composite_mark = (
+        float(mean(inlier_marks))
+        if publish_mark and inlier_marks
+        else None
+    )
+
+    all_rejections = (
+        *decision.qualification_rejections,
+        *decision.outliers,
+    )
+    accepted_source_ids = tuple(row.source_id for row in decision.inliers)
+    rejected_source_ids = tuple(
+        sorted({row.source_id for row in all_rejections})
+    )
+    source_observation_ids = tuple(
+        sorted({
+            *(row.observation_id for row in decision.inliers),
+            *(row.observation_id for row in all_rejections),
+        })
+    )
+
+    identity = {
+        "asset_id": decision.asset_id,
+        "observed_at_utc": observed_at_utc.isoformat(),
+        "state": decision.state.value,
+        "composite_mark": composite_mark,
+        "median_mark": decision.median_mark,
+        "accepted_source_ids": accepted_source_ids,
+        "rejected_source_ids": rejected_source_ids,
+        "source_observation_ids": source_observation_ids,
+        "quorum_required": policy.required_quorum,
+        "agreement_bps": decision.agreement_bps,
+    }
+    composite_id = hashlib.sha256(
+        json.dumps(
+            identity,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+    return TapeCompositeObservation(
+        composite_id=composite_id,
+        asset_id=decision.asset_id,
+        observed_at_utc=observed_at_utc,
+        state=decision.state,
+        composite_mark=composite_mark,
+        median_mark=decision.median_mark,
+        accepted_source_ids=accepted_source_ids,
+        rejected_source_ids=rejected_source_ids,
+        source_observation_ids=source_observation_ids,
+        source_count=len(decision.inliers),
+        quorum_required=policy.required_quorum,
+        max_source_age_ms=decision.max_source_age_ms,
+        agreement_bps=decision.agreement_bps,
+        provenance_complete=(
+            len(source_observation_ids)
+            == len(decision.inliers) + len(all_rejections)
+        ),
     )

@@ -10,6 +10,7 @@ from aether_vnext.tape import (
     TapeSourceQuality,
 )
 from aether_vnext.tape_consensus import (
+    build_tape_composite,
     decide_tape_consensus,
     qualify_tape_sources,
 )
@@ -169,3 +170,59 @@ def test_single_qualified_source_stays_single_source() -> None:
     decision = _decision(_obs("a", mark=6800.00))
     assert decision.state is TapeConsensusState.SINGLE_SOURCE
     assert len(decision.inliers) == 1
+
+
+def test_composite_is_mean_of_inliers_only_after_outlier_rejection() -> None:
+    decision = _decision(
+        _obs("a", mark=6800.00),
+        _obs("b", mark=6800.25),
+        _obs("c", mark=6800.50),
+        _obs("d", mark=6800.25),
+        _obs("bad", mark=6500.00),
+    )
+    composite = build_tape_composite(
+        decision,
+        policy=POLICY,
+        observed_at_utc=NOW,
+    )
+    assert composite.state is TapeConsensusState.FULL
+    assert composite.composite_mark == pytest.approx(
+        (6800.00 + 6800.25 + 6800.50 + 6800.25) / 4
+    )
+    assert "bad" in composite.rejected_source_ids
+    assert composite.source_count == 4
+    assert composite.quorum_required == 3
+    assert composite.provenance_complete is True
+    assert composite.confidence.value == "HIGH"
+    assert composite.can_authorize_execution is False
+
+
+def test_contested_sources_never_publish_averaged_mark() -> None:
+    decision = _decision(
+        _obs("a", mark=6800.00),
+        _obs("b", mark=6800.25),
+        _obs("c", mark=7000.00),
+    )
+    composite = build_tape_composite(
+        decision,
+        policy=POLICY,
+        observed_at_utc=NOW,
+    )
+    assert composite.state is TapeConsensusState.CONTESTED
+    assert composite.composite_mark is None
+    assert composite.confidence.value == "CONTESTED"
+
+
+def test_two_source_composite_is_visible_but_only_medium_confidence() -> None:
+    decision = _decision(
+        _obs("a", mark=6800.00),
+        _obs("b", mark=6800.25),
+    )
+    composite = build_tape_composite(
+        decision,
+        policy=POLICY,
+        observed_at_utc=NOW,
+    )
+    assert composite.state is TapeConsensusState.DEGRADED
+    assert composite.composite_mark == pytest.approx(6800.125)
+    assert composite.confidence.value == "MEDIUM"
