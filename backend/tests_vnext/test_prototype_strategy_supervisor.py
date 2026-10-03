@@ -76,6 +76,8 @@ async def test_strategy_supervisor_repeats_and_stops() -> None:
     assert status.last_error is None
     assert status.paper_only is True
     assert status.live_blocked is True
+    assert isinstance(status.progress, dict)
+    assert "cycle_state" in status.progress
     await supervisor.stop()
     assert supervisor.status().running is False
 

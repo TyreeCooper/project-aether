@@ -126,6 +126,8 @@ async def test_supervisor_runs_repeated_market_only_cycles_and_stops() -> None:
     assert status.last_error is None
     assert status.paper_only is True
     assert status.live_blocked is True
+    assert isinstance(status.progress, dict)
+    assert "cycle_state" in status.progress
 
     await supervisor.stop()
     assert supervisor.status().running is False

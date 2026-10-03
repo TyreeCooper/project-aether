@@ -13,6 +13,7 @@ The supervisor:
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import os
@@ -59,6 +60,30 @@ UTC = timezone.utc
 SANDBOX_SESSION_ID = "aether-sandbox"
 ASSETS = ("btc", "eth")
 CycleRunner = Callable[[], Awaitable[dict[str, object]]]
+_STRATEGY_PROGRESS: dict[str, object] = {
+    "cycle_state": "idle",
+    "phase": "idle",
+    "cycle_started_at_utc": None,
+    "last_progress_at_utc": None,
+    "work_candidate_count": None,
+    "history_fetch_total": None,
+    "history_fetch_completed": 0,
+    "history_cache_hits": 0,
+    "worker_concurrency": None,
+}
+
+
+def _publish_strategy_progress(**updates: object) -> None:
+    global _STRATEGY_PROGRESS
+    _STRATEGY_PROGRESS = {
+        **_STRATEGY_PROGRESS,
+        **updates,
+        "last_progress_at_utc": datetime.now(UTC).isoformat(),
+    }
+
+
+def strategy_progress_payload() -> dict[str, object]:
+    return deepcopy(_STRATEGY_PROGRESS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +98,7 @@ class PrototypeStrategySupervisorStatus:
     last_cycle_finished_at_utc: str | None
     last_error: str | None
     last_result: dict[str, object] | None
+    progress: dict[str, object]
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +150,7 @@ class PrototypeStrategySupervisor:
             ),
             last_error=self._last_error,
             last_result=self._last_result,
+            progress=strategy_progress_payload(),
         )
 
     async def start(self) -> None:
@@ -617,6 +644,16 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
         raise RuntimeError("sandbox strategy safety invariant failed")
 
     as_of_utc = datetime.now(UTC)
+    _publish_strategy_progress(
+        cycle_state="running",
+        phase="seed_history",
+        cycle_started_at_utc=as_of_utc.isoformat(),
+        work_candidate_count=None,
+        history_fetch_total=None,
+        history_fetch_completed=0,
+        history_cache_hits=0,
+        worker_concurrency=configured_dynamic_strategy_scan_batch_size(),
+    )
     focused_asset_ids = current_deep_trade_focus_asset_ids()
     focus_snapshot = current_provider_focus_snapshot()
     store = VNextStore(schema="aether_vnext")
@@ -646,6 +683,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
         "dynamic_assets": {},
     }
 
+    _publish_strategy_progress(phase="plan_universe")
     async with open_vnext_engine() as engine:
         # First transaction: persist current provider truth and plan this roaming slice.
         async with engine.begin() as connection:
@@ -742,18 +780,24 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                 dynamic_attention_ids,
             ) = await connection.run_sync(prepare)
 
+        cache_hit_count = sum(
+            1
+            for product in dynamic_batch
+            if dynamic_warmup_cached.get(product.asset_id, False)
+            and dynamic_kraken_history_cached.get(product.asset_id, False)
+        )
+        _publish_strategy_progress(
+            phase="history",
+            work_candidate_count=len(dynamic_batch),
+            history_cache_hits=cache_hit_count,
+        )
         result["dynamic_product_registry"] = registry_status
         result["dynamic_roam"] = {
             "available": len(dynamic_products),
             "worker_concurrency": configured_dynamic_strategy_scan_batch_size(),
             "configured_worker_concurrency_range": {"minimum": 1, "maximum": 20},
             "work_candidate_count": len(dynamic_batch),
-            "history_cache_hit_count": sum(
-                1
-                for product in dynamic_batch
-                if dynamic_warmup_cached.get(product.asset_id, False)
-                and dynamic_kraken_history_cached.get(product.asset_id, False)
-            ),
+            "history_cache_hit_count": cache_hit_count,
             "work_candidate_asset_ids": [row.asset_id for row in dynamic_batch],
             "open_priority_asset_ids": list(dynamic_open_ids),
             "attention_priority_asset_ids": list(dynamic_attention_ids),
@@ -787,15 +831,23 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
         )
         history_tasks = []
         history_semaphore = asyncio.Semaphore(configured_dynamic_strategy_scan_batch_size())
+        history_fetch_completed = 0
 
         async def fetch_bounded(product, *, needs_warmup):
+            nonlocal history_fetch_completed
             async with history_semaphore:
-                return await _fetch_dynamic_strategy_history(
-                    product,
-                    coinbase_products=coinbase_catalog,
-                    end_at_utc=as_of_utc,
-                    fetch_coinbase_warmup=needs_warmup,
-                )
+                try:
+                    return await _fetch_dynamic_strategy_history(
+                        product,
+                        coinbase_products=coinbase_catalog,
+                        end_at_utc=as_of_utc,
+                        fetch_coinbase_warmup=needs_warmup,
+                    )
+                finally:
+                    history_fetch_completed += 1
+                    _publish_strategy_progress(
+                        history_fetch_completed=history_fetch_completed,
+                    )
 
         for product in fetchable_products:
             needs_warmup = not dynamic_warmup_cached.get(
@@ -833,12 +885,17 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                 )
                 continue
             history_tasks.append(fetch_bounded(product, needs_warmup=needs_warmup))
+        _publish_strategy_progress(
+            history_fetch_total=len(history_tasks),
+            history_fetch_completed=0,
+        )
         if history_tasks:
             histories = await asyncio.gather(*history_tasks)
             history_by_asset.update(
                 {row.asset_id: row for row in histories}
             )
 
+        _publish_strategy_progress(phase="evaluate")
         # Second transaction: persist history and execute every eligible scan item.
         async with engine.begin() as connection:
             def cycle(sync_conn):
@@ -1376,6 +1433,11 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
 
             await connection.run_sync(cycle)
 
+    _publish_strategy_progress(
+        cycle_state="complete",
+        phase="idle",
+        completed_at_utc=datetime.now(UTC).isoformat(),
+    )
     return result
 
 

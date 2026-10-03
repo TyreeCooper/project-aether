@@ -11,6 +11,7 @@ recorded as ingress-attempt blockers rather than bypassed.
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import os
@@ -31,6 +32,29 @@ CycleRunner = Callable[[], Awaitable[dict[str, object]]]
 CRYPTO_ASSETS = ("btc", "eth")
 
 _MAINTENANCE_QUARANTINED_SYMBOLS: set[str] = set()
+_INGRESS_PROGRESS: dict[str, object] = {
+    "cycle_state": "idle",
+    "phase": "idle",
+    "cycle_started_at_utc": None,
+    "last_progress_at_utc": None,
+    "eligible_asset_count": None,
+    "dynamic_chunk_count": None,
+    "completed_dynamic_chunk_count": 0,
+    "processed_asset_count": 0,
+}
+
+
+def _publish_ingress_progress(**updates: object) -> None:
+    global _INGRESS_PROGRESS
+    _INGRESS_PROGRESS = {
+        **_INGRESS_PROGRESS,
+        **updates,
+        "last_progress_at_utc": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def ingress_progress_payload() -> dict[str, object]:
+    return deepcopy(_INGRESS_PROGRESS)
 
 
 def maintenance_quarantine_symbols(symbols: Sequence[str]) -> tuple[str, ...]:
@@ -59,6 +83,7 @@ class KrakenIngressSupervisorStatus:
     last_cycle_finished_at_utc: str | None
     last_error: str | None
     last_result: dict[str, object] | None
+    progress: dict[str, object]
 
 
 class KrakenIngressSupervisor:
@@ -100,6 +125,7 @@ class KrakenIngressSupervisor:
             ),
             last_error=self._last_error,
             last_result=self._last_result,
+            progress=ingress_progress_payload(),
         )
 
     async def start(self) -> None:
@@ -245,6 +271,15 @@ def _chunks(values: tuple[str, ...], size: int) -> tuple[tuple[str, ...], ...]:
 async def run_configured_kraken_ingress_cycle() -> dict[str, object]:
     """Ingest seed plus verified dynamic Kraken BBO using bounded subscriptions."""
     store = VNextStore(schema="aether_vnext")
+    _publish_ingress_progress(
+        cycle_state="running",
+        phase="load_registry",
+        cycle_started_at_utc=datetime.now(timezone.utc).isoformat(),
+        eligible_asset_count=None,
+        dynamic_chunk_count=None,
+        completed_dynamic_chunk_count=0,
+        processed_asset_count=0,
+    )
     results: list[dict[str, object]] = []
     all_quotes: list[object] = []
     batch_errors: list[dict[str, object]] = []
@@ -261,6 +296,11 @@ async def run_configured_kraken_ingress_cycle() -> dict[str, object]:
             **dynamic_symbols,
         }
 
+        _publish_ingress_progress(
+            phase="seed_quote",
+            eligible_asset_count=len(CRYPTO_ASSETS) + len(dynamic_symbols),
+        )
+
         # Keep the canonical seed lane isolated so a dynamic subscription problem
         # can never starve BTC/ETH market truth.
         seed_batch = await fetch_kraken_public_tickers(
@@ -276,10 +316,17 @@ async def run_configured_kraken_ingress_cycle() -> dict[str, object]:
         )
         dynamic_worker_concurrency = configured_dynamic_ingress_worker_concurrency()
         dynamic_semaphore = asyncio.Semaphore(dynamic_worker_concurrency)
+        completed_dynamic_chunks = 0
+        _publish_ingress_progress(
+            phase="dynamic_quote",
+            dynamic_chunk_count=len(dynamic_chunks),
+            completed_dynamic_chunk_count=0,
+        )
 
         async def fetch_dynamic_chunk(
             chunk: tuple[str, ...],
         ) -> tuple[tuple[str, ...], object | None, str | None]:
+            nonlocal completed_dynamic_chunks
             chunk_symbols = {asset: dynamic_symbols[asset] for asset in chunk}
             async with dynamic_semaphore:
                 try:
@@ -291,6 +338,11 @@ async def run_configured_kraken_ingress_cycle() -> dict[str, object]:
                     return chunk, batch, None
                 except Exception as exc:
                     return chunk, None, f"{type(exc).__name__}:{exc}"
+                finally:
+                    completed_dynamic_chunks += 1
+                    _publish_ingress_progress(
+                        completed_dynamic_chunk_count=completed_dynamic_chunks,
+                    )
 
         # Dynamic provider I/O is bounded-concurrent. Eligibility remains the full
         # commissioned universe; worker capacity controls only simultaneous sockets.
@@ -317,6 +369,10 @@ async def run_configured_kraken_ingress_cycle() -> dict[str, object]:
         # only that asset's quote set rather than rescanning the full provider
         # payload for every asset.
         ingress_decision_at_utc = datetime.now(timezone.utc)
+        _publish_ingress_progress(
+            phase="persist_ingress",
+            processed_asset_count=0,
+        )
 
         def persist_ingress_cycle(sync_conn):
             cycle_results = []
@@ -336,6 +392,9 @@ async def run_configured_kraken_ingress_cycle() -> dict[str, object]:
         async with engine.begin() as connection:
             ingress_results = await connection.run_sync(persist_ingress_cycle)
 
+        _publish_ingress_progress(
+            processed_asset_count=len(ingress_results),
+        )
         for result in ingress_results:
             results.append(
                 {
@@ -351,6 +410,11 @@ async def run_configured_kraken_ingress_cycle() -> dict[str, object]:
                 }
             )
 
+    _publish_ingress_progress(
+        cycle_state="complete",
+        phase="idle",
+        completed_at_utc=datetime.now(timezone.utc).isoformat(),
+    )
     return {
         "provider": "kraken_public",
         "status_system": seed_batch.status_system,
