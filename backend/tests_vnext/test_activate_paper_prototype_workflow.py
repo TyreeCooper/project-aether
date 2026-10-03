@@ -67,3 +67,14 @@ def test_activation_does_not_fail_deployment_on_live_pipeline_condition() -> Non
     assert "strategy_ready=0" not in runtime_section
     assert 'result["pipeline_health"]="BLOCKED"' in runtime_section
     assert "pipeline-health.json" in runtime_section
+
+
+
+def test_activation_accepts_fresh_recovery_progress_but_not_static_prior_error() -> None:
+    workflow = _workflow()
+
+    assert "recovering_from_previous_error" in workflow
+    assert 'b["progress_state"] == "running"' in workflow
+    assert 'b["progress_heartbeat"] != a["progress_heartbeat"]' in workflow
+    assert 'assert after.get("last_error") is None or recovering, after' in workflow
+    assert 'assert after.get("last_error") is None, after' not in workflow

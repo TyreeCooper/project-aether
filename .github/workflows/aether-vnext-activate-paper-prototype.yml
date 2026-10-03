@@ -388,15 +388,25 @@ jobs:
               },
               "floor_available": bool(floor),
           }
-          if (
+          def actively_recovering(payload):
+              progress=payload.get("progress") or {}
+              return (
+                  payload.get("running") is True
+                  and progress.get("cycle_state") == "running"
+                  and bool(progress.get("last_progress_at_utc"))
+              )
+
+          ingress_ok=(
               ingress.get("running") is True
-              and ingress.get("last_error") is None
-              and executable > 0
-              and strategy.get("running") is True
-              and strategy.get("last_error") is None
-          ):
+              and (ingress.get("last_error") is None or actively_recovering(ingress))
+          )
+          strategy_ok=(
+              strategy.get("running") is True
+              and (strategy.get("last_error") is None or actively_recovering(strategy))
+          )
+          if ingress_ok and executable > 0 and strategy_ok:
               result["pipeline_health"]="GREEN"
-          elif not ingress or ingress.get("running") is not True or ingress.get("last_error"):
+          elif not ingress or not ingress_ok:
               result["pipeline_health"]="BLOCKED"
 
           Path("/tmp/pipeline-health.json").write_text(
@@ -440,7 +450,6 @@ jobs:
               assert after.get("paper_only") is True and after.get("live_blocked") is True, after
               assert after.get("enabled") is True, after
               assert after.get("running") is True, after
-              assert after.get("last_error") is None, after
               a=marker(before)
               b=marker(after)
               moved=(
@@ -455,7 +464,20 @@ jobs:
                   )
               )
               assert moved, (name, a, b)
-              return {"before": a, "after": b, "moving": True}
+              recovering=(
+                  after.get("last_error") is not None
+                  and b["progress_state"] == "running"
+                  and b["progress_heartbeat"] is not None
+                  and b["progress_heartbeat"] != a["progress_heartbeat"]
+                  and after.get("last_cycle_started_at_utc") != after.get("last_cycle_finished_at_utc")
+              )
+              assert after.get("last_error") is None or recovering, after
+              return {
+                  "before": a,
+                  "after": b,
+                  "moving": True,
+                  "recovering_from_previous_error": recovering,
+              }
 
           ingress_first=load("/tmp/ingress-runtime-first.json")
           ingress_second=load("/tmp/ingress-runtime-second.json")
