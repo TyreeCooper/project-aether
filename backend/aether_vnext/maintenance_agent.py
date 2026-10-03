@@ -154,6 +154,7 @@ def diagnose_pipeline(
     ingress: Mapping[str, object],
     discovery: Mapping[str, object],
     strategy: Mapping[str, object],
+    tape: Mapping[str, object] | None = None,
     floor: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Diagnose the first causal clog without treating supervisor skew as failure."""
@@ -163,6 +164,20 @@ def diagnose_pipeline(
     pipe = strat.get("pipeline") or {}
     registry = strat.get("dynamic_product_registry") or {}
     roam = strat.get("dynamic_roam") or {}
+    tape_payload = tape or {}
+    tape_result = tape_payload.get("last_result") or {}
+    tape_assets = (
+        tape_result.get("assets")
+        if isinstance(tape_result, Mapping)
+        else ()
+    ) or ()
+    tape_states = Counter(
+        str(row.get("state") or "NOT_OBSERVED")
+        for row in tape_assets
+        if isinstance(row, Mapping)
+    )
+    tape_full = _int(tape_states.get("FULL"))
+    tape_required = tape is not None
 
     admitted = _int(disc.get("focus_admitted_count") or disc.get("focus_count"))
     providers = disc.get("providers") or {}
@@ -204,11 +219,14 @@ def diagnose_pipeline(
     confidence = "MEDIUM"
 
     faults: list[str] = []
-    for name, payload in (
+    runtime_payloads = [
         ("ingress", ingress),
         ("discovery", discovery),
         ("strategy", strategy),
-    ):
+    ]
+    if tape_required:
+        runtime_payloads.insert(2, ("tape", tape_payload))
+    for name, payload in runtime_payloads:
         if payload.get("enabled") is False:
             faults.append(name + "_disabled")
         elif payload.get("running") is not True:
@@ -218,15 +236,17 @@ def diagnose_pipeline(
 
     first_cycles = [
         name
-        for name, payload in (
-            ("ingress", ingress),
-            ("discovery", discovery),
-            ("strategy", strategy),
-        )
+        for name, payload in runtime_payloads
         if payload.get("running") is True
         and _int(payload.get("cycle_count")) == 0
         and payload.get("last_result") is None
     ]
+    tape_completed_without_full = (
+        tape_required
+        and _int(tape_payload.get("cycle_count")) > 0
+        and tape_payload.get("last_result") is not None
+        and tape_full == 0
+    )
     discovery_ahead = (
         bool(disc)
         and _newer_completed(discovery, strategy)
@@ -276,6 +296,18 @@ def diagnose_pipeline(
             "Wait for the current strategy pass before declaring a clog."
         )
         affected = roaming
+        confidence = "HIGH"
+    elif tape_completed_without_full:
+        status = "DEGRADED"
+        edge = "TAPE→MARKET_READY"
+        owner = "AETHER Consensus Tape"
+        reason = "tape_full_quorum_unavailable"
+        observed = (
+            "The Tape completed a cycle but no covered asset has FULL independent "
+            "source quorum. New Tape-governed entries remain fail-closed."
+        )
+        affected = len(tape_assets)
+        downstream = ["MARKET_READY", "HISTORY_READY", "STRATEGY_EVALUATED"]
         confidence = "HIGH"
     elif str(registry.get("status") or "") == "provider_policy_missing":
         status = "BLOCKED"
@@ -432,6 +464,10 @@ def diagnose_pipeline(
             "Wait for the first completed supervisor cycles; do not repair a "
             "startup state."
         ),
+        "tape_full_quorum_unavailable": (
+            "Inspect Tape source failures, freshness and divergence. Restore the "
+            "three-source quorum; do not bypass Tape with broker-only market truth."
+        ),
     }.get(
         reason,
         "Inspect the owning module and exact reason histogram before changing downstream gates.",
@@ -499,6 +535,25 @@ def diagnose_pipeline(
         "downstream_effects": downstream,
         "not_root_causes": not_root,
         "confidence": confidence,
+        "tape_health": {
+            "required": tape_required,
+            "cycle_count": (
+                None if not tape_required else _int(tape_payload.get("cycle_count"))
+            ),
+            "full": tape_full if tape_required else None,
+            "degraded": (
+                _int(tape_states.get("DEGRADED")) if tape_required else None
+            ),
+            "single_source": (
+                _int(tape_states.get("SINGLE_SOURCE")) if tape_required else None
+            ),
+            "contested": (
+                _int(tape_states.get("CONTESTED")) if tape_required else None
+            ),
+            "not_observed": (
+                _int(tape_states.get("NOT_OBSERVED")) if tape_required else None
+            ),
+        },
         "unsupported_symbols": list(unsupported),
         "auto_fix_available": bool(unsupported)
         and status not in {"CLEAR", "BUSY"},
@@ -762,6 +817,7 @@ class PipelineMaintenanceSupervisor:
         ingress_provider: StatusProvider,
         discovery_provider: StatusProvider,
         strategy_provider: StatusProvider,
+        tape_provider: StatusProvider | None = None,
         interval_seconds: float = 15.0,
         idle_timeout_seconds: float = 15.0,
         cycle_timeout_seconds: float = 30.0,
@@ -769,6 +825,7 @@ class PipelineMaintenanceSupervisor:
         self._ingress = ingress_provider
         self._discovery = discovery_provider
         self._strategy = strategy_provider
+        self._tape = tape_provider
         self._interval = float(interval_seconds)
         self._idle_timeout = float(idle_timeout_seconds)
         self._cycle_timeout = float(cycle_timeout_seconds)
@@ -882,11 +939,18 @@ class PipelineMaintenanceSupervisor:
                     self._value(self._strategy),
                     "read_strategy",
                 )
+                tape = None
+                if self._tape is not None:
+                    tape = await self._step(
+                        self._value(self._tape),
+                        "read_tape",
+                    )
                 self._progress("diagnose")
                 diagnosis = diagnose_pipeline(
                     ingress=ingress,
                     discovery=discovery,
                     strategy=strategy,
+                    tape=tape,
                 )
 
                 if diagnosis.get("status") == "CLEAR":

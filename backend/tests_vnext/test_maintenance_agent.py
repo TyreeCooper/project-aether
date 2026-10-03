@@ -269,3 +269,87 @@ async def test_manual_repair_fails_closed_when_control_store_stalls(
 
     with pytest.raises(MaintenanceIdleTimeout):
         await supervisor.run_once(force_repair=True)
+
+
+def test_tape_is_a_first_class_maintenance_dependency_when_supplied():
+    status = {
+        "enabled": True,
+        "running": True,
+        "cycle_count": 1,
+        "last_error": None,
+        "last_result": {},
+    }
+    tape = {
+        **status,
+        "last_result": {
+            "assets": [
+                {"asset_id": "btc", "state": "DEGRADED"},
+                {"asset_id": "eth", "state": "CONTESTED"},
+            ]
+        },
+    }
+    strategy = {
+        **status,
+        "last_result": {
+            "pipeline": {
+                "roaming_batch": 4,
+                "market_ready": 4,
+                "history_ready": 4,
+                "strategy_evaluated": 4,
+                "watch": 0,
+                "fire_or_beyond": 0,
+                "evaluation_error": 0,
+            }
+        },
+    }
+    diagnosis = diagnose_pipeline(
+        ingress={**status, "last_result": {"asset_results": []}},
+        discovery={**status, "last_result": {"focus_admitted_count": 10, "providers": {}}},
+        strategy=strategy,
+        tape=tape,
+    )
+    assert diagnosis["status"] == "DEGRADED"
+    assert diagnosis["first_causal_edge"] == "TAPE→MARKET_READY"
+    assert diagnosis["primary_reason"] == "tape_full_quorum_unavailable"
+    assert diagnosis["tape_health"]["full"] == 0
+    assert diagnosis["tape_health"]["contested"] == 1
+
+
+@pytest.mark.asyncio
+async def test_maintenance_supervisor_reads_tape_status(monkeypatch) -> None:
+    async def controls():
+        return dict(CONTROL_DEFAULTS)
+    monkeypatch.setattr(maintenance_agent, "load_controls", controls)
+
+    base_status = {
+        "enabled": True,
+        "running": True,
+        "cycle_count": 1,
+        "last_error": None,
+        "last_result": {},
+    }
+    tape_status = {
+        **base_status,
+        "last_result": {"assets": [{"asset_id": "btc", "state": "FULL"}]},
+    }
+    strategy_status = {
+        **base_status,
+        "last_result": {
+            "pipeline": {
+                "strategy_evaluated": 1,
+                "watch": 0,
+                "fire_or_beyond": 0,
+            }
+        },
+    }
+    supervisor = PipelineMaintenanceSupervisor(
+        ingress_provider=lambda: {**base_status, "last_result": {"asset_results": []}},
+        discovery_provider=lambda: {**base_status, "last_result": {}},
+        strategy_provider=lambda: strategy_status,
+        tape_provider=lambda: tape_status,
+        idle_timeout_seconds=1,
+        cycle_timeout_seconds=2,
+    )
+    result = await supervisor.run_once()
+    assert result["tape_health"]["required"] is True
+    assert result["tape_health"]["full"] == 1

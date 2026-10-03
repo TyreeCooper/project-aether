@@ -59,6 +59,7 @@ from app.vnext_discovery import (
     stop_configured_vnext_discovery,
 )
 from app.vnext_tape import (
+    configured_vnext_tape_status,
     mount_configured_vnext_tape,
     start_configured_vnext_tape,
     stop_configured_vnext_tape,
@@ -337,13 +338,17 @@ async def health():
             "ingress": configured_vnext_ingress_status(),
             "discovery": current_discovery_status(),
             "strategy": configured_vnext_strategy_status(),
+            "tape": configured_vnext_tape_status(),
             "maintenance": configured_vnext_maintenance_status(),
         }
         operating = {
             name: _supervisor_operating_state(status, now=now)
             for name, status in supervisors.items()
         }
-        primary = tuple(operating[name] for name in ("ingress", "discovery", "strategy"))
+        primary = tuple(
+            operating[name]
+            for name in ("ingress", "discovery", "tape", "strategy")
+        )
         if any(state == "FAULT" for state in primary):
             pipeline_state = "DEGRADED"
         elif any(state == "STALLED" for state in primary):

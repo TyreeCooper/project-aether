@@ -9,6 +9,7 @@ from aether_vnext.dynamic_products import project_kraken_spot_product
 import pytest
 
 from aether_vnext.prototype_strategy_supervisor import (
+    _apply_tape_market_policy,
     PrototypeStrategySupervisor,
     _coinbase_warmup_cached,
     _fetch_dynamic_strategy_history,
@@ -479,3 +480,44 @@ async def test_coinbase_catalog_fault_is_gap_not_kraken_history_veto(monkeypatch
     assert history.source_gaps == (
         "coinbase_catalog_error:TimeoutError:catalog timeout",
     )
+
+
+from aether_vnext.tape_market_bridge import TapeMarketProjection
+
+
+def test_required_tape_blocks_seed_provider_fallback_when_quorum_not_full() -> None:
+    provider_observation = object()
+    observations, rejections, telemetry = _apply_tape_market_policy(
+        {"btc": provider_observation},
+        {},
+        {
+            "btc": TapeMarketProjection(
+                observation=None,
+                strategy_ready=False,
+                reason="tape_contested",
+            )
+        },
+        tape_required=True,
+    )
+    assert "btc" not in observations
+    assert rejections["btc"]["reason"] == "tape_contested"
+    assert telemetry["btc"]["required_for_strategy"] is True
+
+
+def test_nonrequired_tape_does_not_erase_provider_fallback() -> None:
+    provider_observation = object()
+    observations, rejections, telemetry = _apply_tape_market_policy(
+        {"btc": provider_observation},
+        {},
+        {
+            "btc": TapeMarketProjection(
+                observation=None,
+                strategy_ready=False,
+                reason="tape_not_observed",
+            )
+        },
+        tape_required=False,
+    )
+    assert observations["btc"] is provider_observation
+    assert rejections == {}
+    assert telemetry["btc"]["required_for_strategy"] is False

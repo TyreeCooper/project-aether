@@ -56,7 +56,11 @@ from aether_vnext.provider_discovery_supervisor import (
 from aether_vnext.registry import ProductRegistryRow, SEED_REGISTRY
 from aether_vnext.runtime_product_policy import runtime_playbook_for_product
 from aether_vnext.store import VNextStore
-from aether_vnext.tape_market_bridge import load_preferred_tape_market_observation
+from aether_vnext.tape_market_bridge import (
+    TapeMarketProjection,
+    load_preferred_tape_market_observation,
+)
+from aether_vnext.tape_supervisor import configured_tape_enabled
 
 
 UTC = timezone.utc
@@ -87,6 +91,40 @@ def _publish_strategy_progress(**updates: object) -> None:
 
 def strategy_progress_payload() -> dict[str, object]:
     return deepcopy(_STRATEGY_PROGRESS)
+
+
+def _apply_tape_market_policy(
+    observations: Mapping[str, object],
+    ingress_rejections: Mapping[str, object],
+    projections: Mapping[str, TapeMarketProjection],
+    *,
+    tape_required: bool,
+) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
+    """Prefer FULL Tape and fail closed for covered assets when Tape is required."""
+    selected = dict(observations)
+    rejected = dict(ingress_rejections)
+    telemetry: dict[str, object] = {}
+    for asset_id, projection in projections.items():
+        telemetry[asset_id] = {
+            "required_for_strategy": tape_required,
+            "strategy_ready": projection.strategy_ready,
+            "reason": projection.reason,
+            "observation_id": (
+                None
+                if projection.observation is None
+                else projection.observation.observation_id
+            ),
+        }
+        if projection.strategy_ready and projection.observation is not None:
+            selected[asset_id] = projection.observation
+            rejected.pop(asset_id, None)
+        elif tape_required:
+            selected.pop(asset_id, None)
+            rejected[asset_id] = {
+                "reason": projection.reason,
+                "observation": projection.observation,
+            }
+    return selected, rejected, telemetry
 
 
 @dataclass(frozen=True, slots=True)
@@ -1060,30 +1098,27 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         }
 
                 decision_at_utc = datetime.now(UTC)
-                tape_market: dict[str, object] = {}
-                for asset_id in ASSETS:
-                    tape_projection = load_preferred_tape_market_observation(
+                tape_required = configured_tape_enabled()
+                tape_projections = {
+                    asset_id: load_preferred_tape_market_observation(
                         sync_conn,
                         store,
                         asset_id=asset_id,
                         calendar_id=SEED_REGISTRY[asset_id].calendar_id,
                         as_of_utc=decision_at_utc,
                     )
-                    tape_market[asset_id] = {
-                        "strategy_ready": tape_projection.strategy_ready,
-                        "reason": tape_projection.reason,
-                        "observation_id": (
-                            None
-                            if tape_projection.observation is None
-                            else tape_projection.observation.observation_id
-                        ),
-                    }
-                    if (
-                        tape_projection.strategy_ready
-                        and tape_projection.observation is not None
-                    ):
-                        observations[asset_id] = tape_projection.observation
-                        ingress_rejections.pop(asset_id, None)
+                    for asset_id in ASSETS
+                }
+                (
+                    observations,
+                    ingress_rejections,
+                    tape_market,
+                ) = _apply_tape_market_policy(
+                    observations,
+                    ingress_rejections,
+                    tape_projections,
+                    tape_required=tape_required,
+                )
 
                 (
                     observations,
@@ -1513,6 +1548,27 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     "focus_received": focus_admitted,  # deprecated compatibility alias
                     "dynamic_kraken_available": len(dynamic_products),
                     "roaming_batch": len(dynamic_batch),
+                    "tape_seed_required": len(ASSETS) if tape_required else 0,
+                    "tape_seed_ready": sum(
+                        1
+                        for row in tape_market.values()
+                        if isinstance(row, Mapping)
+                        and row.get("strategy_ready") is True
+                    ),
+                    "tape_seed_reasons": {
+                        reason: sum(
+                            1
+                            for row in tape_market.values()
+                            if isinstance(row, Mapping)
+                            and str(row.get("reason") or "") == reason
+                        )
+                        for reason in sorted({
+                            str(row.get("reason") or "")
+                            for row in tape_market.values()
+                            if isinstance(row, Mapping)
+                            and row.get("reason")
+                        })
+                    },
                     "market_ready": sum(
                         1
                         for asset_id in product_by_id

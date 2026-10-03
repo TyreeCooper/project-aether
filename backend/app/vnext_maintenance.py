@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from app.vnext_discovery import current_discovery_status
 from app.vnext_ingress import configured_vnext_ingress_status
 from app.vnext_strategy import configured_vnext_strategy_status
+from app.vnext_tape import configured_vnext_tape_status
 from aether_vnext.maintenance_agent import (
     CONTROL_DEFAULTS,
     CONTROL_LABELS,
@@ -40,6 +41,7 @@ def _instance():
           ingress_provider=configured_vnext_ingress_status,
           discovery_provider=current_discovery_status,
           strategy_provider=configured_vnext_strategy_status,
+          tape_provider=configured_vnext_tape_status,
           interval_seconds=configured_maintenance_interval_seconds(),
           idle_timeout_seconds=configured_maintenance_idle_timeout_seconds(),
           cycle_timeout_seconds=configured_maintenance_cycle_timeout_seconds(),
