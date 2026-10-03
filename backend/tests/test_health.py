@@ -87,3 +87,35 @@ def test_runtime_state_uses_live_progress_heartbeat_before_declaring_stall():
 
     status["progress"]["last_progress_at_utc"] = (now - timedelta(minutes=3)).isoformat()
     assert main._supervisor_operating_state(status, now=now) == "STALLED"
+
+
+
+def test_runtime_state_treats_fresh_recovery_cycle_as_busy_after_prior_fault():
+    from datetime import datetime, timedelta, timezone
+    import app.main as main
+
+    now = datetime(2026, 10, 3, 2, 25, tzinfo=timezone.utc)
+    status = {
+        "enabled": True,
+        "running": True,
+        "cycle_count": 0,
+        "interval_seconds": 15.0,
+        "last_cycle_started_at_utc": (now - timedelta(seconds=30)).isoformat(),
+        "last_cycle_finished_at_utc": (now - timedelta(seconds=45)).isoformat(),
+        "last_error": "TimeoutError:",
+        "progress": {
+            "cycle_state": "running",
+            "phase": "history",
+            "last_progress_at_utc": (now - timedelta(seconds=5)).isoformat(),
+        },
+    }
+
+    assert main._supervisor_operating_state(status, now=now) == "BUSY"
+
+    status["progress"] = {
+        "cycle_state": "complete",
+        "last_progress_at_utc": (now - timedelta(seconds=5)).isoformat(),
+    }
+    status["last_cycle_started_at_utc"] = (now - timedelta(seconds=45)).isoformat()
+    status["last_cycle_finished_at_utc"] = (now - timedelta(seconds=30)).isoformat()
+    assert main._supervisor_operating_state(status, now=now) == "FAULT"

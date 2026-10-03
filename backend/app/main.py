@@ -280,8 +280,6 @@ def _supervisor_operating_state(
     *,
     now: datetime,
 ) -> str:
-    if status.get("last_error"):
-        return "FAULT"
     if status.get("enabled") is False:
         return "OFF"
     running = status.get("running") is True
@@ -310,7 +308,11 @@ def _supervisor_operating_state(
             busy_stale_after = 90.0
         if heartbeat is not None and (now - heartbeat).total_seconds() > busy_stale_after:
             return "STALLED"
+        # last_error belongs to the previously completed attempt. A new cycle
+        # with a fresh progress heartbeat is active recovery, not a current FAULT.
         return "BUSY"
+    if status.get("last_error"):
+        return "FAULT"
     if cycles == 0:
         return "STARTING"
     heartbeat = finished or progress_heartbeat or started
