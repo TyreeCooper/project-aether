@@ -150,6 +150,7 @@ def test_maintenance_idle_timeout_has_bounded_configuration(monkeypatch) -> None
     assert configured_maintenance_idle_timeout_seconds()==15
     monkeypatch.setenv("AETHER_VNEXT_MAINTENANCE_IDLE_TIMEOUT_SECONDS","2")
     import pytest
+import aether_vnext.maintenance_agent as maintenance_agent
     with pytest.raises(ValueError,match="3..60"):
         configured_maintenance_idle_timeout_seconds()
 
@@ -183,3 +184,88 @@ def test_clear_diagnosis_keeps_maintenance_semantics() -> None:
     assert result["status"] == "CLEAR"
     assert result["maintenance_mode"] == "MAINTAINING"
     assert result["primary_reason"] == "no_natural_setup"
+
+
+@pytest.mark.asyncio
+async def test_background_maintenance_uses_safe_defaults_when_control_store_stalls(
+    monkeypatch,
+) -> None:
+    import asyncio
+
+    async def stalled_controls():
+        await asyncio.sleep(1)
+        return {}
+
+    monkeypatch.setattr(
+        maintenance_agent,
+        "load_controls",
+        stalled_controls,
+    )
+    status = {
+        "enabled": True,
+        "running": True,
+        "last_error": None,
+        "paper_only": True,
+        "live_blocked": True,
+        "cycle_count": 0,
+        "last_result": {},
+    }
+    supervisor = PipelineMaintenanceSupervisor(
+        ingress_provider=lambda: status,
+        discovery_provider=lambda: status,
+        strategy_provider=lambda: status,
+        interval_seconds=15,
+        idle_timeout_seconds=0.01,
+        cycle_timeout_seconds=1,
+    )
+
+    result = await supervisor.run_once()
+
+    assert result["status"] == "BUSY"
+    assert (
+        result["control_read_warning"]
+        == "maintenance_control_store_timeout"
+    )
+    assert result["controls_source"] == "safe_defaults_after_timeout"
+    assert result["controls"]["auto_repair_enabled"] is False
+    assert (
+        result["incident_persistence"]
+        == "SKIPPED_CONTROL_STORE_TIMEOUT"
+    )
+    assert supervisor.status().last_timeout_phase == "load_controls"
+
+
+@pytest.mark.asyncio
+async def test_manual_repair_fails_closed_when_control_store_stalls(
+    monkeypatch,
+) -> None:
+    import asyncio
+
+    async def stalled_controls():
+        await asyncio.sleep(1)
+        return {}
+
+    monkeypatch.setattr(
+        maintenance_agent,
+        "load_controls",
+        stalled_controls,
+    )
+    status = {
+        "enabled": True,
+        "running": True,
+        "last_error": None,
+        "paper_only": True,
+        "live_blocked": True,
+        "cycle_count": 0,
+        "last_result": {},
+    }
+    supervisor = PipelineMaintenanceSupervisor(
+        ingress_provider=lambda: status,
+        discovery_provider=lambda: status,
+        strategy_provider=lambda: status,
+        idle_timeout_seconds=0.01,
+        cycle_timeout_seconds=1,
+    )
+
+    with pytest.raises(MaintenanceIdleTimeout):
+        await supervisor.run_once(force_repair=True)

@@ -826,7 +826,29 @@ class PipelineMaintenanceSupervisor:
             self._operation_started = datetime.now(UTC)
             self._operation_progress = self._operation_started
             try:
-                controls = await self._step(load_controls(), "load_controls")
+                control_read_warning: str | None = None
+                try:
+                    controls = await self._step(
+                        load_controls(),
+                        "load_controls",
+                    )
+                except MaintenanceIdleTimeout:
+                    if force_repair:
+                        # Manual repair must honor persisted operator controls.
+                        # If those controls cannot be read, fail closed.
+                        raise
+                    # Background diagnosis is read-only unless auto-repair is
+                    # explicitly enabled. A cold/contended control-store read
+                    # must not turn the trading pipeline red; continue with the
+                    # conservative defaults and make the degraded control read
+                    # explicit in telemetry. Auto repair remains OFF.
+                    controls = dict(CONTROL_DEFAULTS)
+                    controls["auto_repair_enabled"] = False
+                    control_read_warning = (
+                        "maintenance_control_store_timeout"
+                    )
+                    self._progress("controls_fallback")
+
                 if not controls.get("master_enabled", True):
                     return {
                         "version": MAINTENANCE_VERSION,
@@ -869,7 +891,11 @@ class PipelineMaintenanceSupervisor:
 
                 if diagnosis.get("status") == "CLEAR":
                     self._healthy_baseline = True
-                    await self._step(close_cleared_incidents(diagnosis), "close_cleared_incidents")
+                    if control_read_warning is None:
+                        await self._step(
+                            close_cleared_incidents(diagnosis),
+                            "close_cleared_incidents",
+                        )
 
                 diagnosis["healthy_baseline_established"] = (
                     self._healthy_baseline
@@ -892,15 +918,25 @@ class PipelineMaintenanceSupervisor:
                 diagnosis["quarantined_symbols"] = list(
                     maintenance_quarantine_snapshot()
                 )
-
-                await self._step(
-                    record_incident(
-                        diagnosis,
-                        repair,
-                        controls=controls,
-                    ),
-                    "record_incident",
-                )
+                if control_read_warning is not None:
+                    diagnosis["control_read_warning"] = (
+                        control_read_warning
+                    )
+                    diagnosis["controls_source"] = (
+                        "safe_defaults_after_timeout"
+                    )
+                    diagnosis["incident_persistence"] = (
+                        "SKIPPED_CONTROL_STORE_TIMEOUT"
+                    )
+                else:
+                    await self._step(
+                        record_incident(
+                            diagnosis,
+                            repair,
+                            controls=controls,
+                        ),
+                        "record_incident",
+                    )
                 self._progress("complete")
                 return diagnosis
             finally:
