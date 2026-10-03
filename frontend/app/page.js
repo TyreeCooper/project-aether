@@ -185,14 +185,32 @@ function supervisorState(supervisor, nowMs) {
   if (supervisor.running !== true) return cycles > 0 ? "BLOCKED" : "WAIT";
   const started = Date.parse(supervisor.last_cycle_started_at_utc || "");
   const finished = Date.parse(supervisor.last_cycle_finished_at_utc || "");
-  if (cycles === 0) return "STARTING";
-  if (Number.isFinite(started) && (!Number.isFinite(finished) || started > finished)) return "BUSY";
-  const heartbeat = Number.isFinite(finished) ? finished : started;
+  const progressHeartbeat = Date.parse(supervisor?.progress?.last_progress_at_utc || "");
   const intervalMs = isObservedNumber(supervisor.interval_seconds)
     ? Number(supervisor.interval_seconds) * 1000
     : 15000;
-  const staleAfterMs = Math.max(90000, intervalMs * 4);
-  if (Number.isFinite(heartbeat) && nowMs - heartbeat > staleAfterMs) return "STALLED";
+  const idleStaleAfterMs = Math.max(90000, intervalMs * 4);
+  const progressState = String(supervisor?.progress?.cycle_state || "").toLowerCase();
+  const cycleBusy = progressState === "running"
+    || (Number.isFinite(started) && (!Number.isFinite(finished) || started > finished));
+  if (cycleBusy) {
+    const busyHeartbeat = Number.isFinite(progressHeartbeat) ? progressHeartbeat : started;
+    const busyStaleAfterMs = Math.max(
+      90000,
+      isObservedNumber(supervisor?.progress?.provider_deadline_seconds)
+        ? Number(supervisor.progress.provider_deadline_seconds) * 1500
+        : 90000,
+    );
+    if (Number.isFinite(busyHeartbeat) && nowMs - busyHeartbeat > busyStaleAfterMs) return "STALLED";
+    return "BUSY";
+  }
+  if (cycles === 0) return "STARTING";
+  const heartbeat = Number.isFinite(finished)
+    ? finished
+    : Number.isFinite(progressHeartbeat)
+      ? progressHeartbeat
+      : started;
+  if (Number.isFinite(heartbeat) && nowMs - heartbeat > idleStaleAfterMs) return "STALLED";
   return "ACTIVE";
 }
 
@@ -595,7 +613,7 @@ const PIPELINE_GATE_BLUEPRINT = [
   },
 ];
 
-function Pipeline({ strategy, discovery, ingress, maintenance, floor, operator }) {
+function Pipeline({ strategy, discovery, ingress, maintenance, floor, operator, nowMs }) {
   const pipe = strategy?.last_result?.pipeline || {};
   const registry = strategy?.last_result?.dynamic_product_registry || {};
   const roam = strategy?.last_result?.dynamic_roam || {};
@@ -735,6 +753,15 @@ function Pipeline({ strategy, discovery, ingress, maintenance, floor, operator }
   );
   const m = maintenance?.last_result || {};
   const firstCausal = String(m.first_causal_edge || "").toUpperCase();
+  const ingressProgress = ingress?.progress || {};
+  const discoveryProgress = discovery?.progress || {};
+  const strategyProgress = strategy?.progress || {};
+  const pipelineState = pipelineRuntimeState(ingress, discovery, strategy, maintenance, nowMs);
+  const progressRatio = (done, total) => (
+    isObservedNumber(done) && isObservedNumber(total)
+      ? `${num(done)}/${num(total)}`
+      : "NOT OBSERVED"
+  );
 
   return (
     <div className="pageGrid">
@@ -746,6 +773,31 @@ function Pipeline({ strategy, discovery, ingress, maintenance, floor, operator }
         </div>
         <Badge value={m.status}>{text(m.status, "SYNCING")}</Badge>
       </div>
+
+      <Section eyebrow="LIVE AGENT WORK" title="Current cycle progress" className="wide">
+        <div className="constraintGrid">
+          <div>
+            <span>Ingress agent</span>
+            <strong>{supervisorState(ingress, nowMs)} · {text(ingressProgress.phase, "NOT OBSERVED").replaceAll("_", " ")}</strong>
+            <small>Quote batches {progressRatio(ingressProgress.completed_dynamic_chunk_count, ingressProgress.dynamic_chunk_count)} · assets persisted {progressRatio(ingressProgress.processed_asset_count, ingressProgress.eligible_asset_count)} · heartbeat {age(ingressProgress.last_progress_at_utc, nowMs)}</small>
+          </div>
+          <div>
+            <span>Discovery agents</span>
+            <strong>{supervisorState(discovery, nowMs)} · {text(discoveryProgress.cycle_state, "NOT OBSERVED").replaceAll("_", " ")}</strong>
+            <small>Active providers {Array.isArray(discoveryProgress.active_providers) ? (discoveryProgress.active_providers.join(", ") || "none") : "NOT OBSERVED"} · current {text(discoveryProgress.current_provider, "none")} · heartbeat {age(discoveryProgress.last_progress_at_utc || discovery?.last_cycle_finished_at_utc, nowMs)}</small>
+          </div>
+          <div>
+            <span>Strategy agents</span>
+            <strong>{supervisorState(strategy, nowMs)} · {text(strategyProgress.phase, "NOT OBSERVED").replaceAll("_", " ")}</strong>
+            <small>History workers {progressRatio(strategyProgress.history_fetch_completed, strategyProgress.history_fetch_total)} · cache hits {num(strategyProgress.history_cache_hits)} · candidates {num(strategyProgress.work_candidate_count)} · concurrency {num(strategyProgress.worker_concurrency)} · heartbeat {age(strategyProgress.last_progress_at_utc, nowMs)}</small>
+          </div>
+          <div>
+            <span>Pipeline state</span>
+            <strong><Badge value={pipelineState}>{pipelineState}</Badge></strong>
+            <small>State is derived from observed supervisor movement and progress heartbeats, not task existence alone.</small>
+          </div>
+        </div>
+      </Section>
 
       <Section eyebrow="FIRST CAUSAL CLOG" title={text(m.first_causal_edge, "No causal clog identified")} className="wide">
         <div className="causalBanner">
@@ -1050,7 +1102,7 @@ function Settings({ ingress, strategy, discovery, floor, maintenance, onToggle, 
 function AppPage({ active, data, nowMs, onToggle, onRepair, busy, controlError }) {
   const { floor, ingress, strategy, discovery, operator, maintenance } = data;
   if (active === "markets") return <Markets discovery={discovery} ingress={ingress} nowMs={nowMs} />;
-  if (active === "pipeline") return <Pipeline strategy={strategy} discovery={discovery} ingress={ingress} maintenance={maintenance} floor={floor} operator={operator} />;
+  if (active === "pipeline") return <Pipeline strategy={strategy} discovery={discovery} ingress={ingress} maintenance={maintenance} floor={floor} operator={operator} nowMs={nowMs} />;
   if (active === "trading") return <TradingFloor strategy={strategy} />;
   if (active === "positions") return <Positions floor={floor} nowMs={nowMs} />;
   if (active === "blotter") return <Blotter operator={operator} />;
@@ -1137,7 +1189,14 @@ export default function DashboardPage() {
             </button>
           ))}
         </nav>
-        <div className="sidebarFoot"><Badge value="GREEN">PAPER ACTIVE</Badge><Badge value="BLOCKED">LIVE BLOCKED</Badge></div>
+        <div className="sidebarFoot">
+          <Badge value={data.floor?.mode?.paper_only === true ? "GREEN" : data.floor?.mode?.paper_only === false ? "UNSAFE" : "NOT OBSERVED"}>
+            {data.floor?.mode?.paper_only === true ? "PAPER ACTIVE" : data.floor?.mode?.paper_only === false ? "PAPER UNSAFE" : "PAPER NOT OBSERVED"}
+          </Badge>
+          <Badge value={data.floor?.mode?.live_blocked === true ? "BLOCKED" : data.floor?.mode?.live_blocked === false ? "UNSAFE" : "NOT OBSERVED"}>
+            {data.floor?.mode?.live_blocked === true ? "LIVE BLOCKED" : data.floor?.mode?.live_blocked === false ? "LIVE NOT BLOCKED" : "LIVE NOT OBSERVED"}
+          </Badge>
+        </div>
       </aside>
 
       <section className="workspace">

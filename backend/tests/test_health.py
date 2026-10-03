@@ -54,3 +54,28 @@ def test_health_uses_vnext_runtime_truth_in_sandbox(monkeypatch):
     assert body["supervisor_state"]["ingress"] == "ACTIVE"
     assert "watch" not in body
     assert "universe" not in body
+
+
+
+def test_runtime_state_uses_live_progress_heartbeat_before_declaring_stall():
+    from datetime import datetime, timedelta, timezone
+    import app.main as main
+
+    now = datetime(2026, 10, 3, 0, 0, tzinfo=timezone.utc)
+    status = {
+        "enabled": True,
+        "running": True,
+        "cycle_count": 8,
+        "interval_seconds": 15.0,
+        "last_cycle_started_at_utc": (now - timedelta(minutes=5)).isoformat(),
+        "last_cycle_finished_at_utc": (now - timedelta(minutes=6)).isoformat(),
+        "last_error": None,
+        "progress": {
+            "cycle_state": "running",
+            "last_progress_at_utc": (now - timedelta(seconds=10)).isoformat(),
+        },
+    }
+    assert main._supervisor_operating_state(status, now=now) == "BUSY"
+
+    status["progress"]["last_progress_at_utc"] = (now - timedelta(minutes=3)).isoformat()
+    assert main._supervisor_operating_state(status, now=now) == "STALLED"

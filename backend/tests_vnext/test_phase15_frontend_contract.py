@@ -182,3 +182,18 @@ def test_maintenance_ui_exposes_health_mode_and_bounded_repair_timeout() -> None
     assert "TIMED_OUT_IDLE" in app
     assert "TIMED_OUT_TOTAL" in app
     assert "status_code=504" in app
+
+
+
+def test_pipeline_surfaces_live_agent_progress_and_uses_progress_heartbeat() -> None:
+    page = (_repo_root() / "frontend" / "app" / "page.js").read_text(encoding="utf-8")
+    for required in (
+        "LIVE AGENT WORK",
+        "Current cycle progress",
+        "last_progress_at_utc",
+        "completed_dynamic_chunk_count",
+        "history_fetch_completed",
+        "active_providers",
+        "State is derived from observed supervisor movement",
+    ):
+        assert required in page

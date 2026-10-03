@@ -293,12 +293,28 @@ def _supervisor_operating_state(
     stale_after = max(90.0, interval * 4.0)
     started = _parse_runtime_timestamp(status.get("last_cycle_started_at_utc"))
     finished = _parse_runtime_timestamp(status.get("last_cycle_finished_at_utc"))
+    progress = status.get("progress")
+    progress = progress if isinstance(progress, dict) else {}
+    progress_heartbeat = _parse_runtime_timestamp(progress.get("last_progress_at_utc"))
+    progress_state = str(progress.get("cycle_state") or "").strip().lower()
+    cycle_busy = progress_state == "running" or (
+        started is not None and (finished is None or started > finished)
+    )
 
-    if started is not None and (finished is None or started > finished):
-        return "STALLED" if (now - started).total_seconds() > stale_after else "BUSY"
+    if cycle_busy:
+        heartbeat = progress_heartbeat or started
+        provider_deadline = progress.get("provider_deadline_seconds")
+        try:
+            busy_stale_after = max(90.0, float(provider_deadline) * 1.5)
+        except (TypeError, ValueError):
+            busy_stale_after = 90.0
+        if heartbeat is not None and (now - heartbeat).total_seconds() > busy_stale_after:
+            return "STALLED"
+        return "BUSY"
     if cycles == 0:
         return "STARTING"
-    if finished is not None and (now - finished).total_seconds() > stale_after:
+    heartbeat = finished or progress_heartbeat or started
+    if heartbeat is not None and (now - heartbeat).total_seconds() > stale_after:
         return "STALLED"
     return "ACTIVE"
 
