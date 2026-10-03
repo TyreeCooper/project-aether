@@ -192,11 +192,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          values="$(az webapp config appsettings list             --name "$app_name"             --resource-group "$resource_group"             --query "[?name=='AETHER_VNEXT_KRAKEN_INGRESS_ENABLED' || name=='AETHER_VNEXT_PROVIDER_DISCOVERY_ENABLED' || name=='AETHER_VNEXT_SANDBOX_TRADING_ENABLED'].{name:name,value:value}"             -o json)"
+          values="$(az webapp config appsettings list             --name "$app_name"             --resource-group "$resource_group"             --query "[?name=='AETHER_VNEXT_KRAKEN_INGRESS_ENABLED' || name=='AETHER_VNEXT_KRAKEN_DYNAMIC_BATCH_SIZE' || name=='AETHER_VNEXT_KRAKEN_INGRESS_WORKER_CONCURRENCY' || name=='AETHER_VNEXT_DYNAMIC_STRATEGY_SCAN_BATCH_SIZE' || name=='AETHER_VNEXT_PROVIDER_DISCOVERY_ENABLED' || name=='AETHER_VNEXT_SANDBOX_TRADING_ENABLED'].{name:name,value:value}"             -o json)"
           python - "$values" <<'PY'
           import json, sys
           rows = {row["name"]: str(row["value"]).lower() for row in json.loads(sys.argv[1])}
           assert rows.get("AETHER_VNEXT_KRAKEN_INGRESS_ENABLED") == "true", rows
+          assert rows.get("AETHER_VNEXT_KRAKEN_DYNAMIC_BATCH_SIZE") == "20", rows
+          assert rows.get("AETHER_VNEXT_KRAKEN_INGRESS_WORKER_CONCURRENCY") == "8", rows
+          assert rows.get("AETHER_VNEXT_DYNAMIC_STRATEGY_SCAN_BATCH_SIZE") == "12", rows
           assert rows.get("AETHER_VNEXT_PROVIDER_DISCOVERY_ENABLED") == "true", rows
           assert rows.get("AETHER_VNEXT_SANDBOX_TRADING_ENABLED") == "true", rows
           print(json.dumps(rows, indent=2, sort_keys=True))
@@ -286,8 +289,10 @@ jobs:
           body=json.load(open("/tmp/health.json", encoding="utf-8"))
           ok=(
               body.get("ok") is True
+              and body.get("runtime") == "vnext"
               and body.get("paper_mode") is True
               and body.get("live_blocked") is True
+              and body.get("pipeline_state") not in {"BLOCKED", "STALLED", "DEGRADED"}
           )
           sys.exit(0 if ok else 1)
           PY
@@ -401,6 +406,97 @@ jobs:
           print(json.dumps(result, indent=2, sort_keys=True))
           PY
 
+          # A task object is not proof of an operating pipeline. Sample the fast
+          # autonomous lanes twice and require observed movement: either a completed
+          # cycle advances or the new in-cycle progress heartbeat advances. This
+          # catches a supervisor that remains running=true while work is wedged.
+          cp /tmp/ingress-runtime.json /tmp/ingress-runtime-first.json
+          cp /tmp/strategy-runtime.json /tmp/strategy-runtime-first.json
+          sleep 45
+          curl --fail --silent --show-error --max-time 20             -o /tmp/ingress-runtime-second.json             "$base/api/v1/vnext/ingress-runtime"
+          curl --fail --silent --show-error --max-time 20             -o /tmp/strategy-runtime-second.json             "$base/api/v1/vnext/strategy-runtime"
+          curl --fail --silent --show-error --max-time 20             -o /tmp/discovery-runtime-second.json             "$base/api/v1/vnext/discovery-runtime"
+          curl --fail --silent --show-error --max-time 10             -o /tmp/health-second.json             "$base/api/v1/health"
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          def load(path):
+              return json.loads(Path(path).read_text(encoding="utf-8"))
+
+          def marker(payload):
+              progress=payload.get("progress") or {}
+              return {
+                  "cycle_count": int(payload.get("cycle_count") or 0),
+                  "finished": payload.get("last_cycle_finished_at_utc"),
+                  "progress_heartbeat": progress.get("last_progress_at_utc"),
+                  "progress_state": progress.get("cycle_state"),
+                  "progress_phase": progress.get("phase"),
+              }
+
+          def assert_moving(name, before, after):
+              assert before.get("paper_only") is True and before.get("live_blocked") is True, before
+              assert after.get("paper_only") is True and after.get("live_blocked") is True, after
+              assert after.get("enabled") is True, after
+              assert after.get("running") is True, after
+              assert after.get("last_error") is None, after
+              a=marker(before)
+              b=marker(after)
+              moved=(
+                  b["cycle_count"] > a["cycle_count"]
+                  or (
+                      b["finished"] is not None
+                      and b["finished"] != a["finished"]
+                  )
+                  or (
+                      b["progress_heartbeat"] is not None
+                      and b["progress_heartbeat"] != a["progress_heartbeat"]
+                  )
+              )
+              assert moved, (name, a, b)
+              return {"before": a, "after": b, "moving": True}
+
+          ingress_first=load("/tmp/ingress-runtime-first.json")
+          ingress_second=load("/tmp/ingress-runtime-second.json")
+          strategy_first=load("/tmp/strategy-runtime-first.json")
+          strategy_second=load("/tmp/strategy-runtime-second.json")
+          discovery=load("/tmp/discovery-runtime-second.json")
+          health=load("/tmp/health-second.json")
+
+          discovery_progress=discovery.get("progress") or {}
+          discovery_observed=(
+              int(discovery.get("cycle_count") or 0) > 0
+              or discovery_progress.get("cycle_state") == "running"
+          )
+          assert discovery.get("enabled") is True, discovery
+          assert discovery.get("running") is True, discovery
+          assert discovery.get("last_error") is None, discovery
+          assert discovery_observed, discovery
+          assert health.get("runtime") == "vnext", health
+          assert health.get("paper_mode") is True, health
+          assert health.get("live_blocked") is True, health
+          assert health.get("pipeline_state") not in {"BLOCKED", "STALLED", "DEGRADED"}, health
+
+          proof={
+              "ingress": assert_moving("ingress", ingress_first, ingress_second),
+              "strategy": assert_moving("strategy", strategy_first, strategy_second),
+              "discovery": {
+                  "cycle_count": int(discovery.get("cycle_count") or 0),
+                  "progress": discovery_progress,
+                  "observed": discovery_observed,
+              },
+              "pipeline_state": health.get("pipeline_state"),
+              "paper_only": True,
+              "live_blocked": True,
+          }
+          Path("/tmp/runtime-continuity.json").write_text(
+              json.dumps(proof, indent=2, sort_keys=True)+"\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(proof, indent=2, sort_keys=True))
+          PY
+
 
       - name: Refresh Azure login for failure diagnostics
         if: failure()
@@ -446,7 +542,7 @@ jobs:
             --resource-group "$resource_group" || true
 
           echo "=== Last probe bodies ==="
-          for file in /tmp/health.json /tmp/build.json /tmp/pipeline-health.json /tmp/floor.json /tmp/ingress-runtime.json /tmp/discovery-runtime.json /tmp/strategy-runtime.json; do
+          for file in /tmp/health.json /tmp/health-second.json /tmp/build.json /tmp/pipeline-health.json /tmp/runtime-continuity.json /tmp/floor.json /tmp/ingress-runtime.json /tmp/ingress-runtime-second.json /tmp/discovery-runtime.json /tmp/discovery-runtime-second.json /tmp/strategy-runtime.json /tmp/strategy-runtime-second.json; do
             if [ -f "$file" ]; then
               echo "--- $file ---"
               cat "$file"
@@ -462,7 +558,16 @@ jobs:
             /tmp/health.json
             /tmp/build.json
             /tmp/ingress-runtime.json
+            /tmp/ingress-runtime-first.json
+            /tmp/ingress-runtime-second.json
+            /tmp/discovery-runtime.json
+            /tmp/discovery-runtime-second.json
             /tmp/strategy-runtime.json
+            /tmp/strategy-runtime-first.json
+            /tmp/strategy-runtime-second.json
+            /tmp/health-second.json
+            /tmp/pipeline-health.json
+            /tmp/runtime-continuity.json
             /tmp/floor.json
             /tmp/index.html
           if-no-files-found: error
