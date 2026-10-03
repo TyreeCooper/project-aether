@@ -37,7 +37,11 @@ def test_health_uses_vnext_runtime_truth_in_sandbox(monkeypatch):
         "last_cycle_started_at_utc": "2099-01-01T00:00:00+00:00",
         "last_cycle_finished_at_utc": "2099-01-01T00:00:01+00:00",
         "last_error": None,
-        "last_result": {},
+        "last_result": {"huge": "x" * 250_000},
+        "progress": {
+            "cycle_state": "complete",
+            "last_progress_at_utc": "2099-01-01T00:00:01+00:00",
+        },
     }
     monkeypatch.setattr(main, "configured_vnext_ingress_status", lambda: dict(active))
     monkeypatch.setattr(main, "current_discovery_status", lambda: dict(active, interval_seconds=300.0))
@@ -52,6 +56,10 @@ def test_health_uses_vnext_runtime_truth_in_sandbox(monkeypatch):
     assert body["live_blocked"] is True
     assert body["pipeline_state"] == "ACTIVE"
     assert body["supervisor_state"]["ingress"] == "ACTIVE"
+    assert body["supervisors"]["ingress"]["cycle_count"] == 3
+    assert body["supervisors"]["ingress"]["progress"]["cycle_state"] == "complete"
+    assert "last_result" not in body["supervisors"]["ingress"]
+    assert len(response.content) < 50_000
     assert "watch" not in body
     assert "universe" not in body
 

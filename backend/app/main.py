@@ -347,6 +347,24 @@ async def health():
         else:
             pipeline_state = "NOT_OBSERVED"
 
+        compact_supervisors = {
+            name: {
+                "enabled": status.get("enabled"),
+                "running": status.get("running"),
+                "cycle_count": status.get("cycle_count"),
+                "interval_seconds": status.get("interval_seconds"),
+                "last_cycle_started_at_utc": status.get("last_cycle_started_at_utc"),
+                "last_cycle_finished_at_utc": status.get("last_cycle_finished_at_utc"),
+                "last_error": status.get("last_error"),
+                "progress": (
+                    status.get("progress")
+                    if isinstance(status.get("progress"), dict)
+                    else None
+                ),
+            }
+            for name, status in supervisors.items()
+        }
+
         return {
             "ok": True,
             "env": "paper",
@@ -356,7 +374,7 @@ async def health():
             "build": load_build_info(),
             "pipeline_state": pipeline_state,
             "supervisor_state": operating,
-            "supervisors": supervisors,
+            "supervisors": compact_supervisors,
         }
 
     snap = engine.snapshot()
