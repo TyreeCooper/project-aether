@@ -187,9 +187,11 @@ jobs:
           echo "Verifying vNext nonproduction deployment at $base"
 
           for attempt in $(seq 1 24); do
-            if curl --fail --silent --show-error --max-time 20 "$base/api/v1/health" >/tmp/health.json; then
+            code="$(curl --silent --show-error --max-time 20 -o /tmp/health.json -w '%{http_code}' "$base/api/v1/health" || true)"
+            if [ "$code" = "200" ]; then
               break
             fi
+            echo "Health attempt $attempt returned ${code:-curl-error}; waiting for warmup."
             if [ "$attempt" -eq 24 ]; then
               echo "Health endpoint did not recover."
               exit 1
