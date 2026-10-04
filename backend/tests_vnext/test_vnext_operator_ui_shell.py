@@ -37,13 +37,14 @@ def test_market_fabric_is_visible_execution_universe_and_provider_top100_is_hidd
     page = (root / "frontend" / "app" / "page.js").read_text(encoding="utf-8")
     css = (root / "frontend" / "app" / "globals.css").read_text(encoding="utf-8")
 
-    assert 'title="Commissioned universe + live bid / ask"' in page
+    assert 'title="Human-route book — exactly as printed"' in page
     assert 'className="marketTable fabricUniverse"' in page
-    assert "Commissioned assets" in page
+    assert "Asset Universe" in page
+    assert "Executable routes" in page
     assert "Bid/ask observed" in page
     assert "Exec state" in page
-    assert "spreadBps" in page
-    assert "Ranking is not an allowlist and is not rendered here." in page
+    assert "Last if printed" in page
+    assert "No midpoint, composite, witness price, or carried-forward last is executable." in page
     assert "row.top100" not in page
     assert "CATALOG PRIORITY" not in page
     assert "Priority pool" not in page
