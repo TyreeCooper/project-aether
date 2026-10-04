@@ -112,7 +112,7 @@ function Badge({ children, value }) {
 const NAV = [
   ["command", "Command Center", "Overview"],
   ["markets", "Markets", "Provider universe"],
-  ["tape", "Tape", "Consensus market truth"],
+  ["tape", "Market Fabric", "Executable + intelligence truth"],
   ["pipeline", "Pipeline", "Flow & diagnostics"],
   ["trading", "Trading Floor", "Opportunities"],
   ["positions", "Positions", "Open risk"],
@@ -454,9 +454,20 @@ function Markets({ discovery, ingress, tape, nowMs }) {
   );
 }
 
-function Tape({ tape, nowMs }) {
+function Tape({ tape, ingress, nowMs }) {
   const assets = Array.isArray(tape?.assets) ? tape.assets : [];
   const sources = Array.isArray(tape?.source_registry) ? tape.source_registry : [];
+  const quotes = Array.isArray(ingress?.last_result?.quotes) ? ingress.last_result.quotes : [];
+  const quoteByAsset = Object.fromEntries(
+    quotes.map((row) => [String(row.asset_id || "").toLowerCase(), row])
+  );
+  const evidenceByAsset = Object.fromEntries(
+    assets.map((row) => [String(row.asset_id || "").toLowerCase(), row])
+  );
+  const instrumentIds = [...new Set([
+    ...Object.keys(quoteByAsset),
+    ...Object.keys(evidenceByAsset),
+  ])].sort();
   const summary = tape?.summary || {};
   const states = summary.state_counts || {};
   const runtime = tape?.runtime || {};
@@ -466,32 +477,70 @@ function Tape({ tape, nowMs }) {
     <div className="pageGrid">
       <div className="pageIntro">
         <div>
-          <span className="kicker">AETHER MARKET DATA PLANE</span>
-          <h2>AETHER Consensus Tape</h2>
-          <p>Independent market truth is reconciled before strategy. Broker/execution-provider health does not define the Tape, and Tape consensus never substitutes for an actual execution fill.</p>
+          <span className="kicker">AETHER MARKET FABRIC</span>
+          <h2>Dual-domain Market Tape</h2>
+          <p>Executable truth is the authorized execution-route book. Market Intelligence is independent witness evidence and derived analytics. Intelligence may corroborate or block action; it never overwrites executable bid/ask.</p>
         </div>
         <div className="heroModes">
           <Badge value={runtimeState}>{runtimeState}</Badge>
           <Badge value={Number(states.FULL || 0) > 0 ? "FULL" : assets.length ? "DEGRADED" : "NOT OBSERVED"}>
-            {Number(states.FULL || 0) > 0 ? "CONSENSUS ACTIVE" : assets.length ? "CONSENSUS PARTIAL" : "NOT OBSERVED"}
+            {Number(states.FULL || 0) > 0 ? "EVIDENCE FULL" : assets.length ? "EVIDENCE PARTIAL" : "EVIDENCE NOT OBSERVED"}
           </Badge>
         </div>
       </div>
 
-      <Section eyebrow="CONSENSUS HEALTH" title="Current Tape coverage" className="wide">
-        <div className="providerStats">
-          <Metric label="Observed assets" value={num(summary.asset_count)} />
-          <Metric label="Full quorum" value={num(states.FULL, 0, "0")} state={Number(states.FULL || 0) ? "FULL" : "NOT OBSERVED"} />
-          <Metric label="Degraded" value={num(states.DEGRADED, 0, "0")} state={Number(states.DEGRADED || 0) ? "DEGRADED" : "CLEAR"} />
-          <Metric label="Contested" value={num(states.CONTESTED, 0, "0")} state={Number(states.CONTESTED || 0) ? "CONTESTED" : "CLEAR"} />
-          <Metric label="Accepted feeds" value={num(summary.accepted_source_count)} />
-          <Metric label="Rejected feeds" value={num(summary.rejected_source_count)} />
-          <Metric label="Tape cycles" value={num(runtime?.cycle_count)} sub={text(runtimeProgress.phase, "idle").replaceAll("_", " ")} />
-          <Metric label="Tape heartbeat" value={age(runtimeProgress.last_progress_at_utc || runtime?.last_cycle_finished_at_utc, nowMs)} />
+      <Section eyebrow="DUAL-DOMAIN TAPE" title="Executable truth + Market Intelligence" className="wide">
+        <div className="marketTable">
+          <div className="marketHead"><span>Instrument</span><span>Exec venue</span><span>Bid</span><span>Ask</span><span>Exec age</span><span>Evidence</span><span>Witnesses</span></div>
+          {instrumentIds.map((assetId) => {
+            const quote = quoteByAsset[assetId];
+            const evidence = evidenceByAsset[assetId];
+            return (
+              <div className="marketRow" key={assetId}>
+                <strong>{assetId.toUpperCase()}</strong>
+                <span>{text(quote?.venue || quote?.source_id, "NOT OBSERVED")}</span>
+                <span>{num(quote?.bid, 6)}</span>
+                <span>{num(quote?.ask, 6)}</span>
+                <span>{age(quote?.reference_ts_utc, nowMs)}</span>
+                <Badge value={evidence?.state}>{text(evidence?.state, "NOT OBSERVED")}</Badge>
+                <span>{isObservedNumber(evidence?.source_count) ? num(evidence.source_count) : "NOT OBSERVED"}</span>
+              </div>
+            );
+          })}
+          {!instrumentIds.length ? <div className="empty">No executable or evidence observation has been observed. AETHER does not invent zeroes or carry stale prices forward.</div> : null}
+        </div>
+        <p className="repairNote">Current shadow telemetry still exposes the legacy evidence source count. Effective-independence quorum is a v3 Market Fabric contract and remains NOT OBSERVED until its runtime persistence path is bound; this screen does not fabricate it.</p>
+      </Section>
+
+      <Section eyebrow="EXECUTABLE TAPE" title="Authorized-route observations" className="wide">
+        <div className="eventList">
+          {quotes.slice(0, 80).map((row) => (
+            <div className="eventRow" key={`${row.asset_id}:${row.reference_ts_utc || row.received_ts_utc}`}>
+              <time>{age(row.reference_ts_utc, nowMs)}</time>
+              <div>
+                <strong>{text(row.asset_id).toUpperCase()} · {text(row.venue)} · {num(row.bid, 6)} / {num(row.ask, 6)}</strong>
+                <span>{text(row.source_id)} · last {num(row.last, 6)} · executable-source observation</span>
+              </div>
+            </div>
+          ))}
+          {!quotes.length ? <div className="empty">Executable-route observations NOT OBSERVED.</div> : null}
         </div>
       </Section>
 
-      <Section eyebrow="SOURCE REGISTRY" title="Independent Tape dependencies" className="wide">
+      <Section eyebrow="MARKET INTELLIGENCE" title="Independent witness evidence" className="wide">
+        <div className="providerStats">
+          <Metric label="Observed assets" value={num(summary.asset_count)} />
+          <Metric label="Full evidence" value={num(states.FULL, 0, "0")} state={Number(states.FULL || 0) ? "FULL" : "NOT OBSERVED"} />
+          <Metric label="Degraded" value={num(states.DEGRADED, 0, "0")} state={Number(states.DEGRADED || 0) ? "DEGRADED" : "CLEAR"} />
+          <Metric label="Contested" value={num(states.CONTESTED, 0, "0")} state={Number(states.CONTESTED || 0) ? "CONTESTED" : "CLEAR"} />
+          <Metric label="Accepted witnesses" value={num(summary.accepted_source_count)} />
+          <Metric label="Rejected witnesses" value={num(summary.rejected_source_count)} />
+          <Metric label="Evidence cycles" value={num(runtime?.cycle_count)} sub={text(runtimeProgress.phase, "idle").replaceAll("_", " ")} />
+          <Metric label="Heartbeat" value={age(runtimeProgress.last_progress_at_utc || runtime?.last_cycle_finished_at_utc, nowMs)} />
+        </div>
+      </Section>
+
+      <Section eyebrow="SOURCE REGISTRY" title="Witness and transport dependencies" className="wide">
         <div className="marketTable">
           <div className="marketHead"><span>Source</span><span>Provider</span><span>Market</span><span>Implemented</span><span>Configured</span><span>Independent</span><span>State</span></div>
           {sources.map((row) => (
@@ -505,30 +554,11 @@ function Tape({ tape, nowMs }) {
               <Badge value={row.state}>{text(row.state, "NOT OBSERVED")}</Badge>
             </div>
           ))}
-          {!sources.length ? <div className="empty">Tape source registry NOT OBSERVED.</div> : null}
+          {!sources.length ? <div className="empty">Market Fabric source registry NOT OBSERVED.</div> : null}
         </div>
       </Section>
 
-      <Section eyebrow="OFFICIAL TAPE" title="Composite market truth" className="wide">
-        <div className="marketTable">
-          <div className="marketHead"><span>Instrument</span><span>Composite</span><span>State</span><span>Sources</span><span>Quorum</span><span>Agreement</span><span>Oldest source</span></div>
-          {assets.map((row) => (
-            <div className="marketRow" key={row.composite_id || row.asset_id}>
-              <strong>{text(row.asset_id)}</strong>
-              <span>{num(row.composite_mark, 6)}</span>
-              <Badge value={row.state}>{text(row.state, "NOT OBSERVED")}</Badge>
-              <span>{num(row.source_count)}</span>
-              <span>{isObservedNumber(row.source_count) && isObservedNumber(row.quorum_required) ? (num(row.source_count) + "/" + num(row.quorum_required)) : "NOT OBSERVED"}</span>
-              <span>{isObservedNumber(row.agreement_bps) ? (num(row.agreement_bps, 3) + " bps") : "NOT OBSERVED"}</span>
-              <span>{isObservedNumber(row.max_source_age_ms) ? (num(row.max_source_age_ms) + " ms") : "NOT OBSERVED"}</span>
-            </div>
-          ))}
-          {!assets.length ? <div className="empty">No persisted Tape composite has been observed yet. No price or zero is invented.</div> : null}
-        </div>
-        <p className="repairNote">FULL requires the reviewed independent-source quorum. CONTESTED and NOT OBSERVED do not publish an authoritative composite mark. Execution-provider prices remain separate for Clerk/fill validation.</p>
-      </Section>
-
-      <Section eyebrow="PROVENANCE" title="Latest constituent observations" className="wide">
+      <Section eyebrow="PROVENANCE" title="Latest witness observations" className="wide">
         <div className="eventList">
           {assets.flatMap((asset) => (asset.sources || []).map((row) => ({ ...row, asset_id: asset.asset_id }))).slice(0, 60).map((row) => (
             <div className="eventRow" key={row.observation_id}>
@@ -539,7 +569,7 @@ function Tape({ tape, nowMs }) {
               </div>
             </div>
           ))}
-          {!assets.some((asset) => Array.isArray(asset.sources) && asset.sources.length) ? <div className="empty">Constituent Tape observations NOT OBSERVED.</div> : null}
+          {!assets.some((asset) => Array.isArray(asset.sources) && asset.sources.length) ? <div className="empty">Witness observations NOT OBSERVED.</div> : null}
         </div>
       </Section>
     </div>
@@ -1262,7 +1292,7 @@ function Settings({ ingress, strategy, discovery, tape, floor, maintenance, onTo
 function AppPage({ active, data, nowMs, onToggle, onRepair, busy, controlError, endpointHealth }) {
   const { floor, ingress, strategy, discovery, operator, maintenance, tape } = data;
   if (active === "markets") return <Markets discovery={discovery} ingress={ingress} tape={tape} nowMs={nowMs} />;
-  if (active === "tape") return <Tape tape={tape} nowMs={nowMs} />;
+  if (active === "tape") return <Tape tape={tape} ingress={ingress} nowMs={nowMs} />;
   if (active === "pipeline") return <Pipeline strategy={strategy} discovery={discovery} ingress={ingress} tape={tape} maintenance={maintenance} floor={floor} operator={operator} nowMs={nowMs} />;
   if (active === "trading") return <TradingFloor strategy={strategy} />;
   if (active === "positions") return <Positions floor={floor} nowMs={nowMs} endpointHealth={endpointHealth} />;
