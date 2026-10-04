@@ -94,8 +94,8 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          python -m pytest -q             tests_vnext/test_vnext_runtime_mode.py             tests_vnext/test_kraken_ingress_supervisor.py             tests_vnext/test_prototype_crypto_features.py             tests_vnext/test_prototype_crypto_entry_plan.py             tests_vnext/test_prototype_crypto_entry_runtime.py             tests_vnext/test_prototype_crypto_exit.py             tests_vnext/test_prototype_crypto_exit_runtime.py             tests_vnext/test_prototype_strategy_supervisor.py             tests_vnext/test_provider_discovery.py             tests_vnext/test_provider_discovery_supervisor.py             tests_vnext/test_public_reference_discovery.py             tests_vnext/test_provider_focus_handoff.py             tests_vnext/test_phase16_configured_shadow_mount.py             tests_vnext/test_vnext_db_runtime_timeouts.py             tests_vnext/test_phase17_floor_test_status.py             tests_vnext/test_tape_end_to_end.py             tests_vnext/test_tape_supervisor.py             tests_vnext/test_vnext_tape_api.py
-          python -m py_compile             app/main.py             app/vnext_ingress.py             app/vnext_strategy.py             app/vnext_discovery.py             app/vnext_shadow.py             app/vnext_runtime_mode.py             aether_vnext/kraken_ingress_supervisor.py             aether_vnext/provider_discovery.py             aether_vnext/provider_discovery_supervisor.py             aether_vnext/provider_focus_handoff.py             aether_vnext/db_runtime.py             aether_vnext/kraken_catalog.py             aether_vnext/massive_discovery.py             aether_vnext/public_reference_discovery.py             aether_vnext/prototype_strategy_supervisor.py             aether_vnext/tape_supervisor.py             aether_vnext/tape_sources.py             aether_vnext/tape_runtime.py             app/vnext_tape.py
+          python -m pytest -q             tests_vnext/test_vnext_runtime_mode.py             tests_vnext/test_kraken_ingress_supervisor.py             tests_vnext/test_prototype_crypto_features.py             tests_vnext/test_prototype_crypto_entry_plan.py             tests_vnext/test_prototype_crypto_entry_runtime.py             tests_vnext/test_prototype_crypto_exit.py             tests_vnext/test_prototype_crypto_exit_runtime.py             tests_vnext/test_prototype_strategy_supervisor.py             tests_vnext/test_provider_discovery.py             tests_vnext/test_provider_discovery_supervisor.py             tests_vnext/test_public_reference_discovery.py             tests_vnext/test_provider_focus_handoff.py             tests_vnext/test_phase16_configured_shadow_mount.py             tests_vnext/test_vnext_db_runtime_timeouts.py             tests_vnext/test_phase17_floor_test_status.py             tests_vnext/test_tape_end_to_end.py             tests_vnext/test_tape_supervisor.py             tests_vnext/test_vnext_tape_api.py             tests_vnext/test_vnext_market_fabric.py
+          python -m py_compile             app/main.py             app/vnext_ingress.py             app/vnext_strategy.py             app/vnext_discovery.py             app/vnext_shadow.py             app/vnext_runtime_mode.py             aether_vnext/kraken_ingress_supervisor.py             aether_vnext/provider_discovery.py             aether_vnext/provider_discovery_supervisor.py             aether_vnext/provider_focus_handoff.py             aether_vnext/db_runtime.py             aether_vnext/kraken_catalog.py             aether_vnext/massive_discovery.py             aether_vnext/public_reference_discovery.py             aether_vnext/prototype_strategy_supervisor.py             aether_vnext/tape_supervisor.py             aether_vnext/tape_sources.py             aether_vnext/tape_runtime.py             app/vnext_tape.py             app/vnext_market_fabric.py
 
       - name: Require sandbox database URL
         env:
@@ -332,7 +332,7 @@ jobs:
           # Market conditions (for example quote_stale) may degrade the PAPER funnel
           # without making the deployed package invalid. Capture runtime snapshots for
           # diagnostics, but do not turn a healthy exact-revision deployment red.
-          for endpoint in ingress-runtime discovery-runtime strategy-runtime tape floor; do
+          for endpoint in ingress-runtime discovery-runtime strategy-runtime tape market-fabric floor; do
             curl --silent --show-error --max-time 20 \
               -o "/tmp/${endpoint}.json" \
               "$base/api/v1/vnext/${endpoint}" || true
@@ -356,6 +356,7 @@ jobs:
           strategy=read("strategy-runtime")
           floor=read("floor")
           tape=read("tape")
+          market_fabric=read("market-fabric")
           tape_runtime=tape.get("runtime") or {}
           tape_assets=tape.get("assets") or []
 
@@ -408,6 +409,14 @@ jobs:
                   "last_error": strategy.get("last_error"),
                   "pipeline": (strategy.get("last_result") or {}).get("pipeline"),
               },
+              "market_fabric": {
+                  "available": bool(market_fabric),
+                  "paper_only": market_fabric.get("paper_only"),
+                  "live_blocked": market_fabric.get("live_blocked"),
+                  "instrument_count": market_fabric.get("instrument_count"),
+                  "authority": market_fabric.get("authority"),
+                  "runtime_contract": market_fabric.get("runtime_contract"),
+              },
               "floor_available": bool(floor),
           }
           def actively_recovering(payload):
@@ -449,11 +458,13 @@ jobs:
           cp /tmp/ingress-runtime.json /tmp/ingress-runtime-first.json
           cp /tmp/strategy-runtime.json /tmp/strategy-runtime-first.json
           cp /tmp/tape.json /tmp/tape-first.json
+          cp /tmp/market-fabric.json /tmp/market-fabric-first.json
           sleep 45
           curl --fail --silent --show-error --max-time 20             -o /tmp/ingress-runtime-second.json             "$base/api/v1/vnext/ingress-runtime"
           curl --fail --silent --show-error --max-time 20             -o /tmp/strategy-runtime-second.json             "$base/api/v1/vnext/strategy-runtime"
           curl --fail --silent --show-error --max-time 20             -o /tmp/discovery-runtime-second.json             "$base/api/v1/vnext/discovery-runtime"
           curl --fail --silent --show-error --max-time 20             -o /tmp/tape-second.json             "$base/api/v1/vnext/tape"
+          curl --fail --silent --show-error --max-time 20             -o /tmp/market-fabric-second.json             "$base/api/v1/vnext/market-fabric"
           curl --fail --silent --show-error --max-time 10             -o /tmp/health-second.json             "$base/api/v1/health"
 
           python - <<'PY'
@@ -514,6 +525,8 @@ jobs:
           discovery=load("/tmp/discovery-runtime-second.json")
           tape_first=load("/tmp/tape-first.json")
           tape_second=load("/tmp/tape-second.json")
+          market_fabric_first=load("/tmp/market-fabric-first.json")
+          market_fabric_second=load("/tmp/market-fabric-second.json")
           tape_first_runtime=tape_first.get("runtime") or {}
           tape_second_runtime=tape_second.get("runtime") or {}
           health=load("/tmp/health-second.json")
@@ -533,6 +546,17 @@ jobs:
           assert health.get("pipeline_state") not in {"BLOCKED", "STALLED", "DEGRADED"}, health
           assert tape_second.get("paper_only") is True, tape_second
           assert tape_second.get("live_blocked") is True, tape_second
+          assert market_fabric_second.get("paper_only") is True, market_fabric_second
+          assert market_fabric_second.get("live_blocked") is True, market_fabric_second
+          fabric_authority=market_fabric_second.get("authority") or {}
+          assert fabric_authority.get("execution_permission") is False, market_fabric_second
+          assert fabric_authority.get("consensus_can_replace_executable_price") is False, market_fabric_second
+          assert (market_fabric_second.get("runtime_contract") or {}).get("effective_independence_runtime") == "NOT_OBSERVED", market_fabric_second
+          for row in (market_fabric_second.get("instruments") or []):
+              if not isinstance(row, dict):
+                  continue
+              intelligence=row.get("intelligence") or {}
+              assert intelligence.get("derived_reference_executable") is False, row
 
           # Tape quorum is market-data readiness, not deployment validity. A temporary
           # external-source outage must remain fail-closed for strategy admission, but
@@ -554,6 +578,12 @@ jobs:
                   "cycle_count": int(discovery.get("cycle_count") or 0),
                   "progress": discovery_progress,
                   "observed": discovery_observed,
+              },
+              "market_fabric": {
+                  "instrument_count_before": market_fabric_first.get("instrument_count"),
+                  "instrument_count_after": market_fabric_second.get("instrument_count"),
+                  "authority": fabric_authority,
+                  "runtime_contract": market_fabric_second.get("runtime_contract"),
               },
               "pipeline_state": health.get("pipeline_state"),
               "paper_only": True,
@@ -611,7 +641,7 @@ jobs:
             --resource-group "$resource_group" || true
 
           echo "=== Last probe bodies ==="
-          for file in /tmp/health.json /tmp/health-second.json /tmp/build.json /tmp/pipeline-health.json /tmp/runtime-continuity.json /tmp/floor.json /tmp/ingress-runtime.json /tmp/ingress-runtime-second.json /tmp/discovery-runtime.json /tmp/discovery-runtime-second.json /tmp/strategy-runtime.json /tmp/strategy-runtime-second.json /tmp/tape.json /tmp/tape-second.json; do
+          for file in /tmp/health.json /tmp/health-second.json /tmp/build.json /tmp/pipeline-health.json /tmp/runtime-continuity.json /tmp/floor.json /tmp/ingress-runtime.json /tmp/ingress-runtime-second.json /tmp/discovery-runtime.json /tmp/discovery-runtime-second.json /tmp/strategy-runtime.json /tmp/strategy-runtime-second.json /tmp/tape.json /tmp/tape-second.json /tmp/market-fabric.json /tmp/market-fabric-first.json /tmp/market-fabric-second.json; do
             if [ -f "$file" ]; then
               echo "--- $file ---"
               cat "$file"
@@ -637,6 +667,9 @@ jobs:
             /tmp/tape.json
             /tmp/tape-first.json
             /tmp/tape-second.json
+            /tmp/market-fabric.json
+            /tmp/market-fabric-first.json
+            /tmp/market-fabric-second.json
             /tmp/health-second.json
             /tmp/pipeline-health.json
             /tmp/runtime-continuity.json
