@@ -33,21 +33,32 @@ def test_health_uses_vnext_runtime_truth_in_sandbox(monkeypatch):
         "paper_only": True,
         "live_blocked": True,
         "cycle_count": 3,
-        "interval_seconds": 15.0,
+        "interval_seconds": 300.0,
         "last_cycle_started_at_utc": "2099-01-01T00:00:00+00:00",
         "last_cycle_finished_at_utc": "2099-01-01T00:00:01+00:00",
         "last_error": None,
-        "last_result": {"huge": "x" * 250_000},
         "progress": {
             "cycle_state": "complete",
             "last_progress_at_utc": "2099-01-01T00:00:01+00:00",
         },
     }
-    monkeypatch.setattr(main, "configured_vnext_ingress_status", lambda: dict(active))
-    monkeypatch.setattr(main, "current_discovery_status", lambda: dict(active, interval_seconds=300.0))
-    monkeypatch.setattr(main, "configured_vnext_strategy_status", lambda: dict(active))
-    monkeypatch.setattr(main, "configured_vnext_tape_status", lambda: dict(active, interval_seconds=5.0))
+    monkeypatch.setattr(main, "current_discovery_status", lambda: dict(active))
     monkeypatch.setattr(main, "configured_vnext_maintenance_status", lambda: dict(active))
+    monkeypatch.setattr(main, "configured_market_truth_snapshot", lambda: {
+        "architecture": "AETHER_MARKET_TRUTH_V1",
+        "paper_only": True,
+        "live_blocked": True,
+        "layers": {"market_fabric": "EXECUTABLE"},
+        "first_proof": {"required": True, "passed": False},
+        "runtime": {
+            "running": True,
+            "bootstrap_ready": True,
+            "bootstrap_error": None,
+            "last_progress_at_utc": "2099-01-01T00:00:01+00:00",
+            "executable_packet_count": 5,
+            "witness_packet_count": 4,
+        },
+    })
 
     response = client.get("/api/v1/health")
     assert response.status_code == 200
@@ -56,11 +67,13 @@ def test_health_uses_vnext_runtime_truth_in_sandbox(monkeypatch):
     assert body["paper_mode"] is True
     assert body["live_blocked"] is True
     assert body["pipeline_state"] == "ACTIVE"
-    assert body["supervisor_state"]["ingress"] == "ACTIVE"
-    assert body["supervisor_state"]["tape"] == "ACTIVE"
-    assert body["supervisors"]["ingress"]["cycle_count"] == 3
-    assert body["supervisors"]["ingress"]["progress"]["cycle_state"] == "complete"
-    assert "last_result" not in body["supervisors"]["ingress"]
+    assert body["market_truth_architecture"] == "AETHER_MARKET_TRUTH_V1"
+    assert body["supervisor_state"]["market_truth"] == "ACTIVE"
+    assert body["supervisor_state"]["ingress"] == "QUARANTINED"
+    assert body["supervisor_state"]["tape"] == "QUARANTINED"
+    assert body["supervisor_state"]["strategy"] == "QUARANTINED"
+    assert body["supervisors"]["ingress"]["authority"] == "QUARANTINED"
+    assert body["supervisors"]["market_truth"]["executable_packet_count"] == 5
     assert len(response.content) < 50_000
     assert "watch" not in body
     assert "universe" not in body
@@ -151,22 +164,34 @@ def test_health_reports_warming_not_degraded_during_cold_start(monkeypatch):
         "paper_only": True,
         "live_blocked": True,
         "cycle_count": 0,
-        "interval_seconds": 15.0,
+        "interval_seconds": 300.0,
         "last_cycle_started_at_utc": None,
         "last_cycle_finished_at_utc": None,
         "last_error": None,
         "progress": {"cycle_state": "idle", "last_progress_at_utc": None},
     }
-    monkeypatch.setattr(main, "configured_vnext_ingress_status", lambda: dict(warming))
     monkeypatch.setattr(main, "current_discovery_status", lambda: dict(warming))
-    monkeypatch.setattr(main, "configured_vnext_strategy_status", lambda: dict(warming))
-    monkeypatch.setattr(main, "configured_vnext_tape_status", lambda: dict(warming))
     monkeypatch.setattr(main, "configured_vnext_maintenance_status", lambda: {
         **warming, "enabled": False, "running": False
+    })
+    monkeypatch.setattr(main, "configured_market_truth_snapshot", lambda: {
+        "architecture": "AETHER_MARKET_TRUTH_V1",
+        "paper_only": True,
+        "live_blocked": True,
+        "layers": {"market_fabric": "WARMING"},
+        "first_proof": {"required": True, "passed": False},
+        "runtime": {
+            "running": True,
+            "bootstrap_ready": False,
+            "bootstrap_error": None,
+            "last_progress_at_utc": None,
+        },
     })
 
     response = client.get("/api/v1/health")
     assert response.status_code == 200
     body = response.json()
     assert body["pipeline_state"] == "WARMING"
-    assert body["supervisor_state"]["ingress"] == "WARMING"
+    assert body["supervisor_state"]["market_truth"] == "WARMING"
+    assert body["supervisor_state"]["ingress"] == "QUARANTINED"
+
