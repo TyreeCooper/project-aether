@@ -24,6 +24,13 @@ def _required_id(name: str, value: str) -> str:
     return normalized
 
 
+def _required_text(name: str, value: str) -> str:
+    normalized = str(value).strip()
+    if not normalized:
+        raise ValueError(f"{name} is required")
+    return normalized
+
+
 class SourceAuthorityClass(StrEnum):
     EXECUTABLE_ROUTE = "executable_route"
     WITNESS = "witness"
@@ -106,10 +113,10 @@ class RouteAuthorityEvent:
             "instrument_id",
             "to_economic_source_id",
             "initiator",
-            "reason",
             "authorization_signature",
         ):
             object.__setattr__(self, name, _required_id(name, getattr(self, name)))
+        object.__setattr__(self, "reason", _required_text("reason", self.reason))
         if self.from_economic_source_id is not None:
             object.__setattr__(
                 self,
@@ -139,14 +146,17 @@ class MarketFabricIdentityRegistry:
         transports: Iterable[TransportPath],
         routes: Iterable[ExecutionRoute] = (),
     ) -> "MarketFabricIdentityRegistry":
-        source_map = {row.economic_source_id: row for row in economic_sources}
-        transport_map = {row.transport_id: row for row in transports}
-        route_map = {row.route_id: row for row in routes}
-        if len(source_map) != len(tuple(economic_sources)):
+        source_rows = tuple(economic_sources)
+        transport_rows = tuple(transports)
+        route_rows = tuple(routes)
+        source_map = {row.economic_source_id: row for row in source_rows}
+        transport_map = {row.transport_id: row for row in transport_rows}
+        route_map = {row.route_id: row for row in route_rows}
+        if len(source_map) != len(source_rows):
             raise ValueError("duplicate economic_source_id")
-        if len(transport_map) != len(tuple(transports)):
+        if len(transport_map) != len(transport_rows):
             raise ValueError("duplicate transport_id")
-        if len(route_map) != len(tuple(routes)):
+        if len(route_map) != len(route_rows):
             raise ValueError("duplicate route_id")
         for row in transport_map.values():
             if row.economic_source_id not in source_map:
