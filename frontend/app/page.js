@@ -11,11 +11,23 @@ const discoveryPath = "/api/v1/vnext/discovery-runtime";
 const maintenancePath = "/api/v1/vnext/maintenance";
 const tapePath = "/api/v1/vnext/tape";
 const marketFabricPath = "/api/v1/vnext/market-fabric";
+const healthPath = "/api/v1/health";
+const startupRecoveryPath = "/api/v1/vnext/startup-recovery";
 
 async function getJson(path) {
   const response = await fetch(`${apiBase}${path}`, { cache: "no-store" });
   if (!response.ok) throw new Error(`${response.status} ${path}`);
   return response.json();
+}
+
+async function postStartupRecovery(component) {
+  const response = await fetch(
+    `${apiBase}${startupRecoveryPath}/${encodeURIComponent(component)}`,
+    { method:"POST", cache:"no-store" },
+  );
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload?.detail || `${response.status} startup recovery`);
+  return payload;
 }
 
 async function postJson(path, body, operatorToken, timeoutMs = 15000) {
@@ -239,16 +251,117 @@ function pipelineRuntimeState(ingress, discovery, tape, strategy, maintenance, n
 }
 
 function telemetryWatermark(data) {
+  // Maintenance is intentionally idle at boot and is not part of market-runtime
+  // readiness. The watermark reflects only continuously running market services.
   const stamps = [
     data.floor?.refresh_time_utc || data.floor?.as_of_utc,
     data.ingress?.last_cycle_finished_at_utc,
     data.strategy?.last_cycle_finished_at_utc,
     data.discovery?.last_cycle_finished_at_utc,
     data.tape?.runtime?.last_cycle_finished_at_utc || data.tape?.as_of_utc,
-    data.maintenance?.last_result?.as_of_utc || data.maintenance?.as_of_utc,
   ].map((value) => Date.parse(value || "")).filter(Number.isFinite);
-  if (stamps.length < 6) return null;
+  if (stamps.length < 5) return null;
   return new Date(Math.min(...stamps)).toISOString();
+}
+
+const BOOTSTRAP_GATES = [
+  ["floor", "Firm Floor"],
+  ["ingress", "Executable Ingress"],
+  ["discovery", "Provider Discovery"],
+  ["tape", "Market Fabric"],
+  ["strategy", "Strategy Runtime"],
+  ["operator", "Operator Ledger"],
+  ["maintenance", "Maintenance Idle Guard"],
+];
+
+const STARTUP_RECOVERABLE = new Set(["ingress","discovery","tape","strategy"]);
+
+function bootstrapGateState(key, payload, health, healthSnapshot) {
+  if (health !== "live") return { ready:false, state:health === "unavailable" ? "UNAVAILABLE" : "LOADING", detail:"endpoint not ready" };
+  if (key === "floor") {
+    const ready = payload?.mode?.paper_only === true && payload?.mode?.live_blocked === true;
+    return { ready, state:ready ? "READY" : "LOADING", detail:ready ? "PAPER ONLY · LIVE BLOCKED" : "loading safety contract" };
+  }
+  if (key === "operator") {
+    return { ready:true, state:"READY", detail:"operating ledger observed" };
+  }
+  if (key === "maintenance") {
+    const idle = payload?.controls?.master_enabled === false && payload?.running !== true;
+    return { ready:idle, state:idle ? "IDLE" : "WAITING", detail:idle ? "startup authority OFF" : "waiting for maintenance idle guard" };
+  }
+  const runtime = key === "tape" ? payload?.runtime : payload;
+  const operating = healthSnapshot?.supervisor_state?.[key];
+  const cycles = Number(runtime?.cycle_count || 0);
+  const ready = runtime?.enabled === true && runtime?.running === true && cycles >= 1 && !runtime?.last_error && operating !== "STALLED";
+  if (ready) return { ready:true, state:"READY", detail:`cycle ${cycles} observed` };
+  if (["STALLED","FAULT","BLOCKED"].includes(String(operating || ""))) {
+    return { ready:false, state:String(operating), detail:`${String(operating).toLowerCase()} · recovery eligible` };
+  }
+  if (runtime?.running === true) {
+    return { ready:false, state:"WARMING", detail:`awaiting first completed cycle · ${cycles}` };
+  }
+  return { ready:false, state:"WAITING", detail:"supervisor not yet running" };
+}
+
+function BootstrapScreen({ data, endpointHealth, recovery }) {
+  const gates = BOOTSTRAP_GATES.map(([key,label]) => ({
+    key,
+    label,
+    ...bootstrapGateState(key, data[key], endpointHealth[key], data.health),
+  }));
+  const readyCount = gates.filter((gate) => gate.ready).length;
+  const pct = Math.round((readyCount / gates.length) * 100);
+  const unresolved = gates.filter((gate) => !gate.ready);
+  const active = unresolved[0] || null;
+  const activeRecovery = active ? recovery?.[active.key] : null;
+  const [visibleKey, setVisibleKey] = useState(active?.key || null);
+  const [leaving, setLeaving] = useState(false);
+
+  useEffect(()=>{
+    const nextKey=active?.key || null;
+    if(nextKey===visibleKey)return;
+    setLeaving(true);
+    const timer=setTimeout(()=>{
+      setVisibleKey(nextKey);
+      setLeaving(false);
+    },260);
+    return()=>clearTimeout(timer);
+  },[active?.key,visibleKey]);
+
+  const visibleGate = gates.find((gate)=>gate.key===visibleKey) || active;
+  const recoveryState = visibleGate ? recovery?.[visibleGate.key] : null;
+  const displayState = recoveryState?.state || visibleGate?.state || "LOADING";
+  const detail = recoveryState?.detail || visibleGate?.detail || "waiting";
+  return (
+    <main className="bootstrapScreen">
+      <section className="bootstrapCard" aria-live="polite">
+        <div className="bootstrapBrand">
+          <img src="/vnext/aether-mark.png" alt="AETHER" />
+          <div><span>AETHER SANDBOX</span><h1>Preparing market operations</h1></div>
+        </div>
+        <div className="bootstrapProgressHead">
+          <strong>{pct}%</strong>
+          <span>{readyCount}/{gates.length} runtime gates observed</span>
+        </div>
+        <div className="bootstrapTrack"><i style={{ width:`${pct}%` }} /></div>
+        <div className="bootstrapSequentialList">
+          {visibleGate ? (
+            <div className={leaving ? "bootstrapSequentialItem leaving" : "bootstrapSequentialItem entering"} key={visibleGate.key}>
+              <span className={["STALLED","FAULT","BLOCKED"].includes(displayState) ? "bootstrapSpinner recovery" : "bootstrapSpinner"} />
+              <div>
+                <strong>{visibleGate.label}</strong>
+                <small>{detail}<span className="bootstrapEllipsis" aria-hidden="true">...</span></small>
+              </div>
+              <Badge value={displayState}>{displayState}</Badge>
+            </div>
+          ) : (
+            <div className="bootstrapComplete">All required startup gates observed.</div>
+          )}
+        </div>
+        <p className="bootstrapTruth">Completed items disappear immediately. Progress is computed from observed runtime state only. Maintenance remains IDLE / OFF during startup.</p>
+      </section>
+    </main>
+  );
 }
 
 
@@ -292,6 +405,8 @@ function CommandCenter({ floor, ingress, strategy, discovery, tape, operator, ma
   const strategyObserved = Boolean(strategy?.last_result && (strategy.last_result.assets || strategy.last_result.dynamic_assets));
   const strategyRows = combinedStrategyRows(strategy).slice(0, 12);
   const maintenanceState = maintenance?.last_result || {};
+  const maintenanceIdle = maintenance?.controls?.master_enabled === false;
+  const maintenanceDisplay = maintenanceIdle ? "IDLE" : text(maintenanceState.status, "NOT OBSERVED");
   const tapeSummary = tape?.summary || {};
   const tapeStates = tapeSummary.state_counts || {};
   const tapeFull = Number(tapeStates.FULL || 0);
@@ -315,7 +430,7 @@ function CommandCenter({ floor, ingress, strategy, discovery, tape, operator, ma
           <Badge value={floor?.mode?.live_blocked === true ? "BLOCKED" : floor?.mode?.live_blocked === false ? "UNSAFE" : "NOT OBSERVED"}>
             {floor?.mode?.live_blocked === true ? "LIVE BLOCKED" : floor?.mode?.live_blocked === false ? "LIVE NOT BLOCKED" : "LIVE NOT OBSERVED"}
           </Badge>
-          <Badge value={maintenanceState.status || "SYNCING"}>{text(maintenanceState.status, "SYNCING")}</Badge>
+          <Badge value={maintenanceDisplay}>{maintenanceDisplay}</Badge>
         </div>
       </div>
 
@@ -325,7 +440,7 @@ function CommandCenter({ floor, ingress, strategy, discovery, tape, operator, ma
         <Metric label="Evaluated this cycle" value={pipe.strategy_evaluated === undefined ? "NOT OBSERVED" : num(pipe.strategy_evaluated)} sub={pipe.market_ready === undefined ? "market readiness NOT OBSERVED" : `${num(pipe.market_ready)} market ready`} />
         <Metric label="Open positions" value={positionsObserved ? num(positions.length) : "NOT OBSERVED"} sub="PAPER positions" />
         <Metric label="Book cash" value={money(bank.book_cash_usd, "NOT OBSERVED")} sub={bank.cash_reserved_usd === null || bank.cash_reserved_usd === undefined ? "reserved NOT OBSERVED" : `${money(bank.cash_reserved_usd)} reserved`} />
-        <Metric label="Maintenance" value={text(maintenanceState.status, "SYNCING")} sub={text(maintenanceState.primary_reason, "establishing baseline")} state={maintenanceState.status} />
+        <Metric label="Maintenance" value={maintenanceDisplay} sub={maintenanceIdle ? "startup authority OFF" : text(maintenanceState.primary_reason, "no diagnosis observed")} state={maintenanceDisplay} />
         <Metric label="Consensus Tape" value={tapeObserved === null ? "NOT OBSERVED" : `${num(tapeFull)}/${num(tapeObserved)} FULL`} sub={`runtime ${tapeRuntimeState}`} state={tapeFull > 0 ? "FULL" : tapeObserved ? "DEGRADED" : tapeRuntimeState} />
       </div>
 
@@ -1191,13 +1306,16 @@ function Blotter({ operator, endpointHealth }) {
 function Maintenance({ maintenance }) {
   const m = maintenance?.last_result || {};
   const incidents = maintenance?.incidents || [];
+  const maintenanceIdle = maintenance?.controls?.master_enabled === false;
+  const status = maintenanceIdle ? "IDLE" : text(m.status, "NOT OBSERVED");
+  const mode = maintenanceIdle ? "OFF" : text(m.maintenance_mode, "NOT OBSERVED");
   return (
     <div className="pageGrid">
-      <div className="pageIntro"><div><span className="kicker">SELF-HEALING OPERATIONS</span><h2>Maintenance</h2><p>Expected vs observed system behavior, first-cause diagnosis, incident recurrence and repair evidence.</p></div><Badge value={m.status}>{text(m.status, "SYNCING")}</Badge></div>
+      <div className="pageIntro"><div><span className="kicker">SELF-HEALING OPERATIONS</span><h2>Maintenance</h2><p>Expected vs observed system behavior, first-cause diagnosis, incident recurrence and repair evidence.</p></div><Badge value={status}>{status}</Badge></div>
       <div className="metricGrid">
-        <Metric label="Status" value={text(m.status,"SYNCING")} state={m.status} />
-        <Metric label="Mode" value={text(m.maintenance_mode, "BASELINE PENDING")} state={m.maintenance_mode} />
-        <Metric label="Healthy baseline" value={maintenance?.healthy_baseline_established || m.healthy_baseline_established ? "ESTABLISHED" : "PENDING"} state={maintenance?.healthy_baseline_established || m.healthy_baseline_established ? "GREEN" : "BUSY"} />
+        <Metric label="Status" value={status} state={status} />
+        <Metric label="Mode" value={mode} state={mode} />
+        <Metric label="Healthy baseline" value={maintenanceIdle ? "IDLE" : maintenance?.healthy_baseline_established || m.healthy_baseline_established ? "ESTABLISHED" : "PENDING"} state={maintenanceIdle ? "IDLE" : maintenance?.healthy_baseline_established || m.healthy_baseline_established ? "GREEN" : "BUSY"} />
         <Metric label="First causal edge" value={text(m.first_causal_edge,"waiting")} />
         <Metric label="Affected" value={num(m.affected_count)} />
         <Metric label="Confidence" value={text(m.confidence)} />
@@ -1205,7 +1323,7 @@ function Maintenance({ maintenance }) {
         <Metric label="Quarantined" value={num((m.quarantined_symbols||[]).length)} />
       </div>
       <Section eyebrow="DIAGNOSIS" title={text(m.primary_reason, "No active diagnosis")}>
-        <p className="longText">{text(m.observed, "Waiting for diagnostic cycle.")}</p>
+        <p className="longText">{maintenanceIdle ? "Maintenance is idle by design. No startup diagnosis or repair is running." : text(m.observed, "No maintenance diagnosis observed.")}</p>
         <div className="detailGrid">
           <div><span>Expected</span><strong>{text(m.expected)}</strong></div>
           <div><span>Owner</span><strong>{text(m.owner)}</strong></div>
@@ -1304,7 +1422,7 @@ function Settings({ ingress, strategy, discovery, tape, floor, maintenance, onTo
 function AppPage({ active, data, nowMs, onToggle, onRepair, busy, controlError, endpointHealth }) {
   const { floor, ingress, strategy, discovery, operator, maintenance, tape, marketFabric } = data;
   if (active === "markets") return <Markets discovery={discovery} ingress={ingress} tape={tape} nowMs={nowMs} />;
-  if (active === "tape") return <Tape tape={tape} ingress={ingress} marketFabric={marketFabric} nowMs={nowMs} />;
+  if (active === "tape") return <Tape tape={tape} marketFabric={marketFabric} ingress={ingress} nowMs={nowMs} />;
   if (active === "pipeline") return <Pipeline strategy={strategy} discovery={discovery} ingress={ingress} tape={tape} maintenance={maintenance} floor={floor} operator={operator} nowMs={nowMs} />;
   if (active === "trading") return <TradingFloor strategy={strategy} />;
   if (active === "positions") return <Positions floor={floor} nowMs={nowMs} endpointHealth={endpointHealth} />;
@@ -1316,12 +1434,14 @@ function AppPage({ active, data, nowMs, onToggle, onRepair, busy, controlError, 
 
 export default function DashboardPage() {
   const [active, setActive] = useState("command");
-  const [data, setData] = useState({ floor:null, ingress:null, strategy:null, operator:null, discovery:null, maintenance:null, tape:null, marketFabric:null });
+  const [data, setData] = useState({ floor:null, ingress:null, strategy:null, operator:null, discovery:null, maintenance:null, tape:null, marketFabric:null, health:null });
   const [errors, setErrors] = useState([]);
   const [endpointHealth, setEndpointHealth] = useState({});
   const [nowMs, setNowMs] = useState(()=>Date.now());
   const [maintenanceBusy, setMaintenanceBusy] = useState(false);
   const [maintenanceError, setMaintenanceError] = useState("");
+  const [bootstrapComplete, setBootstrapComplete] = useState(false);
+  const [startupRecovery, setStartupRecovery] = useState({});
 
   useEffect(()=>{
     const timer=setInterval(()=>setNowMs(Date.now()),1000);
@@ -1333,24 +1453,90 @@ export default function DashboardPage() {
     const load=async()=>{
       const results=await Promise.allSettled([
         getJson(floorPath), getJson(ingressPath), getJson(strategyPath),
-        getJson(operatorPath), getJson(discoveryPath), getJson(maintenancePath), getJson(tapePath),
-        getJson(marketFabricPath),
+        getJson(operatorPath), getJson(discoveryPath), getJson(maintenancePath), getJson(tapePath), getJson(marketFabricPath), getJson(healthPath),
       ]);
       if(!mounted)return;
-      const keys=["floor","ingress","strategy","operator","discovery","maintenance","tape","marketFabric"];
+      const keys=["floor","ingress","strategy","operator","discovery","maintenance","tape","marketFabric","health"];
       const next={}; const nextErrors=[]; const health={};
       results.forEach((r,i)=>{
         if(r.status==="fulfilled") { next[keys[i]]=r.value; health[keys[i]]="live"; }
         else { nextErrors.push(keys[i]); health[keys[i]]="unavailable"; }
       });
+      const mergedData=next;
       setData((current)=>({...current,...next}));
       setEndpointHealth((current)=>({...current,...health}));
       setErrors(nextErrors);
+      const bootstrapReady=BOOTSTRAP_GATES.every(([key])=>
+        bootstrapGateState(key, mergedData[key], health[key], mergedData.health).ready
+      );
+      if(bootstrapReady) setBootstrapComplete(true);
     };
     load();
     const timer=setInterval(load,5000);
     return()=>{mounted=false;clearInterval(timer);};
   },[]);
+
+  useEffect(()=>{
+    if(bootstrapComplete)return;
+    const gates=BOOTSTRAP_GATES.map(([key,label])=>({
+      key,label,...bootstrapGateState(key,data[key],endpointHealth[key],data.health),
+    }));
+    const active=gates.find((gate)=>!gate.ready);
+    if(!active || !STARTUP_RECOVERABLE.has(active.key))return;
+    if(!["WAITING","STALLED","FAULT","BLOCKED"].includes(active.state))return;
+    const current=startupRecovery[active.key];
+    if(current?.inFlight)return;
+    let cancelled=false;
+    setStartupRecovery((state)=>({
+      ...state,
+      [active.key]:{
+        inFlight:true,
+        state:active.state==="WAITING"?"STARTING":"RECOVERING",
+        detail:active.state==="WAITING"?"forcing configured supervisor start":"no progress · bounded restart in progress",
+      },
+    }));
+    postStartupRecovery(active.key)
+      .then((result)=>{
+        if(cancelled)return;
+        setStartupRecovery((state)=>({
+          ...state,
+          [active.key]:{
+            inFlight:false,
+            state:result.action==="NO_ACTION"?"VERIFYING":result.action==="COOLDOWN"?"VERIFYING":"VERIFYING",
+            detail:`${result.action.replaceAll("_"," ").toLowerCase()} · verifying runtime`,
+          },
+        }));
+      })
+      .catch((error)=>{
+        if(cancelled)return;
+        setStartupRecovery((state)=>({
+          ...state,
+          [active.key]:{
+            inFlight:false,
+            state:"STALLED",
+            detail:error instanceof Error?error.message:"startup recovery failed",
+          },
+        }));
+      });
+    return()=>{cancelled=true;};
+  },[bootstrapComplete,data,endpointHealth,startupRecovery]);
+
+  useEffect(()=>{
+    if(bootstrapComplete)return;
+    setStartupRecovery((state)=>{
+      let changed=false;
+      const next={...state};
+      for(const [key] of BOOTSTRAP_GATES){
+        if(!next[key])continue;
+        const gate=bootstrapGateState(key,data[key],endpointHealth[key],data.health);
+        if(gate.ready){
+          delete next[key];
+          changed=true;
+        }
+      }
+      return changed?next:state;
+    });
+  },[bootstrapComplete,data,endpointHealth]);
 
   const onToggle=async(key,enabled,token)=>{
     setMaintenanceBusy(true); setMaintenanceError("");
@@ -1384,6 +1570,9 @@ export default function DashboardPage() {
 
   const title = NAV.find(([id])=>id===active)?.[1] || "Command Center";
   const watermark = telemetryWatermark(data);
+  if (!bootstrapComplete) {
+    return <BootstrapScreen data={data} endpointHealth={endpointHealth} recovery={startupRecovery} />;
+  }
   return (
     <main className="appShell">
       <aside className="sidebar">

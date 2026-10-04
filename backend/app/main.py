@@ -332,6 +332,102 @@ def _supervisor_operating_state(
     return "ACTIVE"
 
 
+
+_STARTUP_RECOVERY_COMPONENTS = {
+    "ingress": (
+        configured_vnext_ingress_status,
+        start_configured_vnext_ingress,
+        stop_configured_vnext_ingress,
+    ),
+    "discovery": (
+        current_discovery_status,
+        start_configured_vnext_discovery,
+        stop_configured_vnext_discovery,
+    ),
+    "tape": (
+        configured_vnext_tape_status,
+        start_configured_vnext_tape,
+        stop_configured_vnext_tape,
+    ),
+    "strategy": (
+        configured_vnext_strategy_status,
+        start_configured_vnext_strategy,
+        stop_configured_vnext_strategy,
+    ),
+}
+_startup_recovery_last_at: dict[str, datetime] = {}
+
+
+@app.post("/api/v1/vnext/startup-recovery/{component}")
+async def vnext_startup_recovery(component: str):
+    """Bounded startup self-recovery for required PAPER supervisors.
+
+    Maintenance is intentionally excluded. A healthy or actively warming supervisor
+    is never restarted. Recovery is allowed only when the server's own runtime-health
+    classifier says the component is BLOCKED, STALLED, or FAULT, or when it has not
+    started at all.
+    """
+    if not configured_vnext_runtime_only():
+        raise HTTPException(status_code=409, detail="startup recovery is sandbox-only")
+    key = str(component).strip().lower()
+    entry = _STARTUP_RECOVERY_COMPONENTS.get(key)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="unsupported startup component")
+
+    status_provider, starter, stopper = entry
+    before = status_provider()
+    if before.get("paper_only") is not True or before.get("live_blocked") is not True:
+        raise HTTPException(
+            status_code=409,
+            detail="startup recovery requires PAPER_ONLY/LIVE_BLOCKED",
+        )
+
+    now = datetime.now(timezone.utc)
+    operating_state = _supervisor_operating_state(before, now=now)
+    interval = float(before.get("interval_seconds") or 15.0)
+    cooldown_seconds = max(15.0, interval * 2.0)
+    previous = _startup_recovery_last_at.get(key)
+    if (
+        previous is not None
+        and (now - previous).total_seconds() < cooldown_seconds
+    ):
+        return {
+            "ok": True,
+            "component": key,
+            "action": "COOLDOWN",
+            "before_state": operating_state,
+            "paper_only": True,
+            "live_blocked": True,
+        }
+
+    running = before.get("running") is True
+    action = "NO_ACTION"
+    if operating_state == "STARTING" and not running:
+        await starter()
+        action = "START"
+    elif operating_state in {"BLOCKED", "STALLED", "FAULT"}:
+        await stopper()
+        await starter()
+        action = "RESTART"
+
+    if action != "NO_ACTION":
+        _startup_recovery_last_at[key] = now
+
+    after = status_provider()
+    return {
+        "ok": True,
+        "component": key,
+        "action": action,
+        "before_state": operating_state,
+        "after_state": _supervisor_operating_state(
+            after,
+            now=datetime.now(timezone.utc),
+        ),
+        "paper_only": True,
+        "live_blocked": True,
+    }
+
+
 @app.get("/api/v1/health")
 async def health():
     if configured_vnext_runtime_only():

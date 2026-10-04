@@ -26,6 +26,9 @@ from aether_vnext.maintenance_agent import (
 
 _supervisor:PipelineMaintenanceSupervisor|None=None
 _last_manual_repair: dict[str, object] | None = None
+# Worker-local authority: every process boot starts maintenance OFF/IDLE even if a
+# prior worker persisted master_enabled=true. Explicit operator action re-arms it.
+_maintenance_armed = False
 class ControlBody(BaseModel): enabled:bool
 
 def _operator(token:str|None)->str:
@@ -53,11 +56,15 @@ def configured_maintenance_enabled() -> bool:
 
 
 async def start_configured_vnext_maintenance():
-    if configured_maintenance_enabled():
-        await _instance().start()
+    # Startup is deliberately inert. Maintenance must not compete with the initial
+    # market-data/runtime warm-up or diagnose partial boot state as a fault.
+    global _maintenance_armed
+    _maintenance_armed = False
 
 
 async def stop_configured_vnext_maintenance():
+    global _maintenance_armed
+    _maintenance_armed = False
     if _supervisor is not None:
         await _supervisor.stop()
 def configured_vnext_maintenance_status():
@@ -91,12 +98,16 @@ def mount_vnext_maintenance(app:FastAPI)->None:
       payload=configured_vnext_maintenance_status()
       idle_timeout=configured_maintenance_idle_timeout_seconds()
       try:
-          payload["controls"]=await asyncio.wait_for(
+          controls=await asyncio.wait_for(
               load_controls(),
               timeout=idle_timeout,
           )
+          # The persisted preference never auto-arms a newly booted worker.
+          controls["master_enabled"]=bool(_maintenance_armed)
+          payload["controls"]=controls
       except TimeoutError:
           payload["controls"]=dict(CONTROL_DEFAULTS)
+          payload["controls"]["master_enabled"]=bool(_maintenance_armed)
           payload["control_read_warning"]="maintenance_control_store_timeout"
       payload["control_labels"]=CONTROL_LABELS
       payload["control_defaults"]=CONTROL_DEFAULTS
@@ -113,14 +124,27 @@ def mount_vnext_maintenance(app:FastAPI)->None:
       return payload
     @router.post("/api/v1/vnext/maintenance/controls/{control_key}")
     async def control(control_key:str,body:ControlBody,x_operator_token:str|None=Header(default=None)):
+      global _maintenance_armed
       actor=_operator(x_operator_token)
       try: controls=await set_control(key=control_key,enabled=body.enabled,actor=actor)
       except KeyError as exc: raise HTTPException(status_code=404,detail=str(exc)) from exc
+      if control_key == "master_enabled":
+          _maintenance_armed=bool(body.enabled)
+          if _maintenance_armed:
+              await _instance().start()
+          else:
+              await stop_configured_vnext_maintenance()
+          controls["master_enabled"]=_maintenance_armed
       return {"ok":True,"controls":controls}
     @router.post("/api/v1/vnext/maintenance/repair")
     async def repair(x_operator_token:str|None=Header(default=None)):
       global _last_manual_repair
       _operator(x_operator_token)
+      if not _maintenance_armed:
+          raise HTTPException(
+              status_code=409,
+              detail="Maintenance is IDLE. Enable Maintenance Agent before repair.",
+          )
       started_at = datetime.now(timezone.utc)
       started = perf_counter()
       timeout_seconds = configured_maintenance_repair_timeout_seconds()

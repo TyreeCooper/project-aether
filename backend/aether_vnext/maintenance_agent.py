@@ -26,7 +26,9 @@ MAINTENANCE_VERSION = "maintenance-agent-v2"
 HEALTHY_PROFILE_VERSION = "HealthyPipelineProfile-v2"
 
 CONTROL_DEFAULTS = {
-    "master_enabled": True,
+    # Maintenance is intentionally inert on a fresh worker. Operator action is
+    # required to arm background diagnosis/repair after the trading runtime is ready.
+    "master_enabled": False,
     "diagnostics_enabled": True,
     "first_clog_enabled": True,
     "incident_history_enabled": True,
