@@ -252,27 +252,22 @@ function telemetryWatermark(data) {
   // readiness. The watermark reflects only continuously running market services.
   const stamps = [
     data.floor?.refresh_time_utc || data.floor?.as_of_utc,
-    data.ingress?.last_cycle_finished_at_utc,
-    data.strategy?.last_cycle_finished_at_utc,
+    data.marketFabric?.as_of_utc || data.marketFabric?.runtime?.last_progress_at_utc,
     data.discovery?.last_cycle_finished_at_utc,
-    data.tape?.runtime?.last_cycle_finished_at_utc || data.tape?.as_of_utc,
   ].map((value) => Date.parse(value || "")).filter(Number.isFinite);
-  if (stamps.length < 5) return null;
+  if (stamps.length < 3) return null;
   return new Date(Math.min(...stamps)).toISOString();
 }
 
 const BACKGROUND_RUNTIME_GATES = [
   ["floor", "Firm Floor"],
-  ["ingress", "Executable Ingress"],
+  ["marketFabric", "Canonical Market Truth"],
   ["discovery", "Provider Discovery"],
-  ["tape", "Market Fabric"],
-  ["history", "Historical Services"],
-  ["strategy", "Strategy Runtime"],
   ["operator", "Operator Ledger"],
   ["maintenance", "Maintenance Idle Guard"],
 ];
 
-const STARTUP_RECOVERABLE = new Set(["ingress","discovery","tape","strategy"]);
+const STARTUP_RECOVERABLE = new Set(["discovery"]);
 
 function startupSafetyState(payload, health) {
   if (health !== "live") {
@@ -299,23 +294,24 @@ function startupSafetyState(payload, health) {
 
 function bootstrapGateState(key, payload, health, healthSnapshot) {
   if (health !== "live") return { ready:false, state:health === "unavailable" ? "UNAVAILABLE" : "LOADING", detail:"endpoint not ready" };
-  if (key === "history") {
-    const cycles = Number(payload?.cycle_count || 0);
-    const pipe = payload?.last_result?.pipeline || {};
-    const readyObserved = isObservedNumber(pipe.history_ready);
-    const heldObserved = isObservedNumber(pipe.history_not_ready);
-    const serviceObserved = cycles >= 1 && readyObserved && heldObserved;
-    if (serviceObserved) {
-      return {
-        ready:true,
-        state:"READY",
-        detail:`history service observed · ${Number(pipe.history_ready)} ready · ${Number(pipe.history_not_ready)} held`,
-      };
-    }
-    if (payload?.running === true) {
-      return { ready:false, state:"WARMING", detail:"awaiting first history service result" };
-    }
-    return { ready:false, state:"WAITING", detail:"history service not yet observed" };
+  if (key === "marketFabric") {
+    const runtime = payload?.runtime || {};
+    const architectureReady = payload?.architecture === "AETHER_MARKET_TRUTH_V1";
+    const safetyReady = payload?.paper_only === true && payload?.live_blocked === true;
+    const routeCount = Number(payload?.execution_universe?.commissioned_count || 0);
+    const proofLocked = payload?.first_proof?.passed !== true;
+    const singleRouteSafe = !proofLocked || routeCount <= 1;
+    const ready = architectureReady && safetyReady && runtime?.running === true && singleRouteSafe;
+    const state = ready
+      ? (payload?.layers?.market_fabric === "EXECUTABLE" ? "READY" : "WARMING")
+      : runtime?.bootstrap_error ? "FAULT" : "WAITING";
+    return {
+      ready,
+      state,
+      detail: ready
+        ? `five-layer authority · ${routeCount} executable route · ${text(payload?.layers?.market_fabric, "WARMING")}`
+        : "canonical Market Truth runtime not ready",
+    };
   }
   if (key === "floor") {
     const ready = payload?.mode?.paper_only === true && payload?.mode?.live_blocked === true;
@@ -367,7 +363,7 @@ function BootstrapScreen({ data, endpointHealth }) {
             <Badge value={gate.state}>{gate.state}</Badge>
           </div>
         </div>
-        <p className="bootstrapTruth">Only the authoritative vNext PAPER ONLY / LIVE BLOCKED safety contract can hold this screen. Market ingress, discovery, Market Fabric, history, strategy, operator telemetry and maintenance continue warming in the background after the console opens.</p>
+        <p className="bootstrapTruth">Only the authoritative vNext PAPER ONLY / LIVE BLOCKED safety contract can hold this screen. Canonical Market Truth, provider discovery, operator telemetry and maintenance continue warming in the background after the console opens. Legacy ingress, Tape and strategy authority are quarantined during first proof.</p>
       </section>
     </main>
   );
@@ -380,21 +376,24 @@ function strategySnapshotId(strategy) {
   return `strategy-${cycle ?? "na"}-${finished || "open"}`;
 }
 
-function RuntimeStrip({ floor, ingress, strategy, discovery, tape, maintenance, nowMs }) {
-  const ingressState = supervisorState(ingress, nowMs);
+function RuntimeStrip({ floor, discovery, marketFabric, maintenance, nowMs }) {
   const discoveryState = supervisorState(discovery, nowMs);
-  const tapeState = supervisorState(tape?.runtime, nowMs);
-  const strategyState = supervisorState(strategy, nowMs);
-  const pipeline = pipelineRuntimeState(ingress, discovery, tape, strategy, maintenance, nowMs);
+  const runtime = marketFabric?.runtime || {};
+  const route = Array.isArray(marketFabric?.routes) ? marketFabric.routes[0] : null;
+  const instrument = Array.isArray(marketFabric?.instruments) ? marketFabric.instruments[0] : null;
+  const execState = text(instrument?.executable?.state, "NOT OBSERVED");
+  const evidenceState = text(instrument?.intelligence?.evidence_state, "NO_WITNESS");
+  const truthState = runtime?.running === true ? text(marketFabric?.layers?.market_fabric, "WARMING") : "OFF";
+  const pipeline = marketFabric?.first_proof?.passed === true ? "PAPER READY" : "PROOF LOCKED";
   return (
     <div className="runtimeStrip">
       <div><span>BUILD</span><b>{text(floor?.build?.source_revision?.slice(0, 8), "NOT OBSERVED")}</b></div>
-      <div><span>SNAPSHOT</span><b>{text(floor?.snapshot_id || strategySnapshotId(strategy), "NOT OBSERVED")}</b></div>
-      <div><span>FLOOR REFRESHED</span><b>{ts(floor?.refresh_time_utc || floor?.as_of_utc || strategy?.last_result?.finished_at_utc, "NOT OBSERVED")}</b></div>
-      <div><span>INGRESS</span><Badge value={ingressState}>{ingressState}</Badge></div>
+      <div><span>MARKET TRUTH</span><Badge value={truthState}>{truthState}</Badge></div>
+      <div><span>ROUTE</span><b>{text(route?.executable_provider_id, "NOT OBSERVED")}</b></div>
+      <div><span>EXECUTION</span><Badge value={execState}>{execState}</Badge></div>
+      <div><span>EVIDENCE</span><Badge value={evidenceState}>{evidenceState}</Badge></div>
       <div><span>DISCOVERY</span><Badge value={discoveryState}>{discoveryState}</Badge></div>
-      <div><span>WITNESS FABRIC</span><Badge value={tapeState}>{tapeState}</Badge></div>
-      <div><span>STRATEGY</span><Badge value={strategyState}>{strategyState}</Badge></div>
+      <div><span>LEGACY AUTHORITY</span><Badge value="BLOCKED">QUARANTINED</Badge></div>
       <div><span>PIPELINE</span><Badge value={pipeline}>{pipeline}</Badge></div>
     </div>
   );
@@ -1501,8 +1500,8 @@ export default function DashboardPage() {
 
   useEffect(()=>{
     const gates=BACKGROUND_RUNTIME_GATES.map(([key,label])=>{
-      const payload=key==="history"?data.strategy:data[key];
-      const endpoint=key==="history"?endpointHealth.strategy:endpointHealth[key];
+      const payload=data[key];
+      const endpoint=endpointHealth[key];
       return {key,label,...bootstrapGateState(key,payload,endpoint,data.health)};
     });
     const active=gates.find((gate)=>
@@ -1554,8 +1553,8 @@ export default function DashboardPage() {
       const next={...state};
       for(const [key] of BACKGROUND_RUNTIME_GATES){
         if(!next[key])continue;
-        const payload=key==="history"?data.strategy:data[key];
-        const endpoint=key==="history"?endpointHealth.strategy:endpointHealth[key];
+        const payload=data[key];
+        const endpoint=endpointHealth[key];
         const gate=bootstrapGateState(key,payload,endpoint,data.health);
         if(gate.ready){
           delete next[key];
@@ -1633,7 +1632,7 @@ export default function DashboardPage() {
           </div>
         </header>
 
-        <RuntimeStrip floor={data.floor} ingress={data.ingress} strategy={data.strategy} discovery={data.discovery} tape={data.tape} maintenance={data.maintenance} nowMs={nowMs} />
+        <RuntimeStrip floor={data.floor} discovery={data.discovery} marketFabric={data.marketFabric} maintenance={data.maintenance} nowMs={nowMs} />
 
         {errors.length ? <div className="errorBox"><strong>Telemetry degraded:</strong> {errors.join(", ")} endpoint(s) unavailable. Existing UI state is preserved; no placeholder trade state is invented.</div> : null}
 

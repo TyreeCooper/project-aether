@@ -162,7 +162,7 @@ jobs:
           settings=(
             AETHER_VNEXT_ENVIRONMENT=sandbox
             AETHER_VNEXT_DATABASE_URL="$DATABASE_URL"
-            AETHER_VNEXT_KRAKEN_INGRESS_ENABLED=true
+            AETHER_VNEXT_KRAKEN_INGRESS_ENABLED=false
             AETHER_VNEXT_KRAKEN_INGRESS_INTERVAL_SECONDS=15
             AETHER_VNEXT_KRAKEN_DYNAMIC_BATCH_SIZE=20
             AETHER_VNEXT_KRAKEN_INGRESS_WORKER_CONCURRENCY=8
@@ -170,10 +170,10 @@ jobs:
             AETHER_VNEXT_PROVIDER_DISCOVERY_INTERVAL_SECONDS=300
             AETHER_VNEXT_PROVIDER_DISCOVERY_INITIAL_DELAY_SECONDS=15
             AETHER_VNEXT_PROVIDER_FETCH_TIMEOUT_SECONDS=60
-            AETHER_VNEXT_SANDBOX_TRADING_ENABLED=true
+            AETHER_VNEXT_SANDBOX_TRADING_ENABLED=false
             AETHER_VNEXT_SANDBOX_TRADING_INTERVAL_SECONDS=15
             AETHER_VNEXT_DYNAMIC_STRATEGY_SCAN_BATCH_SIZE=12
-            AETHER_VNEXT_TAPE_ENABLED=true
+            AETHER_VNEXT_TAPE_ENABLED=false
             AETHER_VNEXT_TAPE_INTERVAL_SECONDS=5
             AETHER_VNEXT_TAPE_CRYPTO_MAX_SOURCE_AGE_MS=10000
             AETHER_VNEXT_TAPE_CRYPTO_MAX_DIVERGENCE_BPS=20
@@ -201,13 +201,13 @@ jobs:
           python - "$values" <<'PY'
           import json, sys
           rows = {row["name"]: str(row["value"]).lower() for row in json.loads(sys.argv[1])}
-          assert rows.get("AETHER_VNEXT_KRAKEN_INGRESS_ENABLED") == "true", rows
+          assert rows.get("AETHER_VNEXT_KRAKEN_INGRESS_ENABLED") == "false", rows
           assert rows.get("AETHER_VNEXT_KRAKEN_DYNAMIC_BATCH_SIZE") == "20", rows
           assert rows.get("AETHER_VNEXT_KRAKEN_INGRESS_WORKER_CONCURRENCY") == "8", rows
           assert rows.get("AETHER_VNEXT_DYNAMIC_STRATEGY_SCAN_BATCH_SIZE") == "12", rows
           assert rows.get("AETHER_VNEXT_PROVIDER_DISCOVERY_ENABLED") == "true", rows
-          assert rows.get("AETHER_VNEXT_SANDBOX_TRADING_ENABLED") == "true", rows
-          assert rows.get("AETHER_VNEXT_TAPE_ENABLED") == "true", rows
+          assert rows.get("AETHER_VNEXT_SANDBOX_TRADING_ENABLED") == "false", rows
+          assert rows.get("AETHER_VNEXT_TAPE_ENABLED") == "false", rows
           assert rows.get("AETHER_VNEXT_TAPE_INTERVAL_SECONDS") == "5", rows
           assert rows.get("AETHER_VNEXT_TAPE_CRYPTO_MAX_SOURCE_AGE_MS") == "10000", rows
           assert rows.get("AETHER_VNEXT_TAPE_CRYPTO_MAX_DIVERGENCE_BPS") == "20", rows
@@ -330,11 +330,9 @@ jobs:
           done
           test "$ui_ready" = "1"
 
-          # Deployment success is intentionally separate from live pipeline health.
-          # Market conditions (for example quote_stale) may degrade the PAPER funnel
-          # without making the deployed package invalid. Capture runtime snapshots for
-          # diagnostics, but do not turn a healthy exact-revision deployment red.
-          for endpoint in ingress-runtime discovery-runtime strategy-runtime tape floor; do
+          # Prove the canonical five-layer runtime rather than the quarantined
+          # legacy ingress/Tape/strategy loops.
+          for endpoint in discovery-runtime floor market-fabric ingress-runtime strategy-runtime tape; do
             curl --silent --show-error --max-time 20 \
               -o "/tmp/${endpoint}.json" \
               "$base/api/v1/vnext/${endpoint}" || true
@@ -353,110 +351,76 @@ jobs:
               except Exception:
                   return {}
 
-          ingress=read("ingress-runtime")
+          fabric=read("market-fabric")
           discovery=read("discovery-runtime")
+          ingress=read("ingress-runtime")
           strategy=read("strategy-runtime")
-          floor=read("floor")
           tape=read("tape")
           tape_runtime=tape.get("runtime") or {}
-          tape_assets=tape.get("assets") or []
+          runtime=fabric.get("runtime") or {}
+          routes=fabric.get("routes") or []
+          instruments=fabric.get("instruments") or []
+          first_proof=fabric.get("first_proof") or {}
 
-          ingress_result=ingress.get("last_result") or {}
-          rows=ingress_result.get("asset_results") or []
-          executable=sum(1 for row in rows if isinstance(row, dict) and row.get("executable") is True)
-          reasons={}
-          for row in rows:
-              if not isinstance(row, dict) or row.get("executable") is True:
-                  continue
-              reason=str(row.get("reason") or "unknown")
-              reasons[reason]=reasons.get(reason, 0)+1
+          assert fabric.get("architecture") == "AETHER_MARKET_TRUTH_V1", fabric
+          assert fabric.get("paper_only") is True, fabric
+          assert fabric.get("live_blocked") is True, fabric
+          assert runtime.get("running") is True, runtime
+          assert len(routes) <= 1 if first_proof.get("passed") is not True else True, routes
+          assert (fabric.get("authority") or {}).get("witness_can_replace_executable_price") is False, fabric
+          assert (fabric.get("authority") or {}).get("automatic_execution_venue_switch_allowed") is False, fabric
+
+          if instruments:
+              executable=(instruments[0].get("executable") or {})
+              assert executable.get("state") in {"EXECUTABLE","STALE","NOT_OBSERVED"}, executable
+              if executable.get("state") != "EXECUTABLE":
+                  assert executable.get("bid") is None and executable.get("ask") is None, executable
+              intelligence=(instruments[0].get("intelligence") or {})
+              assert intelligence.get("evidence_state") in {
+                  "NO_WITNESS","CONTESTED","DIVERGED","SINGLE_SOURCE","DEGRADED","FULL"
+              }, intelligence
+
+          # Old supervisors may still expose read-only compatibility endpoints but
+          # their deployment settings and runtime authority are disabled.
+          assert ingress.get("enabled") is False, ingress
+          assert strategy.get("enabled") is False, strategy
+          assert tape_runtime.get("enabled") is False, tape_runtime
 
           result={
-              "deployment_health": "GREEN",
-              "pipeline_health": "DEGRADED",
-              "paper_only": True,
-              "live_blocked": True,
-              "ingress": {
-                  "enabled": ingress.get("enabled"),
-                  "running": ingress.get("running"),
-                  "cycle_count": ingress.get("cycle_count"),
-                  "last_error": ingress.get("last_error"),
-                  "attempted": len(rows),
-                  "executable": executable,
-                  "top_reasons": sorted(reasons.items(), key=lambda x: (-x[1], x[0]))[:8],
+              "deployment_health":"GREEN",
+              "pipeline_health": (fabric.get("layers") or {}).get("market_fabric","WARMING"),
+              "paper_only":True,
+              "live_blocked":True,
+              "architecture":fabric.get("architecture"),
+              "first_proof":first_proof,
+              "route_count":len(routes),
+              "market_truth_runtime":runtime,
+              "discovery":{
+                  "enabled":discovery.get("enabled"),
+                  "running":discovery.get("running"),
+                  "cycle_count":discovery.get("cycle_count"),
+                  "last_error":discovery.get("last_error"),
               },
-              "discovery": {
-                  "enabled": discovery.get("enabled"),
-                  "running": discovery.get("running"),
-                  "cycle_count": discovery.get("cycle_count"),
-                  "last_error": discovery.get("last_error"),
-                  "focus_admitted": (discovery.get("last_result") or {}).get("focus_admitted_count"),
+              "legacy_authority":{
+                  "ingress":"QUARANTINED",
+                  "tape":"QUARANTINED",
+                  "strategy":"QUARANTINED",
               },
-              "tape": {
-                  "enabled": tape_runtime.get("enabled"),
-                  "running": tape_runtime.get("running"),
-                  "cycle_count": tape_runtime.get("cycle_count"),
-                  "last_error": tape_runtime.get("last_error"),
-                  "asset_count": len(tape_assets),
-                  "full_count": sum(
-                      1 for row in tape_assets
-                      if isinstance(row, dict) and row.get("state") == "FULL"
-                  ),
-              },
-              "strategy": {
-                  "enabled": strategy.get("enabled"),
-                  "running": strategy.get("running"),
-                  "cycle_count": strategy.get("cycle_count"),
-                  "last_error": strategy.get("last_error"),
-                  "pipeline": (strategy.get("last_result") or {}).get("pipeline"),
-              },
-              "floor_available": bool(floor),
           }
-          def actively_recovering(payload):
-              progress=payload.get("progress") or {}
-              return (
-                  payload.get("running") is True
-                  and progress.get("cycle_state") == "running"
-                  and bool(progress.get("last_progress_at_utc"))
-              )
-
-          ingress_ok=(
-              ingress.get("running") is True
-              and (ingress.get("last_error") is None or actively_recovering(ingress))
-          )
-          strategy_ok=(
-              strategy.get("running") is True
-              and (strategy.get("last_error") is None or actively_recovering(strategy))
-          )
-          tape_ok=(
-              tape_runtime.get("running") is True
-              and (tape_runtime.get("last_error") is None or actively_recovering(tape_runtime))
-          )
-          if ingress_ok and executable > 0 and strategy_ok and tape_ok:
-              result["pipeline_health"]="GREEN"
-          elif not ingress or not ingress_ok:
-              result["pipeline_health"]="BLOCKED"
-
           Path("/tmp/pipeline-health.json").write_text(
-              json.dumps(result, indent=2, sort_keys=True)+"\n",
-              encoding="utf-8",
+              json.dumps(result,indent=2,sort_keys=True)+"\\n",encoding="utf-8"
           )
-          print(json.dumps(result, indent=2, sort_keys=True))
+          print(json.dumps(result,indent=2,sort_keys=True))
           PY
 
-          # A task object is not proof of an operating pipeline. Sample the fast
-          # autonomous lanes twice and require observed movement: either a completed
-          # cycle advances or the new in-cycle progress heartbeat advances. This
-          # catches a supervisor that remains running=true while work is wedged.
-          cp /tmp/ingress-runtime.json /tmp/ingress-runtime-first.json
-          cp /tmp/strategy-runtime.json /tmp/strategy-runtime-first.json
-          cp /tmp/tape.json /tmp/tape-first.json
-          sleep 45
-          curl --fail --silent --show-error --max-time 20             -o /tmp/ingress-runtime-second.json             "$base/api/v1/vnext/ingress-runtime"
-          curl --fail --silent --show-error --max-time 20             -o /tmp/strategy-runtime-second.json             "$base/api/v1/vnext/strategy-runtime"
-          curl --fail --silent --show-error --max-time 20             -o /tmp/discovery-runtime-second.json             "$base/api/v1/vnext/discovery-runtime"
-          curl --fail --silent --show-error --max-time 20             -o /tmp/tape-second.json             "$base/api/v1/vnext/tape"
-          curl --fail --silent --show-error --max-time 10             -o /tmp/health-second.json             "$base/api/v1/health"
+          cp /tmp/market-fabric.json /tmp/market-fabric-first.json
+          sleep 20
+          curl --fail --silent --show-error --max-time 20 \
+            -o /tmp/market-fabric-second.json "$base/api/v1/vnext/market-fabric"
+          curl --fail --silent --show-error --max-time 20 \
+            -o /tmp/discovery-runtime-second.json "$base/api/v1/vnext/discovery-runtime"
+          curl --fail --silent --show-error --max-time 10 \
+            -o /tmp/health-second.json "$base/api/v1/health"
 
           python - <<'PY'
           import json
@@ -465,119 +429,49 @@ jobs:
           def load(path):
               return json.loads(Path(path).read_text(encoding="utf-8"))
 
-          def marker(payload):
-              progress=payload.get("progress") or {}
-              return {
-                  "cycle_count": int(payload.get("cycle_count") or 0),
-                  "finished": payload.get("last_cycle_finished_at_utc"),
-                  "progress_heartbeat": progress.get("last_progress_at_utc"),
-                  "progress_state": progress.get("cycle_state"),
-                  "progress_phase": progress.get("phase"),
-              }
-
-          def assert_moving(name, before, after):
-              assert before.get("paper_only") is True and before.get("live_blocked") is True, before
-              assert after.get("paper_only") is True and after.get("live_blocked") is True, after
-              assert after.get("enabled") is True, after
-              assert after.get("running") is True, after
-              a=marker(before)
-              b=marker(after)
-              moved=(
-                  b["cycle_count"] > a["cycle_count"]
-                  or (
-                      b["finished"] is not None
-                      and b["finished"] != a["finished"]
-                  )
-                  or (
-                      b["progress_heartbeat"] is not None
-                      and b["progress_heartbeat"] != a["progress_heartbeat"]
-                  )
-              )
-              assert moved, (name, a, b)
-              recovering=(
-                  after.get("last_error") is not None
-                  and b["progress_state"] == "running"
-                  and b["progress_heartbeat"] is not None
-                  and b["progress_heartbeat"] != a["progress_heartbeat"]
-                  and after.get("last_cycle_started_at_utc") != after.get("last_cycle_finished_at_utc")
-              )
-              assert after.get("last_error") is None or recovering, after
-              return {
-                  "before": a,
-                  "after": b,
-                  "moving": True,
-                  "recovering_from_previous_error": recovering,
-              }
-
-          ingress_first=load("/tmp/ingress-runtime-first.json")
-          ingress_second=load("/tmp/ingress-runtime-second.json")
-          strategy_first=load("/tmp/strategy-runtime-first.json")
-          strategy_second=load("/tmp/strategy-runtime-second.json")
-          discovery=load("/tmp/discovery-runtime-second.json")
-          tape_first=load("/tmp/tape-first.json")
-          tape_second=load("/tmp/tape-second.json")
-          tape_first_runtime=tape_first.get("runtime") or {}
-          tape_second_runtime=tape_second.get("runtime") or {}
+          before=load("/tmp/market-fabric-first.json")
+          after=load("/tmp/market-fabric-second.json")
           health=load("/tmp/health-second.json")
+          discovery=load("/tmp/discovery-runtime-second.json")
+          a=before.get("runtime") or {}
+          b=after.get("runtime") or {}
 
-          discovery_progress=discovery.get("progress") or {}
-          discovery_observed=(
-              int(discovery.get("cycle_count") or 0) > 0
-              or discovery_progress.get("cycle_state") == "running"
-          )
-
-          # Activation proves the exact PAPER package is serving safely. Normal
-          # first-cycle warm-up is runtime telemetry, not a deployment failure.
           assert health.get("runtime") == "vnext", health
           assert health.get("paper_mode") is True, health
           assert health.get("live_blocked") is True, health
-          assert tape_second.get("paper_only") is True, tape_second
-          assert tape_second.get("live_blocked") is True, tape_second
+          assert health.get("market_truth_architecture") == "AETHER_MARKET_TRUTH_V1", health
+          assert b.get("running") is True, b
+          assert after.get("architecture") == "AETHER_MARKET_TRUTH_V1", after
 
-          def movement(name, before, after):
-              try:
-                  return assert_moving(name, before, after)
-              except AssertionError as exc:
-                  return {
-                      "before": marker(before),
-                      "after": marker(after),
-                      "moving": False,
-                      "warming_or_stalled": True,
-                      "detail": str(exc),
-                  }
+          progressed=(
+              b.get("last_progress_at_utc") != a.get("last_progress_at_utc")
+              or int(b.get("executable_packet_count") or 0) > int(a.get("executable_packet_count") or 0)
+              or int(b.get("witness_packet_count") or 0) > int(a.get("witness_packet_count") or 0)
+          )
+          assert progressed, (a,b)
 
           proof={
-              "ingress": movement("ingress", ingress_first, ingress_second),
-              "strategy": movement("strategy", strategy_first, strategy_second),
-              "tape": {
-                  **movement("tape", tape_first_runtime, tape_second_runtime),
-                  "full_count": sum(
-                      1 for row in (tape_second.get("assets") or [])
-                      if isinstance(row, dict) and row.get("state") == "FULL"
-                  ),
-                  "asset_count": len(tape_second.get("assets") or []),
-                  "state_counts": (tape_second.get("summary") or {}).get("state_counts") or {},
-              },
-              "discovery": {
-                  "enabled": discovery.get("enabled"),
-                  "running": discovery.get("running"),
-                  "cycle_count": int(discovery.get("cycle_count") or 0),
-                  "progress": discovery_progress,
-                  "observed": discovery_observed,
-                  "last_error": discovery.get("last_error"),
-              },
-              "pipeline_state": health.get("pipeline_state"),
-              "deployment_health": "GREEN",
-              "paper_only": True,
-              "live_blocked": True,
+              "architecture":"AETHER_MARKET_TRUTH_V1",
+              "market_truth_before":a,
+              "market_truth_after":b,
+              "moving":True,
+              "first_proof":after.get("first_proof"),
+              "execution_state":((after.get("instruments") or [{}])[0].get("executable") or {}).get("state") if after.get("instruments") else "NOT_OBSERVED",
+              "evidence_state":((after.get("instruments") or [{}])[0].get("intelligence") or {}).get("evidence_state") if after.get("instruments") else "NO_WITNESS",
+              "discovery_observed":(
+                  int(discovery.get("cycle_count") or 0)>0
+                  or (discovery.get("progress") or {}).get("cycle_state")=="running"
+              ),
+              "legacy_authority":"QUARANTINED",
+              "deployment_health":"GREEN",
+              "paper_only":True,
+              "live_blocked":True,
           }
           Path("/tmp/runtime-continuity.json").write_text(
-              json.dumps(proof, indent=2, sort_keys=True)+"\n",
-              encoding="utf-8",
+              json.dumps(proof,indent=2,sort_keys=True)+"\\n",encoding="utf-8"
           )
-          print(json.dumps(proof, indent=2, sort_keys=True))
+          print(json.dumps(proof,indent=2,sort_keys=True))
           PY
-
 
       - name: Refresh Azure login for failure diagnostics
         if: failure()
@@ -623,7 +517,7 @@ jobs:
             --resource-group "$resource_group" || true
 
           echo "=== Last probe bodies ==="
-          for file in /tmp/health.json /tmp/health-second.json /tmp/build.json /tmp/pipeline-health.json /tmp/runtime-continuity.json /tmp/floor.json /tmp/ingress-runtime.json /tmp/ingress-runtime-second.json /tmp/discovery-runtime.json /tmp/discovery-runtime-second.json /tmp/strategy-runtime.json /tmp/strategy-runtime-second.json /tmp/tape.json /tmp/tape-second.json; do
+          for file in /tmp/health.json /tmp/health-second.json /tmp/build.json /tmp/pipeline-health.json /tmp/runtime-continuity.json /tmp/floor.json /tmp/market-fabric.json /tmp/market-fabric-first.json /tmp/market-fabric-second.json /tmp/discovery-runtime.json /tmp/discovery-runtime-second.json /tmp/ingress-runtime.json /tmp/strategy-runtime.json /tmp/tape.json; do
             if [ -f "$file" ]; then
               echo "--- $file ---"
               cat "$file"
@@ -638,17 +532,14 @@ jobs:
           path: |
             /tmp/health.json
             /tmp/build.json
-            /tmp/ingress-runtime.json
-            /tmp/ingress-runtime-first.json
-            /tmp/ingress-runtime-second.json
+            /tmp/market-fabric.json
+            /tmp/market-fabric-first.json
+            /tmp/market-fabric-second.json
             /tmp/discovery-runtime.json
             /tmp/discovery-runtime-second.json
+            /tmp/ingress-runtime.json
             /tmp/strategy-runtime.json
-            /tmp/strategy-runtime-first.json
-            /tmp/strategy-runtime-second.json
             /tmp/tape.json
-            /tmp/tape-first.json
-            /tmp/tape-second.json
             /tmp/health-second.json
             /tmp/pipeline-health.json
             /tmp/runtime-continuity.json

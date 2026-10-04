@@ -61,3 +61,14 @@ def test_market_fabric_ui_renders_canonical_five_layer_authority() -> None:
     assert 'text(intelligence.evidence_state, "NO_WITNESS")' in page
     assert "automatic venue switch FORBIDDEN" in page
     assert "No midpoint, composite, witness price, or carried-forward last is executable." in page
+
+
+def test_runtime_strip_exposes_canonical_market_truth_and_legacy_quarantine() -> None:
+    root = Path(__file__).resolve().parents[2]
+    page = (root / "frontend" / "app" / "page.js").read_text(encoding="utf-8")
+    assert "<span>MARKET TRUTH</span>" in page
+    assert "<span>ROUTE</span>" in page
+    assert "<span>EXECUTION</span>" in page
+    assert "<span>EVIDENCE</span>" in page
+    assert "<span>LEGACY AUTHORITY</span>" in page
+    assert "QUARANTINED" in page

@@ -66,6 +66,7 @@ from app.vnext_tape import (
 )
 from app.vnext_market_fabric import mount_vnext_market_fabric
 from aether_vnext.market_truth_runtime import (
+    configured_market_truth_snapshot,
     start_configured_market_truth_runtime,
     stop_configured_market_truth_runtime,
 )
@@ -102,10 +103,11 @@ async def lifespan(_: FastAPI):
         )
     else:
         engine.start_loop()
-    await start_configured_vnext_ingress()
+    # Canonical market-truth authority: discovery may observe the broad catalog,
+    # but legacy ingress/tape/strategy loops are intentionally NOT started. They
+    # remain importable only for historical/forensic compatibility and have no
+    # runtime price or execution authority during the first-proof lock.
     await start_configured_vnext_discovery()
-    await start_configured_vnext_tape()
-    await start_configured_vnext_strategy()
     await start_configured_vnext_maintenance()
     await start_configured_market_truth_runtime()
     logger.info(
@@ -340,27 +342,13 @@ def _supervisor_operating_state(
 
 
 _STARTUP_RECOVERY_COMPONENTS = {
-    "ingress": (
-        configured_vnext_ingress_status,
-        start_configured_vnext_ingress,
-        stop_configured_vnext_ingress,
-    ),
     "discovery": (
         current_discovery_status,
         start_configured_vnext_discovery,
         stop_configured_vnext_discovery,
     ),
-    "tape": (
-        configured_vnext_tape_status,
-        start_configured_vnext_tape,
-        stop_configured_vnext_tape,
-    ),
-    "strategy": (
-        configured_vnext_strategy_status,
-        start_configured_vnext_strategy,
-        stop_configured_vnext_strategy,
-    ),
 }
+_QUARANTINED_STARTUP_COMPONENTS = frozenset({"ingress", "tape", "strategy"})
 _startup_recovery_last_at: dict[str, datetime] = {}
 
 
@@ -376,6 +364,14 @@ async def vnext_startup_recovery(component: str):
     if not configured_vnext_runtime_only():
         raise HTTPException(status_code=409, detail="startup recovery is sandbox-only")
     key = str(component).strip().lower()
+    if key in _QUARANTINED_STARTUP_COMPONENTS:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "legacy market authority is quarantined; canonical Market Truth "
+                "runtime self-heals its own executable/witness sockets"
+            ),
+        )
     entry = _STARTUP_RECOVERY_COMPONENTS.get(key)
     if entry is None:
         raise HTTPException(status_code=404, detail="unsupported startup component")
@@ -438,38 +434,39 @@ async def vnext_startup_recovery(component: str):
 async def health():
     if configured_vnext_runtime_only():
         now = datetime.now(timezone.utc)
-        supervisors = {
-            "ingress": configured_vnext_ingress_status(),
-            "discovery": current_discovery_status(),
-            "strategy": configured_vnext_strategy_status(),
-            "tape": configured_vnext_tape_status(),
-            "maintenance": configured_vnext_maintenance_status(),
-        }
-        operating = {
-            name: _supervisor_operating_state(status, now=now)
-            for name, status in supervisors.items()
-        }
-        primary = tuple(
-            operating[name]
-            for name in ("ingress", "discovery", "tape", "strategy")
-        )
-        if any(state == "FAULT" for state in primary):
-            pipeline_state = "FAULT"
-        elif any(state == "STALLED" for state in primary):
-            pipeline_state = "STALLED"
-        elif any(state in {"BLOCKED", "OFF"} for state in primary):
-            pipeline_state = "BLOCKED"
-        elif any(state in {"STARTING", "WARMING"} for state in primary):
-            pipeline_state = "WARMING"
-        elif any(state == "WORKING" for state in primary):
-            pipeline_state = "WORKING"
-        elif all(state == "ACTIVE" for state in primary):
-            pipeline_state = "ACTIVE"
-        else:
-            pipeline_state = "NOT_OBSERVED"
+        discovery = current_discovery_status()
+        maintenance = configured_vnext_maintenance_status()
+        market_truth = configured_market_truth_snapshot()
+        runtime = dict(market_truth.get("runtime") or {})
+        layers = dict(market_truth.get("layers") or {})
 
-        compact_supervisors = {
-            name: {
+        if runtime.get("running") is not True:
+            market_truth_state = "BLOCKED"
+        elif runtime.get("bootstrap_error"):
+            market_truth_state = "FAULT"
+        elif runtime.get("bootstrap_ready") is not True:
+            market_truth_state = "WARMING"
+        elif layers.get("market_fabric") == "EXECUTABLE":
+            market_truth_state = "ACTIVE"
+        else:
+            # Service is healthy while route truth is waiting/stale/not observed.
+            # Market availability is not the same thing as application health.
+            market_truth_state = "WARMING"
+
+        discovery_state = _supervisor_operating_state(discovery, now=now)
+        maintenance_state = _supervisor_operating_state(maintenance, now=now)
+        operating = {
+            "market_truth": market_truth_state,
+            "discovery": discovery_state,
+            "maintenance": maintenance_state,
+            "ingress": "QUARANTINED",
+            "tape": "QUARANTINED",
+            "strategy": "QUARANTINED",
+        }
+        pipeline_state = market_truth_state
+
+        def compact(status):
+            return {
                 "enabled": status.get("enabled"),
                 "running": status.get("running"),
                 "cycle_count": status.get("cycle_count"),
@@ -483,7 +480,24 @@ async def health():
                     else None
                 ),
             }
-            for name, status in supervisors.items()
+
+        quarantined = {
+            "enabled": False,
+            "running": False,
+            "authority": "QUARANTINED",
+            "reason": "replaced_by_AETHER_MARKET_TRUTH_V1",
+        }
+        supervisors = {
+            "market_truth": {
+                **runtime,
+                "architecture": market_truth.get("architecture"),
+                "first_proof": market_truth.get("first_proof"),
+            },
+            "discovery": compact(discovery),
+            "maintenance": compact(maintenance),
+            "ingress": dict(quarantined),
+            "tape": dict(quarantined),
+            "strategy": dict(quarantined),
         }
 
         return {
@@ -494,8 +508,10 @@ async def health():
             "live_blocked": True,
             "build": load_build_info(),
             "pipeline_state": pipeline_state,
+            "market_truth_architecture": market_truth.get("architecture"),
+            "first_proof": market_truth.get("first_proof"),
             "supervisor_state": operating,
-            "supervisors": compact_supervisors,
+            "supervisors": supervisors,
         }
 
     snap = engine.snapshot()
