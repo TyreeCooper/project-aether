@@ -15,6 +15,10 @@ from fastapi import APIRouter, FastAPI
 from app.vnext_ingress import configured_vnext_ingress_status
 from app.vnext_tape import load_configured_vnext_tape_snapshot
 from aether_vnext.freeze import LIVE_BLOCKED, PAPER_ONLY
+from aether_vnext.market_fabric_runtime_identity import (
+    declared_effective_independence_groups,
+    runtime_source_identity,
+)
 
 
 UTC = timezone.utc
@@ -81,6 +85,24 @@ def build_market_fabric_runtime_snapshot(
             else str(evidence.get("state") or "NOT_OBSERVED")
         )
 
+        accepted_source_ids = (
+            ()
+            if evidence is None
+            else tuple(
+                str(value)
+                for value in (evidence.get("accepted_source_ids") or ())
+            )
+        )
+        declared_groups = declared_effective_independence_groups(
+            accepted_source_ids
+        )
+        source_identities = tuple(
+            identity
+            for source_id in accepted_source_ids
+            for identity in (runtime_source_identity(source_id),)
+            if identity is not None
+        )
+
         instruments.append(
             {
                 "asset_id": asset_id,
@@ -108,8 +130,12 @@ def build_market_fabric_runtime_snapshot(
                     "raw_witness_count": (
                         None if evidence is None else evidence.get("source_count")
                     ),
-                    # v3 independence-group persistence is not commissioned yet.
-                    "effective_independent_count": None,
+                    "declared_independence_group_count": len(declared_groups),
+                    "declared_independence_group_ids": list(declared_groups),
+                    # Empirical collapse requires persisted residual history and is
+                    # intentionally not inferred from a single runtime snapshot.
+                    "empirical_independence_group_count": None,
+                    "source_identities": list(source_identities),
                     "quorum_required": (
                         None if evidence is None else evidence.get("quorum_required")
                     ),
@@ -139,7 +165,8 @@ def build_market_fabric_runtime_snapshot(
         "runtime_contract": {
             "executable_domain": "commissioned_ingress_route",
             "intelligence_domain": "legacy_tape_evidence_compatibility",
-            "effective_independence_runtime": "NOT_OBSERVED",
+            "declared_independence_runtime": "BOUND",
+            "empirical_independence_runtime": "NOT_OBSERVED",
         },
         "instrument_count": len(instruments),
         "instruments": instruments,

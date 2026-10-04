@@ -39,6 +39,11 @@ def test_runtime_snapshot_keeps_executable_and_evidence_price_domains_separate()
                     "composite_id": "cmp-1",
                     "composite_mark": 99950.0,
                     "source_count": 3,
+                    "accepted_source_ids": [
+                        "kraken_public_tape",
+                        "coinbase_exchange_tape",
+                        "gemini_public_tape",
+                    ],
                     "quorum_required": 3,
                     "agreement_bps": 1.2,
                     "provenance_complete": True,
@@ -53,7 +58,11 @@ def test_runtime_snapshot_keeps_executable_and_evidence_price_domains_separate()
     assert row["executable"]["ask"] == 100002.0
     assert row["intelligence"]["derived_reference_mark"] == 99950.0
     assert row["intelligence"]["derived_reference_executable"] is False
-    assert row["intelligence"]["effective_independent_count"] is None
+    assert row["intelligence"]["declared_independence_group_count"] == 3
+    assert row["intelligence"]["empirical_independence_group_count"] is None
+    assert len(row["intelligence"]["source_identities"]) == 3
+    assert payload["runtime_contract"]["declared_independence_runtime"] == "BOUND"
+    assert payload["runtime_contract"]["empirical_independence_runtime"] == "NOT_OBSERVED"
     assert payload["authority"]["consensus_can_replace_executable_price"] is False
     assert payload["paper_only"] is True
     assert payload["live_blocked"] is True
@@ -77,6 +86,10 @@ def test_runtime_snapshot_preserves_not_observed_without_inventing_prices() -> N
                     "composite_id": "cmp-eth",
                     "composite_mark": 4500.0,
                     "source_count": 2,
+                    "accepted_source_ids": [
+                        "kraken_public_tape",
+                        "coinbase_exchange_tape",
+                    ],
                     "quorum_required": 3,
                     "agreement_bps": 3.0,
                     "provenance_complete": True,
