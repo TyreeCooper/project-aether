@@ -10,7 +10,9 @@ def test_operator_console_surfaces_tape_across_runtime_views() -> None:
     page = (ROOT / "frontend" / "app" / "page.js").read_text(encoding="utf-8")
     assert "<span>TAPE</span>" in page
     assert "Tape-governed seeds" in page
-    assert "MARKET TRUTH DEPENDENCY" in page
+    assert "MARKET FABRIC → GATE 04" in page
+    assert "Dual-truth market authority" in page
+    assert "NEVER OVERWRITE" in page
     assert "Tape independence" in page
     assert 'label="Tape"' in page
     assert "pipelineRuntimeState(ingress, discovery, tape, strategy" in page
