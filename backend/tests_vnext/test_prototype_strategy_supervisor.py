@@ -11,7 +11,7 @@ import pytest
 from aether_vnext.prototype_strategy_supervisor import (
     _apply_market_fabric_policy,
     PrototypeStrategySupervisor,
-    _coinbase_warmup_cached,
+    _reference_warmup_cached,
     _fetch_dynamic_strategy_history,
     _kraken_history_cached,
     _partition_observations_for_decision_time,
@@ -314,18 +314,18 @@ def test_dynamic_strategy_work_never_drops_assets_for_worker_limit() -> None:
     assert tuple(row.asset_id for row in selected[:3]) == ("kraken:adausd", "kraken:avaxusd", "kraken:dotusd")
 
 
-def test_coinbase_warmup_cache_requires_full_reference_window() -> None:
+def test_reference_warmup_cache_requires_full_reference_window() -> None:
     rows = tuple(
         SimpleNamespace(source_id="coinbase_exchange_public_candles")
         for _ in range(2200)
     )
-    assert _coinbase_warmup_cached(rows) is True
-    assert _coinbase_warmup_cached(rows[:-1]) is False
+    assert _reference_warmup_cached(rows, source_id="coinbase_exchange_public_candles") is True
+    assert _reference_warmup_cached(rows[:-1], source_id="coinbase_exchange_public_candles") is False
     mixed = (
         *rows[:-1],
         SimpleNamespace(source_id="kraken_public_rest_ohlc"),
     )
-    assert _coinbase_warmup_cached(mixed) is False
+    assert _reference_warmup_cached(mixed, source_id="coinbase_exchange_public_candles") is False
 
 
 def test_kraken_history_cache_tracks_completed_bar_boundaries() -> None:
@@ -398,29 +398,30 @@ def test_successful_strategy_evaluation_count_excludes_pipeline_faults() -> None
 
 
 @pytest.mark.asyncio
-async def test_missing_coinbase_listing_falls_through_to_kraken_history(monkeypatch) -> None:
+async def test_dynamic_history_fetches_reference_and_direct_kraken_lanes(monkeypatch) -> None:
     product = _dynamic_product("XDP/USD")
-    calls = {"coinbase": 0, "hourly": 0, "daily": 0}
+    calls = {"reference": 0, "hourly": 0, "daily": 0}
 
-    async def fake_coinbase(**kwargs):
-        calls["coinbase"] += 1
-        return ()
+    async def fake_reference(**kwargs):
+        calls["reference"] += 1
+        assert kwargs["asset_id"] == "kraken:xdpusd"
+        assert kwargs["asset_symbol"] == "XDP"
+        assert kwargs["minimum_bars"] == 2200
+        return ("reference-hour",)
 
     async def fake_hourly(**kwargs):
         calls["hourly"] += 1
-        assert kwargs["asset_id"] == "kraken:xdpusd"
         assert kwargs["kraken_pair"] == "XDPUSD"
         return ("kraken-hour",)
 
     async def fake_daily(**kwargs):
         calls["daily"] += 1
-        assert kwargs["asset_id"] == "kraken:xdpusd"
         assert kwargs["kraken_pair"] == "XDPUSD"
         return ("kraken-day",)
 
     monkeypatch.setattr(
-        "aether_vnext.prototype_strategy_supervisor.fetch_coinbase_hourly_history",
-        fake_coinbase,
+        "aether_vnext.prototype_strategy_supervisor.fetch_cryptocompare_kraken_hourly",
+        fake_reference,
     )
     monkeypatch.setattr(
         "aether_vnext.prototype_strategy_supervisor.fetch_kraken_completed_hourly",
@@ -433,23 +434,23 @@ async def test_missing_coinbase_listing_falls_through_to_kraken_history(monkeypa
 
     history = await _fetch_dynamic_strategy_history(
         product,
-        coinbase_products={},
         end_at_utc=datetime(2026, 10, 3, 15, 43, tzinfo=timezone.utc),
-        fetch_coinbase_warmup=True,
+        fetch_reference_warmup=True,
     )
 
     assert history.error is None
-    assert history.coinbase_product is None
-    assert history.coinbase_hourly == ()
+    assert history.reference_hourly == ("reference-hour",)
     assert history.kraken_hourly == ("kraken-hour",)
     assert history.kraken_daily == ("kraken-day",)
-    assert history.source_gaps == ("coinbase_warmup_product_unavailable",)
-    assert calls == {"coinbase": 0, "hourly": 1, "daily": 1}
+    assert calls == {"reference": 1, "hourly": 1, "daily": 1}
 
 
 @pytest.mark.asyncio
-async def test_coinbase_catalog_fault_is_gap_not_kraken_history_veto(monkeypatch) -> None:
+async def test_cached_reference_history_does_not_refetch_reference_lane(monkeypatch) -> None:
     product = _dynamic_product("XION/USD")
+
+    async def fail_reference(**kwargs):
+        raise AssertionError("reference history should not be fetched")
 
     async def fake_hourly(**kwargs):
         return ("kraken-hour",)
@@ -458,6 +459,10 @@ async def test_coinbase_catalog_fault_is_gap_not_kraken_history_veto(monkeypatch
         return ("kraken-day",)
 
     monkeypatch.setattr(
+        "aether_vnext.prototype_strategy_supervisor.fetch_cryptocompare_kraken_hourly",
+        fail_reference,
+    )
+    monkeypatch.setattr(
         "aether_vnext.prototype_strategy_supervisor.fetch_kraken_completed_hourly",
         fake_hourly,
     )
@@ -468,18 +473,14 @@ async def test_coinbase_catalog_fault_is_gap_not_kraken_history_veto(monkeypatch
 
     history = await _fetch_dynamic_strategy_history(
         product,
-        coinbase_products={},
         end_at_utc=datetime(2026, 10, 3, 15, 43, tzinfo=timezone.utc),
-        fetch_coinbase_warmup=True,
-        coinbase_catalog_error="TimeoutError:catalog timeout",
+        fetch_reference_warmup=False,
     )
 
     assert history.error is None
+    assert history.reference_hourly == ()
     assert history.kraken_hourly == ("kraken-hour",)
     assert history.kraken_daily == ("kraken-day",)
-    assert history.source_gaps == (
-        "coinbase_catalog_error:TimeoutError:catalog timeout",
-    )
 
 
 from aether_vnext.tape_market_bridge import TapeMarketProjection

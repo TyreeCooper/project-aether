@@ -1,13 +1,13 @@
-"""Hybrid prototype warm-up assembly for BTC/ETH PAPER trading.
+"""Source-separated prototype warm-up assembly for crypto PAPER trading.
 
-The recent decision-critical window remains Kraken:
+The recent decision-critical window remains direct Kraken:
 - trigger/ATR/prior-20 structure uses recent Kraken hourly bars;
 - daily trend and BTC market regime use Kraken daily bars.
 
-Older Coinbase hourly candles may extend the 90-day RV14 percentile reference only
-when they precede the available Kraken hourly window. Coinbase never overwrites a
-Kraken bar, never becomes the execution-market authority, and never becomes Phase-18
-evidence.
+Older historical reference bars may extend the 90-day RV14 percentile window only
+when they precede the available direct Kraken hourly window. Reference history never
+overwrites a Kraken decision bar, never becomes executable market authority, and
+never becomes Phase-18 evidence. Source provenance remains attached to every bar.
 """
 from __future__ import annotations
 
@@ -15,7 +15,6 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Sequence
 
-from aether_vnext.coinbase_prototype_history import COINBASE_SOURCE_ID
 from aether_vnext.prototype_crypto_features import (
     CRYPTO_BREAKOUT_LOOKBACK_BARS,
     CRYPTO_TREND_INTERVAL,
@@ -43,7 +42,7 @@ class PrototypeCryptoWarmup:
     asset_daily_bars: tuple[PrototypeMarketBar, ...]
     btc_daily_bars: tuple[PrototypeMarketBar, ...]
     trigger_close_utc: datetime
-    coinbase_reference_bar_count: int
+    reference_hourly_bar_count: int
     kraken_hourly_bar_count: int
     feature_snapshot: PrototypeCryptoFeatureSnapshot
 
@@ -70,7 +69,7 @@ def _ordered_unique(
 def assemble_prototype_crypto_warmup(
     *,
     asset_id: str,
-    coinbase_hourly: Sequence[PrototypeMarketBar],
+    historical_reference_hourly: Sequence[PrototypeMarketBar],
     kraken_hourly: Sequence[PrototypeMarketBar],
     asset_kraken_daily: Sequence[PrototypeMarketBar],
     btc_kraken_daily: Sequence[PrototypeMarketBar],
@@ -83,8 +82,8 @@ def assemble_prototype_crypto_warmup(
     if as_of_utc.tzinfo is None:
         raise ValueError("as_of_utc must be timezone-aware")
 
-    cb = _ordered_unique(
-        coinbase_hourly,
+    reference = _ordered_unique(
+        historical_reference_hourly,
         asset_id=asset,
         interval=CRYPTO_TRIGGER_INTERVAL,
     )
@@ -118,21 +117,19 @@ def assemble_prototype_crypto_warmup(
         raise ValueError("asset daily trend must be direct Kraken REST bars")
     if any(row.source_id != KRAKEN_DAILY_SOURCE_ID for row in btc_daily):
         raise ValueError("BTC daily regime must be direct Kraken REST bars")
-    if any(row.source_id != COINBASE_SOURCE_ID for row in cb):
-        raise ValueError("older hourly warm-up rows must retain Coinbase provenance")
 
     trigger_close = kr[-1].bucket_close_utc
     if trigger_close > as_of_utc:
         raise ValueError("latest Kraken hourly bar cannot be in the future")
 
     earliest_kraken_open = kr[0].bucket_open_utc
-    older_cb = tuple(
-        row for row in cb
+    older_reference = tuple(
+        row for row in reference
         if row.bucket_open_utc < earliest_kraken_open
         and row.bucket_close_utc <= trigger_close
     )
     # Kraken always wins overlap/current decision-time bars.
-    hourly = (*older_cb, *kr)
+    hourly = (*older_reference, *kr)
 
     if len(hourly) < CRYPTO_BREAKOUT_LOOKBACK_BARS + 1:
         raise ValueError("insufficient hourly warm-up for crypto structure")
@@ -144,10 +141,10 @@ def assemble_prototype_crypto_warmup(
     )
     if len(pre_window) < RV14_REQUIRED_CLOSES:
         raise ValueError(
-            "hybrid warm-up lacks 15 pre-window hourly bars for 90-day RV14 reference"
+            "historical warm-up lacks 15 pre-window hourly bars for 90-day RV14 reference"
         )
 
-    # The entire 20-bar structure/ATR decision window must be Kraken, not Coinbase.
+    # The entire 20-bar structure/ATR decision window must remain direct Kraken.
     decision_window = hourly[-(CRYPTO_BREAKOUT_LOOKBACK_BARS + 1):]
     if any(row.source_id != KRAKEN_DAILY_SOURCE_ID for row in decision_window):
         raise ValueError("crypto decision window must remain Kraken-only")
@@ -167,7 +164,7 @@ def assemble_prototype_crypto_warmup(
         asset_daily_bars=asset_daily,
         btc_daily_bars=btc_daily,
         trigger_close_utc=trigger_close,
-        coinbase_reference_bar_count=len(older_cb),
+        reference_hourly_bar_count=len(older_reference),
         kraken_hourly_bar_count=len(kr),
         feature_snapshot=feature_snapshot,
     )

@@ -21,11 +21,6 @@ from typing import Awaitable, Callable, Mapping, Sequence
 
 import sqlalchemy as sa
 
-from aether_vnext.coinbase_prototype_history import (
-    COINBASE_SOURCE_ID,
-    fetch_coinbase_hourly_history,
-    fetch_coinbase_public_products,
-)
 from aether_vnext.db_runtime import VNextDatabaseConfig, open_vnext_engine
 from aether_vnext.dynamic_products import project_kraken_spot_product
 from aether_vnext.freeze import CONFIGURATION_HASH, LIVE_BLOCKED, PAPER_ONLY
@@ -38,7 +33,9 @@ from aether_vnext.prototype_forward_paper_evidence import (
 )
 from aether_vnext.prototype_crypto_warmup import assemble_prototype_crypto_warmup
 from aether_vnext.prototype_history_sources import (
+    CRYPTOCOMPARE_SOURCE_ID,
     KRAKEN_DAILY_SOURCE_ID,
+    fetch_cryptocompare_kraken_hourly,
     fetch_kraken_completed_daily,
     fetch_kraken_completed_hourly,
 )
@@ -170,8 +167,7 @@ class PrototypeStrategySupervisorStatus:
 @dataclass(frozen=True, slots=True)
 class DynamicStrategyHistory:
     asset_id: str
-    coinbase_product: str | None
-    coinbase_hourly: tuple[PrototypeMarketBar, ...]
+    reference_hourly: tuple[PrototypeMarketBar, ...]
     kraken_hourly: tuple[PrototypeMarketBar, ...]
     kraken_daily: tuple[PrototypeMarketBar, ...]
     error: str | None
@@ -564,16 +560,19 @@ def _dynamic_flow_telemetry(
     }
 
 
-def _coinbase_warmup_cached(
+def _reference_warmup_cached(
     rows: Sequence[PrototypeMarketBar],
     *,
+    source_id: str,
     minimum_bars: int = 2200,
 ) -> bool:
+    if not str(source_id).strip():
+        raise ValueError("source_id is required")
     if minimum_bars < 1:
         raise ValueError("minimum_bars must be positive")
     return sum(
         1 for row in rows
-        if row.source_id == COINBASE_SOURCE_ID
+        if row.source_id == source_id
     ) >= minimum_bars
 
 
@@ -618,12 +617,10 @@ def _kraken_history_cached(
 async def _fetch_dynamic_strategy_history(
     product: ProductRegistryRow,
     *,
-    coinbase_products: Mapping[tuple[str, str], str],
     end_at_utc: datetime,
-    fetch_coinbase_warmup: bool,
-    coinbase_catalog_error: str | None = None,
+    fetch_reference_warmup: bool,
 ) -> DynamicStrategyHistory:
-    """Fetch one dynamic asset's history without allowing it to fail the cycle."""
+    """Fetch one dynamic asset's history without making one source a gatekeeper."""
     asset_id = str(product.asset_id).strip().lower()
     base = str(product.base_currency or "").strip().upper()
     quote = str(product.quote_currency or "").strip().upper()
@@ -632,68 +629,42 @@ async def _fetch_dynamic_strategy_history(
     if not base or quote != "USD" or not kraken_pair:
         return DynamicStrategyHistory(
             asset_id=asset_id,
-            coinbase_product=None,
-            coinbase_hourly=(),
+            reference_hourly=(),
             kraken_hourly=(),
             kraken_daily=(),
             error="product_history_identity_incomplete",
         )
 
-    coinbase_product = coinbase_products.get((base, "USD"))
-    source_gaps: tuple[str, ...] = ()
-    use_coinbase_warmup = fetch_coinbase_warmup and bool(coinbase_product)
-    if fetch_coinbase_warmup and not coinbase_product:
-        source_gaps = (
-            (
-                "coinbase_catalog_error:" + coinbase_catalog_error
-                if coinbase_catalog_error
-                else "coinbase_warmup_product_unavailable"
-            ),
-        )
-
     try:
-        if use_coinbase_warmup:
-            coinbase_hourly, kraken_hourly, kraken_daily = await asyncio.gather(
-                fetch_coinbase_hourly_history(
+        tasks = [
+            fetch_kraken_completed_hourly(
+                asset_id=asset_id,
+                kraken_pair=kraken_pair,
+                end_at_utc=end_at_utc,
+            ),
+            fetch_kraken_completed_daily(
+                asset_id=asset_id,
+                kraken_pair=kraken_pair,
+                end_at_utc=end_at_utc,
+            ),
+        ]
+        if fetch_reference_warmup:
+            reference_hourly, kraken_hourly, kraken_daily = await asyncio.gather(
+                fetch_cryptocompare_kraken_hourly(
                     asset_id=asset_id,
-                    coinbase_product=str(coinbase_product),
+                    asset_symbol=base,
                     end_at_utc=end_at_utc,
                     minimum_bars=2200,
                 ),
-                fetch_kraken_completed_hourly(
-                    asset_id=asset_id,
-                    kraken_pair=kraken_pair,
-                    end_at_utc=end_at_utc,
-                ),
-                fetch_kraken_completed_daily(
-                    asset_id=asset_id,
-                    kraken_pair=kraken_pair,
-                    end_at_utc=end_at_utc,
-                ),
+                *tasks,
             )
         else:
-            # Coinbase is historical backfill, not admission permission. A
-            # commissioned Kraken product with no Coinbase USD listing still gets
-            # its direct Kraken history and lets the warm-up assembler decide
-            # whether the observed bars are sufficient.
-            kraken_hourly, kraken_daily = await asyncio.gather(
-                fetch_kraken_completed_hourly(
-                    asset_id=asset_id,
-                    kraken_pair=kraken_pair,
-                    end_at_utc=end_at_utc,
-                ),
-                fetch_kraken_completed_daily(
-                    asset_id=asset_id,
-                    kraken_pair=kraken_pair,
-                    end_at_utc=end_at_utc,
-                ),
-            )
-            coinbase_hourly = ()
+            kraken_hourly, kraken_daily = await asyncio.gather(*tasks)
+            reference_hourly = ()
     except Exception as exc:
         return DynamicStrategyHistory(
             asset_id=asset_id,
-            coinbase_product=coinbase_product,
-            coinbase_hourly=(),
+            reference_hourly=(),
             kraken_hourly=(),
             kraken_daily=(),
             error=f"history_fetch_error:{type(exc).__name__}:{exc}",
@@ -701,12 +672,10 @@ async def _fetch_dynamic_strategy_history(
 
     return DynamicStrategyHistory(
         asset_id=asset_id,
-        coinbase_product=coinbase_product,
-        coinbase_hourly=tuple(coinbase_hourly),
+        reference_hourly=tuple(reference_hourly),
         kraken_hourly=tuple(kraken_hourly),
         kraken_daily=tuple(kraken_daily),
         error=None,
-        source_gaps=source_gaps,
     )
 
 
@@ -759,14 +728,23 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
     fetched_hourly: dict[str, tuple[PrototypeMarketBar, ...]] = {}
     fetched_daily: dict[str, tuple[PrototypeMarketBar, ...]] = {}
     for asset_id in ASSETS:
-        fetched_hourly[asset_id] = await fetch_kraken_completed_hourly(
-            asset_id=asset_id,
-            end_at_utc=as_of_utc,
+        reference_hourly, direct_hourly, daily = await asyncio.gather(
+            fetch_cryptocompare_kraken_hourly(
+                asset_id=asset_id,
+                end_at_utc=as_of_utc,
+                minimum_bars=2200,
+            ),
+            fetch_kraken_completed_hourly(
+                asset_id=asset_id,
+                end_at_utc=as_of_utc,
+            ),
+            fetch_kraken_completed_daily(
+                asset_id=asset_id,
+                end_at_utc=as_of_utc,
+            ),
         )
-        fetched_daily[asset_id] = await fetch_kraken_completed_daily(
-            asset_id=asset_id,
-            end_at_utc=as_of_utc,
-        )
+        fetched_hourly[asset_id] = (*reference_hourly, *direct_hourly)
+        fetched_daily[asset_id] = daily
 
     result: dict[str, object] = {
         "paper_only": PAPER_ONLY,
@@ -888,8 +866,8 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                 warmup_cached = {}
                 kraken_history_cached = {}
                 for product in batch:
-                    coinbase_meta = history_summary.get(
-                        (product.asset_id, 3600, COINBASE_SOURCE_ID),
+                    reference_meta = history_summary.get(
+                        (product.asset_id, 3600, CRYPTOCOMPARE_SOURCE_ID),
                         {},
                     )
                     kraken_hour_meta = history_summary.get(
@@ -901,7 +879,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         {},
                     )
                     warmup_cached[product.asset_id] = (
-                        int(coinbase_meta.get("bar_count") or 0) >= 2200
+                        int(reference_meta.get("bar_count") or 0) >= 2200
                     )
                     hour_close = kraken_hour_meta.get("latest_close_utc")
                     day_close = kraken_day_meta.get("latest_close_utc")
@@ -960,25 +938,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
             "market_not_ready_count": len(prepared_dynamic_market_not_ready),
         }
 
-        # Resolve a real cross-venue warm-up product once per cycle. A catalog
-        # failure degrades only dynamic history; it never stops the seed lane.
-        coinbase_catalog: Mapping[tuple[str, str], str] = {}
-        coinbase_catalog_error: str | None = None
-        needs_coinbase_catalog = any(
-            prepared_dynamic_observations.get(product.asset_id) is not None
-            and not dynamic_warmup_cached.get(product.asset_id, False)
-            for product in dynamic_batch
-        )
-        if needs_coinbase_catalog:
-            try:
-                coinbase_catalog = await fetch_coinbase_public_products(
-                    timeout_s=20.0
-                )
-            except Exception as exc:
-                coinbase_catalog_error = (
-                    f"{type(exc).__name__}:{exc}"
-                )
-
+        # Historical reference sourcing is independent of exchange-product catalogs.
         history_by_asset: dict[str, DynamicStrategyHistory] = {}
         fetchable_products = tuple(
             product
@@ -995,10 +955,8 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                 try:
                     return await _fetch_dynamic_strategy_history(
                         product,
-                        coinbase_products=coinbase_catalog,
                         end_at_utc=as_of_utc,
-                        fetch_coinbase_warmup=needs_warmup,
-                        coinbase_catalog_error=coinbase_catalog_error,
+                        fetch_reference_warmup=needs_warmup,
                     )
                 finally:
                     history_fetch_completed += 1
@@ -1021,8 +979,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                 # completed-bar boundary instead of repeating every 15 seconds.
                 history_by_asset[product.asset_id] = DynamicStrategyHistory(
                     asset_id=product.asset_id,
-                    coinbase_product=None,
-                    coinbase_hourly=(),
+                    reference_hourly=(),
                     kraken_hourly=(),
                     kraken_daily=(),
                     error=None,
@@ -1065,7 +1022,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         store,
                         tuple(
                             (
-                                *history.coinbase_hourly,
+                                *history.reference_hourly,
                                 *history.kraken_hourly,
                                 *history.kraken_daily,
                             )
@@ -1295,10 +1252,10 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     asset_daily = daily_by_asset.get(asset_id, ())
                     warmup = assemble_prototype_crypto_warmup(
                         asset_id=asset_id,
-                        coinbase_hourly=tuple(
+                        reference_hourly=tuple(
                             row
                             for row in hourly
-                            if row.source_id == COINBASE_SOURCE_ID
+                            if row.source_id == CRYPTOCOMPARE_SOURCE_ID
                         ),
                         kraken_hourly=tuple(
                             row
@@ -1443,10 +1400,10 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     try:
                         warmup = assemble_prototype_crypto_warmup(
                             asset_id=asset_id,
-                            coinbase_hourly=tuple(
+                            reference_hourly=tuple(
                                 row
                                 for row in hourly
-                                if row.source_id == COINBASE_SOURCE_ID
+                                if row.source_id == CRYPTOCOMPARE_SOURCE_ID
                             ),
                             kraken_hourly=tuple(
                                 row
@@ -1523,8 +1480,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                             "volatility_percentile": (
                                 feature.volatility.percentile
                             ),
-                            "coinbase_product": history.coinbase_product,
-                            "history_source_gaps": list(history.source_gaps),
+                                                        "history_source_gaps": list(history.source_gaps),
                             "quote_age_ms": executable_quote_age_ms(observation),
                         }
                         if advanced.stage == "NO_SETUP":

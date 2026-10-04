@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from aether_vnext.coinbase_prototype_history import COINBASE_SOURCE_ID
+from aether_vnext.reference_prototype_history import COINBASE_SOURCE_ID
 from aether_vnext.prototype_crypto_warmup import (
     MIN_RECENT_KRAKEN_HOURLY_BARS,
     assemble_prototype_crypto_warmup,
@@ -53,8 +53,8 @@ def _series(
     return tuple(rows)
 
 
-def test_hybrid_warmup_uses_coinbase_only_before_kraken_window() -> None:
-    coinbase = _series(
+def test_hybrid_warmup_uses_reference_only_before_kraken_window() -> None:
+    reference = _series(
         asset_id="btc",
         interval=timedelta(hours=1),
         count=2400,
@@ -87,7 +87,7 @@ def test_hybrid_warmup_uses_coinbase_only_before_kraken_window() -> None:
 
     out = assemble_prototype_crypto_warmup(
         asset_id="btc",
-        coinbase_hourly=coinbase,
+        historical_reference_hourly=reference,
         kraken_hourly=kraken,
         asset_kraken_daily=daily,
         btc_kraken_daily=daily,
@@ -95,7 +95,7 @@ def test_hybrid_warmup_uses_coinbase_only_before_kraken_window() -> None:
     )
 
     assert out.kraken_hourly_bar_count == 720
-    assert out.coinbase_reference_bar_count == 1680
+    assert out.reference_hourly_bar_count == 1680
     assert len(out.hourly_bars) == 2400
     assert all(
         row.source_id == KRAKEN_DAILY_SOURCE_ID
@@ -108,7 +108,7 @@ def test_hybrid_warmup_uses_coinbase_only_before_kraken_window() -> None:
 
 
 def test_hybrid_warmup_refuses_short_kraken_decision_window() -> None:
-    coinbase = _series(
+    reference = _series(
         asset_id="eth",
         interval=timedelta(hours=1),
         count=2400,
@@ -148,7 +148,7 @@ def test_hybrid_warmup_refuses_short_kraken_decision_window() -> None:
     with pytest.raises(ValueError, match="completed Kraken hourly"):
         assemble_prototype_crypto_warmup(
             asset_id="eth",
-            coinbase_hourly=coinbase,
+            historical_reference_hourly=reference,
             kraken_hourly=kraken,
             asset_kraken_daily=daily,
             btc_kraken_daily=btc_daily,
