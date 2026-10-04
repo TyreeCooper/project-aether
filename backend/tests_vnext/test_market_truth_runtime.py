@@ -100,3 +100,14 @@ def test_dead_executable_book_stays_blank_even_if_evidence_full() -> None:
     assert executable["bid"] is None
     assert executable["ask"] is None
     assert payload["instruments"][0]["intelligence"]["evidence_state"] == "FULL"
+
+
+def test_market_truth_runtime_bootstrap_uses_identity_facts_not_full_ticker_universe() -> None:
+    root = Path(__file__).resolve().parents[2]
+    runtime = (root / "backend" / "aether_vnext" / "market_truth_runtime.py").read_text(encoding="utf-8")
+    catalog = (root / "backend" / "aether_vnext" / "kraken_catalog.py").read_text(encoding="utf-8")
+    assert "fetch_kraken_spot_pair_facts" in runtime
+    assert "fetch_kraken_discovery_universe" not in runtime
+    assert "asyncio.wait_for(" in runtime
+    assert "ASSET_PAIRS_PATH" in catalog
+    assert "Market Truth bootstrap needs\n    no prices here" in catalog

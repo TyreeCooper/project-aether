@@ -241,3 +241,47 @@ async def fetch_kraken_discovery_universe(
     finally:
         if owned:
             await http.aclose()
+
+
+async def fetch_kraken_spot_pair_facts(
+    *,
+    canonical_symbols: tuple[str, ...],
+    client: httpx.AsyncClient | None = None,
+) -> dict[str, dict[str, object]]:
+    """Fetch identity/market-structure facts only from Kraken AssetPairs.
+
+    This intentionally avoids the full ticker universe. Market Truth bootstrap needs
+    no prices here; it needs only tick/lot/session identity facts for routed assets.
+    """
+    wanted = {str(symbol).strip().upper() for symbol in canonical_symbols if str(symbol).strip()}
+    if not wanted:
+        raise ValueError("at least one canonical symbol is required")
+    owned = client is None
+    http = client or httpx.AsyncClient(
+        base_url=KRAKEN_REST_BASE,
+        timeout=httpx.Timeout(10.0),
+    )
+    try:
+        response = await http.get(ASSET_PAIRS_PATH)
+        response.raise_for_status()
+        catalog = parse_kraken_spot_catalog(response.json())
+        by_symbol = {
+            str(row.get("symbol") or "").strip().upper(): row
+            for row in catalog.values()
+        }
+        out: dict[str, dict[str, object]] = {}
+        for symbol in wanted:
+            row = by_symbol.get(symbol)
+            if row is None and symbol == "BTC/USD":
+                row = by_symbol.get("XBT/USD")
+            if row is None:
+                continue
+            out[symbol] = {
+                **row,
+                "tick_size": _precision_step(row.get("pair_decimals")),
+                "quantity_step": _precision_step(row.get("lot_decimals")),
+            }
+        return out
+    finally:
+        if owned:
+            await http.aclose()

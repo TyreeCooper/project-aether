@@ -16,7 +16,7 @@ from typing import Any
 import websockets
 
 from aether_vnext.freeze import LIVE_BLOCKED, PAPER_ONLY
-from aether_vnext.kraken_catalog import fetch_kraken_discovery_universe
+from aether_vnext.kraken_catalog import fetch_kraken_spot_pair_facts
 from aether_vnext.market_truth_coinbase import (
     COINBASE_WITNESS_WS_URL,
     CoinbaseWitnessAdapter,
@@ -270,24 +270,23 @@ class MarketTruthRuntime:
     async def _bootstrap_loop(self) -> None:
         while not self._stop.is_set() and not self._ready.is_set():
             try:
-                rows = await fetch_kraken_discovery_universe()
-                btc = next(
-                    (
-                        row for row in rows
-                        if str(row.symbol).upper() in {"BTC/USD", "XBT/USD"}
-                    ),
-                    None,
+                facts = await asyncio.wait_for(
+                    fetch_kraken_spot_pair_facts(canonical_symbols=("BTC/USD",)),
+                    timeout=12.0,
                 )
+                btc = facts.get("BTC/USD")
                 if btc is None:
-                    raise RuntimeError("BTC/USD missing from Kraken public catalog")
-                if btc.tick_size is None or btc.quantity_step is None:
+                    raise RuntimeError("BTC/USD missing from Kraken AssetPairs")
+                tick_size = btc.get("tick_size")
+                quantity_step = btc.get("quantity_step")
+                if tick_size is None or quantity_step is None:
                     raise RuntimeError("BTC/USD tick/lot facts not observed")
                 universe = AssetUniverse((
                     AssetUniverseRow(
                         canonical_instrument_id="btc-usd",
-                        asset_class=str(btc.asset_class),
-                        tick_size=float(btc.tick_size),
-                        lot_size=float(btc.quantity_step),
+                        asset_class="spot_crypto",
+                        tick_size=float(tick_size),
+                        lot_size=float(quantity_step),
                         session_calendar="crypto_24x7",
                     ),
                 ))
