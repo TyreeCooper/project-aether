@@ -497,7 +497,7 @@ function Tape({ tape, ingress, marketFabric, nowMs }) {
 
       <Section eyebrow="DUAL-DOMAIN TAPE" title="Executable truth + Market Intelligence" className="wide">
         <div className="marketTable">
-          <div className="marketHead"><span>Instrument</span><span>Exec venue</span><span>Bid</span><span>Ask</span><span>Exec age</span><span>Evidence</span><span>Witnesses</span></div>
+          <div className="marketHead"><span>Instrument</span><span>Exec venue</span><span>Bid</span><span>Ask</span><span>Exec age</span><span>Evidence</span><span>Raw / groups</span></div>
           {instrumentIds.map((assetId) => {
             const fabric = fabricByAsset[assetId];
             const quote = quoteByAsset[assetId];
@@ -506,6 +506,7 @@ function Tape({ tape, ingress, marketFabric, nowMs }) {
             const intelligence = fabric?.intelligence || null;
             const execTs = executable?.reference_ts_utc || quote?.reference_ts_utc;
             const rawWitnessCount = intelligence?.raw_witness_count ?? evidence?.source_count;
+            const declaredGroupCount = intelligence?.declared_independence_group_count;
             return (
               <div className="marketRow" key={assetId}>
                 <strong>{assetId.toUpperCase()}</strong>
@@ -514,13 +515,13 @@ function Tape({ tape, ingress, marketFabric, nowMs }) {
                 <span>{num(executable?.ask ?? quote?.ask, 6)}</span>
                 <span>{age(execTs, nowMs)}</span>
                 <Badge value={intelligence?.evidence_state || evidence?.state}>{text(intelligence?.evidence_state || evidence?.state, "NOT OBSERVED")}</Badge>
-                <span>{isObservedNumber(rawWitnessCount) ? num(rawWitnessCount) : "NOT OBSERVED"}</span>
+                <span>{isObservedNumber(rawWitnessCount) ? num(rawWitnessCount) : "NOT OBSERVED"} / {isObservedNumber(declaredGroupCount) ? num(declaredGroupCount) : "NOT OBSERVED"}</span>
               </div>
             );
           })}
           {!instrumentIds.length ? <div className="empty">No executable or evidence observation has been observed. AETHER does not invent zeroes or carry stale prices forward.</div> : null}
         </div>
-        <p className="repairNote">Market Fabric runtime: {text(marketFabric?.runtime_contract?.executable_domain, "NOT OBSERVED")} executable domain · {text(marketFabric?.runtime_contract?.intelligence_domain, "NOT OBSERVED")} evidence domain. Effective-independence runtime remains {text(marketFabric?.runtime_contract?.effective_independence_runtime, "NOT OBSERVED")} until its persistence path is commissioned; this screen does not fabricate it.</p>
+        <p className="repairNote">Market Fabric runtime: {text(marketFabric?.runtime_contract?.executable_domain, "NOT OBSERVED")} executable domain · {text(marketFabric?.runtime_contract?.intelligence_domain, "NOT OBSERVED")} evidence domain. Declared economic-source independence is {text(marketFabric?.runtime_contract?.declared_independence_runtime, "NOT OBSERVED")}; empirical correlation collapse remains {text(marketFabric?.runtime_contract?.empirical_independence_runtime, "NOT OBSERVED")} until residual-history persistence is commissioned.</p>
       </Section>
 
       <Section eyebrow="EXECUTABLE TAPE" title="Authorized-route observations" className="wide">
