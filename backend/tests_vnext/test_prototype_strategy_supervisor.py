@@ -9,7 +9,7 @@ from aether_vnext.dynamic_products import project_kraken_spot_product
 import pytest
 
 from aether_vnext.prototype_strategy_supervisor import (
-    _apply_tape_market_policy,
+    _apply_market_fabric_policy,
     PrototypeStrategySupervisor,
     _coinbase_warmup_cached,
     _fetch_dynamic_strategy_history,
@@ -487,7 +487,7 @@ from aether_vnext.tape_market_bridge import TapeMarketProjection
 
 def test_required_tape_blocks_seed_provider_fallback_when_quorum_not_full() -> None:
     provider_observation = object()
-    observations, rejections, telemetry = _apply_tape_market_policy(
+    observations, rejections, telemetry = _apply_market_fabric_policy(
         {"btc": provider_observation},
         {},
         {
@@ -497,16 +497,16 @@ def test_required_tape_blocks_seed_provider_fallback_when_quorum_not_full() -> N
                 reason="tape_contested",
             )
         },
-        tape_required=True,
+        evidence_required_asset_ids=frozenset({"btc"}),
     )
     assert "btc" not in observations
     assert rejections["btc"]["reason"] == "tape_contested"
-    assert telemetry["btc"]["required_for_strategy"] is True
+    assert telemetry["btc"]["witness_evidence_required"] is True
 
 
 def test_nonrequired_tape_does_not_erase_provider_fallback() -> None:
     provider_observation = object()
-    observations, rejections, telemetry = _apply_tape_market_policy(
+    observations, rejections, telemetry = _apply_market_fabric_policy(
         {"btc": provider_observation},
         {},
         {
@@ -516,17 +516,17 @@ def test_nonrequired_tape_does_not_erase_provider_fallback() -> None:
                 reason="tape_not_observed",
             )
         },
-        tape_required=False,
+        evidence_required_asset_ids=frozenset(),
     )
     assert observations["btc"] is provider_observation
     assert rejections == {}
-    assert telemetry["btc"]["required_for_strategy"] is False
+    assert telemetry["btc"]["witness_evidence_required"] is False
 
 
 def test_full_tape_is_evidence_only_and_cannot_replace_executable_price() -> None:
     provider_observation = object()
     consensus_observation = SimpleNamespace(observation_id="consensus-1")
-    observations, rejections, telemetry = _apply_tape_market_policy(
+    observations, rejections, telemetry = _apply_market_fabric_policy(
         {"btc": provider_observation},
         {},
         {
@@ -536,7 +536,7 @@ def test_full_tape_is_evidence_only_and_cannot_replace_executable_price() -> Non
                 reason="tape_market_ready",
             )
         },
-        tape_required=True,
+        evidence_required_asset_ids=frozenset({"btc"}),
     )
 
     assert observations["btc"] is provider_observation
@@ -548,7 +548,7 @@ def test_full_tape_is_evidence_only_and_cannot_replace_executable_price() -> Non
 
 def test_full_tape_cannot_manufacture_executable_price_when_provider_book_missing() -> None:
     consensus_observation = SimpleNamespace(observation_id="consensus-1")
-    observations, rejections, telemetry = _apply_tape_market_policy(
+    observations, rejections, telemetry = _apply_market_fabric_policy(
         {},
         {},
         {
@@ -558,7 +558,7 @@ def test_full_tape_cannot_manufacture_executable_price_when_provider_book_missin
                 reason="tape_market_ready",
             )
         },
-        tape_required=True,
+        evidence_required_asset_ids=frozenset({"btc"}),
     )
 
     assert "btc" not in observations
@@ -568,7 +568,7 @@ def test_full_tape_cannot_manufacture_executable_price_when_provider_book_missin
 
 def test_tape_telemetry_preserves_evidence_composite_lineage() -> None:
     provider_observation = object()
-    observations, rejections, telemetry = _apply_tape_market_policy(
+    observations, rejections, telemetry = _apply_market_fabric_policy(
         {"btc": provider_observation},
         {},
         {
@@ -580,10 +580,55 @@ def test_tape_telemetry_preserves_evidence_composite_lineage() -> None:
                 evidence_only=True,
             )
         },
-        tape_required=True,
+        evidence_required_asset_ids=frozenset({"btc"}),
     )
 
     assert observations["btc"] is provider_observation
     assert rejections == {}
     assert telemetry["btc"]["evidence_composite_id"] == "cmp-btc-123"
     assert telemetry["btc"]["evidence_only"] is True
+
+
+def test_market_fabric_owns_dynamic_asset_without_inventing_witness_requirement() -> None:
+    provider_observation = object()
+    observations, rejections, telemetry = _apply_market_fabric_policy(
+        {"kraken:solusd": provider_observation},
+        {},
+        {
+            "kraken:solusd": TapeMarketProjection(
+                observation=None,
+                strategy_ready=False,
+                reason="tape_not_observed",
+            )
+        },
+        evidence_required_asset_ids=frozenset(),
+    )
+    assert observations["kraken:solusd"] is provider_observation
+    assert rejections == {}
+    assert telemetry["kraken:solusd"]["authority"] == "market_fabric_v3"
+    assert telemetry["kraken:solusd"]["witness_domain"] == "market_intelligence_only"
+    assert telemetry["kraken:solusd"]["witness_evidence_required"] is False
+    assert telemetry["kraken:solusd"]["consensus_can_replace_executable_price"] is False
+
+
+def test_market_fabric_required_witness_can_gate_but_never_replace_price() -> None:
+    executable = object()
+    witness_reference = SimpleNamespace(observation_id="witness-reference")
+    observations, rejections, telemetry = _apply_market_fabric_policy(
+        {"btc": executable},
+        {},
+        {
+            "btc": TapeMarketProjection(
+                observation=witness_reference,
+                strategy_ready=True,
+                reason="tape_evidence_ready",
+                evidence_composite_id="cmp-1",
+            )
+        },
+        evidence_required_asset_ids=frozenset({"btc"}),
+    )
+    assert observations["btc"] is executable
+    assert observations["btc"] is not witness_reference
+    assert rejections == {}
+    assert telemetry["btc"]["executable_observation_preserved"] is True
+    assert telemetry["btc"]["consensus_can_replace_executable_price"] is False

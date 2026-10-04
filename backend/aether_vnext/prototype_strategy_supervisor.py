@@ -93,28 +93,33 @@ def strategy_progress_payload() -> dict[str, object]:
     return deepcopy(_STRATEGY_PROGRESS)
 
 
-def _apply_tape_market_policy(
+def _apply_market_fabric_policy(
     observations: Mapping[str, object],
     ingress_rejections: Mapping[str, object],
     projections: Mapping[str, TapeMarketProjection],
     *,
-    tape_required: bool,
+    evidence_required_asset_ids: frozenset[str],
 ) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
-    """Use Tape only as an evidence gate; never replace executable-route pricing.
+    """Apply Market Fabric authority without mutating executable-route truth.
 
-    v3 Market Fabric keeps two state axes. The observations mapping contains the
-    executable provider/route truth that Strategy, Risk and Clerk may price from.
-    Tape projection remains evidence-only: FULL can admit that executable observation
-    and degraded or contested evidence can block it, but no consensus/composite quote
-    can overwrite the book AETHER would actually hit.
+    Every scanned instrument enters this authority layer. The executable lane is
+    always the price authority. Witness evidence is a separate intelligence axis and
+    can gate only instruments whose evidence policy is currently commissioned.
+    Missing witness coverage therefore remains NOT_OBSERVED instead of silently
+    inventing consensus or blocking instruments that do not yet have a commissioned
+    witness requirement.
     """
     selected = dict(observations)
     rejected = dict(ingress_rejections)
     telemetry: dict[str, object] = {}
     for asset_id, projection in projections.items():
         executable_observation = selected.get(asset_id)
+        evidence_required = asset_id in evidence_required_asset_ids
         telemetry[asset_id] = {
-            "required_for_strategy": tape_required,
+            "authority": "market_fabric_v3",
+            "executable_domain": "commissioned_ingress_route",
+            "witness_domain": "market_intelligence_only",
+            "witness_evidence_required": evidence_required,
             "strategy_ready": projection.strategy_ready,
             "reason": projection.reason,
             "evidence_observation_id": (
@@ -125,8 +130,9 @@ def _apply_tape_market_policy(
             "evidence_composite_id": projection.evidence_composite_id,
             "executable_observation_preserved": executable_observation is not None,
             "evidence_only": True,
+            "consensus_can_replace_executable_price": False,
         }
-        if not tape_required:
+        if not evidence_required:
             continue
         if not projection.strategy_ready:
             selected.pop(asset_id, None)
@@ -142,7 +148,6 @@ def _apply_tape_market_policy(
                 "observation": None,
             }
             continue
-        # Evidence passed. Preserve the executable-route observation unchanged.
         rejected.pop(asset_id, None)
     return selected, rejected, telemetry
 
@@ -1118,26 +1123,32 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         }
 
                 decision_at_utc = datetime.now(UTC)
-                tape_required = configured_tape_enabled()
-                tape_projections = {
+                product_by_asset = {
+                    **{asset_id: SEED_REGISTRY[asset_id] for asset_id in ASSETS},
+                    **{product.asset_id: product for product in dynamic_batch},
+                }
+                market_fabric_projections = {
                     asset_id: load_preferred_tape_market_observation(
                         sync_conn,
                         store,
                         asset_id=asset_id,
-                        calendar_id=SEED_REGISTRY[asset_id].calendar_id,
+                        calendar_id=product_by_asset[asset_id].calendar_id,
                         as_of_utc=decision_at_utc,
                     )
-                    for asset_id in ASSETS
+                    for asset_id in scan_asset_ids
                 }
+                evidence_required_asset_ids = frozenset(
+                    ASSETS if configured_tape_enabled() else ()
+                )
                 (
                     observations,
                     ingress_rejections,
-                    tape_market,
-                ) = _apply_tape_market_policy(
+                    market_fabric,
+                ) = _apply_market_fabric_policy(
                     observations,
                     ingress_rejections,
-                    tape_projections,
-                    tape_required=tape_required,
+                    market_fabric_projections,
+                    evidence_required_asset_ids=evidence_required_asset_ids,
                 )
 
                 (
@@ -1155,7 +1166,9 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         exchange_clock_ahead_asset_ids
                     ),
                 }
-                result["tape_market"] = tape_market
+                result["market_fabric"] = market_fabric
+                # Compatibility telemetry alias for older operator consumers.
+                result["tape_market"] = market_fabric
 
                 def market_not_ready_payload(asset_id: str) -> dict[str, object]:
                     if asset_id in clock_rejections:

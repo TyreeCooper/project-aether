@@ -385,7 +385,7 @@ function RuntimeStrip({ floor, ingress, strategy, discovery, tape, maintenance, 
       <div><span>FLOOR REFRESHED</span><b>{ts(floor?.refresh_time_utc || floor?.as_of_utc || strategy?.last_result?.finished_at_utc, "NOT OBSERVED")}</b></div>
       <div><span>INGRESS</span><Badge value={ingressState}>{ingressState}</Badge></div>
       <div><span>DISCOVERY</span><Badge value={discoveryState}>{discoveryState}</Badge></div>
-      <div><span>TAPE</span><Badge value={tapeState}>{tapeState}</Badge></div>
+      <div><span>WITNESS FABRIC</span><Badge value={tapeState}>{tapeState}</Badge></div>
       <div><span>STRATEGY</span><Badge value={strategyState}>{strategyState}</Badge></div>
       <div><span>PIPELINE</span><Badge value={pipeline}>{pipeline}</Badge></div>
     </div>
@@ -451,7 +451,7 @@ function CommandCenter({ floor, ingress, strategy, discovery, tape, operator, ma
           <div><span>Kraken commissioned</span><strong>{pipe.dynamic_kraken_available === undefined ? "NOT OBSERVED" : num(pipe.dynamic_kraken_available)}</strong><small>Runtime-bound products with the current commissioned strategy route.</small></div>
           <div><span>Current roaming workset</span><strong>{pipe.roaming_batch === undefined ? "NOT OBSERVED" : num(pipe.roaming_batch)}</strong><small>All commissioned products remain owned; worker concurrency schedules I/O only.</small></div>
           <div><span>Market ready this cycle</span><strong>{pipe.market_ready === undefined ? "NOT OBSERVED" : num(pipe.market_ready)}</strong><small>Executable market evidence observed this cycle.</small></div>
-          <div><span>Tape-governed seeds</span><strong>{pipe.tape_seed_required === undefined ? "NOT OBSERVED" : `${num(pipe.tape_seed_ready)}/${num(pipe.tape_seed_required)}`}</strong><small>FULL independent consensus required for covered seed strategy market truth.</small></div>
+          <div><span>Market Fabric evidence-gated seeds</span><strong>{pipe.tape_seed_required === undefined ? "NOT OBSERVED" : `${num(pipe.tape_seed_ready)}/${num(pipe.tape_seed_required)}`}</strong><small>FULL independent consensus required for covered seed strategy market truth.</small></div>
           <div><span>Floor runtime registry</span><strong>{Array.isArray(floor?.full_universe) ? num(universe.length) : "NOT OBSERVED"}</strong><small>Seed + commissioned dynamic products; not the provider catalog.</small></div>
         </div>
         <p className="universeTruth">Catalog-visible ≠ commissioned ≠ market-ready ≠ setup-qualified. AETHER keeps these populations separate so a large provider catalog cannot be mistaken for trade permission.</p>
@@ -520,7 +520,7 @@ function Markets({ discovery, ingress, tape, nowMs }) {
       </div>
       <Section eyebrow="MARKET DATA PLANE" title="Tape independence" className="wide">
         <div className="providerStats">
-          <Metric label="Tape runtime" value={supervisorState(tape?.runtime, nowMs)} state={supervisorState(tape?.runtime, nowMs)} />
+          <Metric label="Witness Fabric runtime" value={supervisorState(tape?.runtime, nowMs)} state={supervisorState(tape?.runtime, nowMs)} />
           <Metric label="Observed Tape assets" value={num(tape?.summary?.asset_count)} />
           <Metric label="FULL consensus" value={num(tape?.summary?.state_counts?.FULL, 0, "0")} state={Number(tape?.summary?.state_counts?.FULL || 0) ? "FULL" : "NOT OBSERVED"} />
           <Metric label="Independent sources" value={num((tape?.source_registry || []).filter((row) => row?.independent === true).length)} />
@@ -1106,7 +1106,7 @@ function Pipeline({ strategy, discovery, ingress, tape, marketFabric, maintenanc
             <small>Active providers {Array.isArray(discoveryProgress.active_providers) ? (discoveryProgress.active_providers.join(", ") || "none") : "NOT OBSERVED"} · current {text(discoveryProgress.current_provider, "none")} · heartbeat {age(discoveryProgress.last_progress_at_utc || discovery?.last_cycle_finished_at_utc, nowMs)}</small>
           </div>
           <div>
-            <span>Tape agent</span>
+            <span>Witness Fabric agent</span>
             <strong>{supervisorState(tapeRuntime, nowMs)} · {text(tapeProgress.phase, "NOT OBSERVED").replaceAll("_", " ")}</strong>
             <small>FULL {num(tapeStates.FULL, 0, "0")} · degraded {num(tapeStates.DEGRADED, 0, "0")} · contested {num(tapeStates.CONTESTED, 0, "0")} · heartbeat {age(tapeProgress.last_progress_at_utc || tapeRuntime?.last_cycle_finished_at_utc, nowMs)}</small>
           </div>
