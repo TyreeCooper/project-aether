@@ -211,7 +211,8 @@ def test_frontend_recovery_state_matches_backend_health_semantics() -> None:
     fault_index = page.index('if (supervisor.last_error) return "FAULT";', state_start)
     assert fault_index > working_index
     assert "REFERENCE CATALOG ONLINE" in page
-    assert "CATALOG PRIORITY" in page
+    assert "CATALOG PRIORITY" not in page
+    assert "Instrument ranking remains internal and is not rendered here." in page
     assert "grid-template-columns:repeat(8,minmax(0,1fr))" in css
 
 
@@ -222,7 +223,7 @@ def test_frontend_distinguishes_catalog_from_runtime_universes() -> None:
     for required in (
         "UNIVERSE CONTRACT",
         "Catalog → commissioned → active work",
-        "Kraken commissioned",
+        "Market Fabric execution universe",
         "Current roaming workset",
         "Floor runtime registry",
         "Catalog-visible ≠ commissioned ≠ market-ready ≠ setup-qualified.",
