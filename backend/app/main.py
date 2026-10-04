@@ -64,6 +64,7 @@ from app.vnext_tape import (
     start_configured_vnext_tape,
     stop_configured_vnext_tape,
 )
+from app.vnext_market_fabric import mount_vnext_market_fabric
 
 STATIC = Path(__file__).parent / "static"
 VNEXT_UI = Path(__file__).parent / "vnext_ui"
@@ -139,6 +140,7 @@ mount_vnext_discovery_status(app)
 mount_configured_vnext_operator(app)
 mount_vnext_maintenance(app)
 mount_configured_vnext_tape(app)
+mount_vnext_market_fabric(app)
 
 
 @app.middleware("http")

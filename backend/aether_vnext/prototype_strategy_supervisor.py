@@ -100,30 +100,50 @@ def _apply_tape_market_policy(
     *,
     tape_required: bool,
 ) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
-    """Prefer FULL Tape and fail closed for covered assets when Tape is required."""
+    """Use Tape only as an evidence gate; never replace executable-route pricing.
+
+    v3 Market Fabric keeps two state axes. The observations mapping contains the
+    executable provider/route truth that Strategy, Risk and Clerk may price from.
+    Tape projection remains evidence-only: FULL can admit that executable observation
+    and degraded or contested evidence can block it, but no consensus/composite quote
+    can overwrite the book AETHER would actually hit.
+    """
     selected = dict(observations)
     rejected = dict(ingress_rejections)
     telemetry: dict[str, object] = {}
     for asset_id, projection in projections.items():
+        executable_observation = selected.get(asset_id)
         telemetry[asset_id] = {
             "required_for_strategy": tape_required,
             "strategy_ready": projection.strategy_ready,
             "reason": projection.reason,
-            "observation_id": (
+            "evidence_observation_id": (
                 None
                 if projection.observation is None
                 else projection.observation.observation_id
             ),
+            "evidence_composite_id": projection.evidence_composite_id,
+            "executable_observation_preserved": executable_observation is not None,
+            "evidence_only": True,
         }
-        if projection.strategy_ready and projection.observation is not None:
-            selected[asset_id] = projection.observation
-            rejected.pop(asset_id, None)
-        elif tape_required:
+        if not tape_required:
+            continue
+        if not projection.strategy_ready:
             selected.pop(asset_id, None)
             rejected[asset_id] = {
                 "reason": projection.reason,
-                "observation": projection.observation,
+                "observation": executable_observation,
             }
+            continue
+        if executable_observation is None:
+            selected.pop(asset_id, None)
+            rejected[asset_id] = {
+                "reason": "executable_provider_observation_missing",
+                "observation": None,
+            }
+            continue
+        # Evidence passed. Preserve the executable-route observation unchanged.
+        rejected.pop(asset_id, None)
     return selected, rejected, telemetry
 
 

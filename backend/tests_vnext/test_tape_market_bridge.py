@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from aether_vnext.calendars import CalendarDecision
-from aether_vnext.domain import CalendarState, QualityState, SessionState
+from aether_vnext.domain import CalendarState, SessionState
 from aether_vnext.tape import (
     TapeCompositeObservation,
     TapeConsensusState,
@@ -75,7 +75,7 @@ def _composite(state: TapeConsensusState, count: int = 3) -> TapeCompositeObserv
     )
 
 
-def test_full_tape_projects_healthy_strategy_market_truth() -> None:
+def test_full_tape_is_evidence_only_and_never_projects_executable_price() -> None:
     composite = _composite(TapeConsensusState.FULL)
     result = project_tape_market_observation(
         composite,
@@ -88,12 +88,10 @@ def test_full_tape_projects_healthy_strategy_market_truth() -> None:
         as_of_utc=NOW,
     )
     assert result.strategy_ready is True
-    assert result.reason == "tape_market_ready"
-    assert result.observation is not None
-    assert result.observation.quality_state is QualityState.HEALTHY
-    assert result.observation.source == "aether_consensus_tape"
-    assert result.observation.bid is not None
-    assert result.observation.ask is not None
+    assert result.reason == "tape_evidence_ready"
+    assert result.observation is None
+    assert result.evidence_only is True
+    assert result.evidence_composite_id == composite.composite_id
 
 
 def test_degraded_tape_remains_visible_but_cannot_clear_strategy_market_gate() -> None:
