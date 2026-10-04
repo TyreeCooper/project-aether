@@ -1,0 +1,549 @@
+# Manual activation trigger: 2026-10-04T08:43-04:00
+name: AETHER vNext Activate Sandbox Paper Runtime
+
+on:
+  push:
+    branches:
+      - aether-vnext-swapout
+    paths:
+      - ".github/workflows/aether-vnext-activate-paper-prototype.yml"
+      - "backend/aether_vnext/**"
+      - "backend/app/**"
+      - "backend/alembic/**"
+      - "backend/tests_vnext/**"
+      - "frontend/app/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  # Activation is revision-specific. A stale deployment waiting for approval must
+  # never block the newest green branch head from becoming the approval target.
+  group: aether-vnext-activate-paper-prototype
+  cancel-in-progress: true
+
+jobs:
+  activate:
+    if: github.ref_name == 'aether-vnext-swapout'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: aether-vnext-burnin
+
+    steps:
+      - name: Checkout exact vNext head
+        uses: actions/checkout@v4
+
+      - name: Verify sandbox branch boundary
+        id: revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "aether-vnext-swapout"
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$GITHUB_SHA"
+          echo "source_revision=$actual" >> "$GITHUB_OUTPUT"
+          echo "Activating autonomous PAPER sandbox at $actual"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build Unified Firm Floor
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_API_BASE: ""
+          NEXT_PUBLIC_AETHER_FLOOR_PATH: "/api/v1/vnext/floor"
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+          test -f out/index.html
+
+      - name: Embed exact build identity and UI
+        shell: bash
+        env:
+          SOURCE_REVISION: ${{ steps.revision.outputs.source_revision }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from datetime import datetime, timezone
+          import json, os
+          from pathlib import Path
+
+          payload = {
+              "source_revision": os.environ["SOURCE_REVISION"],
+              "package_built_at_utc": datetime.now(timezone.utc).isoformat(),
+          }
+          Path("backend/aether_vnext/build_manifest.json").write_text(
+              json.dumps(payload, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+          rm -rf backend/app/vnext_ui
+          mkdir -p backend/app/vnext_ui
+          cp -R frontend/out/. backend/app/vnext_ui/
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate exact autonomous PAPER package
+        working-directory: backend
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python -m pytest -q             tests_vnext/test_vnext_runtime_mode.py             tests_vnext/test_kraken_ingress_supervisor.py             tests_vnext/test_prototype_crypto_features.py             tests_vnext/test_prototype_crypto_entry_plan.py             tests_vnext/test_prototype_crypto_entry_runtime.py             tests_vnext/test_prototype_crypto_exit.py             tests_vnext/test_prototype_crypto_exit_runtime.py             tests_vnext/test_prototype_strategy_supervisor.py             tests_vnext/test_provider_discovery.py             tests_vnext/test_provider_discovery_supervisor.py             tests_vnext/test_public_reference_discovery.py             tests_vnext/test_provider_focus_handoff.py             tests_vnext/test_phase16_configured_shadow_mount.py             tests_vnext/test_vnext_db_runtime_timeouts.py             tests_vnext/test_phase17_floor_test_status.py             tests_vnext/test_tape_end_to_end.py             tests_vnext/test_tape_supervisor.py             tests_vnext/test_vnext_tape_api.py
+          python -m py_compile             app/main.py             app/vnext_ingress.py             app/vnext_strategy.py             app/vnext_discovery.py             app/vnext_shadow.py             app/vnext_runtime_mode.py             aether_vnext/kraken_ingress_supervisor.py             aether_vnext/provider_discovery.py             aether_vnext/provider_discovery_supervisor.py             aether_vnext/provider_focus_handoff.py             aether_vnext/db_runtime.py             aether_vnext/kraken_catalog.py             aether_vnext/massive_discovery.py             aether_vnext/public_reference_discovery.py             aether_vnext/prototype_strategy_supervisor.py             aether_vnext/tape_supervisor.py             aether_vnext/tape_sources.py             aether_vnext/tape_runtime.py             app/vnext_tape.py
+
+      - name: Require sandbox database URL
+        env:
+          DATABASE_URL: ${{ secrets.AETHER_VNEXT_BURNIN_DATABASE_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$DATABASE_URL"
+
+      - name: Upgrade sandbox schema to exact branch head
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ secrets.AETHER_VNEXT_BURNIN_DATABASE_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          from alembic import command
+          from alembic.config import Config
+          from sqlalchemy.engine import make_url
+
+          raw_url = os.environ["DATABASE_URL"]
+          if not raw_url:
+              raise SystemExit("burn-in database URL missing")
+          url = make_url(raw_url)
+          if url.drivername in {"postgresql", "postgres"}:
+              url = url.set(drivername="postgresql+asyncpg")
+          elif url.drivername != "postgresql+asyncpg":
+              raise SystemExit(f"unsupported burn-in database driver: {url.drivername}")
+          cfg = Config("alembic.ini")
+          rendered = url.render_as_string(hide_password=False).replace("%", "%%")
+          cfg.set_main_option("sqlalchemy.url", rendered)
+          command.upgrade(cfg, "head")
+          PY
+
+      - name: Login to Azure with dedicated vNext identity
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_E2CE53939F2D406CBA8FB39DB4948C7B }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_0E83D5CA9CF543228DA7FA7818D7C998 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_B530D2ECBF5549A39B4758868409068A }}
+
+      - name: Bind autonomous sandbox runtime settings
+        env:
+          DATABASE_URL: ${{ secrets.AETHER_VNEXT_BURNIN_DATABASE_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="aether-vnext-nonprod"
+          rg="aether-rg"
+
+          host="$(az webapp show             --name "$app"             --resource-group "$rg"             --query defaultHostName -o tsv)"
+
+          case "$host" in
+            aether-vnext-nonprod-*.azurewebsites.net|aether-vnext-nonprod.azurewebsites.net) ;;
+            *) echo "Forbidden/unexpected target: $host"; exit 2 ;;
+          esac
+          test "$app" != "aether-prod-api"
+
+          az webapp config appsettings delete             --name "$app"             --resource-group "$rg"             --setting-names AETHER_VNEXT_AZURE_POSTGRESQL_CONNECTIONSTRING             >/dev/null 2>&1 || true
+
+          settings=(
+            AETHER_VNEXT_ENVIRONMENT=sandbox
+            AETHER_VNEXT_DATABASE_URL="$DATABASE_URL"
+            AETHER_VNEXT_KRAKEN_INGRESS_ENABLED=false
+            AETHER_VNEXT_KRAKEN_INGRESS_INTERVAL_SECONDS=15
+            AETHER_VNEXT_KRAKEN_DYNAMIC_BATCH_SIZE=20
+            AETHER_VNEXT_KRAKEN_INGRESS_WORKER_CONCURRENCY=8
+            AETHER_VNEXT_PROVIDER_DISCOVERY_ENABLED=true
+            AETHER_VNEXT_PROVIDER_DISCOVERY_INTERVAL_SECONDS=300
+            AETHER_VNEXT_PROVIDER_DISCOVERY_INITIAL_DELAY_SECONDS=15
+            AETHER_VNEXT_PROVIDER_FETCH_TIMEOUT_SECONDS=60
+            AETHER_VNEXT_SANDBOX_TRADING_ENABLED=false
+            AETHER_VNEXT_SANDBOX_TRADING_INTERVAL_SECONDS=15
+            AETHER_VNEXT_DYNAMIC_STRATEGY_SCAN_BATCH_SIZE=12
+            AETHER_VNEXT_TAPE_ENABLED=false
+            AETHER_VNEXT_TAPE_INTERVAL_SECONDS=5
+            AETHER_VNEXT_TAPE_CRYPTO_MAX_SOURCE_AGE_MS=10000
+            AETHER_VNEXT_TAPE_CRYPTO_MAX_DIVERGENCE_BPS=20
+          )
+
+          # Public/reference discovery is intentionally keyless in the sandbox.
+          # Remove any stale paid-feed key so runtime proof exercises only public sources.
+          az webapp config appsettings delete             --name "$app"             --resource-group "$rg"             --setting-names AETHER_MASSIVE_API_KEY >/dev/null 2>&1 || true
+
+          az webapp config appsettings set             --name "$app"             --resource-group "$rg"             --settings "${settings[@]}" >/dev/null
+
+          # Do not mutate App Service logging on every activation. Reconfiguring
+          # filesystem container logging adds required platform mounts during a cold
+          # start and can turn a normal deployment into a mount/startup race.
+
+          echo "app_name=$app" >> "$GITHUB_ENV"
+          echo "resource_group=$rg" >> "$GITHUB_ENV"
+          echo "prototype_host=$host" >> "$GITHUB_ENV"
+
+      - name: Verify sandbox runtime settings
+        shell: bash
+        run: |
+          set -euo pipefail
+          values="$(az webapp config appsettings list             --name "$app_name"             --resource-group "$resource_group"             --query "[?name=='AETHER_VNEXT_KRAKEN_INGRESS_ENABLED' || name=='AETHER_VNEXT_KRAKEN_DYNAMIC_BATCH_SIZE' || name=='AETHER_VNEXT_KRAKEN_INGRESS_WORKER_CONCURRENCY' || name=='AETHER_VNEXT_DYNAMIC_STRATEGY_SCAN_BATCH_SIZE' || name=='AETHER_VNEXT_PROVIDER_DISCOVERY_ENABLED' || name=='AETHER_VNEXT_SANDBOX_TRADING_ENABLED' || name=='AETHER_VNEXT_TAPE_ENABLED' || name=='AETHER_VNEXT_TAPE_INTERVAL_SECONDS' || name=='AETHER_VNEXT_TAPE_CRYPTO_MAX_SOURCE_AGE_MS' || name=='AETHER_VNEXT_TAPE_CRYPTO_MAX_DIVERGENCE_BPS'].{name:name,value:value}"             -o json)"
+          python - "$values" <<'PY'
+          import json, sys
+          rows = {row["name"]: str(row["value"]).lower() for row in json.loads(sys.argv[1])}
+          assert rows.get("AETHER_VNEXT_KRAKEN_INGRESS_ENABLED") == "false", rows
+          assert rows.get("AETHER_VNEXT_KRAKEN_DYNAMIC_BATCH_SIZE") == "20", rows
+          assert rows.get("AETHER_VNEXT_KRAKEN_INGRESS_WORKER_CONCURRENCY") == "8", rows
+          assert rows.get("AETHER_VNEXT_DYNAMIC_STRATEGY_SCAN_BATCH_SIZE") == "12", rows
+          assert rows.get("AETHER_VNEXT_PROVIDER_DISCOVERY_ENABLED") == "true", rows
+          assert rows.get("AETHER_VNEXT_SANDBOX_TRADING_ENABLED") == "false", rows
+          assert rows.get("AETHER_VNEXT_TAPE_ENABLED") == "false", rows
+          assert rows.get("AETHER_VNEXT_TAPE_INTERVAL_SECONDS") == "5", rows
+          assert rows.get("AETHER_VNEXT_TAPE_CRYPTO_MAX_SOURCE_AGE_MS") == "10000", rows
+          assert rows.get("AETHER_VNEXT_TAPE_CRYPTO_MAX_DIVERGENCE_BPS") == "20", rows
+          print(json.dumps(rows, indent=2, sort_keys=True))
+          PY
+
+      - name: Deploy exact sandbox package
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: aether-vnext-nonprod
+          package: backend
+
+      - name: Activate newly deployed package once
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$app_name" = "aether-vnext-nonprod"
+          # OneDeploy uploads the new package but the currently serving Linux
+          # worker can continue running the previous extracted package. Perform
+          # exactly one post-deploy restart so the worker loads this run's
+          # embedded SOURCE_REVISION. Do not restart again in verification.
+          az webapp restart \
+            --name "$app_name" \
+            --resource-group "$resource_group"
+
+      - name: Verify deployed PAPER runtime end to end
+        env:
+          EXPECTED_SHA: ${{ steps.revision.outputs.source_revision }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://$prototype_host"
+
+          # OneDeploy + restart is asynchronous at the App Service front end:
+          # the old worker can continue returning HTTP 200 for a short period,
+          # then the site can be unavailable while the new worker cold-starts.
+          # The first authoritative readiness condition is therefore the exact
+          # embedded SOURCE_REVISION, not generic HTTP liveness.
+          revision_ready=0
+          for attempt in $(seq 1 36); do
+            code="$(curl --silent --show-error --max-time 5 \
+              -o /tmp/build.json -w '%{http_code}' \
+              "$base/api/v1/vnext/build" || true)"
+            observed=""
+            if [ "$code" = "200" ]; then
+              observed="$(python - <<'PY'
+          import json
+          try:
+              body=json.load(open("/tmp/build.json", encoding="utf-8"))
+              print((body.get("build") or {}).get("source_revision") or "")
+          except Exception:
+              print("")
+          PY
+          )"
+            fi
+            if [ "$code" = "200" ] && [ "$observed" = "$EXPECTED_SHA" ] && EXPECTED_SHA="$EXPECTED_SHA" python - <<'PY'
+          import json, os, sys
+          body=json.load(open("/tmp/build.json", encoding="utf-8"))
+          build=body.get("build") or {}
+          ok=(
+              body.get("ok") is True
+              and body.get("paper_only") is True
+              and body.get("live_blocked") is True
+              and build.get("source_revision") == os.environ["EXPECTED_SHA"]
+          )
+          sys.exit(0 if ok else 1)
+          PY
+            then
+              revision_ready=1
+              echo "Exact package revision is serving: $EXPECTED_SHA"
+              break
+            fi
+            echo "Waiting for new worker (attempt $attempt/36, http=$code, observed_revision=${observed:-none})"
+            sleep 10
+          done
+          test "$revision_ready" = "1"
+
+          # Once the exact package is serving, prove the application health
+          # contract on that same worker. Do not let the pre-restart worker
+          # satisfy this gate.
+          health_ready=0
+          for attempt in $(seq 1 12); do
+            code="$(curl --silent --show-error --max-time 5 \
+              -o /tmp/health.json -w '%{http_code}' \
+              "$base/api/v1/health" || true)"
+            if [ "$code" = "200" ] && python - <<'PY'
+          import json, sys
+          body=json.load(open("/tmp/health.json", encoding="utf-8"))
+          ok=(
+              body.get("ok") is True
+              and body.get("runtime") == "vnext"
+              and body.get("paper_mode") is True
+              and body.get("live_blocked") is True
+              and body.get("pipeline_state") not in {"BLOCKED", "STALLED", "DEGRADED"}
+          )
+          sys.exit(0 if ok else 1)
+          PY
+            then
+              health_ready=1
+              break
+            fi
+            echo "Waiting for exact-revision health (attempt $attempt/12, http=$code)"
+            sleep 5
+          done
+          test "$health_ready" = "1"
+
+          # The vNext shell is client-rendered. Do not grep the static HTML for
+          # React text such as "Command Center"; that creates false deployment
+          # failures even when the exact package and API are healthy.
+          ui_ready=0
+          for attempt in $(seq 1 12); do
+            code="$(curl --silent --show-error --max-time 30 \
+              -o /tmp/index.html -w '%{http_code}' "$base/vnext/" || true)"
+            if [ "$code" = "200" ] && [ -s /tmp/index.html ]; then
+              ui_ready=1
+              break
+            fi
+            echo "Waiting for vNext UI shell (attempt $attempt/12, http=$code)"
+            sleep 5
+          done
+          test "$ui_ready" = "1"
+
+          # Prove the canonical five-layer runtime rather than the quarantined
+          # legacy ingress/Tape/strategy loops.
+          for endpoint in discovery-runtime floor market-fabric ingress-runtime strategy-runtime tape; do
+            curl --silent --show-error --max-time 20 \
+              -o "/tmp/${endpoint}.json" \
+              "$base/api/v1/vnext/${endpoint}" || true
+          done
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          def read(name):
+              path=Path(f"/tmp/{name}.json")
+              if not path.exists():
+                  return {}
+              try:
+                  return json.loads(path.read_text(encoding="utf-8"))
+              except Exception:
+                  return {}
+
+          fabric=read("market-fabric")
+          discovery=read("discovery-runtime")
+          ingress=read("ingress-runtime")
+          strategy=read("strategy-runtime")
+          tape=read("tape")
+          tape_runtime=tape.get("runtime") or {}
+          runtime=fabric.get("runtime") or {}
+          routes=fabric.get("routes") or []
+          instruments=fabric.get("instruments") or []
+          first_proof=fabric.get("first_proof") or {}
+
+          assert fabric.get("architecture") == "AETHER_MARKET_TRUTH_V1", fabric
+          assert fabric.get("paper_only") is True, fabric
+          assert fabric.get("live_blocked") is True, fabric
+          assert runtime.get("running") is True, runtime
+          assert len(routes) <= 1 if first_proof.get("passed") is not True else True, routes
+          assert (fabric.get("authority") or {}).get("witness_can_replace_executable_price") is False, fabric
+          assert (fabric.get("authority") or {}).get("automatic_execution_venue_switch_allowed") is False, fabric
+
+          if instruments:
+              executable=(instruments[0].get("executable") or {})
+              assert executable.get("state") in {"EXECUTABLE","STALE","NOT_OBSERVED"}, executable
+              if executable.get("state") != "EXECUTABLE":
+                  assert executable.get("bid") is None and executable.get("ask") is None, executable
+              intelligence=(instruments[0].get("intelligence") or {})
+              assert intelligence.get("evidence_state") in {
+                  "NO_WITNESS","CONTESTED","DIVERGED","SINGLE_SOURCE","DEGRADED","FULL"
+              }, intelligence
+
+          # Old supervisors may still expose read-only compatibility endpoints but
+          # their deployment settings and runtime authority are disabled.
+          assert ingress.get("enabled") is False, ingress
+          assert strategy.get("enabled") is False, strategy
+          assert tape_runtime.get("enabled") is False, tape_runtime
+
+          result={
+              "deployment_health":"GREEN",
+              "pipeline_health": (fabric.get("layers") or {}).get("market_fabric","WARMING"),
+              "paper_only":True,
+              "live_blocked":True,
+              "architecture":fabric.get("architecture"),
+              "first_proof":first_proof,
+              "route_count":len(routes),
+              "market_truth_runtime":runtime,
+              "discovery":{
+                  "enabled":discovery.get("enabled"),
+                  "running":discovery.get("running"),
+                  "cycle_count":discovery.get("cycle_count"),
+                  "last_error":discovery.get("last_error"),
+              },
+              "legacy_authority":{
+                  "ingress":"QUARANTINED",
+                  "tape":"QUARANTINED",
+                  "strategy":"QUARANTINED",
+              },
+          }
+          Path("/tmp/pipeline-health.json").write_text(
+              json.dumps(result,indent=2,sort_keys=True)+"\\n",encoding="utf-8"
+          )
+          print(json.dumps(result,indent=2,sort_keys=True))
+          PY
+
+          cp /tmp/market-fabric.json /tmp/market-fabric-first.json
+          sleep 20
+          curl --fail --silent --show-error --max-time 20 \
+            -o /tmp/market-fabric-second.json "$base/api/v1/vnext/market-fabric"
+          curl --fail --silent --show-error --max-time 20 \
+            -o /tmp/discovery-runtime-second.json "$base/api/v1/vnext/discovery-runtime"
+          curl --fail --silent --show-error --max-time 10 \
+            -o /tmp/health-second.json "$base/api/v1/health"
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          def load(path):
+              return json.loads(Path(path).read_text(encoding="utf-8"))
+
+          before=load("/tmp/market-fabric-first.json")
+          after=load("/tmp/market-fabric-second.json")
+          health=load("/tmp/health-second.json")
+          discovery=load("/tmp/discovery-runtime-second.json")
+          a=before.get("runtime") or {}
+          b=after.get("runtime") or {}
+
+          assert health.get("runtime") == "vnext", health
+          assert health.get("paper_mode") is True, health
+          assert health.get("live_blocked") is True, health
+          assert health.get("market_truth_architecture") == "AETHER_MARKET_TRUTH_V1", health
+          assert b.get("running") is True, b
+          assert after.get("architecture") == "AETHER_MARKET_TRUTH_V1", after
+
+          progressed=(
+              b.get("last_progress_at_utc") != a.get("last_progress_at_utc")
+              or int(b.get("executable_packet_count") or 0) > int(a.get("executable_packet_count") or 0)
+              or int(b.get("witness_packet_count") or 0) > int(a.get("witness_packet_count") or 0)
+          )
+          assert progressed, (a,b)
+
+          proof={
+              "architecture":"AETHER_MARKET_TRUTH_V1",
+              "market_truth_before":a,
+              "market_truth_after":b,
+              "moving":True,
+              "first_proof":after.get("first_proof"),
+              "execution_state":((after.get("instruments") or [{}])[0].get("executable") or {}).get("state") if after.get("instruments") else "NOT_OBSERVED",
+              "evidence_state":((after.get("instruments") or [{}])[0].get("intelligence") or {}).get("evidence_state") if after.get("instruments") else "NO_WITNESS",
+              "discovery_observed":(
+                  int(discovery.get("cycle_count") or 0)>0
+                  or (discovery.get("progress") or {}).get("cycle_state")=="running"
+              ),
+              "legacy_authority":"QUARANTINED",
+              "deployment_health":"GREEN",
+              "paper_only":True,
+              "live_blocked":True,
+          }
+          Path("/tmp/runtime-continuity.json").write_text(
+              json.dumps(proof,indent=2,sort_keys=True)+"\\n",encoding="utf-8"
+          )
+          print(json.dumps(proof,indent=2,sort_keys=True))
+          PY
+
+      - name: Refresh Azure login for failure diagnostics
+        if: failure()
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_E2CE53939F2D406CBA8FB39DB4948C7B }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_0E83D5CA9CF543228DA7FA7818D7C998 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_B530D2ECBF5549A39B4758868409068A }}
+
+      - name: Diagnose Azure runtime on activation failure
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          echo "=== App state ==="
+          az webapp show \
+            --name "$app_name" \
+            --resource-group "$resource_group" \
+            --query '{state:state,host:defaultHostName,availabilityState:availabilityState}' \
+            -o json
+
+          echo "=== Runtime configuration ==="
+          az webapp config show \
+            --name "$app_name" \
+            --resource-group "$resource_group" \
+            --query '{startup:appCommandLine,alwaysOn:alwaysOn,linuxFxVersion:linuxFxVersion,http20Enabled:http20Enabled}' \
+            -o json
+
+          echo "=== App state after failed activation ==="
+          az webapp show \
+            --name "$app_name" \
+            --resource-group "$resource_group" \
+            --query '{state:state,availabilityState:availabilityState,host:defaultHostName}' \
+            -o json || true
+
+          echo "=== Container startup logs ==="
+          az webapp log startup list \
+            --name "$app_name" \
+            --resource-group "$resource_group" \
+            -o json || true
+          az webapp log startup show \
+            --name "$app_name" \
+            --resource-group "$resource_group" || true
+
+          echo "=== Last probe bodies ==="
+          for file in /tmp/health.json /tmp/health-second.json /tmp/build.json /tmp/pipeline-health.json /tmp/runtime-continuity.json /tmp/floor.json /tmp/market-fabric.json /tmp/market-fabric-first.json /tmp/market-fabric-second.json /tmp/discovery-runtime.json /tmp/discovery-runtime-second.json /tmp/ingress-runtime.json /tmp/strategy-runtime.json /tmp/tape.json; do
+            if [ -f "$file" ]; then
+              echo "--- $file ---"
+              cat "$file"
+              echo
+            fi
+          done
+
+      - name: Upload activation proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-vnext-autonomous-paper-activation-${{ github.run_id }}
+          path: |
+            /tmp/health.json
+            /tmp/build.json
+            /tmp/market-fabric.json
+            /tmp/market-fabric-first.json
+            /tmp/market-fabric-second.json
+            /tmp/discovery-runtime.json
+            /tmp/discovery-runtime-second.json
+            /tmp/ingress-runtime.json
+            /tmp/strategy-runtime.json
+            /tmp/tape.json
+            /tmp/health-second.json
+            /tmp/pipeline-health.json
+            /tmp/runtime-continuity.json
+            /tmp/floor.json
+            /tmp/index.html
+          if-no-files-found: error
+          retention-days: 90

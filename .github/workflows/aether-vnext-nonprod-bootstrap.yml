@@ -1,0 +1,218 @@
+name: AETHER vNext Nonprod OIDC Bootstrap
+
+on:
+  push:
+    branches:
+      - aether-vnext-swapout
+    paths:
+      - ".github/workflows/aether-vnext-nonprod-bootstrap.yml"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: aether-vnext-nonprod-bootstrap
+  cancel-in-progress: false
+
+jobs:
+  deploy-approved-green-head:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      APPROVED_SHA: f793ddf19d7635ca20aaf10a8cd518bb16f32a7c
+
+    steps:
+      - name: Checkout approved green vNext revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.APPROVED_SHA }}
+
+      - name: Verify pinned green revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$APPROVED_SHA"
+          echo "Deploying approved green vNext revision: $actual"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build Unified Firm Floor static export
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_API_BASE: ""
+          NEXT_PUBLIC_AETHER_FLOOR_PATH: "/api/v1/vnext/floor"
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+          test -f out/index.html
+          test -d out/_next
+
+      - name: Embed approved build identity
+        shell: bash
+        run: |
+          python - <<'PY'
+          from datetime import datetime, timezone
+          import json
+          import os
+          from pathlib import Path
+
+          revision = os.environ["APPROVED_SHA"].strip()
+          payload = {
+              "source_revision": revision,
+              "package_built_at_utc": datetime.now(timezone.utc).isoformat(),
+          }
+          Path("backend/aether_vnext/build_manifest.json").write_text(
+              json.dumps(payload, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Embed vNext UI into backend package
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf backend/app/vnext_ui
+          mkdir -p backend/app/vnext_ui
+          cp -R frontend/out/. backend/app/vnext_ui/
+          test -f backend/app/vnext_ui/index.html
+          test -d backend/app/vnext_ui/_next
+          grep -q '/vnext/_next/' backend/app/vnext_ui/index.html
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Revalidate approved package before Azure login
+        working-directory: backend
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python -m pytest -q \
+            tests_vnext/test_phase15_frontend_contract.py \
+            tests_vnext/test_phase16_shadow_mount.py \
+            tests_vnext/test_phase17_floor_test_status.py \
+            tests_vnext/test_phase17_paper_test_reset.py
+          test -f startup.sh
+          test -f app/main.py
+          test -f app/vnext_ui/index.html
+
+      - name: Login to Azure with dedicated vNext identity
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_E2CE53939F2D406CBA8FB39DB4948C7B }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_0E83D5CA9CF543228DA7FA7818D7C998 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_B530D2ECBF5549A39B4758868409068A }}
+
+      - name: Resolve dedicated nonproduction target
+        id: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_name="aether-vnext-nonprod"
+          resource_group="aether-rg"
+          host="$(az webapp show \
+            --name "$app_name" \
+            --resource-group "$resource_group" \
+            --query defaultHostName \
+            -o tsv)"
+          test -n "$host"
+          test "$app_name" != "aether-prod-api"
+          test "$host" != "aether-prod-api.azurewebsites.net"
+          case "$host" in
+            aether-vnext-nonprod-*.azurewebsites.net|aether-vnext-nonprod.azurewebsites.net)
+              ;;
+            *)
+              echo "Unexpected nonproduction hostname: $host"
+              exit 2
+              ;;
+          esac
+          echo "app_name=$app_name" >> "$GITHUB_OUTPUT"
+          echo "host=$host" >> "$GITHUB_OUTPUT"
+
+      - name: Configure FastAPI startup command
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_name="aether-vnext-nonprod"
+          resource_group="aether-rg"
+          echo "Current nonprod runtime/startup configuration:"
+          az webapp config show \
+            --name "$app_name" \
+            --resource-group "$resource_group" \
+            --query "{linuxFxVersion:linuxFxVersion,appCommandLine:appCommandLine}" \
+            -o json
+          az webapp config set \
+            --name "$app_name" \
+            --resource-group "$resource_group" \
+            --startup-file "bash startup.sh" \
+            --output none
+          configured="$(az webapp config show \
+            --name "$app_name" \
+            --resource-group "$resource_group" \
+            --query appCommandLine \
+            -o tsv)"
+          test "$configured" = "bash startup.sh"
+          echo "vNext startup command configured: $configured"
+
+      - name: Deploy approved vNext package
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ steps.target.outputs.app_name }}
+          package: backend
+
+      - name: Verify deployed paper-only vNext surface
+        shell: bash
+        env:
+          HOST: ${{ steps.target.outputs.host }}
+        run: |
+          set -euo pipefail
+          base="https://$HOST"
+
+          for attempt in $(seq 1 24); do
+            if curl --fail --silent --show-error --max-time 20 "$base/api/v1/health" >/tmp/health.json; then
+              break
+            fi
+            if [ "$attempt" -eq 24 ]; then
+              echo "Health endpoint did not recover."
+              exit 1
+            fi
+            sleep 10
+          done
+
+          python - <<'PY'
+          import json
+          body=json.load(open("/tmp/health.json", encoding="utf-8"))
+          assert body.get("ok") is True, body
+          assert body.get("paper_mode") is True, body
+          assert body.get("live_blocked") is True, body
+          PY
+
+          curl --fail --silent --show-error --max-time 20 "$base/vnext/" >/tmp/vnext.html
+          grep -q "AETHER" /tmp/vnext.html
+
+          curl --fail --silent --show-error --max-time 20 "$base/api/v1/vnext/floor" >/tmp/vnext-floor.json
+          python - <<'PY'
+          import json
+          import os
+
+          body=json.load(open("/tmp/vnext-floor.json", encoding="utf-8"))
+          mode=body.get("mode") or {}
+          assert mode.get("paper_only") is True, body
+          assert mode.get("live_blocked") is True, body
+          build=body.get("build") or {}
+          assert build.get("source_revision") == os.environ["APPROVED_SHA"], build
+          assert build.get("package_built_at_utc"), build
+          PY
+
+          for method in POST PUT PATCH DELETE; do
+            code="$(curl --silent --show-error --max-time 20 -o /tmp/mutation.json -w '%{http_code}' -X "$method" "$base/api/v1/vnext/floor")"
+            test "$code" = "405"
+          done
+
+          echo "Pinned green vNext nonproduction deployment verified."

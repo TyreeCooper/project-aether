@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 import hmac
 import logging
@@ -26,8 +27,52 @@ from app.paper_exec import (
     install as install_harsh_paper,
 )
 from app.universe import public_catalog
+from app.vnext_shadow import mount_configured_vnext_shadow_floor
+from aether_vnext.build_info import load_build_info
+from app.vnext_runtime_mode import (
+    configured_vnext_runtime_only,
+    validate_vnext_runtime_only_environment,
+)
+from app.vnext_operator import mount_configured_vnext_operator
+from app.vnext_maintenance import (
+    configured_vnext_maintenance_status,
+    mount_vnext_maintenance,
+    start_configured_vnext_maintenance,
+    stop_configured_vnext_maintenance,
+)
+from app.vnext_ingress import (
+    configured_vnext_ingress_status,
+    mount_vnext_ingress_status,
+    start_configured_vnext_ingress,
+    stop_configured_vnext_ingress,
+)
+from app.vnext_strategy import (
+    configured_vnext_strategy_status,
+    mount_vnext_strategy_status,
+    start_configured_vnext_strategy,
+    stop_configured_vnext_strategy,
+)
+from app.vnext_discovery import (
+    current_discovery_status,
+    mount_vnext_discovery_status,
+    start_configured_vnext_discovery,
+    stop_configured_vnext_discovery,
+)
+from app.vnext_tape import (
+    configured_vnext_tape_status,
+    mount_configured_vnext_tape,
+    start_configured_vnext_tape,
+    stop_configured_vnext_tape,
+)
+from app.vnext_market_fabric import mount_vnext_market_fabric
+from aether_vnext.market_truth_runtime import (
+    configured_market_truth_snapshot,
+    start_configured_market_truth_runtime,
+    stop_configured_market_truth_runtime,
+)
 
 STATIC = Path(__file__).parent / "static"
+VNEXT_UI = Path(__file__).parent / "vnext_ui"
 ICON_LINKS = (
     '<link rel="icon" href="/favicon.svg?v=3" type="image/svg+xml"/>'
     '<link rel="icon" href="/static/aether-mark.svg?v=3" type="image/svg+xml"/>'
@@ -51,7 +96,20 @@ async def lifespan(_: FastAPI):
     await engine.initialize_persistence()
     await desk.initialize_history_persistence()
     install_harsh_paper(engine)
-    engine.start_loop()
+    validate_vnext_runtime_only_environment()
+    if configured_vnext_runtime_only():
+        logger.info(
+            "event=legacy_engine_loop state=disabled reason=vnext_runtime_only"
+        )
+    else:
+        engine.start_loop()
+    # Canonical market-truth authority: discovery may observe the broad catalog,
+    # but legacy ingress/tape/strategy loops are intentionally NOT started. They
+    # remain importable only for historical/forensic compatibility and have no
+    # runtime price or execution authority during the first-proof lock.
+    await start_configured_vnext_discovery()
+    await start_configured_vnext_maintenance()
+    await start_configured_market_truth_runtime()
     logger.info(
         "event=app_start phase=ready version=2.1.0 storage_configured=%s storage_initialized=%s live_ready=%s",
         db_store.status().get("configured"),
@@ -62,6 +120,12 @@ async def lifespan(_: FastAPI):
         yield
     finally:
         logger.info("event=app_shutdown phase=begin")
+        await stop_configured_market_truth_runtime()
+        await stop_configured_vnext_maintenance()
+        await stop_configured_vnext_strategy()
+        await stop_configured_vnext_tape()
+        await stop_configured_vnext_discovery()
+        await stop_configured_vnext_ingress()
         await engine.shutdown()
         await db_store.close()
         logger.info("event=app_shutdown phase=complete")
@@ -75,6 +139,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Phase 16: GET-only shadow mount; no database is opened until the route is read.
+mount_configured_vnext_shadow_floor(app)
+mount_vnext_ingress_status(app)
+mount_vnext_strategy_status(app)
+mount_vnext_discovery_status(app)
+mount_configured_vnext_operator(app)
+mount_vnext_maintenance(app)
+mount_configured_vnext_tape(app)
+mount_vnext_market_fabric(app)
 
 
 @app.middleware("http")
@@ -197,12 +271,254 @@ async def favicon_ico():
     return FileResponse(STATIC / "aether-mark.svg", media_type="image/svg+xml")
 
 
+@app.get("/api/v1/vnext/build")
+async def vnext_build_identity():
+    """Return immutable package identity without opening the vNext database."""
+    return {
+        "ok": True,
+        "paper_only": True,
+        "live_blocked": True,
+        "build": load_build_info(),
+    }
+
+
+def _parse_runtime_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _supervisor_operating_state(
+    status: dict[str, object],
+    *,
+    now: datetime,
+) -> str:
+    if status.get("enabled") is False:
+        return "OFF"
+    running = status.get("running") is True
+    cycles = int(status.get("cycle_count") or 0)
+    if not running:
+        return "BLOCKED" if cycles > 0 else "STARTING"
+
+    interval = float(status.get("interval_seconds") or 15.0)
+    stale_after = max(90.0, interval * 4.0)
+    started = _parse_runtime_timestamp(status.get("last_cycle_started_at_utc"))
+    finished = _parse_runtime_timestamp(status.get("last_cycle_finished_at_utc"))
+    progress = status.get("progress")
+    progress = progress if isinstance(progress, dict) else {}
+    progress_heartbeat = _parse_runtime_timestamp(progress.get("last_progress_at_utc"))
+    progress_state = str(progress.get("cycle_state") or "").strip().lower()
+    cycle_busy = progress_state == "running" or (
+        started is not None and (finished is None or started > finished)
+    )
+
+    if cycle_busy:
+        heartbeat = progress_heartbeat or started
+        provider_deadline = progress.get("provider_deadline_seconds")
+        try:
+            busy_stale_after = max(90.0, float(provider_deadline) * 1.5)
+        except (TypeError, ValueError):
+            busy_stale_after = 90.0
+        if heartbeat is not None and (now - heartbeat).total_seconds() > busy_stale_after:
+            return "STALLED"
+        # A running supervisor with no completed cycle is warming, not degraded.
+        # After the first completed cycle, an in-flight cycle is normal WORKING.
+        return "WARMING" if cycles == 0 else "WORKING"
+    if status.get("last_error"):
+        return "FAULT"
+    if cycles == 0:
+        return "WARMING"
+    heartbeat = finished or progress_heartbeat or started
+    if heartbeat is not None and (now - heartbeat).total_seconds() > stale_after:
+        return "STALLED"
+    return "ACTIVE"
+
+
+
+_STARTUP_RECOVERY_COMPONENTS = {
+    "discovery": (
+        current_discovery_status,
+        start_configured_vnext_discovery,
+        stop_configured_vnext_discovery,
+    ),
+}
+_QUARANTINED_STARTUP_COMPONENTS = frozenset({"ingress", "tape", "strategy"})
+_startup_recovery_last_at: dict[str, datetime] = {}
+
+
+@app.post("/api/v1/vnext/startup-recovery/{component}")
+async def vnext_startup_recovery(component: str):
+    """Bounded startup self-recovery for required PAPER supervisors.
+
+    Maintenance is intentionally excluded. A healthy or actively warming supervisor
+    is never restarted. Recovery is allowed only when the server's own runtime-health
+    classifier says the component is BLOCKED, STALLED, or FAULT, or when it has not
+    started at all.
+    """
+    if not configured_vnext_runtime_only():
+        raise HTTPException(status_code=409, detail="startup recovery is sandbox-only")
+    key = str(component).strip().lower()
+    if key in _QUARANTINED_STARTUP_COMPONENTS:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "legacy market authority is quarantined; canonical Market Truth "
+                "runtime self-heals its own executable/witness sockets"
+            ),
+        )
+    entry = _STARTUP_RECOVERY_COMPONENTS.get(key)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="unsupported startup component")
+
+    status_provider, starter, stopper = entry
+    before = status_provider()
+    if before.get("paper_only") is not True or before.get("live_blocked") is not True:
+        raise HTTPException(
+            status_code=409,
+            detail="startup recovery requires PAPER_ONLY/LIVE_BLOCKED",
+        )
+
+    now = datetime.now(timezone.utc)
+    operating_state = _supervisor_operating_state(before, now=now)
+    interval = float(before.get("interval_seconds") or 15.0)
+    cooldown_seconds = max(15.0, interval * 2.0)
+    previous = _startup_recovery_last_at.get(key)
+    if (
+        previous is not None
+        and (now - previous).total_seconds() < cooldown_seconds
+    ):
+        return {
+            "ok": True,
+            "component": key,
+            "action": "COOLDOWN",
+            "before_state": operating_state,
+            "paper_only": True,
+            "live_blocked": True,
+        }
+
+    running = before.get("running") is True
+    action = "NO_ACTION"
+    if operating_state == "STARTING" and not running:
+        await starter()
+        action = "START"
+    elif operating_state in {"BLOCKED", "STALLED", "FAULT"}:
+        await stopper()
+        await starter()
+        action = "RESTART"
+
+    if action != "NO_ACTION":
+        _startup_recovery_last_at[key] = now
+
+    after = status_provider()
+    return {
+        "ok": True,
+        "component": key,
+        "action": action,
+        "before_state": operating_state,
+        "after_state": _supervisor_operating_state(
+            after,
+            now=datetime.now(timezone.utc),
+        ),
+        "paper_only": True,
+        "live_blocked": True,
+    }
+
+
 @app.get("/api/v1/health")
 async def health():
+    if configured_vnext_runtime_only():
+        now = datetime.now(timezone.utc)
+        discovery = current_discovery_status()
+        maintenance = configured_vnext_maintenance_status()
+        market_truth = configured_market_truth_snapshot()
+        runtime = dict(market_truth.get("runtime") or {})
+        layers = dict(market_truth.get("layers") or {})
+
+        if runtime.get("running") is not True:
+            market_truth_state = "BLOCKED"
+        elif runtime.get("bootstrap_error"):
+            market_truth_state = "FAULT"
+        elif runtime.get("bootstrap_ready") is not True:
+            market_truth_state = "WARMING"
+        elif layers.get("market_fabric") == "EXECUTABLE":
+            market_truth_state = "ACTIVE"
+        else:
+            # Service is healthy while route truth is waiting/stale/not observed.
+            # Market availability is not the same thing as application health.
+            market_truth_state = "WARMING"
+
+        discovery_state = _supervisor_operating_state(discovery, now=now)
+        maintenance_state = _supervisor_operating_state(maintenance, now=now)
+        operating = {
+            "market_truth": market_truth_state,
+            "discovery": discovery_state,
+            "maintenance": maintenance_state,
+            "ingress": "QUARANTINED",
+            "tape": "QUARANTINED",
+            "strategy": "QUARANTINED",
+        }
+        pipeline_state = market_truth_state
+
+        def compact(status):
+            return {
+                "enabled": status.get("enabled"),
+                "running": status.get("running"),
+                "cycle_count": status.get("cycle_count"),
+                "interval_seconds": status.get("interval_seconds"),
+                "last_cycle_started_at_utc": status.get("last_cycle_started_at_utc"),
+                "last_cycle_finished_at_utc": status.get("last_cycle_finished_at_utc"),
+                "last_error": status.get("last_error"),
+                "progress": (
+                    status.get("progress")
+                    if isinstance(status.get("progress"), dict)
+                    else None
+                ),
+            }
+
+        quarantined = {
+            "enabled": False,
+            "running": False,
+            "authority": "QUARANTINED",
+            "reason": "replaced_by_AETHER_MARKET_TRUTH_V1",
+        }
+        supervisors = {
+            "market_truth": {
+                **runtime,
+                "architecture": market_truth.get("architecture"),
+                "first_proof": market_truth.get("first_proof"),
+            },
+            "discovery": compact(discovery),
+            "maintenance": compact(maintenance),
+            "ingress": dict(quarantined),
+            "tape": dict(quarantined),
+            "strategy": dict(quarantined),
+        }
+
+        return {
+            "ok": True,
+            "env": "paper",
+            "runtime": "vnext",
+            "paper_mode": True,
+            "live_blocked": True,
+            "build": load_build_info(),
+            "pipeline_state": pipeline_state,
+            "market_truth_architecture": market_truth.get("architecture"),
+            "first_proof": market_truth.get("first_proof"),
+            "supervisor_state": operating,
+            "supervisors": supervisors,
+        }
+
     snap = engine.snapshot()
     return {
         "ok": True,
         "env": "paper",
+        "runtime": "legacy",
         "venue": snap.get("mark_source"),
         "watch": "binance.us",
         "symbols": [a["pair"] for a in public_catalog()],
@@ -647,5 +963,8 @@ async def flatten(_: None = Depends(require_operator)):
 async def unlock(_: None = Depends(require_operator)):
     return await engine.unlock()
 
+
+if VNEXT_UI.exists():
+    app.mount("/vnext", StaticFiles(directory=VNEXT_UI, html=True), name="vnext-ui")
 
 app.mount("/static", StaticFiles(directory=STATIC), name="static")

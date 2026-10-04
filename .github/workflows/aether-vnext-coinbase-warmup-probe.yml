@@ -1,0 +1,81 @@
+name: AETHER vNext Coinbase Warmup Probe
+
+on:
+  push:
+    branches:
+      - aether-vnext-swapout
+    paths:
+      - ".github/workflows/aether-vnext-coinbase-warmup-probe.yml"
+      - "backend/aether_vnext/coinbase_prototype_history.py"
+      - "backend/scripts/aether_vnext_coinbase_warmup_probe.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout exact vNext head
+        uses: actions/checkout@v4
+
+      - name: Verify branch
+        shell: bash
+        working-directory: .
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "aether-vnext-swapout"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run read-only Coinbase versus Kraken warmup probe
+        env:
+          PYTHONPATH: .
+        run: |
+          python scripts/aether_vnext_coinbase_warmup_probe.py \
+            --output aether-vnext-coinbase-warmup-probe.json
+
+      - name: Verify probe safety and coverage
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          body = json.loads(
+              Path("aether-vnext-coinbase-warmup-probe.json").read_text()
+          )
+          assert body["mutation_performed"] is False
+          assert body["phase18_evidence"] is False
+          assert body["canonical_execution_market"] == "kraken"
+          assert body["paper_only"] is True
+          assert body["live_blocked"] is True
+          for asset in ("btc", "eth"):
+              row = body["assets"][asset]
+              assert row["coinbase_hourly_count"] >= 2200
+              assert row["kraken_hourly_count"] >= 600
+              assert row["kraken_daily_count"] >= 50
+              assert row["overlap"]["overlap_count"] >= 500
+          PY
+
+      - name: Upload probe evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-vnext-coinbase-warmup-probe-${{ github.run_id }}
+          path: backend/aether-vnext-coinbase-warmup-probe.json
+          if-no-files-found: error
+          retention-days: 30
