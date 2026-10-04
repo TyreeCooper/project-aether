@@ -925,13 +925,13 @@ function Pipeline({ strategy, discovery, ingress, tape, marketFabric, maintenanc
     MARKET_READY: isObservedNumber(pipe.market_ready) ? Number(pipe.market_ready) : null,
     HISTORY_READY: isObservedNumber(pipe.history_ready) ? Number(pipe.history_ready) : null,
     STRATEGY_EVALUATED: isObservedNumber(pipe.strategy_evaluated) ? Number(pipe.strategy_evaluated) : null,
-    WATCH: queue("Scout", "WATCH") ?? (isObservedNumber(pipe.watch) ? Number(pipe.watch) : null),
-    FIRE: queue("Sniper", "FIRE"),
-    SIZE: queue("Risk", "SIZE"),
-    READY: queue("Clerk", "READY"),
-    RESERVED: queue("Portfolio", "ORDER"),
-    SUBMITTED: null,
-    OPEN: Array.isArray(floor?.open_cockpits) ? floor.open_cockpits.length : null,
+    WATCH: isObservedNumber(pipe.watch) ? Number(pipe.watch) : (queue("Scout", "WATCH") ?? null),
+    FIRE: isObservedNumber(pipe.fire) ? Number(pipe.fire) : queue("Sniper", "FIRE"),
+    SIZE: isObservedNumber(pipe.size) ? Number(pipe.size) : queue("Risk", "SIZE"),
+    READY: isObservedNumber(pipe.ready) ? Number(pipe.ready) : queue("Clerk", "READY"),
+    RESERVED: isObservedNumber(pipe.reserved) ? Number(pipe.reserved) : queue("Portfolio", "ORDER"),
+    SUBMITTED: isObservedNumber(pipe.submitted) ? Number(pipe.submitted) : null,
+    OPEN: isObservedNumber(pipe.open) ? Number(pipe.open) : (Array.isArray(floor?.open_cockpits) ? floor.open_cockpits.length : null),
     FLAT: Array.isArray(operator?.blotter) ? operator.blotter.length : null,
   };
   const exitRows = Object.values(strategy?.last_result?.exit_results || {});
@@ -947,8 +947,38 @@ function Pipeline({ strategy, discovery, ingress, tape, marketFabric, maintenanc
   const dynamicRows = dynamicAssetsObserved ? Object.values(strategy.last_result.dynamic_assets) : [];
   const ingressRows = ingress?.last_result?.asset_results || [];
   const queueRows = floor?.seat_queues || [];
+  const backendGateRows = Array.isArray(strategy?.last_result?.gate_telemetry)
+    ? strategy.last_result.gate_telemetry
+    : [];
+  const backendGateByStage = Object.fromEntries(
+    backendGateRows
+      .filter((row) => row && typeof row.stage === "string")
+      .map((row) => [row.stage, row])
+  );
 
   const gateTelemetry = (stage) => {
+    const backend = backendGateByStage[stage];
+    if (backend) {
+      const input = isObservedNumber(backend.input) ? Number(backend.input) : null;
+      const pass = isObservedNumber(backend.pass) ? Number(backend.pass) : null;
+      const wait = isObservedNumber(backend.hold) ? Number(backend.hold) : null;
+      const fault = isObservedNumber(backend.fault) ? Number(backend.fault) : null;
+      const numeric = [input, pass, wait, fault].every(isObservedNumber);
+      const accounted = numeric ? pass + wait + fault : null;
+      return {
+        input,
+        pass,
+        wait,
+        reject: numeric ? 0 : null,
+        bypass: numeric ? 0 : null,
+        fault,
+        unexplained: numeric ? Math.max(0, input - accounted) : null,
+        reconciled: numeric ? accounted === input : null,
+        coverage: text(backend.observability, "PARTIAL"),
+        reasons: [],
+        source: "BACKEND_GATE_TELEMETRY",
+      };
+    }
     if (stage === "CATALOG") {
       const complete = [catalog, eligible, counts.FOCUS_ADMITTED].every(isObservedNumber);
       return reconcileGate({
@@ -1135,7 +1165,7 @@ function Pipeline({ strategy, discovery, ingress, tape, marketFabric, maintenanc
         <div className="constraintGrid">
           <div><span>Scan scheduler</span><strong>{isObservedNumber(roam.worker_concurrency) ? `${num(roam.worker_concurrency)} workers · range ${num(roam.configured_worker_concurrency_range?.minimum)}–${num(roam.configured_worker_concurrency_range?.maximum)}` : "NOT OBSERVED"}</strong><small>Worker capacity controls simultaneous history I/O only; it does not drop or gate eligible assets.</small></div>
           <div><span>Crypto regime input</span><strong>btc_kraken_daily still exists in warm-up</strong><small>This is a real code dependency to remove/generalize later, not a UI preference.</small></div>
-          <div><span>Telemetry coverage</span><strong>{fullCoverage}/{PIPELINE_GATE_BLUEPRINT.length} gates fully reconcilable</strong><small>Unknown outcomes stay NOT OBSERVED; the UI does not invent zeroes.</small></div>
+          <div><span>Telemetry coverage</span><strong>{fullCoverage}/{PIPELINE_GATE_BLUEPRINT.length} gates fully reconcilable</strong><small>Canonical backend gate telemetry is primary. Unknown outcomes stay NOT OBSERVED; cumulative transitions are labeled explicitly.</small></div>
           <div className={unexplainedTotal ? "constraintFault" : ""}><span>Unexplained flow loss</span><strong>{num(unexplainedTotal)}</strong><small>{unexplainedTotal ? "Observed counts do not reconcile at one or more fully measured gates." : "No unexplained loss in fully measured gates."}</small></div>
         </div>
       </Section>
@@ -1169,8 +1199,8 @@ function Pipeline({ strategy, discovery, ingress, tape, marketFabric, maintenanc
                       </div>
                     </div>
                     {item.stage === "RESERVED" ? <p className="telemetryNote">Floor currently projects this queue as <code>Portfolio / ORDER</code>; the underlying runtime transition is READY → RESERVED.</p> : null}
-                    {item.stage === "SUBMITTED" ? <p className="telemetryNote">The current Floor payload does not expose a dedicated SUBMITTED count, so this map intentionally shows no fabricated number.</p> : null}
-                    {["EXIT_REQUESTED","CLOSE_RESERVED"].includes(item.stage) ? <p className="telemetryNote">This transient close state is enforced in code but is not separately counted in the current Floor payload.</p> : null}
+                    {item.stage === "SUBMITTED" ? <p className="telemetryNote">SUBMITTED now comes from the strategy runtime's canonical backend gate telemetry, with Floor data retained only as compatibility context.</p> : null}
+                    {["EXIT_REQUESTED","CLOSE_RESERVED"].includes(item.stage) ? <p className="telemetryNote">These short-lived close transitions are reported as cumulative backend evidence: a later observed close state proves the earlier gate was passed without inventing a transient queue.</p> : null}
                   </div>
                 </article>
 
@@ -1199,8 +1229,8 @@ function Pipeline({ strategy, discovery, ingress, tape, marketFabric, maintenanc
                       </div>
                       <div className="gateTelemetry">
                         {(() => {
-                          const reveal = gate.coverage === "FULL" && gate.reconciled === true;
-                          const show = (value) => reveal ? num(value) : "NOT OBSERVED";
+                          const reveal = ["FULL","CUMULATIVE"].includes(gate.coverage) && gate.reconciled === true;
+                          const show = (value) => reveal && isObservedNumber(value) ? num(value) : "NOT OBSERVED";
                           return <>
                             <div><span>INPUT</span><strong>{show(gate.input)}</strong></div>
                             <div><span>PASS</span><strong>{show(gate.pass)}</strong></div>

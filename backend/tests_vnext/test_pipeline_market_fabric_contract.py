@@ -48,3 +48,24 @@ def test_pipeline_wires_market_fabric_dual_truth_into_gate_four() -> None:
     assert "consensus_can_replace_executable_price === false" in page
     assert "Witness sources provide corroboration and market intelligence only." in page
     assert "never overwrite route truth" in page
+
+
+def test_pipeline_prefers_backend_canonical_gate_telemetry() -> None:
+    page = _frontend_page()
+    assert "strategy?.last_result?.gate_telemetry" in page
+    assert 'source: "BACKEND_GATE_TELEMETRY"' in page
+    assert '["FULL","CUMULATIVE"].includes(gate.coverage)' in page
+    assert "backendGateByStage[stage]" in page
+
+
+def test_pipeline_uses_backend_stage_counts_before_floor_compatibility_counts() -> None:
+    page = _frontend_page()
+    for token in (
+        "isObservedNumber(pipe.fire)",
+        "isObservedNumber(pipe.size)",
+        "isObservedNumber(pipe.ready)",
+        "isObservedNumber(pipe.reserved)",
+        "isObservedNumber(pipe.submitted)",
+        "isObservedNumber(pipe.open)",
+    ):
+        assert token in page
