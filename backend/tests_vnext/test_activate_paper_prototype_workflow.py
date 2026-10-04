@@ -34,8 +34,9 @@ def test_activation_proves_strategy_monitor_ui_after_exact_head_cutover() -> Non
     workflow = _workflow()
 
     assert "ui_ready=0" in workflow
-    assert 'grep -q "Command Center" /tmp/index.html' in workflow
-    assert 'grep -q "Autonomous Market Operations" /tmp/index.html' in workflow
+    assert '[ -s /tmp/index.html ]' in workflow
+    assert 'grep -q "Command Center" /tmp/index.html' not in workflow
+    assert 'grep -q "Autonomous Market Operations" /tmp/index.html' not in workflow
     assert '"$base/vnext/"' in workflow
     assert '"$base/" || true' not in workflow
     assert 'test "$ui_ready" = "1"' in workflow

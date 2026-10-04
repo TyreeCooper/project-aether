@@ -25,6 +25,6 @@ def test_activation_proves_tape_runtime_continuity_and_full_consensus() -> None:
     ).read_text(encoding="utf-8")
     assert "AETHER_VNEXT_TAPE_ENABLED=true" in workflow
     assert "/api/v1/vnext/tape" in workflow
-    assert 'assert_moving("tape"' in workflow
+    assert 'movement("tape", tape_first_runtime, tape_second_runtime)' in workflow
     assert 'row.get("state") == "FULL"' in workflow
     assert "/tmp/tape-second.json" in workflow
