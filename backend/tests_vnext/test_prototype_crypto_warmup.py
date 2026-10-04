@@ -4,12 +4,14 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from aether_vnext.reference_prototype_history import COINBASE_SOURCE_ID
 from aether_vnext.prototype_crypto_warmup import (
     MIN_RECENT_KRAKEN_HOURLY_BARS,
     assemble_prototype_crypto_warmup,
 )
-from aether_vnext.prototype_history_sources import KRAKEN_DAILY_SOURCE_ID
+from aether_vnext.prototype_history_sources import (
+    CRYPTOCOMPARE_SOURCE_ID,
+    KRAKEN_DAILY_SOURCE_ID,
+)
 from aether_vnext.prototype_market_history import PrototypeMarketBar
 
 
@@ -44,7 +46,7 @@ def _series(
                 low=min(open_, close) - 1.0,
                 close=close,
                 volume=10.0,
-                trade_count=0 if source_id == COINBASE_SOURCE_ID else 20,
+                trade_count=0 if source_id == CRYPTOCOMPARE_SOURCE_ID else 20,
                 source_id=source_id,
                 source_ref=f"test:{source_id}",
                 available_at_utc=opened + interval,
@@ -53,13 +55,13 @@ def _series(
     return tuple(rows)
 
 
-def test_hybrid_warmup_uses_reference_only_before_kraken_window() -> None:
+def test_source_separated_warmup_uses_reference_only_before_kraken_window() -> None:
     reference = _series(
         asset_id="btc",
         interval=timedelta(hours=1),
         count=2400,
         start=START,
-        source_id=COINBASE_SOURCE_ID,
+        source_id=CRYPTOCOMPARE_SOURCE_ID,
         base=90_000.0,
         drift=0.2,
     )
@@ -107,13 +109,13 @@ def test_hybrid_warmup_uses_reference_only_before_kraken_window() -> None:
     assert out.feature_snapshot.volatility.reference_count > 0
 
 
-def test_hybrid_warmup_refuses_short_kraken_decision_window() -> None:
+def test_source_separated_warmup_refuses_short_kraken_decision_window() -> None:
     reference = _series(
         asset_id="eth",
         interval=timedelta(hours=1),
         count=2400,
         start=START,
-        source_id=COINBASE_SOURCE_ID,
+        source_id=CRYPTOCOMPARE_SOURCE_ID,
         base=3_000.0,
         drift=0.01,
     )
