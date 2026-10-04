@@ -13,7 +13,7 @@ def test_operator_console_surfaces_tape_across_runtime_views() -> None:
     assert "MARKET FABRIC → GATE 04" in page
     assert "Dual-truth market authority" in page
     assert "NEVER OVERWRITE" in page
-    assert "Tape independence" in page
+    assert "Market Fabric independence" in page
     assert 'label="Market Fabric"' in page
     assert "pipelineRuntimeState(ingress, discovery, tape, strategy" in page
 
