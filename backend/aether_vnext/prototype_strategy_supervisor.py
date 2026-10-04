@@ -22,6 +22,7 @@ from typing import Awaitable, Callable, Mapping, Sequence
 import sqlalchemy as sa
 
 from aether_vnext.db_runtime import VNextDatabaseConfig, open_vnext_engine
+from aether_vnext.canonical_pipeline import build_canonical_gate_snapshot
 from aether_vnext.dynamic_products import project_kraken_spot_product
 from aether_vnext.freeze import CONFIGURATION_HASH, LIVE_BLOCKED, PAPER_ONLY
 from aether_vnext.prototype_crypto_entry_plan import build_prototype_crypto_entry_plan
@@ -1736,6 +1737,14 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     ),
                     "strategy_evaluated": evaluated,
                     "watch": _stage_count(dynamic_results, "WATCH"),
+                    "fire": _stage_count(dynamic_results, "FIRE"),
+                    "size": _stage_count(dynamic_results, "SIZE"),
+                    "ready": _stage_count(dynamic_results, "READY"),
+                    "reserved": _stage_count(dynamic_results, "RESERVED"),
+                    "submitted": _stage_count(dynamic_results, "SUBMITTED"),
+                    "open": _stage_count(dynamic_results, "OPEN"),
+                    "no_setup": _stage_count(dynamic_results, "NO_SETUP"),
+                    "rejected": _stage_count(dynamic_results, "REJECTED"),
                     "fire_or_beyond": _stage_count(
                         dynamic_results,
                         "FIRE",
@@ -1808,6 +1817,13 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         and row["history_service"].get("service_state") == "UNAVAILABLE"
                     ),
                 }
+
+                result["gate_telemetry"] = build_canonical_gate_snapshot(
+                    pipeline=result["pipeline"],
+                    dynamic_results=dynamic_results,
+                    exit_results=exit_results,
+                    registry_status=registry_status,
+                )
 
                 result["inserted_market_bars"] = inserted
                 result["current_observation_asset_ids"] = sorted(
