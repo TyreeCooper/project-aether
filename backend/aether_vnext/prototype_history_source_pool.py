@@ -13,7 +13,7 @@ Policy:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Final
 
 from aether_vnext.coinbase_prototype_history import (
@@ -26,9 +26,21 @@ from aether_vnext.prototype_history_sources import (
     fetch_cryptocompare_kraken_hourly,
 )
 from aether_vnext.prototype_market_history import PrototypeMarketBar
+from aether_vnext.volatility_percentile import (
+    RV14_REQUIRED_CLOSES,
+    VOLATILITY_PERCENTILE_WINDOW,
+)
 
 
-REFERENCE_MINIMUM_BARS: Final = 2200
+REFERENCE_MINIMUM_BARS: Final = (
+    int(VOLATILITY_PERCENTILE_WINDOW / timedelta(hours=1))
+    + RV14_REQUIRED_CLOSES
+    + 1
+)
+REFERENCE_SOURCE_IDS: Final = (
+    CRYPTOCOMPARE_SOURCE_ID,
+    COINBASE_SOURCE_ID,
+)
 
 
 @dataclass(frozen=True, slots=True)

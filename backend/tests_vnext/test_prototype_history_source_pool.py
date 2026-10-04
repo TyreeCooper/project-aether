@@ -8,6 +8,7 @@ from aether_vnext.coinbase_prototype_history import COINBASE_SOURCE_ID
 from aether_vnext.prototype_history_sources import CRYPTOCOMPARE_SOURCE_ID
 from aether_vnext.prototype_history_source_pool import (
     HistoricalReferenceUnavailable,
+    REFERENCE_MINIMUM_BARS,
     fetch_historical_reference_pool,
 )
 
@@ -17,7 +18,7 @@ NOW = datetime(2026, 10, 4, 17, 0, tzinfo=timezone.utc)
 
 @pytest.mark.asyncio
 async def test_reference_pool_uses_primary_when_ready(monkeypatch) -> None:
-    primary = (object(),) * 2200
+    primary = (object(),) * REFERENCE_MINIMUM_BARS
 
     async def primary_fetch(**kwargs):
         return primary
@@ -47,7 +48,7 @@ async def test_reference_pool_uses_primary_when_ready(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_reference_pool_promotes_coinbase_after_primary_failure(monkeypatch) -> None:
-    backup = (object(),) * 2200
+    backup = (object(),) * REFERENCE_MINIMUM_BARS
 
     async def primary_fetch(**kwargs):
         raise TimeoutError("primary unavailable")
@@ -114,3 +115,7 @@ async def test_reference_pool_exhaustion_reports_every_attempt(monkeypatch) -> N
         "FAILED",
         "UNAVAILABLE",
     )
+
+
+def test_reference_minimum_is_derived_from_rv14_contract() -> None:
+    assert REFERENCE_MINIMUM_BARS == 2176

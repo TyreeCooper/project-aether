@@ -33,16 +33,16 @@ from aether_vnext.prototype_forward_paper_evidence import (
 )
 from aether_vnext.prototype_crypto_warmup import assemble_prototype_crypto_warmup
 from aether_vnext.prototype_history_sources import (
-    CRYPTOCOMPARE_SOURCE_ID,
     KRAKEN_DAILY_SOURCE_ID,
     fetch_kraken_completed_daily,
     fetch_kraken_completed_hourly,
 )
 from aether_vnext.prototype_history_source_pool import (
     HistoricalSourceAttempt,
+    REFERENCE_MINIMUM_BARS,
+    REFERENCE_SOURCE_IDS,
     fetch_historical_reference_pool,
 )
-from aether_vnext.coinbase_prototype_history import COINBASE_SOURCE_ID
 from aether_vnext.prototype_market_history import (
     PrototypeMarketBar,
     load_prototype_market_bars,
@@ -660,7 +660,7 @@ async def _fetch_dynamic_strategy_history(
                     asset_id=asset_id,
                     asset_symbol=base,
                     end_at_utc=end_at_utc,
-                    minimum_bars=2200,
+                    minimum_bars=REFERENCE_MINIMUM_BARS,
                 ),
                 *tasks,
             )
@@ -707,6 +707,9 @@ def _successful_strategy_evaluation_count(
     failed_or_not_evaluated = {
         "MARKET_NOT_READY",
         "HISTORY_NOT_READY",
+        "HISTORY_WARMING",
+        "HISTORY_SOURCE_UNAVAILABLE",
+        "INSUFFICIENT_HISTORY",
         "EVALUATION_ERROR",
         "PIPELINE_ERROR",
     }
@@ -746,7 +749,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                 asset_id=asset_id,
                 asset_symbol=asset_id.upper(),
                 end_at_utc=as_of_utc,
-                minimum_bars=2200,
+                minimum_bars=REFERENCE_MINIMUM_BARS,
             ),
             fetch_kraken_completed_hourly(
                 asset_id=asset_id,
@@ -886,10 +889,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                                 (product.asset_id, 3600, source_id),
                                 {},
                             )
-                            for source_id in (
-                                CRYPTOCOMPARE_SOURCE_ID,
-                                COINBASE_SOURCE_ID,
-                            )
+                            for source_id in REFERENCE_SOURCE_IDS
                         ),
                         key=lambda row: int(row.get("bar_count") or 0),
                     )
@@ -902,7 +902,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         {},
                     )
                     warmup_cached[product.asset_id] = (
-                        int(reference_meta.get("bar_count") or 0) >= 2200
+                        int(reference_meta.get("bar_count") or 0) >= REFERENCE_MINIMUM_BARS
                     )
                     hour_close = kraken_hour_meta.get("latest_close_utc")
                     day_close = kraken_day_meta.get("latest_close_utc")
@@ -1278,7 +1278,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         historical_reference_hourly=tuple(
                             row
                             for row in hourly
-                            if row.source_id == CRYPTOCOMPARE_SOURCE_ID
+                            if row.source_id in REFERENCE_SOURCE_IDS
                         ),
                         kraken_hourly=tuple(
                             row
@@ -1392,14 +1392,14 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     history = history_by_asset.get(asset_id)
                     if history is None:
                         dynamic_results[asset_id] = {
-                            "stage": "HISTORY_NOT_READY",
+                            "stage": "HISTORY_WARMING",
                             "reason": "history_not_fetched",
                             "quote_age_ms": executable_quote_age_ms(observation),
                         }
                         continue
                     if history.error is not None:
                         dynamic_results[asset_id] = {
-                            "stage": "HISTORY_NOT_READY",
+                            "stage": "HISTORY_SOURCE_UNAVAILABLE",
                             "reason": history.error,
                             "quote_age_ms": executable_quote_age_ms(observation),
                             "history_source_gaps": list(history.source_gaps),
@@ -1426,7 +1426,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                             historical_reference_hourly=tuple(
                                 row
                                 for row in hourly
-                                if row.source_id == CRYPTOCOMPARE_SOURCE_ID
+                                if row.source_id in REFERENCE_SOURCE_IDS
                             ),
                             kraken_hourly=tuple(
                                 row
@@ -1448,7 +1448,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         )
                     except Exception as exc:
                         dynamic_results[asset_id] = {
-                            "stage": "HISTORY_NOT_READY",
+                            "stage": "INSUFFICIENT_HISTORY",
                             "reason": f"warmup:{type(exc).__name__}:{exc}",
                             "quote_age_ms": executable_quote_age_ms(observation),
                             "history_source_gaps": list(history.source_gaps),
@@ -1650,6 +1650,21 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     "history_not_ready": _stage_count(
                         dynamic_results,
                         "HISTORY_NOT_READY",
+                        "HISTORY_WARMING",
+                        "HISTORY_SOURCE_UNAVAILABLE",
+                        "INSUFFICIENT_HISTORY",
+                    ),
+                    "history_warming": _stage_count(
+                        dynamic_results,
+                        "HISTORY_WARMING",
+                    ),
+                    "history_source_unavailable": _stage_count(
+                        dynamic_results,
+                        "HISTORY_SOURCE_UNAVAILABLE",
+                    ),
+                    "insufficient_history": _stage_count(
+                        dynamic_results,
+                        "INSUFFICIENT_HISTORY",
                     ),
                     "evaluation_error": _stage_count(
                         dynamic_results,

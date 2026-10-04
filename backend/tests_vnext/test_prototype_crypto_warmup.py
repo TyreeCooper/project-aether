@@ -156,3 +156,7 @@ def test_source_separated_warmup_refuses_short_kraken_decision_window() -> None:
             btc_kraken_daily=btc_daily,
             as_of_utc=kraken[-1].bucket_close_utc,
         )
+
+
+def test_direct_kraken_requirement_matches_decision_window() -> None:
+    assert MIN_RECENT_KRAKEN_HOURLY_BARS == 21

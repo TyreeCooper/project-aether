@@ -8,6 +8,7 @@ from aether_vnext.dynamic_products import project_kraken_spot_product
 
 import pytest
 
+from aether_vnext.prototype_history_source_pool import REFERENCE_MINIMUM_BARS
 from aether_vnext.prototype_strategy_supervisor import (
     _apply_market_fabric_policy,
     PrototypeStrategySupervisor,
@@ -391,7 +392,7 @@ def test_successful_strategy_evaluation_count_excludes_pipeline_faults() -> None
         "ada": {"stage": "WATCH"},
         "dot": {"stage": "PIPELINE_ERROR"},
         "link": {"stage": "EVALUATION_ERROR"},
-        "avax": {"stage": "HISTORY_NOT_READY"},
+        "avax": {"stage": "INSUFFICIENT_HISTORY"},
         "uni": {"stage": "MARKET_NOT_READY"},
     }
     assert _successful_strategy_evaluation_count(rows) == 2
@@ -406,7 +407,7 @@ async def test_dynamic_history_fetches_reference_and_direct_kraken_lanes(monkeyp
         calls["reference"] += 1
         assert kwargs["asset_id"] == "kraken:xdpusd"
         assert kwargs["asset_symbol"] == "XDP"
-        assert kwargs["minimum_bars"] == 2200
+        assert kwargs["minimum_bars"] == REFERENCE_MINIMUM_BARS
         return SimpleNamespace(
             bars=("reference-hour",),
             selected_source_id="test-reference",
