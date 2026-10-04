@@ -1574,7 +1574,12 @@ export default function DashboardPage() {
       const endpoint=key==="history"?endpointHealth.strategy:endpointHealth[key];
       return {key,label,...bootstrapGateState(key,payload,endpoint,data.health)};
     });
-    const active=gates.find((gate)=>\n      !gate.ready\n      && STARTUP_RECOVERABLE.has(gate.key)\n      && ["WAITING","STALLED","FAULT","BLOCKED"].includes(gate.state)\n    );\n    if(!active)return;
+    const active=gates.find((gate)=>
+      !gate.ready
+      && STARTUP_RECOVERABLE.has(gate.key)
+      && ["WAITING","STALLED","FAULT","BLOCKED"].includes(gate.state)
+    );
+    if(!active)return;
     const current=startupRecovery[active.key];
     if(current?.inFlight)return;
     let cancelled=false;
@@ -1660,7 +1665,13 @@ export default function DashboardPage() {
     finally{setMaintenanceBusy(false);}
   };
 
-  const title = NAV.find(([id])=>id===active)?.[1] || "Command Center";\n  const watermark = telemetryWatermark(data);\n  const paperSafe = data.floor?.mode?.paper_only ?? data.health?.paper_mode;\n  const liveBlocked = data.floor?.mode?.live_blocked ?? data.health?.live_blocked;\n  if (!shellReady) {\n    return <BootstrapScreen data={data} endpointHealth={endpointHealth} />;\n  }
+  const title = NAV.find(([id])=>id===active)?.[1] || "Command Center";
+  const watermark = telemetryWatermark(data);
+  const paperSafe = data.floor?.mode?.paper_only ?? data.health?.paper_mode;
+  const liveBlocked = data.floor?.mode?.live_blocked ?? data.health?.live_blocked;
+  if (!shellReady) {
+    return <BootstrapScreen data={data} endpointHealth={endpointHealth} />;
+  }
   return (
     <main className="appShell">
       <aside className="sidebar">
