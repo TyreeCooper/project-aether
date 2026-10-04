@@ -89,13 +89,9 @@ def test_one_feed_failure_still_reaches_official_tape_api_and_strategy_market_ga
         assert snapshot["assets"][0]["state"] == "FULL"
         assert snapshot["assets"][0]["source_count"] == 3
         assert projection.strategy_ready is True
-        assert projection.observation is not None
-        assert projection.observation.source == "aether_consensus_tape"
-        persisted = store.load_market_observation(
-            conn,
-            observation_id=projection.observation.observation_id,
-        )
-        assert persisted is not None
+        assert projection.observation is None
+        assert projection.evidence_only is True
+        assert projection.evidence_composite_id == cycle.composite.composite_id
 
     btc_execution = execution_provider_profile(SEED_REGISTRY["btc"])
     assert btc_execution.broker == "Kraken"
