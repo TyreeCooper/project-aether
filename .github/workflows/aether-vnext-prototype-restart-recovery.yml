@@ -1,4 +1,4 @@
-# Manual safe-reboot trigger: 2026-10-04
+# Manual safe-reboot trigger: 2026-10-04 retry-2
 name: AETHER vNext Prototype Restart Recovery
 
 on:
