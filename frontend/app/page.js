@@ -261,7 +261,7 @@ function telemetryWatermark(data) {
   return new Date(Math.min(...stamps)).toISOString();
 }
 
-const BOOTSTRAP_GATES = [
+const BACKGROUND_RUNTIME_GATES = [
   ["floor", "Firm Floor"],
   ["ingress", "Executable Ingress"],
   ["discovery", "Provider Discovery"],
@@ -273,6 +273,29 @@ const BOOTSTRAP_GATES = [
 ];
 
 const STARTUP_RECOVERABLE = new Set(["ingress","discovery","tape","strategy"]);
+
+function startupSafetyState(payload, health) {
+  if (health !== "live") {
+    return {
+      ready:false,
+      state:health === "unavailable" ? "UNAVAILABLE" : "LOADING",
+      detail:"waiting for authoritative vNext safety contract",
+    };
+  }
+  const ready = (
+    payload?.ok === true
+    && payload?.runtime === "vnext"
+    && payload?.paper_mode === true
+    && payload?.live_blocked === true
+  );
+  return {
+    ready,
+    state:ready ? "READY" : "UNSAFE",
+    detail:ready
+      ? "vNext · PAPER ONLY · LIVE BLOCKED"
+      : "runtime safety contract not satisfied",
+  };
+}
 
 function bootstrapGateState(key, payload, health, healthSnapshot) {
   if (health !== "live") return { ready:false, state:health === "unavailable" ? "UNAVAILABLE" : "LOADING", detail:"endpoint not ready" };
@@ -319,69 +342,36 @@ function bootstrapGateState(key, payload, health, healthSnapshot) {
   return { ready:false, state:"WAITING", detail:"supervisor not yet running" };
 }
 
-function BootstrapScreen({ data, endpointHealth, recovery }) {
-  const bootstrapPayload = (key) => key === "history" ? data.strategy : data[key];
-  const bootstrapHealth = (key) => key === "history" ? endpointHealth.strategy : endpointHealth[key];
-  const gates = BOOTSTRAP_GATES.map(([key,label]) => ({
-    key,
-    label,
-    ...bootstrapGateState(key, bootstrapPayload(key), bootstrapHealth(key), data.health),
-  }));
-  const readyCount = gates.filter((gate) => gate.ready).length;
-  const pct = Math.round((readyCount / gates.length) * 100);
-  const unresolved = gates.filter((gate) => !gate.ready);
-  const active = unresolved[0] || null;
-  const activeRecovery = active ? recovery?.[active.key] : null;
-  const [visibleKey, setVisibleKey] = useState(active?.key || null);
-  const [leaving, setLeaving] = useState(false);
-
-  useEffect(()=>{
-    const nextKey=active?.key || null;
-    if(nextKey===visibleKey)return;
-    setLeaving(true);
-    const timer=setTimeout(()=>{
-      setVisibleKey(nextKey);
-      setLeaving(false);
-    },260);
-    return()=>clearTimeout(timer);
-  },[active?.key,visibleKey]);
-
-  const visibleGate = gates.find((gate)=>gate.key===visibleKey) || active;
-  const recoveryState = visibleGate ? recovery?.[visibleGate.key] : null;
-  const displayState = recoveryState?.state || visibleGate?.state || "LOADING";
-  const detail = recoveryState?.detail || visibleGate?.detail || "waiting";
+function BootstrapScreen({ data, endpointHealth }) {
+  const gate = startupSafetyState(data.health, endpointHealth.health);
+  const pct = gate.ready ? 100 : 0;
   return (
     <main className="bootstrapScreen">
       <section className="bootstrapCard" aria-live="polite">
         <div className="bootstrapBrand">
           <img src="/vnext/aether-mark.png" alt="AETHER" />
-          <div><span>AETHER SANDBOX</span><h1>Preparing market operations</h1></div>
+          <div><span>AETHER SANDBOX</span><h1>Verifying runtime safety</h1></div>
         </div>
         <div className="bootstrapProgressHead">
           <strong>{pct}%</strong>
-          <span>{readyCount}/{gates.length} runtime gates observed</span>
+          <span>{gate.ready ? "Safety contract verified" : "Waiting only on safety contract"}</span>
         </div>
         <div className="bootstrapTrack"><i style={{ width:`${pct}%` }} /></div>
         <div className="bootstrapSequentialList">
-          {visibleGate ? (
-            <div className={leaving ? "bootstrapSequentialItem leaving" : "bootstrapSequentialItem entering"} key={visibleGate.key}>
-              <span className={["STALLED","FAULT","BLOCKED"].includes(displayState) ? "bootstrapSpinner recovery" : "bootstrapSpinner"} />
-              <div>
-                <strong>{visibleGate.label}</strong>
-                <small>{detail}<span className="bootstrapEllipsis" aria-hidden="true">...</span></small>
-              </div>
-              <Badge value={displayState}>{displayState}</Badge>
+          <div className="bootstrapSequentialItem entering">
+            <span className="bootstrapSpinner" />
+            <div>
+              <strong>Sandbox Safety Contract</strong>
+              <small>{gate.detail}<span className="bootstrapEllipsis" aria-hidden="true">...</span></small>
             </div>
-          ) : (
-            <div className="bootstrapComplete">All required startup gates observed.</div>
-          )}
+            <Badge value={gate.state}>{gate.state}</Badge>
+          </div>
         </div>
-        <p className="bootstrapTruth">Completed items disappear immediately. Progress is computed from observed runtime state only. Historical Services reports service readiness without requiring every asset to be history-ready. Maintenance remains IDLE / OFF during startup.</p>
+        <p className="bootstrapTruth">Only the authoritative vNext PAPER ONLY / LIVE BLOCKED safety contract can hold this screen. Market ingress, discovery, Market Fabric, history, strategy, operator telemetry and maintenance continue warming in the background after the console opens.</p>
       </section>
     </main>
   );
 }
-
 
 function strategySnapshotId(strategy) {
   const finished = strategy?.last_result?.finished_at_utc || strategy?.last_cycle_finished_at_utc;
@@ -1520,7 +1510,7 @@ export default function DashboardPage() {
   const [nowMs, setNowMs] = useState(()=>Date.now());
   const [maintenanceBusy, setMaintenanceBusy] = useState(false);
   const [maintenanceError, setMaintenanceError] = useState("");
-  const [bootstrapComplete, setBootstrapComplete] = useState(false);
+  const [shellReady, setShellReady] = useState(false);
   const [startupRecovery, setStartupRecovery] = useState({});
 
   useEffect(()=>{
@@ -1530,28 +1520,48 @@ export default function DashboardPage() {
 
   useEffect(()=>{
     let mounted=true;
-    const load=async()=>{
-      const results=await Promise.allSettled([
-        getJson(floorPath), getJson(ingressPath), getJson(strategyPath),
-        getJson(operatorPath), getJson(discoveryPath), getJson(maintenancePath), getJson(tapePath), getJson(marketFabricPath), getJson(healthPath),
-      ]);
-      if(!mounted)return;
-      const keys=["floor","ingress","strategy","operator","discovery","maintenance","tape","marketFabric","health"];
-      const next={}; const nextErrors=[]; const health={};
-      results.forEach((r,i)=>{
-        if(r.status==="fulfilled") { next[keys[i]]=r.value; health[keys[i]]="live"; }
-        else { nextErrors.push(keys[i]); health[keys[i]]="unavailable"; }
-      });
-      const mergedData=next;
-      setData((current)=>({...current,...next}));
-      setEndpointHealth((current)=>({...current,...health}));
-      setErrors(nextErrors);
-      const bootstrapReady=BOOTSTRAP_GATES.every(([key])=>{
-        const payload=key==="history"?mergedData.strategy:mergedData[key];
-        const endpoint=key==="history"?health.strategy:health[key];
-        return bootstrapGateState(key,payload,endpoint,mergedData.health).ready;
-      });
-      if(bootstrapReady) setBootstrapComplete(true);
+    const load=()=>{
+      // Start the cheap authoritative safety check and all telemetry requests at
+      // the same time. The console is released as soon as health proves vNext +
+      // PAPER ONLY + LIVE BLOCKED; slow telemetry must never serialize startup.
+      getJson(healthPath)
+        .then((payload)=>{
+          if(!mounted)return;
+          setData((current)=>({...current,health:payload}));
+          setEndpointHealth((current)=>({...current,health:"live"}));
+          setErrors((current)=>current.filter((key)=>key!=="health"));
+          if(startupSafetyState(payload,"live").ready) setShellReady(true);
+        })
+        .catch(()=>{
+          if(!mounted)return;
+          setEndpointHealth((current)=>({...current,health:"unavailable"}));
+          setErrors((current)=>current.includes("health")?current:[...current,"health"]);
+        });
+
+      const telemetry=[
+        ["floor",floorPath],
+        ["ingress",ingressPath],
+        ["strategy",strategyPath],
+        ["operator",operatorPath],
+        ["discovery",discoveryPath],
+        ["maintenance",maintenancePath],
+        ["tape",tapePath],
+        ["marketFabric",marketFabricPath],
+      ];
+      for(const [key,path] of telemetry){
+        getJson(path)
+          .then((payload)=>{
+            if(!mounted)return;
+            setData((current)=>({...current,[key]:payload}));
+            setEndpointHealth((current)=>({...current,[key]:"live"}));
+            setErrors((current)=>current.filter((item)=>item!==key));
+          })
+          .catch(()=>{
+            if(!mounted)return;
+            setEndpointHealth((current)=>({...current,[key]:"unavailable"}));
+            setErrors((current)=>current.includes(key)?current:[...current,key]);
+          });
+      }
     };
     load();
     const timer=setInterval(load,5000);
@@ -1559,15 +1569,12 @@ export default function DashboardPage() {
   },[]);
 
   useEffect(()=>{
-    if(bootstrapComplete)return;
-    const gates=BOOTSTRAP_GATES.map(([key,label])=>{
+    const gates=BACKGROUND_RUNTIME_GATES.map(([key,label])=>{
       const payload=key==="history"?data.strategy:data[key];
       const endpoint=key==="history"?endpointHealth.strategy:endpointHealth[key];
       return {key,label,...bootstrapGateState(key,payload,endpoint,data.health)};
     });
-    const active=gates.find((gate)=>!gate.ready);
-    if(!active || !STARTUP_RECOVERABLE.has(active.key))return;
-    if(!["WAITING","STALLED","FAULT","BLOCKED"].includes(active.state))return;
+    const active=gates.find((gate)=>\n      !gate.ready\n      && STARTUP_RECOVERABLE.has(gate.key)\n      && ["WAITING","STALLED","FAULT","BLOCKED"].includes(gate.state)\n    );\n    if(!active)return;
     const current=startupRecovery[active.key];
     if(current?.inFlight)return;
     let cancelled=false;
@@ -1603,14 +1610,13 @@ export default function DashboardPage() {
         }));
       });
     return()=>{cancelled=true;};
-  },[bootstrapComplete,data,endpointHealth,startupRecovery]);
+  },[data,endpointHealth,startupRecovery]);
 
   useEffect(()=>{
-    if(bootstrapComplete)return;
     setStartupRecovery((state)=>{
       let changed=false;
       const next={...state};
-      for(const [key] of BOOTSTRAP_GATES){
+      for(const [key] of BACKGROUND_RUNTIME_GATES){
         if(!next[key])continue;
         const payload=key==="history"?data.strategy:data[key];
         const endpoint=key==="history"?endpointHealth.strategy:endpointHealth[key];
@@ -1622,7 +1628,7 @@ export default function DashboardPage() {
       }
       return changed?next:state;
     });
-  },[bootstrapComplete,data,endpointHealth]);
+  },[data,endpointHealth]);
 
   const onToggle=async(key,enabled,token)=>{
     setMaintenanceBusy(true); setMaintenanceError("");
@@ -1654,11 +1660,7 @@ export default function DashboardPage() {
     finally{setMaintenanceBusy(false);}
   };
 
-  const title = NAV.find(([id])=>id===active)?.[1] || "Command Center";
-  const watermark = telemetryWatermark(data);
-  if (!bootstrapComplete) {
-    return <BootstrapScreen data={data} endpointHealth={endpointHealth} recovery={startupRecovery} />;
-  }
+  const title = NAV.find(([id])=>id===active)?.[1] || "Command Center";\n  const watermark = telemetryWatermark(data);\n  const paperSafe = data.floor?.mode?.paper_only ?? data.health?.paper_mode;\n  const liveBlocked = data.floor?.mode?.live_blocked ?? data.health?.live_blocked;\n  if (!shellReady) {\n    return <BootstrapScreen data={data} endpointHealth={endpointHealth} />;\n  }
   return (
     <main className="appShell">
       <aside className="sidebar">
@@ -1671,11 +1673,11 @@ export default function DashboardPage() {
           ))}
         </nav>
         <div className="sidebarFoot">
-          <Badge value={data.floor?.mode?.paper_only === true ? "GREEN" : data.floor?.mode?.paper_only === false ? "UNSAFE" : "NOT OBSERVED"}>
-            {data.floor?.mode?.paper_only === true ? "PAPER ACTIVE" : data.floor?.mode?.paper_only === false ? "PAPER UNSAFE" : "PAPER NOT OBSERVED"}
+          <Badge value={paperSafe === true ? "GREEN" : paperSafe === false ? "UNSAFE" : "NOT OBSERVED"}>
+            {paperSafe === true ? "PAPER ACTIVE" : paperSafe === false ? "PAPER UNSAFE" : "PAPER NOT OBSERVED"}
           </Badge>
-          <Badge value={data.floor?.mode?.live_blocked === true ? "BLOCKED" : data.floor?.mode?.live_blocked === false ? "UNSAFE" : "NOT OBSERVED"}>
-            {data.floor?.mode?.live_blocked === true ? "LIVE BLOCKED" : data.floor?.mode?.live_blocked === false ? "LIVE NOT BLOCKED" : "LIVE NOT OBSERVED"}
+          <Badge value={liveBlocked === true ? "BLOCKED" : liveBlocked === false ? "UNSAFE" : "NOT OBSERVED"}>
+            {liveBlocked === true ? "LIVE BLOCKED" : liveBlocked === false ? "LIVE NOT BLOCKED" : "LIVE NOT OBSERVED"}
           </Badge>
         </div>
       </aside>
