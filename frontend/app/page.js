@@ -441,7 +441,7 @@ function CommandCenter({ floor, ingress, strategy, discovery, tape, operator, ma
         <Metric label="Open positions" value={positionsObserved ? num(positions.length) : "NOT OBSERVED"} sub="PAPER positions" />
         <Metric label="Book cash" value={money(bank.book_cash_usd, "NOT OBSERVED")} sub={bank.cash_reserved_usd === null || bank.cash_reserved_usd === undefined ? "reserved NOT OBSERVED" : `${money(bank.cash_reserved_usd)} reserved`} />
         <Metric label="Maintenance" value={maintenanceDisplay} sub={maintenanceIdle ? "startup authority OFF" : text(maintenanceState.primary_reason, "no diagnosis observed")} state={maintenanceDisplay} />
-        <Metric label="Consensus Tape" value={tapeObserved === null ? "NOT OBSERVED" : `${num(tapeFull)}/${num(tapeObserved)} FULL`} sub={`runtime ${tapeRuntimeState}`} state={tapeFull > 0 ? "FULL" : tapeObserved ? "DEGRADED" : tapeRuntimeState} />
+        <Metric label="Market Fabric" value={tapeObserved === null ? "NOT OBSERVED" : `${num(tapeFull)}/${num(tapeObserved)} FULL`} sub={`runtime ${tapeRuntimeState}`} state={tapeFull > 0 ? "FULL" : tapeObserved ? "DEGRADED" : tapeRuntimeState} />
       </div>
 
       <Section eyebrow="UNIVERSE CONTRACT" title="Catalog → commissioned → active work" className="wide">
@@ -451,7 +451,7 @@ function CommandCenter({ floor, ingress, strategy, discovery, tape, operator, ma
           <div><span>Kraken commissioned</span><strong>{pipe.dynamic_kraken_available === undefined ? "NOT OBSERVED" : num(pipe.dynamic_kraken_available)}</strong><small>Runtime-bound products with the current commissioned strategy route.</small></div>
           <div><span>Current roaming workset</span><strong>{pipe.roaming_batch === undefined ? "NOT OBSERVED" : num(pipe.roaming_batch)}</strong><small>All commissioned products remain owned; worker concurrency schedules I/O only.</small></div>
           <div><span>Market ready this cycle</span><strong>{pipe.market_ready === undefined ? "NOT OBSERVED" : num(pipe.market_ready)}</strong><small>Executable market evidence observed this cycle.</small></div>
-          <div><span>Market Fabric evidence-gated seeds</span><strong>{pipe.tape_seed_required === undefined ? "NOT OBSERVED" : `${num(pipe.tape_seed_ready)}/${num(pipe.tape_seed_required)}`}</strong><small>FULL independent consensus required for covered seed strategy market truth.</small></div>
+          <div><span>Market Fabric evidence policy</span><strong>{pipe.market_fabric_evidence_required === undefined && pipe.tape_seed_required === undefined ? "NOT OBSERVED" : `${num(pipe.market_fabric_evidence_ready ?? pipe.tape_seed_ready)}/${num(pipe.market_fabric_evidence_required ?? pipe.tape_seed_required)} ready`}</strong><small>Witness intelligence gates only instruments with a commissioned evidence requirement; executable route truth remains mandatory for every instrument.</small></div>
           <div><span>Floor runtime registry</span><strong>{Array.isArray(floor?.full_universe) ? num(universe.length) : "NOT OBSERVED"}</strong><small>Seed + commissioned dynamic products; not the provider catalog.</small></div>
         </div>
         <p className="universeTruth">Catalog-visible ≠ commissioned ≠ market-ready ≠ setup-qualified. AETHER keeps these populations separate so a large provider catalog cannot be mistaken for trade permission.</p>
@@ -515,17 +515,17 @@ function Markets({ discovery, ingress, tape, nowMs }) {
   return (
     <div className="pageGrid">
       <div className="pageIntro">
-        <div><span className="kicker">MARKET INTELLIGENCE</span><h2>Provider universe</h2><p>Catalog visibility is execution-provider discovery truth. Independent price authority lives in AETHER Tape; provider availability and Tape-source availability are separate failure domains.</p></div>
+        <div><span className="kicker">MARKET INTELLIGENCE</span><h2>Provider universe</h2><p>Catalog visibility is execution-provider discovery truth. Market Fabric owns market truth. Execution-provider availability and witness-source availability remain separate failure domains.</p></div>
         <input className="search" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter instruments…" />
       </div>
-      <Section eyebrow="MARKET DATA PLANE" title="Tape independence" className="wide">
+      <Section eyebrow="MARKET DATA PLANE" title="Market Fabric independence" className="wide">
         <div className="providerStats">
           <Metric label="Witness Fabric runtime" value={supervisorState(tape?.runtime, nowMs)} state={supervisorState(tape?.runtime, nowMs)} />
-          <Metric label="Observed Tape assets" value={num(tape?.summary?.asset_count)} />
+          <Metric label="Observed witness assets" value={num(tape?.summary?.asset_count)} />
           <Metric label="FULL consensus" value={num(tape?.summary?.state_counts?.FULL, 0, "0")} state={Number(tape?.summary?.state_counts?.FULL || 0) ? "FULL" : "NOT OBSERVED"} />
           <Metric label="Independent sources" value={num((tape?.source_registry || []).filter((row) => row?.independent === true).length)} />
         </div>
-        <p className="repairNote">Execution providers below can fail independently. A broker catalog being online does not make its quote the official Tape mark.</p>
+        <p className="repairNote">Execution providers below can fail independently. A broker catalog being online does not make its quote the authorized executable market truth.</p>
       </Section>
       {rows.map((row) => {
         const items = (row.top100 || []).filter((item) => !filter || String(item.symbol || "").toLowerCase().includes(filter.toLowerCase()));
@@ -794,7 +794,7 @@ const PIPELINE_GATE_BLUEPRINT = [
     owner: "Market Fabric",
     gate: "Executable Ingress",
     plain: "AETHER requires a valid executable-route observation. Market Fabric witness evidence may corroborate or gate that observation, but it can never create, average into, or overwrite the executable price.",
-    dev: "market_ingress.ingest_market_quotes() supplies executable truth; _apply_tape_market_policy() applies evidence-only admission and preserves the executable observation unchanged.",
+    dev: "market_ingress.ingest_market_quotes() supplies executable truth; _apply_market_fabric_policy() applies evidence-only admission and preserves the executable observation unchanged.",
   },
   {
     number: 5,
@@ -1392,7 +1392,7 @@ function Settings({ ingress, strategy, discovery, tape, floor, maintenance, onTo
           <Metric label="Ingress cadence" value={`${num(ingress?.interval_seconds)}s`} />
           <Metric label="Strategy cadence" value={`${num(strategy?.interval_seconds)}s`} />
           <Metric label="Discovery" value={discovery?.running ? "RUNNING" : "WAIT"} state={discovery?.running ? "GREEN":"WARN"} />
-          <Metric label="Tape" value={supervisorState(tape?.runtime, Date.now())} state={supervisorState(tape?.runtime, Date.now())} sub={isObservedNumber(tape?.runtime?.interval_seconds) ? `${num(tape.runtime.interval_seconds)}s cadence · quorum 3` : "cadence NOT OBSERVED"} />
+          <Metric label="Market Fabric" value={supervisorState(tape?.runtime, Date.now())} state={supervisorState(tape?.runtime, Date.now())} sub={isObservedNumber(tape?.runtime?.interval_seconds) ? `${num(tape.runtime.interval_seconds)}s cadence · quorum 3` : "cadence NOT OBSERVED"} />
           <Metric label="Build" value={text(floor?.build?.source_revision?.slice(0,8),"local")} />
         </div>
       </Section>

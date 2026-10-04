@@ -1581,27 +1581,40 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     "focus_received": focus_admitted,  # deprecated compatibility alias
                     "dynamic_kraken_available": len(dynamic_products),
                     "roaming_batch": len(dynamic_batch),
-                    "tape_seed_required": len(ASSETS) if tape_required else 0,
-                    "tape_seed_ready": sum(
+                    "market_fabric_instrument_count": len(market_fabric),
+                    "market_fabric_evidence_required": len(evidence_required_asset_ids),
+                    "market_fabric_evidence_ready": sum(
                         1
-                        for row in tape_market.values()
-                        if isinstance(row, Mapping)
+                        for asset_id, row in market_fabric.items()
+                        if asset_id in evidence_required_asset_ids
+                        and isinstance(row, Mapping)
                         and row.get("strategy_ready") is True
                     ),
-                    "tape_seed_reasons": {
+                    "market_fabric_evidence_reasons": {
                         reason: sum(
                             1
-                            for row in tape_market.values()
-                            if isinstance(row, Mapping)
+                            for asset_id, row in market_fabric.items()
+                            if asset_id in evidence_required_asset_ids
+                            and isinstance(row, Mapping)
                             and str(row.get("reason") or "") == reason
                         )
                         for reason in sorted({
                             str(row.get("reason") or "")
-                            for row in tape_market.values()
-                            if isinstance(row, Mapping)
+                            for asset_id, row in market_fabric.items()
+                            if asset_id in evidence_required_asset_ids
+                            and isinstance(row, Mapping)
                             and row.get("reason")
                         })
                     },
+                    # Deprecated compatibility aliases; Market Fabric is authoritative.
+                    "tape_seed_required": len(evidence_required_asset_ids),
+                    "tape_seed_ready": sum(
+                        1
+                        for asset_id, row in market_fabric.items()
+                        if asset_id in evidence_required_asset_ids
+                        and isinstance(row, Mapping)
+                        and row.get("strategy_ready") is True
+                    ),
                     "market_ready": sum(
                         1
                         for asset_id in product_by_id
