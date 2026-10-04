@@ -44,6 +44,7 @@ from aether_vnext.prototype_history_source_pool import (
     REFERENCE_MINIMUM_BARS,
     REFERENCE_SOURCE_IDS,
     fetch_historical_reference_pool,
+    select_persisted_reference_history,
 )
 from aether_vnext.prototype_market_history import (
     PrototypeMarketBar,
@@ -1378,11 +1379,10 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     try:
                         warmup = assemble_prototype_crypto_warmup(
                             asset_id=asset_id,
-                            historical_reference_hourly=tuple(
-                                row
-                                for row in hourly
-                                if row.source_id in REFERENCE_SOURCE_IDS
-                            ),
+                            historical_reference_hourly=select_persisted_reference_history(
+                                tuple(hourly),
+                                minimum_bars=REFERENCE_MINIMUM_BARS,
+                            ).bars,
                             kraken_hourly=tuple(
                                 row
                                 for row in hourly
@@ -1539,11 +1539,10 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     try:
                         warmup = assemble_prototype_crypto_warmup(
                             asset_id=asset_id,
-                            historical_reference_hourly=tuple(
-                                row
-                                for row in hourly
-                                if row.source_id in REFERENCE_SOURCE_IDS
-                            ),
+                            historical_reference_hourly=select_persisted_reference_history(
+                                tuple(hourly),
+                                minimum_bars=REFERENCE_MINIMUM_BARS,
+                            ).bars,
                             kraken_hourly=tuple(
                                 row
                                 for row in hourly

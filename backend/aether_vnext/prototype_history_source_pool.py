@@ -208,3 +208,52 @@ async def fetch_historical_reference_pool(
         ))
 
     raise HistoricalReferenceUnavailable(tuple(attempts))
+
+
+def select_persisted_reference_history(
+    rows: tuple[PrototypeMarketBar, ...],
+    *,
+    minimum_bars: int = REFERENCE_MINIMUM_BARS,
+) -> HistoricalReferenceResult:
+    """Select one complete persisted reference source by policy tier.
+
+    Persisted bars from different providers are never blended at identical timestamps.
+    This lets failover and later primary recovery coexist in the ledger without
+    manufacturing a composite historical tape.
+    """
+    if minimum_bars < 1:
+        raise ValueError("minimum_bars must be positive")
+    attempts: list[HistoricalSourceAttempt] = []
+    tier_by_source = {
+        CRYPTOCOMPARE_SOURCE_ID: 1,
+        COINBASE_SOURCE_ID: 2,
+    }
+    for source_id in REFERENCE_SOURCE_IDS:
+        source_rows = tuple(
+            sorted(
+                (row for row in rows if row.source_id == source_id),
+                key=lambda row: row.bucket_open_utc,
+            )
+        )
+        if len(source_rows) >= minimum_bars:
+            attempts.append(HistoricalSourceAttempt(
+                source_id=source_id,
+                tier=tier_by_source[source_id],
+                status="READY",
+                reason=None,
+                bar_count=len(source_rows),
+            ))
+            return HistoricalReferenceResult(
+                bars=source_rows,
+                selected_source_id=source_id,
+                selected_tier=tier_by_source[source_id],
+                attempts=tuple(attempts),
+            )
+        attempts.append(HistoricalSourceAttempt(
+            source_id=source_id,
+            tier=tier_by_source[source_id],
+            status="INSUFFICIENT",
+            reason=f"persisted_bar_count:{len(source_rows)}<{minimum_bars}",
+            bar_count=len(source_rows),
+        ))
+    raise HistoricalReferenceUnavailable(tuple(attempts))

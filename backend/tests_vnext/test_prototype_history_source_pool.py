@@ -10,6 +10,7 @@ from aether_vnext.prototype_history_source_pool import (
     HistoricalReferenceUnavailable,
     REFERENCE_MINIMUM_BARS,
     fetch_historical_reference_pool,
+    select_persisted_reference_history,
 )
 
 
@@ -170,6 +171,84 @@ def test_service_health_reports_exhaustion_without_fabricating_integrity() -> No
         ),
     ))
     health = exc.health_payload()
+    assert health["service_state"] == "UNAVAILABLE"
+    assert health["integrity_state"] == "NOT_OBSERVED"
+    assert health["source_exhausted"] is True
+
+
+def _bar(source_id: str, hour: int, close: float):
+    from datetime import timedelta
+    from aether_vnext.prototype_market_history import PrototypeMarketBar
+
+    opened = NOW - timedelta(hours=REFERENCE_MINIMUM_BARS - hour)
+    return PrototypeMarketBar(
+        asset_id="kraken:solusd",
+        interval_seconds=3600,
+        bucket_open_utc=opened,
+        bucket_close_utc=opened + timedelta(hours=1),
+        open=close,
+        high=close + 1.0,
+        low=close - 1.0,
+        close=close,
+        volume=1.0,
+        trade_count=0,
+        source_id=source_id,
+        source_ref=f"test:{source_id}",
+        available_at_utc=opened + timedelta(hours=1),
+    )
+
+
+def test_persisted_reference_selection_never_blends_sources() -> None:
+    primary = tuple(
+        _bar(CRYPTOCOMPARE_SOURCE_ID, i, 100.0 + i)
+        for i in range(REFERENCE_MINIMUM_BARS)
+    )
+    backup = tuple(
+        _bar(COINBASE_SOURCE_ID, i, 200.0 + i)
+        for i in range(REFERENCE_MINIMUM_BARS)
+    )
+    result = select_persisted_reference_history((*backup, *primary))
+    assert result.selected_source_id == CRYPTOCOMPARE_SOURCE_ID
+    assert len(result.bars) == REFERENCE_MINIMUM_BARS
+    assert {row.source_id for row in result.bars} == {CRYPTOCOMPARE_SOURCE_ID}
+
+
+def test_persisted_reference_selection_keeps_backup_until_primary_complete() -> None:
+    primary = tuple(
+        _bar(CRYPTOCOMPARE_SOURCE_ID, i, 100.0 + i)
+        for i in range(REFERENCE_MINIMUM_BARS - 1)
+    )
+    backup = tuple(
+        _bar(COINBASE_SOURCE_ID, i, 200.0 + i)
+        for i in range(REFERENCE_MINIMUM_BARS)
+    )
+    result = select_persisted_reference_history((*primary, *backup))
+    assert result.selected_source_id == COINBASE_SOURCE_ID
+    assert result.selected_tier == 2
+    assert {row.source_id for row in result.bars} == {COINBASE_SOURCE_ID}
+
+
+def test_persisted_reference_selection_promotes_recovered_primary_when_complete() -> None:
+    backup = tuple(
+        _bar(COINBASE_SOURCE_ID, i, 200.0 + i)
+        for i in range(REFERENCE_MINIMUM_BARS)
+    )
+    recovered_primary = tuple(
+        _bar(CRYPTOCOMPARE_SOURCE_ID, i, 100.0 + i)
+        for i in range(REFERENCE_MINIMUM_BARS)
+    )
+    result = select_persisted_reference_history((*backup, *recovered_primary))
+    assert result.selected_source_id == CRYPTOCOMPARE_SOURCE_ID
+    assert result.selected_tier == 1
+
+
+def test_persisted_reference_exhaustion_preserves_not_observed_integrity() -> None:
+    with pytest.raises(HistoricalReferenceUnavailable) as exc:
+        select_persisted_reference_history((
+            _bar(CRYPTOCOMPARE_SOURCE_ID, 0, 100.0),
+            _bar(COINBASE_SOURCE_ID, 0, 200.0),
+        ))
+    health = exc.value.health_payload()
     assert health["service_state"] == "UNAVAILABLE"
     assert health["integrity_state"] == "NOT_OBSERVED"
     assert health["source_exhausted"] is True
