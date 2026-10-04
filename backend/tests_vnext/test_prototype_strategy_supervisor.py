@@ -413,6 +413,17 @@ async def test_dynamic_history_fetches_reference_and_direct_kraken_lanes(monkeyp
             bars=("reference-hour",),
             selected_source_id="test-reference",
             attempts=(),
+            health_payload=lambda: {
+                "service": "historical_reference",
+                "service_state": "READY",
+                "integrity_state": "FULL",
+                "selected_source_id": "test-reference",
+                "selected_tier": 1,
+                "failover_active": False,
+                "source_exhausted": False,
+                "attempted_source_count": 1,
+                "standby_state": "NOT_OBSERVED",
+            },
         )
 
     async def fake_hourly(**kwargs):
