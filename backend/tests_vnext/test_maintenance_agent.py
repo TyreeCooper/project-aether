@@ -226,17 +226,15 @@ async def test_background_maintenance_uses_safe_defaults_when_control_store_stal
 
     result = await supervisor.run_once()
 
-    assert result["status"] == "BUSY"
-    assert (
-        result["control_read_warning"]
-        == "maintenance_control_store_timeout"
-    )
-    assert result["controls_source"] == "safe_defaults_after_timeout"
+    # A control-store timeout now falls back to the startup-safe defaults. Since
+    # master_enabled defaults OFF, the maintenance worker remains inert rather than
+    # diagnosing a partially warmed runtime or attempting any repair.
+    assert result["status"] == "DISABLED"
+    assert result["maintenance_mode"] == "OFF"
+    assert result["controls"]["master_enabled"] is False
     assert result["controls"]["auto_repair_enabled"] is False
-    assert (
-        result["incident_persistence"]
-        == "SKIPPED_CONTROL_STORE_TIMEOUT"
-    )
+    assert result["paper_only"] is True
+    assert result["live_blocked"] is True
     assert supervisor.status().last_timeout_phase == "load_controls"
 
 
