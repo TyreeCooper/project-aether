@@ -2,164 +2,85 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from app.vnext_market_fabric import build_market_fabric_runtime_snapshot
+from aether_vnext.market_truth_contract import EvidenceState, ExecutionState
+from aether_vnext.market_truth_evidence import EvidenceSnapshot
+from aether_vnext.market_truth_fabric import ExecutableBookSnapshot
+from aether_vnext.market_truth_first_proof import first_proof_provider_cards, first_proof_route
+from aether_vnext.market_truth_runtime import build_market_truth_snapshot
+from aether_vnext.market_truth_universe import AssetUniverse, AssetUniverseRow
 
 
 UTC = timezone.utc
+NOW = datetime(2026, 10, 4, 22, 0, tzinfo=UTC)
 
 
-def test_runtime_snapshot_keeps_executable_and_evidence_price_domains_separate() -> None:
-    payload = build_market_fabric_runtime_snapshot(
-        ingress_status={
-            "enabled": True,
-            "running": True,
-            "cycle_count": 10,
-            "last_error": None,
-            "last_result": {
-                "quotes": [
-                    {
-                        "asset_id": "btc",
-                        "source_id": "kraken_public",
-                        "venue": "Kraken",
-                        "bid": 100000.0,
-                        "ask": 100002.0,
-                        "last": 100001.0,
-                        "mark": 100001.0,
-                        "reference_ts_utc": "2026-10-04T08:00:00+00:00",
-                    }
-                ]
-            },
-        },
-        tape_snapshot={
-            "runtime": {"running": True},
-            "assets": [
-                {
-                    "asset_id": "btc",
-                    "state": "FULL",
-                    "composite_id": "cmp-1",
-                    "composite_mark": 99950.0,
-                    "source_count": 3,
-                    "accepted_source_ids": [
-                        "kraken_public_tape",
-                        "coinbase_exchange_tape",
-                        "gemini_public_tape",
-                    ],
-                    "quorum_required": 3,
-                    "agreement_bps": 1.2,
-                    "provenance_complete": True,
-                }
-            ],
-        },
-        as_of_utc=datetime(2026, 10, 4, 8, 0, 1, tzinfo=UTC),
+def _fixture(*, execution_state=ExecutionState.EXECUTABLE, evidence_state=EvidenceState.SINGLE_SOURCE):
+    universe = AssetUniverse((
+        AssetUniverseRow("btc-usd", "spot_crypto", 0.1, 0.0001, "crypto_24x7"),
+    ))
+    providers = first_proof_provider_cards()
+    route = first_proof_route(human_set_by="operator", set_at_utc=NOW)
+    if execution_state is ExecutionState.EXECUTABLE:
+        book = ExecutableBookSnapshot(
+            canonical_instrument_id="btc-usd",
+            route_id=route.route_id,
+            executable_provider_id="kraken",
+            venue="Kraken",
+            transport_id="kraken-public-ws-v2-primary",
+            state=execution_state,
+            bid=100.0,
+            ask=101.0,
+            last_if_printed=100.4,
+            bid_size=1.0,
+            ask_size=2.0,
+            venue_time_utc=NOW,
+            receive_time_utc=NOW,
+            state_reason="fresh_coherent_route_book",
+        )
+    else:
+        book = ExecutableBookSnapshot.not_observed(
+            route, venue="Kraken", reason="socket_down"
+        )
+    evidence = EvidenceSnapshot(
+        canonical_instrument_id="btc-usd",
+        route_id=route.route_id,
+        state=evidence_state,
+        configured_witness_count=1,
+        observed_witness_count=1 if evidence_state is not EvidenceState.NO_WITNESS else 0,
+        fresh_coherent_witness_count=1 if evidence_state is not EvidenceState.NO_WITNESS else 0,
+        assessments=(),
+        max_gap_bps_to_executable=None,
+    )
+    return build_market_truth_snapshot(
+        universe=universe,
+        providers=providers,
+        route=route,
+        book=book,
+        evidence=evidence,
+        runtime_status={"running": True},
     )
 
-    row = payload["instruments"][0]
-    assert row["executable"]["bid"] == 100000.0
-    assert row["executable"]["ask"] == 100002.0
-    assert row["intelligence"]["derived_reference_mark"] == 99950.0
-    assert row["intelligence"]["derived_reference_executable"] is False
-    assert row["intelligence"]["declared_independence_group_count"] == 3
-    assert row["intelligence"]["empirical_independence_group_count"] is None
-    assert len(row["intelligence"]["source_identities"]) == 3
-    assert payload["runtime_contract"]["declared_independence_runtime"] == "BOUND"
-    assert payload["runtime_contract"]["empirical_independence_runtime"] == "NOT_OBSERVED"
-    assert payload["authority"]["consensus_can_replace_executable_price"] is False
+
+def test_market_fabric_api_contract_is_canonical_five_layer_runtime() -> None:
+    payload = _fixture()
+    assert payload["architecture"] == "AETHER_MARKET_TRUTH_V1"
     assert payload["paper_only"] is True
     assert payload["live_blocked"] is True
+    assert payload["authority"]["witness_can_replace_executable_price"] is False
+    assert payload["authority"]["automatic_execution_venue_switch_allowed"] is False
+    assert payload["runtime_contract"]["missing_field_semantics"] == "NULL_NEVER_ZERO"
+    assert "NO_WITNESS" in payload["runtime_contract"]["evidence_states"]
+    assert "NOT_OBSERVED" not in payload["runtime_contract"]["evidence_states"]
 
 
-def test_runtime_snapshot_preserves_not_observed_without_inventing_prices() -> None:
-    payload = build_market_fabric_runtime_snapshot(
-        ingress_status={
-            "enabled": True,
-            "running": True,
-            "cycle_count": 1,
-            "last_error": None,
-            "last_result": {"quotes": []},
-        },
-        tape_snapshot={
-            "runtime": {"running": True},
-            "assets": [
-                {
-                    "asset_id": "eth",
-                    "state": "DEGRADED",
-                    "composite_id": "cmp-eth",
-                    "composite_mark": 4500.0,
-                    "source_count": 2,
-                    "accepted_source_ids": [
-                        "kraken_public_tape",
-                        "coinbase_exchange_tape",
-                    ],
-                    "quorum_required": 3,
-                    "agreement_bps": 3.0,
-                    "provenance_complete": True,
-                }
-            ],
-        },
-        as_of_utc=datetime(2026, 10, 4, 8, 0, 1, tzinfo=UTC),
+def test_market_fabric_keeps_execution_and_evidence_axes_separate() -> None:
+    payload = _fixture(
+        execution_state=ExecutionState.NOT_OBSERVED,
+        evidence_state=EvidenceState.FULL,
     )
-
     row = payload["instruments"][0]
     assert row["executable"]["state"] == "NOT_OBSERVED"
     assert row["executable"]["bid"] is None
     assert row["executable"]["ask"] is None
-    assert row["intelligence"]["derived_reference_mark"] == 4500.0
+    assert row["intelligence"]["evidence_state"] == "FULL"
     assert row["intelligence"]["derived_reference_executable"] is False
-
-
-def test_runtime_snapshot_projects_full_commissioned_universe_before_tape_or_cycle_close() -> None:
-    payload = build_market_fabric_runtime_snapshot(
-        ingress_status={
-            "enabled": True,
-            "running": True,
-            "cycle_count": 0,
-            "last_error": None,
-            "last_result": None,
-            "live_quotes": [
-                {
-                    "asset_id": "kraken:solusd",
-                    "symbol": "SOL/USD",
-                    "source_id": "kraken_public_ticker_v2",
-                    "venue": "Kraken",
-                    "bid": 145.10,
-                    "ask": 145.12,
-                    "last": 145.11,
-                    "mark": 145.11,
-                    "reference_ts_utc": "2026-10-04T20:00:00+00:00",
-                    "received_ts_utc": "2026-10-04T20:00:00+00:00",
-                }
-            ],
-        },
-        tape_snapshot={"runtime": {"running": True}, "assets": []},
-        executable_universe=(
-            {
-                "asset_id": "btc",
-                "symbol": "BTC/USD",
-                "execution_symbol": "XBT/USD",
-                "venue": "Kraken",
-                "source_id": "kraken_public_ticker_v2",
-                "asset_class": "spot_crypto",
-            },
-            {
-                "asset_id": "kraken:solusd",
-                "symbol": "SOL/USD",
-                "execution_symbol": "SOL/USD",
-                "venue": "Kraken",
-                "source_id": "kraken_public_ticker_v2",
-                "asset_class": "spot_crypto",
-            },
-        ),
-        as_of_utc=datetime(2026, 10, 4, 20, 0, 1, tzinfo=UTC),
-    )
-
-    by_asset = {row["asset_id"]: row for row in payload["instruments"]}
-    assert set(by_asset) == {"btc", "kraken:solusd"}
-    assert payload["execution_universe"]["commissioned_count"] == 2
-    assert payload["execution_universe"]["quoted_count"] == 1
-    assert by_asset["btc"]["commissioned"] is True
-    assert by_asset["btc"]["executable"]["state"] == "NOT_OBSERVED"
-    assert by_asset["btc"]["executable"]["bid"] is None
-    assert by_asset["kraken:solusd"]["executable"]["state"] == "EXECUTABLE"
-    assert by_asset["kraken:solusd"]["executable"]["bid"] == 145.10
-    assert by_asset["kraken:solusd"]["executable"]["ask"] == 145.12
-    assert by_asset["kraken:solusd"]["intelligence"]["evidence_state"] == "NOT_OBSERVED"
