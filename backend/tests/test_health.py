@@ -85,14 +85,14 @@ def test_runtime_state_uses_live_progress_heartbeat_before_declaring_stall():
             "last_progress_at_utc": (now - timedelta(seconds=10)).isoformat(),
         },
     }
-    assert main._supervisor_operating_state(status, now=now) == "BUSY"
+    assert main._supervisor_operating_state(status, now=now) == "WORKING"
 
     status["progress"]["last_progress_at_utc"] = (now - timedelta(minutes=3)).isoformat()
     assert main._supervisor_operating_state(status, now=now) == "STALLED"
 
 
 
-def test_runtime_state_treats_fresh_recovery_cycle_as_busy_after_prior_fault():
+def test_runtime_state_treats_fresh_recovery_cycle_as_warming_after_prior_fault():
     from datetime import datetime, timedelta, timezone
     import app.main as main
 
@@ -112,7 +112,7 @@ def test_runtime_state_treats_fresh_recovery_cycle_as_busy_after_prior_fault():
         },
     }
 
-    assert main._supervisor_operating_state(status, now=now) == "BUSY"
+    assert main._supervisor_operating_state(status, now=now) == "WARMING"
 
     status["progress"] = {
         "cycle_state": "complete",
@@ -121,3 +121,52 @@ def test_runtime_state_treats_fresh_recovery_cycle_as_busy_after_prior_fault():
     status["last_cycle_started_at_utc"] = (now - timedelta(seconds=45)).isoformat()
     status["last_cycle_finished_at_utc"] = (now - timedelta(seconds=30)).isoformat()
     assert main._supervisor_operating_state(status, now=now) == "FAULT"
+
+
+def test_runtime_state_running_zero_cycles_is_warming():
+    from datetime import datetime, timezone
+    import app.main as main
+
+    now = datetime(2026, 10, 4, 18, 0, tzinfo=timezone.utc)
+    status = {
+        "enabled": True,
+        "running": True,
+        "cycle_count": 0,
+        "interval_seconds": 15.0,
+        "last_cycle_started_at_utc": None,
+        "last_cycle_finished_at_utc": None,
+        "last_error": None,
+        "progress": {"cycle_state": "idle", "last_progress_at_utc": None},
+    }
+    assert main._supervisor_operating_state(status, now=now) == "WARMING"
+
+
+def test_health_reports_warming_not_degraded_during_cold_start(monkeypatch):
+    import app.main as main
+
+    monkeypatch.setenv("AETHER_VNEXT_ENVIRONMENT", "sandbox")
+    warming = {
+        "enabled": True,
+        "running": True,
+        "paper_only": True,
+        "live_blocked": True,
+        "cycle_count": 0,
+        "interval_seconds": 15.0,
+        "last_cycle_started_at_utc": None,
+        "last_cycle_finished_at_utc": None,
+        "last_error": None,
+        "progress": {"cycle_state": "idle", "last_progress_at_utc": None},
+    }
+    monkeypatch.setattr(main, "configured_vnext_ingress_status", lambda: dict(warming))
+    monkeypatch.setattr(main, "current_discovery_status", lambda: dict(warming))
+    monkeypatch.setattr(main, "configured_vnext_strategy_status", lambda: dict(warming))
+    monkeypatch.setattr(main, "configured_vnext_tape_status", lambda: dict(warming))
+    monkeypatch.setattr(main, "configured_vnext_maintenance_status", lambda: {
+        **warming, "enabled": False, "running": False
+    })
+
+    response = client.get("/api/v1/health")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["pipeline_state"] == "WARMING"
+    assert body["supervisor_state"]["ingress"] == "WARMING"

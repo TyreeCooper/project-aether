@@ -319,13 +319,13 @@ def _supervisor_operating_state(
             busy_stale_after = 90.0
         if heartbeat is not None and (now - heartbeat).total_seconds() > busy_stale_after:
             return "STALLED"
-        # last_error belongs to the previously completed attempt. A new cycle
-        # with a fresh progress heartbeat is active recovery, not a current FAULT.
-        return "BUSY"
+        # A running supervisor with no completed cycle is warming, not degraded.
+        # After the first completed cycle, an in-flight cycle is normal WORKING.
+        return "WARMING" if cycles == 0 else "WORKING"
     if status.get("last_error"):
         return "FAULT"
     if cycles == 0:
-        return "STARTING"
+        return "WARMING"
     heartbeat = finished or progress_heartbeat or started
     if heartbeat is not None and (now - heartbeat).total_seconds() > stale_after:
         return "STALLED"
@@ -448,13 +448,15 @@ async def health():
             for name in ("ingress", "discovery", "tape", "strategy")
         )
         if any(state == "FAULT" for state in primary):
-            pipeline_state = "DEGRADED"
+            pipeline_state = "FAULT"
         elif any(state == "STALLED" for state in primary):
             pipeline_state = "STALLED"
         elif any(state in {"BLOCKED", "OFF"} for state in primary):
             pipeline_state = "BLOCKED"
-        elif any(state in {"STARTING", "BUSY"} for state in primary):
-            pipeline_state = "BUSY"
+        elif any(state in {"STARTING", "WARMING"} for state in primary):
+            pipeline_state = "WARMING"
+        elif any(state == "WORKING" for state in primary):
+            pipeline_state = "WORKING"
         elif all(state == "ACTIVE" for state in primary):
             pipeline_state = "ACTIVE"
         else:

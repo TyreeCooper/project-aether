@@ -114,7 +114,7 @@ function tone(value) {
   const v = String(value || "").toUpperCase();
   if (["CLEAR","RUNNING","ONLINE","OPEN","READY","GREEN","ACTIVE","FULL","HIGH"].includes(v)) return "good";
   if (["FAULT","BLOCKED","HALT","REJECT","ERROR","OFFLINE","STALLED","UNSAFE","CONTESTED"].includes(v)) return "bad";
-  if (["DEGRADED","SINGLE_SOURCE","CREDENTIAL_REQUIRED","WAIT","WATCH","FIRE","STARTING","SYNCING","BUSY","CATCHING_UP","BASELINE_PENDING","RECOVERY","RECOVERY_BEFORE_BASELINE"].includes(v)) return "warn";
+  if (["DEGRADED","SINGLE_SOURCE","CREDENTIAL_REQUIRED","WAIT","WAITING","WATCH","FIRE","STARTING","WARMING","WORKING","SYNCING","BUSY","CATCHING_UP","BASELINE_PENDING","RECOVERY","RECOVERY_BEFORE_BASELINE","FAILOVER","INSUFFICIENT_HISTORY"].includes(v)) return "warn";
   return "neutral";
 }
 
@@ -216,12 +216,12 @@ function supervisorState(supervisor, nowMs) {
         : 90000,
     );
     if (Number.isFinite(busyHeartbeat) && nowMs - busyHeartbeat > busyStaleAfterMs) return "STALLED";
-    return "BUSY";
+    return cycles === 0 ? "WARMING" : "WORKING";
   }
   // Match backend health semantics exactly: a previous-cycle error is not a
   // current FAULT while a fresh recovery cycle is actively making progress.
   if (supervisor.last_error) return "FAULT";
-  if (cycles === 0) return "STARTING";
+  if (cycles === 0) return "WARMING";
   const heartbeat = Number.isFinite(finished)
     ? finished
     : Number.isFinite(progressHeartbeat)
@@ -238,15 +238,12 @@ function pipelineRuntimeState(ingress, discovery, tape, strategy, maintenance, n
     supervisorState(tape?.runtime, nowMs),
     supervisorState(strategy, nowMs),
   ];
-  if (states.includes("FAULT")) return "DEGRADED";
+  if (states.includes("FAULT")) return "FAULT";
   if (states.includes("STALLED")) return "STALLED";
   if (states.includes("BLOCKED") || states.includes("OFF")) return "BLOCKED";
-  if (states.some((state) => ["STARTING","BUSY","WAIT"].includes(state))) return "BUSY";
-  if (states.every((state) => state === "ACTIVE")) {
-    const maintenanceState = String(maintenance?.last_result?.status || "").toUpperCase();
-    if (["FAULT","BLOCKED","DEGRADED","STALLED"].includes(maintenanceState)) return "DEGRADED";
-    return "ACTIVE";
-  }
+  if (states.some((state) => ["STARTING","WARMING","WAIT"].includes(state))) return "WARMING";
+  if (states.includes("WORKING")) return "WORKING";
+  if (states.every((state) => state === "ACTIVE")) return "ACTIVE";
   return "NOT OBSERVED";
 }
 
