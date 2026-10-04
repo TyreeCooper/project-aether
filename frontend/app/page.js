@@ -712,7 +712,7 @@ const PIPELINE_TRUE_PREDICATES = {
   CATALOG: "eligible provider row → FOCUS_ADMITTED; provider rank is priority telemetry, not execution permission",
   FOCUS_ADMITTED: "projection.product != null && runtime_playbook_for_product(...) succeeds",
   PRODUCT_BOUND: "full commissioned compatible universe ordered OPEN/attention first; worker concurrency affects scheduling only and assets_dropped=0",
-  ROAMING_SCAN: "Tape-governed assets require FULL AETHER consensus; otherwise canonical decision-time ingress observation must be valid, with binding/lifecycle gates still enforced",
+  ROAMING_SCAN: "canonical executable-route observation must exist and remain valid; Market Fabric evidence may admit/block covered strategy paths but derived witness prices are never executable and never overwrite route truth",
   MARKET_READY: "history.error is None && source-bound warm-up snapshot assembles successfully",
   HISTORY_READY: "completed trigger bar closes at/before as_of_utc && setup identity has not already completed",
   STRATEGY_EVALUATED: "plan.eligible === true → WATCH; otherwise terminal NO_SETUP evidence",
@@ -761,152 +761,161 @@ function reconcileGate({ input, pass, wait, reject, bypass = 0, fault = 0, exact
 
 const PIPELINE_GATE_BLUEPRINT = [
   {
+    number: 1,
     stage: "CATALOG",
-    label: "Provider Catalog",
+    label: "Discovery Admission",
     owner: "Discovery",
-    gate: "Discovery eligibility & focus admission",
-    plain: "Provider rows must survive catalog eligibility and enter the prioritized focus pool. Rank controls attention order; it is not permission to trade.",
-    dev: 'provider_focus_handoff.focus_handoff_rows() → state="FOCUS_ADMITTED"; provider rank remains priority telemetry, not an execution veto.',
+    gate: "Discovery Admission",
+    plain: "Provider catalogs are admitted into AETHER only after eligibility checks. Priority changes evaluation order; it never becomes execution permission.",
+    dev: 'provider_focus_handoff.focus_handoff_rows() → FOCUS_ADMITTED; provider rank remains attention telemetry.',
   },
   {
+    number: 2,
     stage: "FOCUS_ADMITTED",
-    label: "Focus Admitted",
-    owner: "Discovery → Runtime",
-    gate: "Runtime product commissioning",
-    plain: "The instrument needs a real runtime product definition and a commissioned strategy contract before it can enter deep evaluation.",
-    dev: 'prototype_strategy_supervisor._sync_dynamic_kraken_products() + runtime_playbook_for_product(..., playbook_id="pb_crypto_swing_v1_2").',
+    label: "Commissioning",
+    owner: "Discovery → Runtime Registry",
+    gate: "Commissioning",
+    plain: "An admitted instrument must resolve to a real runtime product, canonical identity and compatible commissioned strategy contract.",
+    dev: 'prototype_strategy_supervisor._sync_dynamic_kraken_products() + runtime_playbook_for_product(...).',
   },
   {
+    number: 3,
     stage: "PRODUCT_BOUND",
-    label: "Product Bound",
+    label: "Work Scheduler",
     owner: "Runtime Registry",
-    gate: "Full-universe work scheduler",
-    plain: "Every commissioned compatible product remains in the work set. Open positions and attention-ranked assets move first, while bounded worker concurrency controls simultaneous history I/O without dropping eligibility.",
-    dev: "prototype_strategy_supervisor._ordered_dynamic_strategy_work(...); configured_dynamic_strategy_scan_batch_size() controls workers only and _dynamic_flow_telemetry() proves assets_dropped=0.",
+    gate: "Work Scheduler",
+    plain: "Every commissioned compatible product remains eligible for work. Scheduling and worker concurrency control order and throughput, not eligibility.",
+    dev: "prototype_strategy_supervisor._ordered_dynamic_strategy_work(...); worker concurrency is bounded while assets_dropped remains zero.",
   },
   {
+    number: 4,
     stage: "ROAMING_SCAN",
-    label: "Roaming Scan",
-    owner: "Strategy Supervisor",
-    gate: "Executable market ingress",
-    plain: "The product must have executable market plumbing, valid lifecycle/calendar state, a usable quote and a decision-time clock that is not invalid.",
-    dev: "market_ingress.ingest_market_quotes() → binding_blockers(), ProductRegistryRow.market_data_ready(), lifecycle_fire_eligible(); then _partition_observations_for_decision_time().",
+    label: "Executable Ingress",
+    owner: "Market Fabric",
+    gate: "Executable Ingress",
+    plain: "AETHER requires a valid executable-route observation. Market Fabric witness evidence may corroborate or gate that observation, but it can never create, average into, or overwrite the executable price.",
+    dev: "market_ingress.ingest_market_quotes() supplies executable truth; _apply_tape_market_policy() applies evidence-only admission and preserves the executable observation unchanged.",
   },
   {
+    number: 5,
     stage: "MARKET_READY",
-    label: "Market Ready",
-    owner: "Market Ingress",
-    gate: "History & warm-up completeness",
-    plain: "A current quote is not enough. The strategy requires enough completed history to build its source-bound feature snapshot before evaluation.",
-    dev: "prototype_strategy_supervisor._fetch_dynamic_strategy_history() → assemble_prototype_crypto_warmup(). Current crypto warm-up uses Coinbase/Kraken history and supplies btc_kraken_daily regime context.",
-  },
-  {
-    stage: "HISTORY_READY",
-    label: "History Ready",
+    label: "History & Warm-Up",
     owner: "History / Features",
-    gate: "Closed-bar strategy evaluation",
-    plain: "Only a completed decision bar may trigger evaluation. The current crypto path requires the exact completed 1-hour Kraken bar, rejects future/unavailable bars and will not re-enter an already-traded setup.",
-    dev: "prototype_crypto_entry_runtime._require_completed_kraken_hour() + build_prototype_crypto_entry_plan(); prototype_strategy_supervisor._setup_already_completed().",
+    gate: "History & Warm-Up",
+    plain: "Executable market truth alone is not enough. The strategy must have the required completed historical context and feature warm-up before evaluation.",
+    dev: "prototype_strategy_supervisor._fetch_dynamic_strategy_history() → assemble_prototype_crypto_warmup().",
   },
   {
-    stage: "STRATEGY_EVALUATED",
-    label: "Strategy Evaluated",
+    number: 6,
+    stage: "HISTORY_READY",
+    label: "Closed-Bar Evaluation",
     owner: "Strategy",
-    gate: "Scout setup admission",
-    plain: "The evaluated strategy must actually produce a WATCH candidate. A valid evaluation with no setup is a normal no-trade outcome, not a broken pipeline.",
-    dev: "advance_prototype_crypto_entry(): if !plan.eligible → NO_SETUP; runtime_scout_bridge.persist_cycle_watch_setups() persists only cycle.decision.watch_candidates.",
+    gate: "Closed-Bar Evaluation",
+    plain: "Only completed decision bars may be evaluated. Future, incomplete or duplicate setup identity is rejected before a setup can advance.",
+    dev: "prototype_crypto_entry_runtime._require_completed_kraken_hour() + build_prototype_crypto_entry_plan() + _setup_already_completed().",
   },
   {
-    stage: "WATCH",
-    label: "WATCH",
+    number: 7,
+    stage: "STRATEGY_EVALUATED",
+    label: "Scout Admission",
     owner: "Scout",
-    gate: "Sniper FIRE validation",
-    plain: "The setup must still match the completed trigger bar, remain uninvalidated, have usable current market data, support the requested side and carry a legal protective stop.",
-    dev: "sniper.evaluate_sniper_fire(); VNextStore.record_sniper_ticket() also rejects duplicate signal_key, BENCH/DISABLED route state and Governor admission blocks.",
+    gate: "Scout Admission",
+    plain: "A valid strategy evaluation advances only a real setup into WATCH. NO_SETUP is a terminal evaluation outcome, not a pipeline fault.",
+    dev: "advance_prototype_crypto_entry() → WATCH or NO_SETUP; runtime_scout_bridge persists only qualified watch candidates.",
   },
   {
-    stage: "FIRE",
-    label: "FIRE",
+    number: 8,
+    stage: "WATCH",
+    label: "Sniper Fire",
     owner: "Sniper",
-    gate: "Firm Risk sizing",
-    plain: "Risk sizes the trade against current Firm equity and the combined open + pending exposure. A candidate cannot consume more than the frozen trade, asset, cluster or portfolio capacity.",
-    dev: "runtime_risk_bridge.size_runtime_fire_ticket() → VNextStore.size_fire_ticket() → risk.size_candidate_to_risk(); ceilings: trade 0.75%, asset 1.50%, cluster 2.25%, portfolio 3.00%.",
+    gate: "Sniper Fire",
+    plain: "The WATCH setup must remain valid at trigger time: completed-bar identity, market health, supported side, invalidation state and stop legality are checked again.",
+    dev: "sniper.evaluate_sniper_fire(); duplicate signal, disabled route and Governor blocks remain fail-closed.",
   },
   {
-    stage: "SIZE",
-    label: "SIZE",
+    number: 9,
+    stage: "FIRE",
+    label: "Risk / Size",
     owner: "Risk",
-    gate: "Clerk economics",
-    plain: "The Risk-sized candidate must have a supported side and enough expected opportunity to clear modeled round-trip costs. Clerk cannot increase the Risk quantity.",
-    dev: "runtime_clerk_bridge.evaluate_and_persist_clerk_ready() → clerk.evaluate_clerk_ready(); current crypto path passes PROTOTYPE_COST_EDGE_MULTIPLE=1.40.",
+    gate: "Risk / Size",
+    plain: "Risk sizes the candidate against Firm equity and aggregate open plus pending exposure. Trade, asset, cluster, portfolio and instrument ceilings remain hard constraints.",
+    dev: "runtime_risk_bridge.size_runtime_fire_ticket() → risk.size_candidate_to_risk().",
   },
   {
-    stage: "READY",
-    label: "READY",
+    number: 10,
+    stage: "SIZE",
+    label: "Clerk",
     owner: "Clerk",
-    gate: "Portfolio atomic reservation",
-    plain: "Before an order exists, Portfolio rechecks identity, product binding, Governor state and Firm risk capacity, then atomically reserves the OPEN intent so concurrent candidates cannot spend the same capacity.",
-    dev: "runtime_portfolio_bridge.reserve_runtime_ready_ticket() → VNextStore.reserve_risk_checked_open_intent(); idempotency + active-book and RESERVED/SUBMITTED risk are checked under the Firm guard row.",
+    gate: "Clerk",
+    plain: "Clerk validates product-side support and execution economics. It cannot increase Risk quantity and the opportunity must clear the modeled cost hurdle.",
+    dev: "runtime_clerk_bridge.evaluate_and_persist_clerk_ready() → clerk.evaluate_clerk_ready().",
   },
   {
+    number: 11,
+    stage: "READY",
+    label: "Portfolio Reserve",
+    owner: "Portfolio",
+    gate: "Portfolio Reserve",
+    plain: "Portfolio rechecks identity, Governor state, risk and capital, then atomically reserves the OPEN intent so concurrent candidates cannot consume the same capacity.",
+    dev: "runtime_portfolio_bridge.reserve_runtime_ready_ticket() → reserve_risk_checked_open_intent().",
+  },
+  {
+    number: 12,
     stage: "RESERVED",
-    label: "RESERVED",
-    owner: "Portfolio",
-    gate: "PAPER submit",
-    plain: "The reserved intent can submit only through the PAPER adapter. It must still be a MARKET_PAPER OPEN intent with an existing Firm risk reservation.",
-    dev: "runtime_execution_bridge.submit_runtime_reserved_open(); requires PAPER_ONLY && LIVE_BLOCKED, state=RESERVED, order_type=MARKET_PAPER and tracked risk reservation.",
+    label: "Paper Submit",
+    owner: "PAPER Execution",
+    gate: "Paper Submit",
+    plain: "Only a valid RESERVED OPEN intent may enter the PAPER execution adapter. LIVE remains hard blocked.",
+    dev: "runtime_execution_bridge.submit_runtime_reserved_open(); PAPER_ONLY && LIVE_BLOCKED are mandatory.",
   },
   {
+    number: 13,
     stage: "SUBMITTED",
-    label: "SUBMITTED",
-    owner: "Paper Execution",
-    gate: "Fill-time market guard",
-    plain: "Submission does not guarantee a fill. The later fill cycle waits for paper latency and rechecks market quality, freshness, session, spread expansion and protective-stop geometry.",
-    dev: "runtime_fill_bridge.fill_runtime_submitted_open() → execution.fill_submitted_paper_intent(); 250ms latency, spread ≤ 2× READY spread, stop not breached, no bad_fill_through_stop.",
+    label: "Fill Guard",
+    owner: "PAPER Fill",
+    gate: "Fill Guard",
+    plain: "Submission is not a fill. The later PAPER fill gate revalidates executable market freshness, session state, spread expansion, latency and stop geometry.",
+    dev: "runtime_fill_bridge.fill_runtime_submitted_open() → execution.fill_submitted_paper_intent().",
   },
   {
+    number: 14,
     stage: "OPEN",
-    label: "OPEN",
+    label: "Exit Management",
     owner: "Position Management",
-    gate: "Exit management",
-    plain: "An open position remains managed regardless of discovery rank. Exit logic evaluates the position from current market and completed-bar state; a failed close does not make the position disappear.",
-    dev: "prototype_crypto_exit_runtime.advance_prototype_crypto_exit(); close lifecycle continues through runtime_exit_request_bridge / runtime_close_reserve_bridge / runtime_close_execution_bridge / runtime_close_fill_bridge.",
+    gate: "Exit Management",
+    plain: "An OPEN position stays managed independently of discovery rank. Exit logic continuously evaluates valid exit precedence against current executable market state.",
+    dev: "prototype_crypto_exit_runtime.advance_prototype_crypto_exit() evaluates hard stop, structure and time-stop paths.",
   },
   {
+    number: 15,
     stage: "EXIT_REQUESTED",
-    label: "Flatten Requested",
-    owner: "Exit",
-    gate: "Close reservation",
-    plain: "A valid exit reason is persisted as FLATTEN_REQUEST. The position is still OPEN until the close lifecycle actually succeeds.",
-    dev: "runtime_exit_request_bridge.request_runtime_flatten() validates EXIT_PRECEDENCE, OPEN trade identity and observation identity before persisting FLATTEN_REQUEST.",
+    label: "Close Reservation",
+    owner: "Exit → Portfolio",
+    gate: "Close Reservation",
+    plain: "A valid exit reason creates a FLATTEN_REQUEST, but the position remains OPEN until the matching close is safely reserved.",
+    dev: "runtime_exit_request_bridge.request_runtime_flatten() → runtime_close_reserve_bridge.reserve_runtime_flatten().",
   },
   {
+    number: 16,
     stage: "CLOSE_RESERVED",
-    label: "Close Reserved",
-    owner: "Portfolio",
-    gate: "Paper close submit",
-    plain: "The risk-reducing close must map to the still-open trade and matching FLATTEN_REQUEST. It reserves zero new cash and zero new margin.",
-    dev: "runtime_close_reserve_bridge.reserve_runtime_flatten() requires matching FLATTEN_REQUEST and OPEN trade identity; reserve_cash_usd=0 and reserve_margin_usd=0.",
+    label: "Paper Close Submit",
+    owner: "PAPER Execution",
+    gate: "Paper Close Submit",
+    plain: "The risk-reducing close intent must map to the still-open trade and reserve zero new cash and zero new margin before PAPER submission.",
+    dev: "runtime_close_execution_bridge.submit_runtime_reserved_close().",
   },
   {
+    number: 17,
     stage: "CLOSE_SUBMITTED",
-    label: "Close Submitted",
-    owner: "Paper Execution",
-    gate: "Close fill-time guard",
-    plain: "The submitted close waits for paper latency and must still have fresh executable market data. A rejected close leaves the trade OPEN for a later retry with new market evidence.",
-    dev: "runtime_close_execution_bridge.submit_runtime_reserved_close() → runtime_close_fill_bridge.fill_runtime_submitted_close(); rejection releases the reservation and prototype_crypto_exit_runtime returns OPEN.",
-  },
-  {
-    stage: "FLAT",
-    label: "FLAT / BLOTTER",
-    owner: "Book of Record",
-    gate: null,
-    plain: "Completed round trips land in the blotter and evidence surfaces with execution economics and exit reason.",
-    dev: "Terminal close persistence feeds the durable book / blotter; this is the end of the entry-to-close path shown here.",
+    label: "Close Fill",
+    owner: "PAPER Fill",
+    gate: "Close Fill",
+    plain: "The submitted close must pass paper latency and a fresh executable-market guard. Only the verified terminal fill may move the trade to FLAT.",
+    dev: "runtime_close_fill_bridge.fill_runtime_submitted_close() → finalize_filled_flat().",
   },
 ];
 
-function Pipeline({ strategy, discovery, ingress, tape, maintenance, floor, operator, nowMs }) {
+function Pipeline({ strategy, discovery, ingress, tape, marketFabric, maintenance, floor, operator, nowMs }) {
   const pipe = strategy?.last_result?.pipeline || {};
   const registry = strategy?.last_result?.dynamic_product_registry || {};
   const roam = strategy?.last_result?.dynamic_roam || {};
@@ -1058,6 +1067,14 @@ function Pipeline({ strategy, discovery, ingress, tape, maintenance, floor, oper
   const tapeRuntime = tape?.runtime || {};
   const tapeProgress = tapeRuntime?.progress || {};
   const tapeStates = tape?.summary?.state_counts || {};
+  const fabricInstruments = Array.isArray(marketFabric?.instruments) ? marketFabric.instruments : [];
+  const fabricExecutableCount = fabricInstruments.filter((row) => row?.executable?.state === "EXECUTABLE").length;
+  const fabricEvidenceCounts = fabricInstruments.reduce((acc, row) => {
+    const state = String(row?.intelligence?.evidence_state || "NOT_OBSERVED");
+    acc[state] = (acc[state] || 0) + 1;
+    return acc;
+  }, {});
+  const fabricAuthoritySafe = marketFabric?.authority?.consensus_can_replace_executable_price === false;
   const pipelineState = pipelineRuntimeState(ingress, discovery, tape, strategy, maintenance, nowMs);
   const progressRatio = (done, total) => (
     isObservedNumber(done) && isObservedNumber(total)
@@ -1126,12 +1143,12 @@ function Pipeline({ strategy, discovery, ingress, tape, maintenance, floor, oper
         </div>
       </Section>
 
-      <Section eyebrow="MARKET TRUTH DEPENDENCY" title="Tape → Gate 04" className="wide">
+      <Section eyebrow="MARKET FABRIC → GATE 04" title="Dual-truth market authority" className="wide">
         <div className="constraintGrid">
-          <div><span>Tape runtime</span><strong>{supervisorState(tapeRuntime, nowMs)}</strong><small>Independent from Kraken / NinjaTrader / tastyfx / IBKR execution-provider health.</small></div>
-          <div><span>Seed quorum</span><strong>{pipe.tape_seed_required === undefined ? "NOT OBSERVED" : `${num(pipe.tape_seed_ready)}/${num(pipe.tape_seed_required)} ready`}</strong><small>Covered seed assets require FULL consensus before strategy market readiness.</small></div>
-          <div><span>FULL composites</span><strong>{num(tapeStates.FULL, 0, "0")}</strong><small>3+ qualified agreeing independent feeds.</small></div>
-          <div><span>Tape exceptions</span><strong>{num(Number(tapeStates.DEGRADED || 0) + Number(tapeStates.SINGLE_SOURCE || 0) + Number(tapeStates.CONTESTED || 0))}</strong><small>Degraded/single/contested remains visible but cannot silently become seed strategy authority.</small></div>
+          <div><span>Executable lane</span><strong>{num(fabricExecutableCount, 0, "NOT OBSERVED")} executable</strong><small>Authorized-route bid / ask observations are the only price truth Strategy, Risk, Clerk and PAPER execution may act on.</small></div>
+          <div><span>Witness lane</span><strong>{supervisorState(tapeRuntime, nowMs)}</strong><small>Witness sources provide corroboration and market intelligence only. They never average into or overwrite the executable lane.</small></div>
+          <div><span>Authority lock</span><strong>{fabricAuthoritySafe ? "NEVER OVERWRITE" : "NOT OBSERVED"}</strong><small>Market Fabric endpoint contract: consensus_can_replace_executable_price = false.</small></div>
+          <div><span>Evidence states</span><strong>FULL {num(fabricEvidenceCounts.FULL, 0, "0")} · DEGRADED {num(fabricEvidenceCounts.DEGRADED, 0, "0")} · CONTESTED {num(fabricEvidenceCounts.CONTESTED, 0, "0")}</strong><small>Evidence can admit or block a covered strategy path, but missing executable truth still fails closed.</small></div>
         </div>
       </Section>
 
@@ -1145,7 +1162,7 @@ function Pipeline({ strategy, discovery, ingress, tape, maintenance, floor, oper
             return (
               <div className="flowUnit" key={item.stage}>
                 <article className={flagged ? "flowStageV flagged" : "flowStageV"}>
-                  <div className="flowStageIndex">{String(index + 1).padStart(2, "0")}</div>
+                  <div className="flowStageIndex">{String(item.number).padStart(2, "0")}</div>
                   <div className="flowStageBody">
                     <div className="flowStageTitle">
                       <div><span>{item.owner}</span><h3>{item.label}</h3></div>
@@ -1165,7 +1182,7 @@ function Pipeline({ strategy, discovery, ingress, tape, maintenance, floor, oper
                     <div className="flowArrow" aria-hidden="true"><span>↓</span></div>
                     <article className="flowGateCard">
                       <div className="flowGateHead">
-                        <span>GATE {String(index + 1).padStart(2, "0")}</span>
+                        <span>GATE {String(item.number).padStart(2, "0")}</span>
                         <strong>{item.gate}</strong>
                         <div className="gateOutcomes"><b>PASS ↓</b><b>WAIT ↺</b><b>REJECT → EVIDENCE</b></div>
                       </div>
@@ -1212,6 +1229,21 @@ function Pipeline({ strategy, discovery, ingress, tape, maintenance, floor, oper
               </div>
             );
           })}
+          <div className="flowUnit terminalFlow">
+            <article className="flowStageV">
+              <div className="flowStageIndex">✓</div>
+              <div className="flowStageBody">
+                <div className="flowStageTitle">
+                  <div><span>Book of Record</span><h3>FLAT / BLOTTER</h3></div>
+                  <div className="flowStageCount">
+                    <strong>{counts.FLAT === null || counts.FLAT === undefined ? "NOT OBSERVED" : num(counts.FLAT)}</strong>
+                    <small>TERMINAL STATE — NOT GATE 18</small>
+                  </div>
+                </div>
+                <p className="telemetryNote">A verified Gate 17 close fill finalizes the round trip. FLAT is the terminal lifecycle state and feeds the blotter / evidence record.</p>
+              </div>
+            </article>
+          </div>
         </div>
       </Section>
 
@@ -1423,7 +1455,7 @@ function AppPage({ active, data, nowMs, onToggle, onRepair, busy, controlError, 
   const { floor, ingress, strategy, discovery, operator, maintenance, tape, marketFabric } = data;
   if (active === "markets") return <Markets discovery={discovery} ingress={ingress} tape={tape} nowMs={nowMs} />;
   if (active === "tape") return <Tape tape={tape} marketFabric={marketFabric} ingress={ingress} nowMs={nowMs} />;
-  if (active === "pipeline") return <Pipeline strategy={strategy} discovery={discovery} ingress={ingress} tape={tape} maintenance={maintenance} floor={floor} operator={operator} nowMs={nowMs} />;
+  if (active === "pipeline") return <Pipeline strategy={strategy} discovery={discovery} ingress={ingress} tape={tape} marketFabric={marketFabric} maintenance={maintenance} floor={floor} operator={operator} nowMs={nowMs} />;
   if (active === "trading") return <TradingFloor strategy={strategy} />;
   if (active === "positions") return <Positions floor={floor} nowMs={nowMs} endpointHealth={endpointHealth} />;
   if (active === "blotter") return <Blotter operator={operator} endpointHealth={endpointHealth} />;
