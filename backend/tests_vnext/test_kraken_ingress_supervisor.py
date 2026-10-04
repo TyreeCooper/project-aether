@@ -5,18 +5,22 @@ from datetime import datetime, timezone
 
 import pytest
 
+import aether_vnext.kraken_ingress_supervisor as ingress_module
+
 from aether_vnext.dynamic_products import project_kraken_spot_product
 from aether_vnext.kraken_ingress_supervisor import (
     KrakenIngressSupervisor,
     _chunks,
     _dynamic_kraken_symbol_map,
     _fetch_dynamic_chunk_resilient,
+    _publish_ingress_live_quotes,
     _quote_telemetry,
     _quotes_by_asset,
     configured_dynamic_ingress_batch_size,
     configured_dynamic_ingress_worker_concurrency,
     configured_ingress_enabled,
     configured_ingress_interval_seconds,
+    ingress_live_quotes_payload,
     validate_configured_ingress_environment,
 )
 from aether_vnext.market_data import RawQuote
@@ -278,3 +282,31 @@ async def test_dynamic_chunk_timeout_stays_one_batch_error_without_retry_explosi
     assert outcomes[0][1] is None
     assert "TimeoutError" in outcomes[0][2]
     assert calls == [chunk]
+
+
+def test_progressive_live_quote_cache_exposes_dynamic_assets_before_cycle_close() -> None:
+    ingress_module._INGRESS_LIVE_QUOTES.clear()
+    ts = datetime(2026, 10, 4, 20, 0, tzinfo=timezone.utc)
+    quote = RawQuote(
+        asset_id="kraken:solusd",
+        venue="kraken",
+        source_id="kraken_public_ticker_v2",
+        bid=145.10,
+        ask=145.12,
+        last=145.11,
+        mark=145.11,
+        exchange_ts=ts,
+        received_ts=ts,
+        adapter_version="test",
+    )
+    _publish_ingress_live_quotes(
+        (quote,),
+        symbol_by_asset={"kraken:solusd": "SOL/USD"},
+    )
+    rows = ingress_live_quotes_payload()
+    assert len(rows) == 1
+    assert rows[0]["asset_id"] == "kraken:solusd"
+    assert rows[0]["symbol"] == "SOL/USD"
+    assert rows[0]["bid"] == 145.10
+    assert rows[0]["ask"] == 145.12
+    ingress_module._INGRESS_LIVE_QUOTES.clear()

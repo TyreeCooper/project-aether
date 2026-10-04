@@ -105,3 +105,61 @@ def test_runtime_snapshot_preserves_not_observed_without_inventing_prices() -> N
     assert row["executable"]["ask"] is None
     assert row["intelligence"]["derived_reference_mark"] == 4500.0
     assert row["intelligence"]["derived_reference_executable"] is False
+
+
+def test_runtime_snapshot_projects_full_commissioned_universe_before_tape_or_cycle_close() -> None:
+    payload = build_market_fabric_runtime_snapshot(
+        ingress_status={
+            "enabled": True,
+            "running": True,
+            "cycle_count": 0,
+            "last_error": None,
+            "last_result": None,
+            "live_quotes": [
+                {
+                    "asset_id": "kraken:solusd",
+                    "symbol": "SOL/USD",
+                    "source_id": "kraken_public_ticker_v2",
+                    "venue": "Kraken",
+                    "bid": 145.10,
+                    "ask": 145.12,
+                    "last": 145.11,
+                    "mark": 145.11,
+                    "reference_ts_utc": "2026-10-04T20:00:00+00:00",
+                    "received_ts_utc": "2026-10-04T20:00:00+00:00",
+                }
+            ],
+        },
+        tape_snapshot={"runtime": {"running": True}, "assets": []},
+        executable_universe=(
+            {
+                "asset_id": "btc",
+                "symbol": "BTC/USD",
+                "execution_symbol": "XBT/USD",
+                "venue": "Kraken",
+                "source_id": "kraken_public_ticker_v2",
+                "asset_class": "spot_crypto",
+            },
+            {
+                "asset_id": "kraken:solusd",
+                "symbol": "SOL/USD",
+                "execution_symbol": "SOL/USD",
+                "venue": "Kraken",
+                "source_id": "kraken_public_ticker_v2",
+                "asset_class": "spot_crypto",
+            },
+        ),
+        as_of_utc=datetime(2026, 10, 4, 20, 0, 1, tzinfo=UTC),
+    )
+
+    by_asset = {row["asset_id"]: row for row in payload["instruments"]}
+    assert set(by_asset) == {"btc", "kraken:solusd"}
+    assert payload["execution_universe"]["commissioned_count"] == 2
+    assert payload["execution_universe"]["quoted_count"] == 1
+    assert by_asset["btc"]["commissioned"] is True
+    assert by_asset["btc"]["executable"]["state"] == "NOT_OBSERVED"
+    assert by_asset["btc"]["executable"]["bid"] is None
+    assert by_asset["kraken:solusd"]["executable"]["state"] == "EXECUTABLE"
+    assert by_asset["kraken:solusd"]["executable"]["bid"] == 145.10
+    assert by_asset["kraken:solusd"]["executable"]["ask"] == 145.12
+    assert by_asset["kraken:solusd"]["intelligence"]["evidence_state"] == "NOT_OBSERVED"

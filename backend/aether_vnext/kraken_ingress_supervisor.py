@@ -43,6 +43,12 @@ _INGRESS_PROGRESS: dict[str, object] = {
     "processed_asset_count": 0,
 }
 
+# Latest provider-authored executable quote per commissioned asset. This cache is
+# telemetry only: canonical market admission still goes through persisted ingress.
+# It exists so Market Fabric can render the execution universe progressively while
+# a large ingress cycle is still fetching/persisting in the background.
+_INGRESS_LIVE_QUOTES: dict[str, dict[str, object]] = {}
+
 
 def _publish_ingress_progress(**updates: object) -> None:
     global _INGRESS_PROGRESS
@@ -55,6 +61,35 @@ def _publish_ingress_progress(**updates: object) -> None:
 
 def ingress_progress_payload() -> dict[str, object]:
     return deepcopy(_INGRESS_PROGRESS)
+
+
+def _publish_ingress_live_quotes(
+    quotes: Sequence[object],
+    *,
+    symbol_by_asset: Mapping[str, str] | None = None,
+) -> None:
+    global _INGRESS_LIVE_QUOTES
+    current = dict(_INGRESS_LIVE_QUOTES)
+    for quote in quotes:
+        row = _quote_telemetry(quote, symbol_by_asset=symbol_by_asset)
+        asset_id = str(row["asset_id"])
+        prior = current.get(asset_id)
+        current_key = str(row.get("reference_ts_utc") or row.get("received_ts_utc") or "")
+        prior_key = (
+            ""
+            if prior is None
+            else str(prior.get("reference_ts_utc") or prior.get("received_ts_utc") or "")
+        )
+        if prior is None or current_key >= prior_key:
+            current[asset_id] = row
+    _INGRESS_LIVE_QUOTES = current
+
+
+def ingress_live_quotes_payload() -> tuple[dict[str, object], ...]:
+    return tuple(
+        deepcopy(_INGRESS_LIVE_QUOTES[asset_id])
+        for asset_id in sorted(_INGRESS_LIVE_QUOTES)
+    )
 
 
 def maintenance_quarantine_symbols(symbols: Sequence[str]) -> tuple[str, ...]:
@@ -357,6 +392,10 @@ async def run_configured_kraken_ingress_cycle() -> dict[str, object]:
             timeout_s=10.0,
         )
         all_quotes.extend(seed_batch.quotes)
+        _publish_ingress_live_quotes(
+            seed_batch.quotes,
+            symbol_by_asset=symbol_by_asset,
+        )
 
         dynamic_assets = tuple(dynamic_symbols)
         dynamic_chunks = _chunks(
@@ -378,11 +417,18 @@ async def run_configured_kraken_ingress_cycle() -> dict[str, object]:
             nonlocal completed_dynamic_chunks
             async with dynamic_semaphore:
                 try:
-                    return await _fetch_dynamic_chunk_resilient(
+                    outcomes = await _fetch_dynamic_chunk_resilient(
                         chunk,
                         dynamic_symbols=dynamic_symbols,
                         timeout_s=10.0,
                     )
+                    for _, dynamic_batch, _ in outcomes:
+                        if dynamic_batch is not None:
+                            _publish_ingress_live_quotes(
+                                dynamic_batch.quotes,
+                                symbol_by_asset=symbol_by_asset,
+                            )
+                    return outcomes
                 finally:
                     completed_dynamic_chunks += 1
                     _publish_ingress_progress(
