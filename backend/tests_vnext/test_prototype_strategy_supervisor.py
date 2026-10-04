@@ -407,7 +407,11 @@ async def test_dynamic_history_fetches_reference_and_direct_kraken_lanes(monkeyp
         assert kwargs["asset_id"] == "kraken:xdpusd"
         assert kwargs["asset_symbol"] == "XDP"
         assert kwargs["minimum_bars"] == 2200
-        return ("reference-hour",)
+        return SimpleNamespace(
+            bars=("reference-hour",),
+            selected_source_id="test-reference",
+            attempts=(),
+        )
 
     async def fake_hourly(**kwargs):
         calls["hourly"] += 1
@@ -420,7 +424,7 @@ async def test_dynamic_history_fetches_reference_and_direct_kraken_lanes(monkeyp
         return ("kraken-day",)
 
     monkeypatch.setattr(
-        "aether_vnext.prototype_strategy_supervisor.fetch_cryptocompare_kraken_hourly",
+        "aether_vnext.prototype_strategy_supervisor.fetch_historical_reference_pool",
         fake_reference,
     )
     monkeypatch.setattr(
@@ -442,6 +446,7 @@ async def test_dynamic_history_fetches_reference_and_direct_kraken_lanes(monkeyp
     assert history.reference_hourly == ("reference-hour",)
     assert history.kraken_hourly == ("kraken-hour",)
     assert history.kraken_daily == ("kraken-day",)
+    assert history.reference_source_id == "test-reference"
     assert calls == {"reference": 1, "hourly": 1, "daily": 1}
 
 
@@ -459,7 +464,7 @@ async def test_cached_reference_history_does_not_refetch_reference_lane(monkeypa
         return ("kraken-day",)
 
     monkeypatch.setattr(
-        "aether_vnext.prototype_strategy_supervisor.fetch_cryptocompare_kraken_hourly",
+        "aether_vnext.prototype_strategy_supervisor.fetch_historical_reference_pool",
         fail_reference,
     )
     monkeypatch.setattr(
@@ -481,6 +486,7 @@ async def test_cached_reference_history_does_not_refetch_reference_lane(monkeypa
     assert history.reference_hourly == ()
     assert history.kraken_hourly == ("kraken-hour",)
     assert history.kraken_daily == ("kraken-day",)
+    assert history.reference_source_id is None
 
 
 from aether_vnext.tape_market_bridge import TapeMarketProjection
