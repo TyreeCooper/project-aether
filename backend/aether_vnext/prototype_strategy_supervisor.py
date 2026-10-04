@@ -35,10 +35,14 @@ from aether_vnext.prototype_crypto_warmup import assemble_prototype_crypto_warmu
 from aether_vnext.prototype_history_sources import (
     CRYPTOCOMPARE_SOURCE_ID,
     KRAKEN_DAILY_SOURCE_ID,
-    fetch_cryptocompare_kraken_hourly,
     fetch_kraken_completed_daily,
     fetch_kraken_completed_hourly,
 )
+from aether_vnext.prototype_history_source_pool import (
+    HistoricalSourceAttempt,
+    fetch_historical_reference_pool,
+)
+from aether_vnext.coinbase_prototype_history import COINBASE_SOURCE_ID
 from aether_vnext.prototype_market_history import (
     PrototypeMarketBar,
     load_prototype_market_bars,
@@ -171,6 +175,8 @@ class DynamicStrategyHistory:
     kraken_hourly: tuple[PrototypeMarketBar, ...]
     kraken_daily: tuple[PrototypeMarketBar, ...]
     error: str | None
+    reference_source_id: str | None = None
+    reference_attempts: tuple[HistoricalSourceAttempt, ...] = ()
     source_gaps: tuple[str, ...] = ()
 
 
@@ -649,8 +655,8 @@ async def _fetch_dynamic_strategy_history(
             ),
         ]
         if fetch_reference_warmup:
-            reference_hourly, kraken_hourly, kraken_daily = await asyncio.gather(
-                fetch_cryptocompare_kraken_hourly(
+            reference_result, kraken_hourly, kraken_daily = await asyncio.gather(
+                fetch_historical_reference_pool(
                     asset_id=asset_id,
                     asset_symbol=base,
                     end_at_utc=end_at_utc,
@@ -658,6 +664,7 @@ async def _fetch_dynamic_strategy_history(
                 ),
                 *tasks,
             )
+            reference_hourly = reference_result.bars
         else:
             kraken_hourly, kraken_daily = await asyncio.gather(*tasks)
             reference_hourly = ()
@@ -676,6 +683,12 @@ async def _fetch_dynamic_strategy_history(
         kraken_hourly=tuple(kraken_hourly),
         kraken_daily=tuple(kraken_daily),
         error=None,
+        reference_source_id=(
+            None if not fetch_reference_warmup else reference_result.selected_source_id
+        ),
+        reference_attempts=(
+            () if not fetch_reference_warmup else reference_result.attempts
+        ),
     )
 
 
@@ -728,9 +741,10 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
     fetched_hourly: dict[str, tuple[PrototypeMarketBar, ...]] = {}
     fetched_daily: dict[str, tuple[PrototypeMarketBar, ...]] = {}
     for asset_id in ASSETS:
-        reference_hourly, direct_hourly, daily = await asyncio.gather(
-            fetch_cryptocompare_kraken_hourly(
+        reference_result, direct_hourly, daily = await asyncio.gather(
+            fetch_historical_reference_pool(
                 asset_id=asset_id,
+                asset_symbol=asset_id.upper(),
                 end_at_utc=as_of_utc,
                 minimum_bars=2200,
             ),
@@ -743,7 +757,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                 end_at_utc=as_of_utc,
             ),
         )
-        fetched_hourly[asset_id] = (*reference_hourly, *direct_hourly)
+        fetched_hourly[asset_id] = (*reference_result.bars, *direct_hourly)
         fetched_daily[asset_id] = daily
 
     result: dict[str, object] = {
@@ -866,9 +880,18 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                 warmup_cached = {}
                 kraken_history_cached = {}
                 for product in batch:
-                    reference_meta = history_summary.get(
-                        (product.asset_id, 3600, CRYPTOCOMPARE_SOURCE_ID),
-                        {},
+                    reference_meta = max(
+                        (
+                            history_summary.get(
+                                (product.asset_id, 3600, source_id),
+                                {},
+                            )
+                            for source_id in (
+                                CRYPTOCOMPARE_SOURCE_ID,
+                                COINBASE_SOURCE_ID,
+                            )
+                        ),
+                        key=lambda row: int(row.get("bar_count") or 0),
                     )
                     kraken_hour_meta = history_summary.get(
                         (product.asset_id, 3600, KRAKEN_DAILY_SOURCE_ID),
@@ -1481,6 +1504,10 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                                 feature.volatility.percentile
                             ),
                                                         "history_source_gaps": list(history.source_gaps),
+                            "history_reference_source_id": history.reference_source_id,
+                            "history_reference_attempts": [
+                                asdict(row) for row in history.reference_attempts
+                            ],
                             "quote_age_ms": executable_quote_age_ms(observation),
                         }
                         if advanced.stage == "NO_SETUP":
