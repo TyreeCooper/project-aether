@@ -10,6 +10,7 @@ const operatorPath = "/api/v1/vnext/operator";
 const discoveryPath = "/api/v1/vnext/discovery-runtime";
 const maintenancePath = "/api/v1/vnext/maintenance";
 const tapePath = "/api/v1/vnext/tape";
+const marketFabricPath = "/api/v1/vnext/market-fabric";
 
 async function getJson(path) {
   const response = await fetch(`${apiBase}${path}`, { cache: "no-store" });
@@ -454,10 +455,14 @@ function Markets({ discovery, ingress, tape, nowMs }) {
   );
 }
 
-function Tape({ tape, ingress, nowMs }) {
+function Tape({ tape, ingress, marketFabric, nowMs }) {
   const assets = Array.isArray(tape?.assets) ? tape.assets : [];
   const sources = Array.isArray(tape?.source_registry) ? tape.source_registry : [];
   const quotes = Array.isArray(ingress?.last_result?.quotes) ? ingress.last_result.quotes : [];
+  const fabricInstruments = Array.isArray(marketFabric?.instruments) ? marketFabric.instruments : [];
+  const fabricByAsset = Object.fromEntries(
+    fabricInstruments.map((row) => [String(row.asset_id || "").toLowerCase(), row])
+  );
   const quoteByAsset = Object.fromEntries(
     quotes.map((row) => [String(row.asset_id || "").toLowerCase(), row])
   );
@@ -465,6 +470,7 @@ function Tape({ tape, ingress, nowMs }) {
     assets.map((row) => [String(row.asset_id || "").toLowerCase(), row])
   );
   const instrumentIds = [...new Set([
+    ...Object.keys(fabricByAsset),
     ...Object.keys(quoteByAsset),
     ...Object.keys(evidenceByAsset),
   ])].sort();
@@ -493,23 +499,28 @@ function Tape({ tape, ingress, nowMs }) {
         <div className="marketTable">
           <div className="marketHead"><span>Instrument</span><span>Exec venue</span><span>Bid</span><span>Ask</span><span>Exec age</span><span>Evidence</span><span>Witnesses</span></div>
           {instrumentIds.map((assetId) => {
+            const fabric = fabricByAsset[assetId];
             const quote = quoteByAsset[assetId];
             const evidence = evidenceByAsset[assetId];
+            const executable = fabric?.executable || null;
+            const intelligence = fabric?.intelligence || null;
+            const execTs = executable?.reference_ts_utc || quote?.reference_ts_utc;
+            const rawWitnessCount = intelligence?.raw_witness_count ?? evidence?.source_count;
             return (
               <div className="marketRow" key={assetId}>
                 <strong>{assetId.toUpperCase()}</strong>
-                <span>{text(quote?.venue || quote?.source_id, "NOT OBSERVED")}</span>
-                <span>{num(quote?.bid, 6)}</span>
-                <span>{num(quote?.ask, 6)}</span>
-                <span>{age(quote?.reference_ts_utc, nowMs)}</span>
-                <Badge value={evidence?.state}>{text(evidence?.state, "NOT OBSERVED")}</Badge>
-                <span>{isObservedNumber(evidence?.source_count) ? num(evidence.source_count) : "NOT OBSERVED"}</span>
+                <span>{text(executable?.venue || executable?.source_id || quote?.venue || quote?.source_id, "NOT OBSERVED")}</span>
+                <span>{num(executable?.bid ?? quote?.bid, 6)}</span>
+                <span>{num(executable?.ask ?? quote?.ask, 6)}</span>
+                <span>{age(execTs, nowMs)}</span>
+                <Badge value={intelligence?.evidence_state || evidence?.state}>{text(intelligence?.evidence_state || evidence?.state, "NOT OBSERVED")}</Badge>
+                <span>{isObservedNumber(rawWitnessCount) ? num(rawWitnessCount) : "NOT OBSERVED"}</span>
               </div>
             );
           })}
           {!instrumentIds.length ? <div className="empty">No executable or evidence observation has been observed. AETHER does not invent zeroes or carry stale prices forward.</div> : null}
         </div>
-        <p className="repairNote">Current shadow telemetry still exposes the legacy evidence source count. Effective-independence quorum is a v3 Market Fabric contract and remains NOT OBSERVED until its runtime persistence path is bound; this screen does not fabricate it.</p>
+        <p className="repairNote">Market Fabric runtime: {text(marketFabric?.runtime_contract?.executable_domain, "NOT OBSERVED")} executable domain · {text(marketFabric?.runtime_contract?.intelligence_domain, "NOT OBSERVED")} evidence domain. Effective-independence runtime remains {text(marketFabric?.runtime_contract?.effective_independence_runtime, "NOT OBSERVED")} until its persistence path is commissioned; this screen does not fabricate it.</p>
       </Section>
 
       <Section eyebrow="EXECUTABLE TAPE" title="Authorized-route observations" className="wide">
@@ -1290,9 +1301,9 @@ function Settings({ ingress, strategy, discovery, tape, floor, maintenance, onTo
 }
 
 function AppPage({ active, data, nowMs, onToggle, onRepair, busy, controlError, endpointHealth }) {
-  const { floor, ingress, strategy, discovery, operator, maintenance, tape } = data;
+  const { floor, ingress, strategy, discovery, operator, maintenance, tape, marketFabric } = data;
   if (active === "markets") return <Markets discovery={discovery} ingress={ingress} tape={tape} nowMs={nowMs} />;
-  if (active === "tape") return <Tape tape={tape} ingress={ingress} nowMs={nowMs} />;
+  if (active === "tape") return <Tape tape={tape} ingress={ingress} marketFabric={marketFabric} nowMs={nowMs} />;
   if (active === "pipeline") return <Pipeline strategy={strategy} discovery={discovery} ingress={ingress} tape={tape} maintenance={maintenance} floor={floor} operator={operator} nowMs={nowMs} />;
   if (active === "trading") return <TradingFloor strategy={strategy} />;
   if (active === "positions") return <Positions floor={floor} nowMs={nowMs} endpointHealth={endpointHealth} />;
@@ -1304,7 +1315,7 @@ function AppPage({ active, data, nowMs, onToggle, onRepair, busy, controlError, 
 
 export default function DashboardPage() {
   const [active, setActive] = useState("command");
-  const [data, setData] = useState({ floor:null, ingress:null, strategy:null, operator:null, discovery:null, maintenance:null, tape:null });
+  const [data, setData] = useState({ floor:null, ingress:null, strategy:null, operator:null, discovery:null, maintenance:null, tape:null, marketFabric:null });
   const [errors, setErrors] = useState([]);
   const [endpointHealth, setEndpointHealth] = useState({});
   const [nowMs, setNowMs] = useState(()=>Date.now());
@@ -1322,9 +1333,10 @@ export default function DashboardPage() {
       const results=await Promise.allSettled([
         getJson(floorPath), getJson(ingressPath), getJson(strategyPath),
         getJson(operatorPath), getJson(discoveryPath), getJson(maintenancePath), getJson(tapePath),
+        getJson(marketFabricPath),
       ]);
       if(!mounted)return;
-      const keys=["floor","ingress","strategy","operator","discovery","maintenance","tape"];
+      const keys=["floor","ingress","strategy","operator","discovery","maintenance","tape","marketFabric"];
       const next={}; const nextErrors=[]; const health={};
       results.forEach((r,i)=>{
         if(r.status==="fulfilled") { next[keys[i]]=r.value; health[keys[i]]="live"; }
