@@ -521,3 +521,46 @@ def test_nonrequired_tape_does_not_erase_provider_fallback() -> None:
     assert observations["btc"] is provider_observation
     assert rejections == {}
     assert telemetry["btc"]["required_for_strategy"] is False
+
+
+def test_full_tape_is_evidence_only_and_cannot_replace_executable_price() -> None:
+    provider_observation = object()
+    consensus_observation = SimpleNamespace(observation_id="consensus-1")
+    observations, rejections, telemetry = _apply_tape_market_policy(
+        {"btc": provider_observation},
+        {},
+        {
+            "btc": TapeMarketProjection(
+                observation=consensus_observation,
+                strategy_ready=True,
+                reason="tape_market_ready",
+            )
+        },
+        tape_required=True,
+    )
+
+    assert observations["btc"] is provider_observation
+    assert observations["btc"] is not consensus_observation
+    assert rejections == {}
+    assert telemetry["btc"]["evidence_only"] is True
+    assert telemetry["btc"]["executable_observation_preserved"] is True
+
+
+def test_full_tape_cannot_manufacture_executable_price_when_provider_book_missing() -> None:
+    consensus_observation = SimpleNamespace(observation_id="consensus-1")
+    observations, rejections, telemetry = _apply_tape_market_policy(
+        {},
+        {},
+        {
+            "btc": TapeMarketProjection(
+                observation=consensus_observation,
+                strategy_ready=True,
+                reason="tape_market_ready",
+            )
+        },
+        tape_required=True,
+    )
+
+    assert "btc" not in observations
+    assert rejections["btc"]["reason"] == "executable_provider_observation_missing"
+    assert telemetry["btc"]["evidence_only"] is True
