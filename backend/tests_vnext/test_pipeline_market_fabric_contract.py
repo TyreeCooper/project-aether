@@ -51,7 +51,7 @@ def test_pipeline_wires_market_fabric_dual_truth_into_gate_four() -> None:
 
 
 def test_pipeline_prefers_backend_canonical_gate_telemetry() -> None:
-    page = _frontend_page()
+    page = (ROOT / "frontend" / "app" / "page.js").read_text(encoding="utf-8")
     assert "strategy?.last_result?.gate_telemetry" in page
     assert 'source: "BACKEND_GATE_TELEMETRY"' in page
     assert '["FULL","CUMULATIVE"].includes(gate.coverage)' in page
@@ -59,7 +59,7 @@ def test_pipeline_prefers_backend_canonical_gate_telemetry() -> None:
 
 
 def test_pipeline_uses_backend_stage_counts_before_floor_compatibility_counts() -> None:
-    page = _frontend_page()
+    page = (ROOT / "frontend" / "app" / "page.js").read_text(encoding="utf-8")
     for token in (
         "isObservedNumber(pipe.fire)",
         "isObservedNumber(pipe.size)",
