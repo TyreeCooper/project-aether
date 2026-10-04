@@ -1252,7 +1252,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     asset_daily = daily_by_asset.get(asset_id, ())
                     warmup = assemble_prototype_crypto_warmup(
                         asset_id=asset_id,
-                        reference_hourly=tuple(
+                        historical_reference_hourly=tuple(
                             row
                             for row in hourly
                             if row.source_id == CRYPTOCOMPARE_SOURCE_ID
@@ -1400,7 +1400,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                     try:
                         warmup = assemble_prototype_crypto_warmup(
                             asset_id=asset_id,
-                            reference_hourly=tuple(
+                            historical_reference_hourly=tuple(
                                 row
                                 for row in hourly
                                 if row.source_id == CRYPTOCOMPARE_SOURCE_ID
