@@ -38,6 +38,7 @@ from aether_vnext.prototype_history_sources import (
     fetch_kraken_completed_hourly,
 )
 from aether_vnext.prototype_history_source_pool import (
+    HistoricalReferenceUnavailable,
     HistoricalSourceAttempt,
     REFERENCE_MINIMUM_BARS,
     REFERENCE_SOURCE_IDS,
@@ -177,6 +178,7 @@ class DynamicStrategyHistory:
     error: str | None
     reference_source_id: str | None = None
     reference_attempts: tuple[HistoricalSourceAttempt, ...] = ()
+    reference_service_health: dict[str, object] | None = None
     source_gaps: tuple[str, ...] = ()
 
 
@@ -668,6 +670,16 @@ async def _fetch_dynamic_strategy_history(
         else:
             kraken_hourly, kraken_daily = await asyncio.gather(*tasks)
             reference_hourly = ()
+    except HistoricalReferenceUnavailable as exc:
+        return DynamicStrategyHistory(
+            asset_id=asset_id,
+            reference_hourly=(),
+            kraken_hourly=(),
+            kraken_daily=(),
+            error=str(exc),
+            reference_attempts=exc.attempts,
+            reference_service_health=exc.health_payload(),
+        )
     except Exception as exc:
         return DynamicStrategyHistory(
             asset_id=asset_id,
@@ -675,6 +687,17 @@ async def _fetch_dynamic_strategy_history(
             kraken_hourly=(),
             kraken_daily=(),
             error=f"history_fetch_error:{type(exc).__name__}:{exc}",
+            reference_service_health={
+                "service": "historical_reference",
+                "service_state": "UNAVAILABLE",
+                "integrity_state": "NOT_OBSERVED",
+                "selected_source_id": None,
+                "selected_tier": None,
+                "failover_active": False,
+                "source_exhausted": False,
+                "attempted_source_count": None,
+                "standby_state": "NOT_OBSERVED",
+            },
         )
 
     return DynamicStrategyHistory(
@@ -688,6 +711,21 @@ async def _fetch_dynamic_strategy_history(
         ),
         reference_attempts=(
             () if not fetch_reference_warmup else reference_result.attempts
+        ),
+        reference_service_health=(
+            {
+                "service": "historical_reference",
+                "service_state": "READY_CACHED",
+                "integrity_state": "FULL",
+                "selected_source_id": None,
+                "selected_tier": None,
+                "failover_active": False,
+                "source_exhausted": False,
+                "attempted_source_count": 0,
+                "standby_state": "NOT_OBSERVED",
+            }
+            if not fetch_reference_warmup
+            else reference_result.health_payload()
         ),
     )
 
@@ -745,6 +783,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
     fetched_hourly: dict[str, tuple[PrototypeMarketBar, ...]] = {}
     fetched_daily: dict[str, tuple[PrototypeMarketBar, ...]] = {}
     seed_history_errors: dict[str, str] = {}
+    seed_history_services: dict[str, dict[str, object]] = {}
 
     async def fetch_seed_history(asset_id: str):
         try:
@@ -769,6 +808,15 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                 (*reference_result.bars, *direct_hourly),
                 tuple(daily),
                 None,
+                reference_result.health_payload(),
+            )
+        except HistoricalReferenceUnavailable as exc:
+            return (
+                asset_id,
+                (),
+                (),
+                str(exc),
+                exc.health_payload(),
             )
         except Exception as exc:
             return (
@@ -776,13 +824,25 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                 (),
                 (),
                 f"{type(exc).__name__}:{exc}",
+                {
+                    "service": "historical_reference",
+                    "service_state": "UNAVAILABLE",
+                    "integrity_state": "NOT_OBSERVED",
+                    "selected_source_id": None,
+                    "selected_tier": None,
+                    "failover_active": False,
+                    "source_exhausted": False,
+                    "attempted_source_count": None,
+                    "standby_state": "NOT_OBSERVED",
+                },
             )
 
-    for asset_id, hourly_rows, daily_rows, error in await asyncio.gather(
+    for asset_id, hourly_rows, daily_rows, error, service_health in await asyncio.gather(
         *(fetch_seed_history(asset_id) for asset_id in ASSETS)
     ):
         fetched_hourly[asset_id] = tuple(hourly_rows)
         fetched_daily[asset_id] = tuple(daily_rows)
+        seed_history_services[asset_id] = dict(service_health)
         if error is not None:
             seed_history_errors[asset_id] = error
 
@@ -796,6 +856,9 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
         ),
         "assets": {},
         "dynamic_assets": {},
+        "history_services": {
+            "seed_assets": seed_history_services,
+        },
     }
 
     _publish_strategy_progress(phase="plan_universe")
@@ -1454,6 +1517,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                             "reason": history.error,
                             "quote_age_ms": executable_quote_age_ms(observation),
                             "history_source_gaps": list(history.source_gaps),
+                            "history_service": history.reference_service_health,
                         }
                         continue
 
@@ -1556,6 +1620,7 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                             ),
                                                         "history_source_gaps": list(history.source_gaps),
                             "history_reference_source_id": history.reference_source_id,
+                            "history_service": history.reference_service_health,
                             "history_reference_attempts": [
                                 asdict(row) for row in history.reference_attempts
                             ],
@@ -1727,6 +1792,20 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         for row in (*seed_results.values(), *dynamic_results.values())
                         if isinstance(row, Mapping)
                         and row.get("isolated_failure") is True
+                    ),
+                    "history_service_failover_active": sum(
+                        1
+                        for row in dynamic_results.values()
+                        if isinstance(row, Mapping)
+                        and isinstance(row.get("history_service"), Mapping)
+                        and row["history_service"].get("failover_active") is True
+                    ),
+                    "history_service_unavailable": sum(
+                        1
+                        for row in dynamic_results.values()
+                        if isinstance(row, Mapping)
+                        and isinstance(row.get("history_service"), Mapping)
+                        and row["history_service"].get("service_state") == "UNAVAILABLE"
                     ),
                 }
 

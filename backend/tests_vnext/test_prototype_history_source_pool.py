@@ -119,3 +119,57 @@ async def test_reference_pool_exhaustion_reports_every_attempt(monkeypatch) -> N
 
 def test_reference_minimum_is_derived_from_rv14_contract() -> None:
     assert REFERENCE_MINIMUM_BARS == 2176
+
+
+def test_service_health_reports_ready_failover_without_degradation() -> None:
+    from aether_vnext.prototype_history_source_pool import (
+        HistoricalReferenceResult,
+        HistoricalSourceAttempt,
+    )
+    result = HistoricalReferenceResult(
+        bars=(object(),),
+        selected_source_id=COINBASE_SOURCE_ID,
+        selected_tier=2,
+        attempts=(
+            HistoricalSourceAttempt(
+                source_id=CRYPTOCOMPARE_SOURCE_ID,
+                tier=1,
+                status="FAILED",
+                reason="TimeoutError:test",
+                bar_count=0,
+            ),
+            HistoricalSourceAttempt(
+                source_id=COINBASE_SOURCE_ID,
+                tier=2,
+                status="READY",
+                reason=None,
+                bar_count=REFERENCE_MINIMUM_BARS,
+            ),
+        ),
+    )
+    health = result.health_payload()
+    assert health["service_state"] == "READY"
+    assert health["integrity_state"] == "FULL"
+    assert health["failover_active"] is True
+    assert health["source_exhausted"] is False
+    assert health["standby_state"] == "NOT_OBSERVED"
+
+
+def test_service_health_reports_exhaustion_without_fabricating_integrity() -> None:
+    from aether_vnext.prototype_history_source_pool import (
+        HistoricalReferenceUnavailable,
+        HistoricalSourceAttempt,
+    )
+    exc = HistoricalReferenceUnavailable((
+        HistoricalSourceAttempt(
+            source_id=CRYPTOCOMPARE_SOURCE_ID,
+            tier=1,
+            status="FAILED",
+            reason="TimeoutError:test",
+            bar_count=0,
+        ),
+    ))
+    health = exc.health_payload()
+    assert health["service_state"] == "UNAVAILABLE"
+    assert health["integrity_state"] == "NOT_OBSERVED"
+    assert health["source_exhausted"] is True

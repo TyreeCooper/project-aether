@@ -59,6 +59,29 @@ class HistoricalReferenceResult:
     selected_tier: int
     attempts: tuple[HistoricalSourceAttempt, ...]
 
+    def health_payload(self) -> dict[str, object]:
+        return {
+            "service": "historical_reference",
+            "service_state": "READY",
+            "integrity_state": "FULL",
+            "selected_source_id": self.selected_source_id,
+            "selected_tier": self.selected_tier,
+            "failover_active": self.selected_tier > 1,
+            "source_exhausted": False,
+            "attempted_source_count": len(self.attempts),
+            "standby_state": "NOT_OBSERVED",
+            "attempts": [
+                {
+                    "source_id": row.source_id,
+                    "tier": row.tier,
+                    "status": row.status,
+                    "reason": row.reason,
+                    "bar_count": row.bar_count,
+                }
+                for row in self.attempts
+            ],
+        }
+
 
 class HistoricalReferenceUnavailable(RuntimeError):
     def __init__(self, attempts: tuple[HistoricalSourceAttempt, ...]):
@@ -68,6 +91,29 @@ class HistoricalReferenceUnavailable(RuntimeError):
             for row in attempts
         )
         super().__init__(f"historical_reference_exhausted:{detail}")
+
+    def health_payload(self) -> dict[str, object]:
+        return {
+            "service": "historical_reference",
+            "service_state": "UNAVAILABLE",
+            "integrity_state": "NOT_OBSERVED",
+            "selected_source_id": None,
+            "selected_tier": None,
+            "failover_active": False,
+            "source_exhausted": True,
+            "attempted_source_count": len(self.attempts),
+            "standby_state": "EXHAUSTED",
+            "attempts": [
+                {
+                    "source_id": row.source_id,
+                    "tier": row.tier,
+                    "status": row.status,
+                    "reason": row.reason,
+                    "bar_count": row.bar_count,
+                }
+                for row in self.attempts
+            ],
+        }
 
 
 async def fetch_historical_reference_pool(
