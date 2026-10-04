@@ -89,7 +89,8 @@ async def test_startup_recovery_restarts_server_classified_stall(monkeypatch) ->
 
 
 @pytest.mark.asyncio
-async def test_startup_recovery_never_targets_maintenance() -> None:
+async def test_startup_recovery_never_targets_maintenance(monkeypatch) -> None:
+    monkeypatch.setattr(main, "configured_vnext_runtime_only", lambda: True)
     with pytest.raises(Exception) as exc:
         await main.vnext_startup_recovery("maintenance")
     assert getattr(exc.value, "status_code", None) == 404
