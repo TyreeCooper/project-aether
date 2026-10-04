@@ -238,16 +238,88 @@ function pipelineRuntimeState(ingress, discovery, tape, strategy, maintenance, n
 }
 
 function telemetryWatermark(data) {
+  // Maintenance is intentionally idle at boot and is not part of market-runtime
+  // readiness. The watermark reflects only continuously running market services.
   const stamps = [
     data.floor?.refresh_time_utc || data.floor?.as_of_utc,
     data.ingress?.last_cycle_finished_at_utc,
     data.strategy?.last_cycle_finished_at_utc,
     data.discovery?.last_cycle_finished_at_utc,
     data.tape?.runtime?.last_cycle_finished_at_utc || data.tape?.as_of_utc,
-    data.maintenance?.last_result?.as_of_utc || data.maintenance?.as_of_utc,
   ].map((value) => Date.parse(value || "")).filter(Number.isFinite);
-  if (stamps.length < 6) return null;
+  if (stamps.length < 5) return null;
   return new Date(Math.min(...stamps)).toISOString();
+}
+
+const BOOTSTRAP_GATES = [
+  ["floor", "Firm floor"],
+  ["ingress", "Executable ingress"],
+  ["discovery", "Provider discovery"],
+  ["tape", "Consensus Tape"],
+  ["strategy", "Strategy runtime"],
+  ["operator", "Operator ledger"],
+  ["maintenance", "Maintenance idle guard"],
+];
+
+function bootstrapGateState(key, payload, health) {
+  if (health !== "live") return { ready:false, state:health === "unavailable" ? "UNAVAILABLE" : "LOADING", detail:"endpoint not ready" };
+  if (key === "floor") {
+    const ready = payload?.mode?.paper_only === true && payload?.mode?.live_blocked === true;
+    return { ready, state:ready ? "READY" : "LOADING", detail:ready ? "PAPER ONLY · LIVE BLOCKED" : "waiting for floor safety contract" };
+  }
+  if (key === "operator") {
+    return { ready:true, state:"READY", detail:"ledger snapshot received" };
+  }
+  if (key === "maintenance") {
+    const idle = payload?.controls?.master_enabled === false && payload?.running !== true;
+    return { ready:idle, state:idle ? "IDLE" : "WAITING", detail:idle ? "startup authority OFF" : "waiting for maintenance idle guard" };
+  }
+  const runtime = key === "tape" ? payload?.runtime : payload;
+  const cycles = Number(runtime?.cycle_count || 0);
+  const ready = runtime?.enabled === true && runtime?.running === true && cycles >= 1 && !runtime?.last_error;
+  const detail = runtime?.last_error
+    ? String(runtime.last_error)
+    : ready
+      ? `cycle ${cycles} observed`
+      : runtime?.running === true
+        ? `waiting for first completed cycle · ${cycles}`
+        : "supervisor not yet running";
+  return { ready, state:ready ? "READY" : runtime?.running === true ? "WARMING" : "WAITING", detail };
+}
+
+function BootstrapScreen({ data, endpointHealth }) {
+  const gates = BOOTSTRAP_GATES.map(([key,label]) => ({
+    key,
+    label,
+    ...bootstrapGateState(key, data[key], endpointHealth[key]),
+  }));
+  const readyCount = gates.filter((gate) => gate.ready).length;
+  const pct = Math.round((readyCount / gates.length) * 100);
+  return (
+    <main className="bootstrapScreen">
+      <section className="bootstrapCard" aria-live="polite">
+        <div className="bootstrapBrand">
+          <img src="/vnext/aether-mark.png" alt="AETHER" />
+          <div><span>AETHER SANDBOX</span><h1>Loading autonomous market operations</h1></div>
+        </div>
+        <div className="bootstrapProgressHead">
+          <strong>{pct}%</strong>
+          <span>{readyCount}/{gates.length} runtime gates observed</span>
+        </div>
+        <div className="bootstrapTrack"><i style={{ width:`${pct}%` }} /></div>
+        <div className="bootstrapGateList">
+          {gates.map((gate) => (
+            <div className="bootstrapGate" key={gate.key}>
+              <span className={gate.ready ? "bootstrapDot ready" : "bootstrapDot"} />
+              <div><strong>{gate.label}</strong><small>{gate.detail}</small></div>
+              <Badge value={gate.ready ? "GREEN" : gate.state}>{gate.state}</Badge>
+            </div>
+          ))}
+        </div>
+        <p className="bootstrapTruth">Progress is computed only from observed endpoint and supervisor state. No timer, fake percentage, or placeholder readiness is used.</p>
+      </section>
+    </main>
+  );
 }
 
 
@@ -291,6 +363,8 @@ function CommandCenter({ floor, ingress, strategy, discovery, tape, operator, ma
   const strategyObserved = Boolean(strategy?.last_result && (strategy.last_result.assets || strategy.last_result.dynamic_assets));
   const strategyRows = combinedStrategyRows(strategy).slice(0, 12);
   const maintenanceState = maintenance?.last_result || {};
+  const maintenanceIdle = maintenance?.controls?.master_enabled === false;
+  const maintenanceDisplay = maintenanceIdle ? "IDLE" : text(maintenanceState.status, "NOT OBSERVED");
   const tapeSummary = tape?.summary || {};
   const tapeStates = tapeSummary.state_counts || {};
   const tapeFull = Number(tapeStates.FULL || 0);
@@ -314,7 +388,7 @@ function CommandCenter({ floor, ingress, strategy, discovery, tape, operator, ma
           <Badge value={floor?.mode?.live_blocked === true ? "BLOCKED" : floor?.mode?.live_blocked === false ? "UNSAFE" : "NOT OBSERVED"}>
             {floor?.mode?.live_blocked === true ? "LIVE BLOCKED" : floor?.mode?.live_blocked === false ? "LIVE NOT BLOCKED" : "LIVE NOT OBSERVED"}
           </Badge>
-          <Badge value={maintenanceState.status || "SYNCING"}>{text(maintenanceState.status, "SYNCING")}</Badge>
+          <Badge value={maintenanceDisplay}>{maintenanceDisplay}</Badge>
         </div>
       </div>
 
@@ -324,7 +398,7 @@ function CommandCenter({ floor, ingress, strategy, discovery, tape, operator, ma
         <Metric label="Evaluated this cycle" value={pipe.strategy_evaluated === undefined ? "NOT OBSERVED" : num(pipe.strategy_evaluated)} sub={pipe.market_ready === undefined ? "market readiness NOT OBSERVED" : `${num(pipe.market_ready)} market ready`} />
         <Metric label="Open positions" value={positionsObserved ? num(positions.length) : "NOT OBSERVED"} sub="PAPER positions" />
         <Metric label="Book cash" value={money(bank.book_cash_usd, "NOT OBSERVED")} sub={bank.cash_reserved_usd === null || bank.cash_reserved_usd === undefined ? "reserved NOT OBSERVED" : `${money(bank.cash_reserved_usd)} reserved`} />
-        <Metric label="Maintenance" value={text(maintenanceState.status, "SYNCING")} sub={text(maintenanceState.primary_reason, "establishing baseline")} state={maintenanceState.status} />
+        <Metric label="Maintenance" value={maintenanceDisplay} sub={maintenanceIdle ? "startup authority OFF" : text(maintenanceState.primary_reason, "no diagnosis observed")} state={maintenanceDisplay} />
         <Metric label="Consensus Tape" value={tapeObserved === null ? "NOT OBSERVED" : `${num(tapeFull)}/${num(tapeObserved)} FULL`} sub={`runtime ${tapeRuntimeState}`} state={tapeFull > 0 ? "FULL" : tapeObserved ? "DEGRADED" : tapeRuntimeState} />
       </div>
 
@@ -1149,13 +1223,16 @@ function Blotter({ operator, endpointHealth }) {
 function Maintenance({ maintenance }) {
   const m = maintenance?.last_result || {};
   const incidents = maintenance?.incidents || [];
+  const maintenanceIdle = maintenance?.controls?.master_enabled === false;
+  const status = maintenanceIdle ? "IDLE" : text(m.status, "NOT OBSERVED");
+  const mode = maintenanceIdle ? "OFF" : text(m.maintenance_mode, "NOT OBSERVED");
   return (
     <div className="pageGrid">
-      <div className="pageIntro"><div><span className="kicker">SELF-HEALING OPERATIONS</span><h2>Maintenance</h2><p>Expected vs observed system behavior, first-cause diagnosis, incident recurrence and repair evidence.</p></div><Badge value={m.status}>{text(m.status, "SYNCING")}</Badge></div>
+      <div className="pageIntro"><div><span className="kicker">SELF-HEALING OPERATIONS</span><h2>Maintenance</h2><p>Expected vs observed system behavior, first-cause diagnosis, incident recurrence and repair evidence.</p></div><Badge value={status}>{status}</Badge></div>
       <div className="metricGrid">
-        <Metric label="Status" value={text(m.status,"SYNCING")} state={m.status} />
-        <Metric label="Mode" value={text(m.maintenance_mode, "BASELINE PENDING")} state={m.maintenance_mode} />
-        <Metric label="Healthy baseline" value={maintenance?.healthy_baseline_established || m.healthy_baseline_established ? "ESTABLISHED" : "PENDING"} state={maintenance?.healthy_baseline_established || m.healthy_baseline_established ? "GREEN" : "BUSY"} />
+        <Metric label="Status" value={status} state={status} />
+        <Metric label="Mode" value={mode} state={mode} />
+        <Metric label="Healthy baseline" value={maintenanceIdle ? "IDLE" : maintenance?.healthy_baseline_established || m.healthy_baseline_established ? "ESTABLISHED" : "PENDING"} state={maintenanceIdle ? "IDLE" : maintenance?.healthy_baseline_established || m.healthy_baseline_established ? "GREEN" : "BUSY"} />
         <Metric label="First causal edge" value={text(m.first_causal_edge,"waiting")} />
         <Metric label="Affected" value={num(m.affected_count)} />
         <Metric label="Confidence" value={text(m.confidence)} />
@@ -1163,7 +1240,7 @@ function Maintenance({ maintenance }) {
         <Metric label="Quarantined" value={num((m.quarantined_symbols||[]).length)} />
       </div>
       <Section eyebrow="DIAGNOSIS" title={text(m.primary_reason, "No active diagnosis")}>
-        <p className="longText">{text(m.observed, "Waiting for diagnostic cycle.")}</p>
+        <p className="longText">{maintenanceIdle ? "Maintenance is idle by design. No startup diagnosis or repair is running." : text(m.observed, "No maintenance diagnosis observed.")}</p>
         <div className="detailGrid">
           <div><span>Expected</span><strong>{text(m.expected)}</strong></div>
           <div><span>Owner</span><strong>{text(m.owner)}</strong></div>
@@ -1280,6 +1357,7 @@ export default function DashboardPage() {
   const [nowMs, setNowMs] = useState(()=>Date.now());
   const [maintenanceBusy, setMaintenanceBusy] = useState(false);
   const [maintenanceError, setMaintenanceError] = useState("");
+  const [bootstrapComplete, setBootstrapComplete] = useState(false);
 
   useEffect(()=>{
     const timer=setInterval(()=>setNowMs(Date.now()),1000);
@@ -1300,9 +1378,14 @@ export default function DashboardPage() {
         if(r.status==="fulfilled") { next[keys[i]]=r.value; health[keys[i]]="live"; }
         else { nextErrors.push(keys[i]); health[keys[i]]="unavailable"; }
       });
+      const mergedData=next;
       setData((current)=>({...current,...next}));
       setEndpointHealth((current)=>({...current,...health}));
       setErrors(nextErrors);
+      const bootstrapReady=BOOTSTRAP_GATES.every(([key])=>
+        bootstrapGateState(key, mergedData[key], health[key]).ready
+      );
+      if(bootstrapReady) setBootstrapComplete(true);
     };
     load();
     const timer=setInterval(load,5000);
@@ -1341,6 +1424,9 @@ export default function DashboardPage() {
 
   const title = NAV.find(([id])=>id===active)?.[1] || "Command Center";
   const watermark = telemetryWatermark(data);
+  if (!bootstrapComplete) {
+    return <BootstrapScreen data={data} endpointHealth={endpointHealth} />;
+  }
   return (
     <main className="appShell">
       <aside className="sidebar">

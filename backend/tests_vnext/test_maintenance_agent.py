@@ -79,6 +79,11 @@ def test_revision_0035_is_maintenance_schema():
     assert "maintenance_controls" in migration and "maintenance_incidents" in migration
 
 
+def test_maintenance_defaults_to_operator_armed_off() -> None:
+    assert CONTROL_DEFAULTS["master_enabled"] is False
+    assert CONTROL_DEFAULTS["auto_repair_enabled"] is False
+
+
 def test_maintenance_runtime_only_starts_in_sandbox(monkeypatch) -> None:
     from app.vnext_maintenance import configured_maintenance_enabled
 
@@ -318,7 +323,7 @@ def test_tape_is_a_first_class_maintenance_dependency_when_supplied():
 @pytest.mark.asyncio
 async def test_maintenance_supervisor_reads_tape_status(monkeypatch) -> None:
     async def controls():
-        return dict(CONTROL_DEFAULTS)
+        return {**dict(CONTROL_DEFAULTS), "master_enabled": True}
     monkeypatch.setattr(maintenance_agent, "load_controls", controls)
 
     async def close_incidents(_diagnosis):
@@ -361,3 +366,20 @@ async def test_maintenance_supervisor_reads_tape_status(monkeypatch) -> None:
     result = await supervisor.run_once()
     assert result["tape_health"]["required"] is True
     assert result["tape_health"]["full"] == 1
+
+
+@pytest.mark.asyncio
+async def test_configured_maintenance_boot_is_idle(monkeypatch) -> None:
+    import app.vnext_maintenance as api
+
+    class FakeSupervisor:
+        running = False
+        async def start(self):
+            raise AssertionError("startup must not arm maintenance")
+
+    monkeypatch.setattr(api, "_supervisor", FakeSupervisor())
+    monkeypatch.setattr(api, "_maintenance_armed", True)
+
+    await api.start_configured_vnext_maintenance()
+
+    assert api._maintenance_armed is False
