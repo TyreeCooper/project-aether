@@ -564,3 +564,26 @@ def test_full_tape_cannot_manufacture_executable_price_when_provider_book_missin
     assert "btc" not in observations
     assert rejections["btc"]["reason"] == "executable_provider_observation_missing"
     assert telemetry["btc"]["evidence_only"] is True
+
+
+def test_tape_telemetry_preserves_evidence_composite_lineage() -> None:
+    provider_observation = object()
+    observations, rejections, telemetry = _apply_tape_market_policy(
+        {"btc": provider_observation},
+        {},
+        {
+            "btc": TapeMarketProjection(
+                observation=None,
+                strategy_ready=True,
+                reason="tape_evidence_ready",
+                evidence_composite_id="cmp-btc-123",
+                evidence_only=True,
+            )
+        },
+        tape_required=True,
+    )
+
+    assert observations["btc"] is provider_observation
+    assert rejections == {}
+    assert telemetry["btc"]["evidence_composite_id"] == "cmp-btc-123"
+    assert telemetry["btc"]["evidence_only"] is True

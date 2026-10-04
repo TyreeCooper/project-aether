@@ -122,6 +122,7 @@ def _apply_tape_market_policy(
                 if projection.observation is None
                 else projection.observation.observation_id
             ),
+            "evidence_composite_id": projection.evidence_composite_id,
             "executable_observation_preserved": executable_observation is not None,
             "evidence_only": True,
         }
