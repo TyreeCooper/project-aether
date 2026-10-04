@@ -206,9 +206,10 @@ def test_frontend_recovery_state_matches_backend_health_semantics() -> None:
     root = _repo_root()
     page = (root / "frontend" / "app" / "page.js").read_text(encoding="utf-8")
     css = (root / "frontend" / "app" / "globals.css").read_text(encoding="utf-8")
-    busy_index = page.index('return "BUSY";', page.index("function supervisorState"))
-    fault_index = page.index('if (supervisor.last_error) return "FAULT";', page.index("function supervisorState"))
-    assert fault_index > busy_index
+    state_start = page.index("function supervisorState")
+    working_index = page.index('return cycles === 0 ? "WARMING" : "WORKING";', state_start)
+    fault_index = page.index('if (supervisor.last_error) return "FAULT";', state_start)
+    assert fault_index > working_index
     assert "REFERENCE CATALOG ONLINE" in page
     assert "CATALOG PRIORITY" in page
     assert "grid-template-columns:repeat(8,minmax(0,1fr))" in css
