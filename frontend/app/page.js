@@ -417,11 +417,9 @@ function CommandCenter({ floor, ingress, strategy, discovery, tape, marketFabric
   const maintenanceState = maintenance?.last_result || {};
   const maintenanceIdle = maintenance?.controls?.master_enabled === false;
   const maintenanceDisplay = maintenanceIdle ? "IDLE" : text(maintenanceState.status, "NOT OBSERVED");
-  const tapeSummary = tape?.summary || {};
-  const tapeStates = tapeSummary.state_counts || {};
-  const tapeFull = Number(tapeStates.FULL || 0);
-  const tapeObserved = isObservedNumber(tapeSummary.asset_count) ? Number(tapeSummary.asset_count) : null;
-  const tapeRuntimeState = supervisorState(tape?.runtime, nowMs);
+  const fabricExecState = marketFabric?.instruments?.[0]?.executable?.state || "NOT OBSERVED";
+  const fabricEvidenceState = marketFabric?.instruments?.[0]?.intelligence?.evidence_state || "NO_WITNESS";
+  const fabricUniverseCount = marketFabric?.execution_universe?.asset_universe_count;
   const bank = operator?.bank || {};
   const eventsObserved = Array.isArray(operator?.activity);
   const events = eventsObserved ? operator.activity : [];
@@ -451,7 +449,7 @@ function CommandCenter({ floor, ingress, strategy, discovery, tape, marketFabric
         <Metric label="Open positions" value={positionsObserved ? num(positions.length) : "NOT OBSERVED"} sub="PAPER positions" />
         <Metric label="Book cash" value={money(bank.book_cash_usd, "NOT OBSERVED")} sub={bank.cash_reserved_usd === null || bank.cash_reserved_usd === undefined ? "reserved NOT OBSERVED" : `${money(bank.cash_reserved_usd)} reserved`} />
         <Metric label="Maintenance" value={maintenanceDisplay} sub={maintenanceIdle ? "startup authority OFF" : text(maintenanceState.primary_reason, "no diagnosis observed")} state={maintenanceDisplay} />
-        <Metric label="Market Fabric" value={tapeObserved === null ? "NOT OBSERVED" : `${num(tapeFull)}/${num(tapeObserved)} FULL`} sub={`runtime ${tapeRuntimeState}`} state={tapeFull > 0 ? "FULL" : tapeObserved ? "DEGRADED" : tapeRuntimeState} />
+        <Metric label="Market Fabric" value={text(fabricExecState, "NOT OBSERVED")} sub={`${text(fabricEvidenceState, "NO_WITNESS")} evidence · ${num(fabricUniverseCount)} universe`} state={fabricExecState} />
       </div>
 
       <Section eyebrow="UNIVERSE CONTRACT" title="Catalog → commissioned → active work" className="wide">
@@ -554,115 +552,95 @@ function Markets({ discovery, tape, nowMs }) {
   );
 }
 
-function Tape({ tape, ingress, marketFabric, nowMs }) {
+function Tape({ marketFabric, nowMs }) {
   const [filter, setFilter] = useState("");
-  const assets = Array.isArray(tape?.assets) ? tape.assets : [];
-  const sources = Array.isArray(tape?.source_registry) ? tape.source_registry : [];
-  const quotes = Array.isArray(ingress?.last_result?.quotes) ? ingress.last_result.quotes : [];
   const fabricInstruments = Array.isArray(marketFabric?.instruments) ? marketFabric.instruments : [];
   const universe = marketFabric?.execution_universe || {};
+  const layers = marketFabric?.layers || {};
+  const runtime = marketFabric?.runtime || {};
   const filteredInstruments = fabricInstruments.filter((row) => {
     if (!filter) return true;
     const needle = filter.toLowerCase();
     return [row?.asset_id, row?.symbol, row?.execution_symbol, row?.executable?.venue]
       .some((value) => String(value || "").toLowerCase().includes(needle));
   });
-  const summary = tape?.summary || {};
-  const states = summary.state_counts || {};
-  const runtime = tape?.runtime || {};
-  const runtimeState = supervisorState(runtime, nowMs);
-  const runtimeProgress = runtime?.progress || {};
-  const executableCount = fabricInstruments.filter((row) => row?.executable?.state === "EXECUTABLE").length;
   return (
     <div className="pageGrid">
       <div className="pageIntro">
         <div>
-          <span className="kicker">AETHER MARKET FABRIC</span>
-          <h2>Execution asset universe</h2>
-          <p>The full commissioned execution universe is shown here. Authorized-route bid/ask is executable truth; Market Intelligence is separate witness evidence and never overwrites route pricing.</p>
+          <span className="kicker">AETHER MARKET TRUTH V1</span>
+          <h2>Asset Universe → Provider → Route → Fabric → Execution</h2>
+          <p>These layers are ordered authorities, not peer feeds. The human Route owns executable venue selection. Witness evidence is a separate axis and never overwrites executable bid/ask.</p>
         </div>
-        <input className="search" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter execution universe…" />
+        <input className="search" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter routed instruments…" />
       </div>
 
-      <Section eyebrow="EXECUTION TRUTH" title="Commissioned universe + live bid / ask" className="wide">
+      <Section eyebrow="AUTHORITY CHAIN" title="Five-layer runtime" className="wide">
+        <div className="universeContract">
+          <div><span>1 · Asset Universe</span><strong>{text(layers.asset_universe, "WARMING")}</strong><small>{num(universe.asset_universe_count)} identity rows · no prices</small></div>
+          <div><span>2 · Provider Card</span><strong>{text(layers.provider_card, "WARMING")}</strong><small>capability · entitlement · fees</small></div>
+          <div><span>3 · Human Route</span><strong>{text(layers.route, "WARMING")}</strong><small>{num(universe.commissioned_count)} executable route · no auto venue switch</small></div>
+          <div><span>4 · Market Fabric</span><strong>{text(layers.market_fabric, "WARMING")}</strong><small>route book + independent evidence</small></div>
+          <div><span>5 · Execution</span><strong>{text(layers.execution, "PROOF LOCKED")}</strong><small>PAPER only · live blocked</small></div>
+        </div>
+      </Section>
+
+      <Section eyebrow="EXECUTABLE TAPE" title="Human-route book — exactly as printed" className="wide">
         <div className="providerStats">
-          <Metric label="Commissioned assets" value={num(universe.commissioned_count)} sub="Full execution universe" />
-          <Metric label="Bid/ask observed" value={num(universe.quoted_count, 0, String(executableCount))} sub="Progressive ingress" state={executableCount > 0 ? "GREEN" : "WARMING"} />
-          <Metric label="Witness evidence observed" value={num(universe.evidence_observed_count, 0, String(summary.asset_count ?? "NOT OBSERVED"))} sub="Separate evidence domain" />
-          <Metric label="Ingress state" value={supervisorState(ingress, nowMs)} state={supervisorState(ingress, nowMs)} sub="Quotes populate while cycle continues" />
+          <Metric label="Asset Universe" value={num(universe.asset_universe_count)} sub="identity only" />
+          <Metric label="Executable routes" value={num(universe.commissioned_count)} sub="first-proof max = 1" />
+          <Metric label="Bid/ask observed" value={num(universe.quoted_count, 0, "0")} state={Number(universe.quoted_count || 0) ? "GREEN" : "NOT OBSERVED"} />
+          <Metric label="First proof" value={marketFabric?.first_proof?.passed === true ? "PASSED" : "REQUIRED"} state={marketFabric?.first_proof?.passed === true ? "GREEN" : "WAITING"} />
         </div>
         <div className="marketTable fabricUniverse">
-          <div className="marketHead"><span>Instrument</span><span>Venue</span><span>Bid</span><span>Ask</span><span>Spread</span><span>Last</span><span>Age</span><span>Exec state</span><span>Evidence</span></div>
+          <div className="marketHead"><span>Instrument</span><span>Venue</span><span>Bid</span><span>Ask</span><span>Bid Sz</span><span>Ask Sz</span><span>Last if printed</span><span>Age</span><span>Exec state</span><span>Evidence</span></div>
           {filteredInstruments.map((row) => {
             const executable = row?.executable || {};
             const intelligence = row?.intelligence || {};
-            const bid = isObservedNumber(executable.bid) ? Number(executable.bid) : null;
-            const ask = isObservedNumber(executable.ask) ? Number(executable.ask) : null;
-            const midpoint = bid !== null && ask !== null ? (bid + ask) / 2 : null;
-            const spreadBps = midpoint && midpoint > 0 ? ((ask - bid) / midpoint) * 10000 : null;
             return (
               <div className="marketRow" key={row.asset_id}>
-                <strong>{text(row.symbol || row.execution_symbol || row.asset_id).toUpperCase()}</strong>
+                <strong>{text(row.symbol || row.asset_id).toUpperCase()}</strong>
                 <span>{text(executable.venue, "NOT OBSERVED")}</span>
                 <span>{num(executable.bid, 8)}</span>
                 <span>{num(executable.ask, 8)}</span>
-                <span>{spreadBps === null ? "NOT OBSERVED" : `${num(spreadBps, 2)} bps`}</span>
-                <span>{num(executable.last, 8)}</span>
+                <span>{num(executable.bid_size, 8)}</span>
+                <span>{num(executable.ask_size, 8)}</span>
+                <span>{num(executable.last_if_printed, 8)}</span>
                 <span>{age(executable.reference_ts_utc || executable.received_ts_utc, nowMs)}</span>
                 <Badge value={executable.state}>{text(executable.state, "NOT OBSERVED")}</Badge>
-                <Badge value={intelligence.evidence_state}>{text(intelligence.evidence_state, "NOT OBSERVED")}</Badge>
+                <Badge value={intelligence.evidence_state}>{text(intelligence.evidence_state, "NO_WITNESS")}</Badge>
               </div>
             );
           })}
-          {!filteredInstruments.length ? <div className="empty">{fabricInstruments.length ? "No instruments match the filter." : "Commissioned execution universe NOT OBSERVED yet. Market Fabric will populate assets independently as runtime registry and ingress come online."}</div> : null}
+          {!filteredInstruments.length ? <div className="empty">Canonical Route is warming. AETHER will not invent or carry a price while the executable public socket is unavailable.</div> : null}
         </div>
-        <p className="repairNote">Ranking is not an allowlist and is not rendered here. A commissioned asset remains in this universe even when its current bid/ask is temporarily NOT OBSERVED. Missing witness evidence does not erase executable-route membership.</p>
+        <p className="repairNote">A dead executable socket blanks bid/ask even when witnesses are healthy. Missing fields are null, never zero. No midpoint, composite, witness price, or carried-forward last is executable.</p>
       </Section>
 
-      <Section eyebrow="MARKET INTELLIGENCE" title="Independent witness evidence" className="wide">
-        <div className="providerStats">
-          <Metric label="Observed evidence assets" value={num(summary.asset_count)} />
-          <Metric label="Full evidence" value={num(states.FULL, 0, "0")} state={Number(states.FULL || 0) ? "FULL" : "NOT OBSERVED"} />
-          <Metric label="Degraded" value={num(states.DEGRADED, 0, "0")} state={Number(states.DEGRADED || 0) ? "DEGRADED" : "CLEAR"} />
-          <Metric label="Contested" value={num(states.CONTESTED, 0, "0")} state={Number(states.CONTESTED || 0) ? "CONTESTED" : "CLEAR"} />
-          <Metric label="Accepted witnesses" value={num(summary.accepted_source_count)} />
-          <Metric label="Rejected witnesses" value={num(summary.rejected_source_count)} />
-          <Metric label="Evidence cycles" value={num(runtime?.cycle_count)} sub={text(runtimeProgress.phase, "idle").replaceAll("_", " ")} />
-          <Metric label="Heartbeat" value={age(runtimeProgress.last_progress_at_utc || runtime?.last_cycle_finished_at_utc, nowMs)} />
-        </div>
-        <p className="repairNote">Witness evidence currently covers only commissioned evidence lanes. It is not the execution-universe definition and cannot substitute for provider-authored bid/ask.</p>
-      </Section>
-
-      <Section eyebrow="SOURCE REGISTRY" title="Witness and transport dependencies" className="wide">
-        <div className="marketTable">
-          <div className="marketHead"><span>Source</span><span>Provider</span><span>Market</span><span>Implemented</span><span>Configured</span><span>Independent</span><span>State</span></div>
-          {sources.map((row) => (
-            <div className="marketRow" key={row.source_id}>
-              <strong>{text(row.source_id)}</strong>
-              <span>{text(row.provider)}</span>
-              <span>{text(row.market).replaceAll("_", " ")}</span>
-              <span>{row.implemented === true ? "YES" : row.implemented === false ? "NO" : "NOT OBSERVED"}</span>
-              <span>{row.configured === true ? "YES" : row.configured === false ? "NO" : "NOT OBSERVED"}</span>
-              <span>{row.independent === true ? "YES" : row.independent === false ? "NO" : "NOT OBSERVED"}</span>
-              <Badge value={row.state}>{text(row.state, "NOT OBSERVED")}</Badge>
-            </div>
-          ))}
-          {!sources.length ? <div className="empty">Market Fabric source registry NOT OBSERVED.</div> : null}
-        </div>
-      </Section>
-
-      <Section eyebrow="PROVENANCE" title="Latest witness observations" className="wide">
+      <Section eyebrow="ROUTE & PROVIDERS" title="Human authority and contracts" className="wide">
         <div className="eventList">
-          {assets.flatMap((asset) => (asset.sources || []).map((row) => ({ ...row, asset_id: asset.asset_id }))).slice(0, 60).map((row) => (
-            <div className="eventRow" key={row.observation_id}>
-              <time>{age(row.received_ts, nowMs)}</time>
-              <div>
-                <strong>{text(row.asset_id)} · {text(row.source_id)} · {num(row.mark, 6)}</strong>
-                <span>{text(row.quality)} · {text(row.source_symbol)} · {text(row.source_ref)}</span>
-              </div>
+          {(marketFabric?.routes || []).map((route) => (
+            <div className="eventRow" key={route.route_id}>
+              <time>ROUTE {num(route.route_revision)}</time>
+              <div><strong>{text(route.canonical_instrument_id)} → {text(route.executable_provider_id)}</strong><span>Witnesses: {(route.witness_provider_ids || []).join(", ") || "none"} · set by {text(route.human_set_by)} · automatic venue switch FORBIDDEN</span></div>
             </div>
           ))}
-          {!assets.some((asset) => Array.isArray(asset.sources) && asset.sources.length) ? <div className="empty">Witness observations NOT OBSERVED.</div> : null}
+          {!(marketFabric?.routes || []).length ? <div className="empty">Human Route NOT OBSERVED yet.</div> : null}
+          {(marketFabric?.provider_cards || []).map((card) => (
+            <div className="eventRow" key={card.provider_id}>
+              <time>{text(card.role).toUpperCase()}</time>
+              <div><strong>{text(card.provider_id)} · {text(card.venue)}</strong><span>{text(card.entitlement)} · fee card {text(card.fee_schedule?.schedule_id)}</span></div>
+            </div>
+          ))}
+        </div>
+      </Section>
+
+      <Section eyebrow="RUNTIME" title="Socket health" className="wide">
+        <div className="providerStats">
+          <Metric label="Executable socket" value={runtime.executable_connected === true ? "CONNECTED" : "DOWN"} state={runtime.executable_connected === true ? "GREEN" : "NOT OBSERVED"} sub={text(runtime.executable_error, "no error observed")} />
+          <Metric label="Executable packets" value={num(runtime.executable_packet_count, 0, "0")} />
+          <Metric label="Witness socket" value={runtime.witness_connected === true ? "CONNECTED" : "DOWN"} state={runtime.witness_connected === true ? "GREEN" : "NO_WITNESS"} sub={text(runtime.witness_error, "no error observed")} />
+          <Metric label="Witness packets" value={num(runtime.witness_packet_count, 0, "0")} />
         </div>
       </Section>
     </div>
@@ -1445,7 +1423,7 @@ function Settings({ ingress, strategy, discovery, tape, floor, maintenance, onTo
 function AppPage({ active, data, nowMs, onToggle, onRepair, busy, controlError, endpointHealth }) {
   const { floor, ingress, strategy, discovery, operator, maintenance, tape, marketFabric } = data;
   if (active === "markets") return <Markets discovery={discovery} tape={tape} nowMs={nowMs} />;
-  if (active === "tape") return <Tape tape={tape} marketFabric={marketFabric} ingress={ingress} nowMs={nowMs} />;
+  if (active === "tape") return <Tape marketFabric={marketFabric} nowMs={nowMs} />;
   if (active === "pipeline") return <Pipeline strategy={strategy} discovery={discovery} ingress={ingress} tape={tape} marketFabric={marketFabric} maintenance={maintenance} floor={floor} operator={operator} nowMs={nowMs} />;
   if (active === "trading") return <TradingFloor strategy={strategy} />;
   if (active === "positions") return <Positions floor={floor} nowMs={nowMs} endpointHealth={endpointHealth} />;

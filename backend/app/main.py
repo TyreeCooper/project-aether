@@ -65,6 +65,10 @@ from app.vnext_tape import (
     stop_configured_vnext_tape,
 )
 from app.vnext_market_fabric import mount_vnext_market_fabric
+from aether_vnext.market_truth_runtime import (
+    start_configured_market_truth_runtime,
+    stop_configured_market_truth_runtime,
+)
 
 STATIC = Path(__file__).parent / "static"
 VNEXT_UI = Path(__file__).parent / "vnext_ui"
@@ -103,6 +107,7 @@ async def lifespan(_: FastAPI):
     await start_configured_vnext_tape()
     await start_configured_vnext_strategy()
     await start_configured_vnext_maintenance()
+    await start_configured_market_truth_runtime()
     logger.info(
         "event=app_start phase=ready version=2.1.0 storage_configured=%s storage_initialized=%s live_ready=%s",
         db_store.status().get("configured"),
@@ -113,6 +118,7 @@ async def lifespan(_: FastAPI):
         yield
     finally:
         logger.info("event=app_shutdown phase=begin")
+        await stop_configured_market_truth_runtime()
         await stop_configured_vnext_maintenance()
         await stop_configured_vnext_strategy()
         await stop_configured_vnext_tape()

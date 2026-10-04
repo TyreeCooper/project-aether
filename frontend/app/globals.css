@@ -158,3 +158,5 @@ button{cursor:pointer}
 
 .fabricUniverse{max-height:560px}
 .fabricUniverse .marketHead,.fabricUniverse .marketRow{grid-template-columns:minmax(140px,1.5fr) 90px 100px 100px 82px 100px 78px 95px 95px;min-width:980px}
+
+.fabricUniverse .marketHead,.fabricUniverse .marketRow{grid-template-columns:minmax(130px,1.35fr) 90px 95px 95px 80px 80px 105px 75px 95px 95px;min-width:1040px}

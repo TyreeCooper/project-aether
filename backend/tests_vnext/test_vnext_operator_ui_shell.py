@@ -48,3 +48,15 @@ def test_market_fabric_is_visible_execution_universe_and_provider_top100_is_hidd
     assert "CATALOG PRIORITY" not in page
     assert "Priority pool" not in page
     assert ".fabricUniverse .marketHead" in css
+
+
+def test_market_fabric_ui_renders_canonical_five_layer_authority() -> None:
+    root = Path(__file__).resolve().parents[2]
+    page = (root / "frontend" / "app" / "page.js").read_text(encoding="utf-8")
+    assert "AETHER MARKET TRUTH V1" in page
+    assert "Asset Universe → Provider → Route → Fabric → Execution" in page
+    assert "Human-route book — exactly as printed" in page
+    assert "Last if printed" in page
+    assert 'text(intelligence.evidence_state, "NO_WITNESS")' in page
+    assert "automatic venue switch FORBIDDEN" in page
+    assert "No midpoint, composite, witness price, or carried-forward last is executable." in page
