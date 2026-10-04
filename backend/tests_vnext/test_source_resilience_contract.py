@@ -23,7 +23,7 @@ def test_market_fabric_price_authority_survives_reference_source_failover() -> N
     pool = (
         ROOT / "backend" / "aether_vnext" / "prototype_history_source_pool.py"
     ).read_text(encoding="utf-8")
-    assert "No consumer may replace an executable price" in fabric
+    assert "replace an executable price with witness-derived or composite pricing" in fabric
     assert "never participates in Market Fabric price authority" in pool
     assert "never blended" in pool
 
