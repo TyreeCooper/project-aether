@@ -266,6 +266,7 @@ const BOOTSTRAP_GATES = [
   ["ingress", "Executable Ingress"],
   ["discovery", "Provider Discovery"],
   ["tape", "Market Fabric"],
+  ["history", "Historical Services"],
   ["strategy", "Strategy Runtime"],
   ["operator", "Operator Ledger"],
   ["maintenance", "Maintenance Idle Guard"],
@@ -275,6 +276,24 @@ const STARTUP_RECOVERABLE = new Set(["ingress","discovery","tape","strategy"]);
 
 function bootstrapGateState(key, payload, health, healthSnapshot) {
   if (health !== "live") return { ready:false, state:health === "unavailable" ? "UNAVAILABLE" : "LOADING", detail:"endpoint not ready" };
+  if (key === "history") {
+    const cycles = Number(payload?.cycle_count || 0);
+    const pipe = payload?.last_result?.pipeline || {};
+    const readyObserved = isObservedNumber(pipe.history_ready);
+    const heldObserved = isObservedNumber(pipe.history_not_ready);
+    const serviceObserved = cycles >= 1 && readyObserved && heldObserved;
+    if (serviceObserved) {
+      return {
+        ready:true,
+        state:"READY",
+        detail:`history service observed · ${Number(pipe.history_ready)} ready · ${Number(pipe.history_not_ready)} held`,
+      };
+    }
+    if (payload?.running === true) {
+      return { ready:false, state:"WARMING", detail:"awaiting first history service result" };
+    }
+    return { ready:false, state:"WAITING", detail:"history service not yet observed" };
+  }
   if (key === "floor") {
     const ready = payload?.mode?.paper_only === true && payload?.mode?.live_blocked === true;
     return { ready, state:ready ? "READY" : "LOADING", detail:ready ? "PAPER ONLY · LIVE BLOCKED" : "loading safety contract" };
@@ -301,10 +320,12 @@ function bootstrapGateState(key, payload, health, healthSnapshot) {
 }
 
 function BootstrapScreen({ data, endpointHealth, recovery }) {
+  const bootstrapPayload = (key) => key === "history" ? data.strategy : data[key];
+  const bootstrapHealth = (key) => key === "history" ? endpointHealth.strategy : endpointHealth[key];
   const gates = BOOTSTRAP_GATES.map(([key,label]) => ({
     key,
     label,
-    ...bootstrapGateState(key, data[key], endpointHealth[key], data.health),
+    ...bootstrapGateState(key, bootstrapPayload(key), bootstrapHealth(key), data.health),
   }));
   const readyCount = gates.filter((gate) => gate.ready).length;
   const pct = Math.round((readyCount / gates.length) * 100);
@@ -355,7 +376,7 @@ function BootstrapScreen({ data, endpointHealth, recovery }) {
             <div className="bootstrapComplete">All required startup gates observed.</div>
           )}
         </div>
-        <p className="bootstrapTruth">Completed items disappear immediately. Progress is computed from observed runtime state only. Maintenance remains IDLE / OFF during startup.</p>
+        <p className="bootstrapTruth">Completed items disappear immediately. Progress is computed from observed runtime state only. Historical Services reports service readiness without requiring every asset to be history-ready. Maintenance remains IDLE / OFF during startup.</p>
       </section>
     </main>
   );
@@ -1525,9 +1546,11 @@ export default function DashboardPage() {
       setData((current)=>({...current,...next}));
       setEndpointHealth((current)=>({...current,...health}));
       setErrors(nextErrors);
-      const bootstrapReady=BOOTSTRAP_GATES.every(([key])=>
-        bootstrapGateState(key, mergedData[key], health[key], mergedData.health).ready
-      );
+      const bootstrapReady=BOOTSTRAP_GATES.every(([key])=>{
+        const payload=key==="history"?mergedData.strategy:mergedData[key];
+        const endpoint=key==="history"?health.strategy:health[key];
+        return bootstrapGateState(key,payload,endpoint,mergedData.health).ready;
+      });
       if(bootstrapReady) setBootstrapComplete(true);
     };
     load();
@@ -1537,9 +1560,11 @@ export default function DashboardPage() {
 
   useEffect(()=>{
     if(bootstrapComplete)return;
-    const gates=BOOTSTRAP_GATES.map(([key,label])=>({
-      key,label,...bootstrapGateState(key,data[key],endpointHealth[key],data.health),
-    }));
+    const gates=BOOTSTRAP_GATES.map(([key,label])=>{
+      const payload=key==="history"?data.strategy:data[key];
+      const endpoint=key==="history"?endpointHealth.strategy:endpointHealth[key];
+      return {key,label,...bootstrapGateState(key,payload,endpoint,data.health)};
+    });
     const active=gates.find((gate)=>!gate.ready);
     if(!active || !STARTUP_RECOVERABLE.has(active.key))return;
     if(!["WAITING","STALLED","FAULT","BLOCKED"].includes(active.state))return;
@@ -1587,7 +1612,9 @@ export default function DashboardPage() {
       const next={...state};
       for(const [key] of BOOTSTRAP_GATES){
         if(!next[key])continue;
-        const gate=bootstrapGateState(key,data[key],endpointHealth[key],data.health);
+        const payload=key==="history"?data.strategy:data[key];
+        const endpoint=key==="history"?endpointHealth.strategy:endpointHealth[key];
+        const gate=bootstrapGateState(key,payload,endpoint,data.health);
         if(gate.ready){
           delete next[key];
           changed=true;
