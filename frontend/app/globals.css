@@ -155,3 +155,6 @@ button{cursor:pointer}
 .bootstrapComplete{padding:12px 13px;border:1px solid var(--line);border-radius:10px;background:var(--panel2);font-size:10px;color:var(--muted);animation:bootstrapIn .32s ease both}
 @keyframes bootstrapSpin{to{transform:rotate(360deg)}}@keyframes bootstrapDots{0%{width:0}100%{width:14px}}@keyframes bootstrapIn{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:translateY(0)}}@keyframes bootstrapOut{from{opacity:1;transform:translateY(0);max-height:80px}to{opacity:0;transform:translateY(-8px);max-height:0;padding-top:0;padding-bottom:0;border-width:0}}
 @media(prefers-reduced-motion:reduce){.bootstrapSequentialItem.entering,.bootstrapSequentialItem.leaving,.bootstrapComplete,.bootstrapSpinner,.bootstrapEllipsis{animation:none}}
+
+.fabricUniverse{max-height:560px}
+.fabricUniverse .marketHead,.fabricUniverse .marketRow{grid-template-columns:minmax(140px,1.5fr) 90px 100px 100px 82px 100px 78px 95px 95px;min-width:980px}

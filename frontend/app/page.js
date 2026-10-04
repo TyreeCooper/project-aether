@@ -400,15 +400,17 @@ function RuntimeStrip({ floor, ingress, strategy, discovery, tape, maintenance, 
   );
 }
 
-function CommandCenter({ floor, ingress, strategy, discovery, tape, operator, maintenance, nowMs }) {
+function CommandCenter({ floor, ingress, strategy, discovery, tape, marketFabric, operator, maintenance, nowMs }) {
   const universe = Array.isArray(floor?.full_universe) ? floor.full_universe : [];
   const positionsObserved = Array.isArray(floor?.open_cockpits);
   const positions = positionsObserved ? floor.open_cockpits : [];
   const providers = providerRows(discovery);
   const catalog = observedSum(providers.map((r) => r.catalog_count));
   const eligible = observedSum(providers.map((r) => r.eligible_count));
-  const focusRaw = discovery?.last_result?.focus_admitted_count;
-  const focus = focusRaw === null || focusRaw === undefined ? null : Number(focusRaw);
+  const executionUniverse = marketFabric?.execution_universe || {};
+  const commissionedExecutionCount = isObservedNumber(executionUniverse.commissioned_count)
+    ? Number(executionUniverse.commissioned_count)
+    : null;
   const pipe = strategy?.last_result?.pipeline || {};
   const strategyObserved = Boolean(strategy?.last_result && (strategy.last_result.assets || strategy.last_result.dynamic_assets));
   const strategyRows = combinedStrategyRows(strategy).slice(0, 12);
@@ -444,7 +446,7 @@ function CommandCenter({ floor, ingress, strategy, discovery, tape, operator, ma
 
       <div className="metricGrid">
         <Metric label="Catalog instruments" value={catalog === null ? "NOT OBSERVED" : num(catalog)} sub="Discovery-visible; not execution permission" />
-        <Metric label="Focus admitted" value={focus === null ? "NOT OBSERVED" : num(focus)} sub={eligible === null ? "eligibility NOT OBSERVED" : `${num(eligible)} eligible · priority only`} />
+        <Metric label="Execution universe" value={commissionedExecutionCount === null ? "NOT OBSERVED" : num(commissionedExecutionCount)} sub={isObservedNumber(executionUniverse.quoted_count) ? `${num(executionUniverse.quoted_count)} bid/ask observed · Market Fabric` : "Market Fabric commissioned routes"} />
         <Metric label="Evaluated this cycle" value={pipe.strategy_evaluated === undefined ? "NOT OBSERVED" : num(pipe.strategy_evaluated)} sub={pipe.market_ready === undefined ? "market readiness NOT OBSERVED" : `${num(pipe.market_ready)} market ready`} />
         <Metric label="Open positions" value={positionsObserved ? num(positions.length) : "NOT OBSERVED"} sub="PAPER positions" />
         <Metric label="Book cash" value={money(bank.book_cash_usd, "NOT OBSERVED")} sub={bank.cash_reserved_usd === null || bank.cash_reserved_usd === undefined ? "reserved NOT OBSERVED" : `${money(bank.cash_reserved_usd)} reserved`} />
@@ -456,7 +458,7 @@ function CommandCenter({ floor, ingress, strategy, discovery, tape, operator, ma
         <div className="universeContract">
           <div><span>Provider catalog</span><strong>{catalog === null ? "NOT OBSERVED" : num(catalog)}</strong><small>Discovery-visible across providers; not execution permission.</small></div>
           <div><span>Catalog eligible</span><strong>{eligible === null ? "NOT OBSERVED" : num(eligible)}</strong><small>Provider discovery eligibility only.</small></div>
-          <div><span>Kraken commissioned</span><strong>{pipe.dynamic_kraken_available === undefined ? "NOT OBSERVED" : num(pipe.dynamic_kraken_available)}</strong><small>Runtime-bound products with the current commissioned strategy route.</small></div>
+          <div><span>Market Fabric execution universe</span><strong>{commissionedExecutionCount === null ? "NOT OBSERVED" : num(commissionedExecutionCount)}</strong><small>Commissioned authorized-route assets. Ranking never limits this universe.</small></div>
           <div><span>Current roaming workset</span><strong>{pipe.roaming_batch === undefined ? "NOT OBSERVED" : num(pipe.roaming_batch)}</strong><small>All commissioned products remain owned; worker concurrency schedules I/O only.</small></div>
           <div><span>Market ready this cycle</span><strong>{pipe.market_ready === undefined ? "NOT OBSERVED" : num(pipe.market_ready)}</strong><small>Executable market evidence observed this cycle.</small></div>
           <div><span>Market Fabric evidence policy</span><strong>{pipe.market_fabric_evidence_required === undefined && pipe.tape_seed_required === undefined ? "NOT OBSERVED" : `${num(pipe.market_fabric_evidence_ready ?? pipe.tape_seed_ready)}/${num(pipe.market_fabric_evidence_required ?? pipe.tape_seed_required)} ready`}</strong><small>Witness intelligence gates only instruments with a commissioned evidence requirement; executable route truth remains mandatory for every instrument.</small></div>
@@ -515,16 +517,12 @@ function CommandCenter({ floor, ingress, strategy, discovery, tape, operator, ma
   );
 }
 
-function Markets({ discovery, ingress, tape, nowMs }) {
-  const [filter, setFilter] = useState("");
+function Markets({ discovery, tape, nowMs }) {
   const rows = providerRows(discovery);
-  const quotes = ingress?.last_result?.quotes || [];
-  const quoteMap = Object.fromEntries(quotes.map((q) => [String(q.symbol || "").toUpperCase(), q]));
   return (
     <div className="pageGrid">
       <div className="pageIntro">
-        <div><span className="kicker">MARKET INTELLIGENCE</span><h2>Provider universe</h2><p>Catalog visibility is execution-provider discovery truth. Market Fabric owns market truth. Execution-provider availability and witness-source availability remain separate failure domains.</p></div>
-        <input className="search" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter instruments…" />
+        <div><span className="kicker">PROVIDER DISCOVERY</span><h2>Provider universe</h2><p>This page is provider/catalog health only. Asset-level executable truth lives in Market Fabric. Internal ranking may schedule work, but no Top-100 list is presented as the trading universe.</p></div>
       </div>
       <Section eyebrow="MARKET DATA PLANE" title="Market Fabric independence" className="wide">
         <div className="providerStats">
@@ -533,138 +531,97 @@ function Markets({ discovery, ingress, tape, nowMs }) {
           <Metric label="FULL consensus" value={num(tape?.summary?.state_counts?.FULL, 0, "0")} state={Number(tape?.summary?.state_counts?.FULL || 0) ? "FULL" : "NOT OBSERVED"} />
           <Metric label="Independent sources" value={num((tape?.source_registry || []).filter((row) => row?.independent === true).length)} />
         </div>
-        <p className="repairNote">Execution providers below can fail independently. A broker catalog being online does not make its quote the authorized executable market truth.</p>
+        <p className="repairNote">Execution providers can fail independently. Provider ranking is internal scheduling telemetry only; Market Fabric owns the visible commissioned execution universe and bid/ask truth.</p>
       </Section>
-      {rows.map((row) => {
-        const items = (row.top100 || []).filter((item) => !filter || String(item.symbol || "").toLowerCase().includes(filter.toLowerCase()));
-        return (
-          <Section
-            eyebrow={row.catalog_mode === "provider_native" ? "NATIVE CATALOG" : "REFERENCE CATALOG"}
-            title={row.provider}
-            action={<Badge value={row.status === "online" ? "ONLINE" : row.status === "NOT OBSERVED" ? "NOT OBSERVED" : "FAULT"}>{row.status === "online" ? (row.catalog_mode === "provider_native" ? "NATIVE CATALOG ONLINE" : "REFERENCE CATALOG ONLINE") : String(row.status || "NOT OBSERVED").toUpperCase()}</Badge>}
-            className="wide"
-            key={row.provider}
-          >
-            <div className="providerStats">
-              <Metric label="Catalog" value={num(row.catalog_count)} />
-              <Metric label="Eligible" value={num(row.eligible_count)} />
-              <Metric label="Priority pool" value={num(row.focus_count)} />
-              <Metric label="Data mode" value={text(row.catalog_mode, "NOT OBSERVED").replaceAll("_", " ")} />
-            </div>
-            <div className="marketTable">
-              <div className="marketHead"><span>Rank</span><span>Instrument</span><span>Score</span><span>Move</span><span>Reference</span><span>Quote age</span><span>Readiness</span></div>
-              {items.map((item) => {
-                const q = quoteMap[String(item.symbol || "").toUpperCase()] || quoteMap[String(item.market_data_symbol || "").toUpperCase()];
-                return (
-                  <div className="marketRow" key={`${row.provider}:${item.market_data_symbol || item.symbol}`}>
-                    <span>#{num(item.rank)}</span>
-                    <strong>{text(item.symbol)}</strong>
-                    <span>{num(item.score, 1)}</span>
-                    {isObservedNumber(item.change_pct)
-                      ? <span className={Number(item.change_pct) < 0 ? "loss" : Number(item.change_pct) > 0 ? "gain" : ""}>{Number(item.change_pct) >= 0 ? "+" : ""}{num(item.change_pct, 2)}%</span>
-                      : <span>NOT OBSERVED</span>}
-                    <span>{money(item.price)}</span>
-                    <span>{age(q?.reference_ts_utc, nowMs)}</span>
-                    <Badge value="PRIORITY">CATALOG PRIORITY</Badge>
-                  </div>
-                );
-              })}
-              {!items.length ? <div className="empty">{row.status === "online" ? "No matching instruments." : text(row.reason, "Provider data unavailable.")}</div> : null}
-            </div>
-          </Section>
-        );
-      })}
+      {rows.map((row) => (
+        <Section
+          eyebrow={row.catalog_mode === "provider_native" ? "NATIVE CATALOG" : "REFERENCE CATALOG"}
+          title={row.provider}
+          action={<Badge value={row.status === "online" ? "ONLINE" : row.status === "NOT OBSERVED" ? "NOT OBSERVED" : "FAULT"}>{row.status === "online" ? (row.catalog_mode === "provider_native" ? "NATIVE CATALOG ONLINE" : "REFERENCE CATALOG ONLINE") : String(row.status || "NOT OBSERVED").toUpperCase()}</Badge>}
+          className="wide"
+          key={row.provider}
+        >
+          <div className="providerStats">
+            <Metric label="Catalog" value={num(row.catalog_count)} />
+            <Metric label="Eligible" value={num(row.eligible_count)} />
+            <Metric label="Data mode" value={text(row.catalog_mode, "NOT OBSERVED").replaceAll("_", " ")} />
+            <Metric label="Execution binding" value={row.execution_binding_required === true ? "REQUIRED" : row.execution_binding_required === false ? "NATIVE" : "NOT OBSERVED"} state={row.execution_binding_required === true ? "WAITING" : row.execution_binding_required === false ? "GREEN" : "NOT OBSERVED"} />
+          </div>
+          <p className="repairNote">{row.status === "online" ? "Catalog online. Instrument ranking remains internal and is not rendered here." : text(row.reason, "Provider catalog not observed.")}</p>
+        </Section>
+      ))}
     </div>
   );
 }
 
 function Tape({ tape, ingress, marketFabric, nowMs }) {
+  const [filter, setFilter] = useState("");
   const assets = Array.isArray(tape?.assets) ? tape.assets : [];
   const sources = Array.isArray(tape?.source_registry) ? tape.source_registry : [];
   const quotes = Array.isArray(ingress?.last_result?.quotes) ? ingress.last_result.quotes : [];
   const fabricInstruments = Array.isArray(marketFabric?.instruments) ? marketFabric.instruments : [];
-  const fabricByAsset = Object.fromEntries(
-    fabricInstruments.map((row) => [String(row.asset_id || "").toLowerCase(), row])
-  );
-  const quoteByAsset = Object.fromEntries(
-    quotes.map((row) => [String(row.asset_id || "").toLowerCase(), row])
-  );
-  const evidenceByAsset = Object.fromEntries(
-    assets.map((row) => [String(row.asset_id || "").toLowerCase(), row])
-  );
-  const instrumentIds = [...new Set([
-    ...Object.keys(fabricByAsset),
-    ...Object.keys(quoteByAsset),
-    ...Object.keys(evidenceByAsset),
-  ])].sort();
+  const universe = marketFabric?.execution_universe || {};
+  const filteredInstruments = fabricInstruments.filter((row) => {
+    if (!filter) return true;
+    const needle = filter.toLowerCase();
+    return [row?.asset_id, row?.symbol, row?.execution_symbol, row?.executable?.venue]
+      .some((value) => String(value || "").toLowerCase().includes(needle));
+  });
   const summary = tape?.summary || {};
   const states = summary.state_counts || {};
   const runtime = tape?.runtime || {};
   const runtimeState = supervisorState(runtime, nowMs);
   const runtimeProgress = runtime?.progress || {};
+  const executableCount = fabricInstruments.filter((row) => row?.executable?.state === "EXECUTABLE").length;
   return (
     <div className="pageGrid">
       <div className="pageIntro">
         <div>
           <span className="kicker">AETHER MARKET FABRIC</span>
-          <h2>Dual-domain Market Tape</h2>
-          <p>Executable truth is the authorized execution-route book. Market Intelligence is independent witness evidence and derived analytics. Intelligence may corroborate or block action; it never overwrites executable bid/ask.</p>
+          <h2>Execution asset universe</h2>
+          <p>The full commissioned execution universe is shown here. Authorized-route bid/ask is executable truth; Market Intelligence is separate witness evidence and never overwrites route pricing.</p>
         </div>
-        <div className="heroModes">
-          <Badge value={runtimeState}>{runtimeState}</Badge>
-          <Badge value={Number(states.FULL || 0) > 0 ? "FULL" : assets.length ? "DEGRADED" : "NOT OBSERVED"}>
-            {Number(states.FULL || 0) > 0 ? "EVIDENCE FULL" : assets.length ? "EVIDENCE PARTIAL" : "EVIDENCE NOT OBSERVED"}
-          </Badge>
-        </div>
+        <input className="search" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter execution universe…" />
       </div>
 
-      <Section eyebrow="DUAL-DOMAIN TAPE" title="Executable truth + Market Intelligence" className="wide">
-        <div className="marketTable">
-          <div className="marketHead"><span>Instrument</span><span>Exec venue</span><span>Bid</span><span>Ask</span><span>Exec age</span><span>Evidence</span><span>Raw / groups</span></div>
-          {instrumentIds.map((assetId) => {
-            const fabric = fabricByAsset[assetId];
-            const quote = quoteByAsset[assetId];
-            const evidence = evidenceByAsset[assetId];
-            const executable = fabric?.executable || null;
-            const intelligence = fabric?.intelligence || null;
-            const execTs = executable?.reference_ts_utc || quote?.reference_ts_utc;
-            const rawWitnessCount = intelligence?.raw_witness_count ?? evidence?.source_count;
-            const declaredGroupCount = intelligence?.declared_independence_group_count;
+      <Section eyebrow="EXECUTION TRUTH" title="Commissioned universe + live bid / ask" className="wide">
+        <div className="providerStats">
+          <Metric label="Commissioned assets" value={num(universe.commissioned_count)} sub="Full execution universe" />
+          <Metric label="Bid/ask observed" value={num(universe.quoted_count, 0, String(executableCount))} sub="Progressive ingress" state={executableCount > 0 ? "GREEN" : "WARMING"} />
+          <Metric label="Witness evidence observed" value={num(universe.evidence_observed_count, 0, String(summary.asset_count ?? "NOT OBSERVED"))} sub="Separate evidence domain" />
+          <Metric label="Ingress state" value={supervisorState(ingress, nowMs)} state={supervisorState(ingress, nowMs)} sub="Quotes populate while cycle continues" />
+        </div>
+        <div className="marketTable fabricUniverse">
+          <div className="marketHead"><span>Instrument</span><span>Venue</span><span>Bid</span><span>Ask</span><span>Spread</span><span>Last</span><span>Age</span><span>Exec state</span><span>Evidence</span></div>
+          {filteredInstruments.map((row) => {
+            const executable = row?.executable || {};
+            const intelligence = row?.intelligence || {};
+            const bid = isObservedNumber(executable.bid) ? Number(executable.bid) : null;
+            const ask = isObservedNumber(executable.ask) ? Number(executable.ask) : null;
+            const midpoint = bid !== null && ask !== null ? (bid + ask) / 2 : null;
+            const spreadBps = midpoint && midpoint > 0 ? ((ask - bid) / midpoint) * 10000 : null;
             return (
-              <div className="marketRow" key={assetId}>
-                <strong>{assetId.toUpperCase()}</strong>
-                <span>{text(executable?.venue || executable?.source_id || quote?.venue || quote?.source_id, "NOT OBSERVED")}</span>
-                <span>{num(executable?.bid ?? quote?.bid, 6)}</span>
-                <span>{num(executable?.ask ?? quote?.ask, 6)}</span>
-                <span>{age(execTs, nowMs)}</span>
-                <Badge value={intelligence?.evidence_state || evidence?.state}>{text(intelligence?.evidence_state || evidence?.state, "NOT OBSERVED")}</Badge>
-                <span>{isObservedNumber(rawWitnessCount) ? num(rawWitnessCount) : "NOT OBSERVED"} / {isObservedNumber(declaredGroupCount) ? num(declaredGroupCount) : "NOT OBSERVED"}</span>
+              <div className="marketRow" key={row.asset_id}>
+                <strong>{text(row.symbol || row.execution_symbol || row.asset_id).toUpperCase()}</strong>
+                <span>{text(executable.venue, "NOT OBSERVED")}</span>
+                <span>{num(executable.bid, 8)}</span>
+                <span>{num(executable.ask, 8)}</span>
+                <span>{spreadBps === null ? "NOT OBSERVED" : `${num(spreadBps, 2)} bps`}</span>
+                <span>{num(executable.last, 8)}</span>
+                <span>{age(executable.reference_ts_utc || executable.received_ts_utc, nowMs)}</span>
+                <Badge value={executable.state}>{text(executable.state, "NOT OBSERVED")}</Badge>
+                <Badge value={intelligence.evidence_state}>{text(intelligence.evidence_state, "NOT OBSERVED")}</Badge>
               </div>
             );
           })}
-          {!instrumentIds.length ? <div className="empty">No executable or evidence observation has been observed. AETHER does not invent zeroes or carry stale prices forward.</div> : null}
+          {!filteredInstruments.length ? <div className="empty">{fabricInstruments.length ? "No instruments match the filter." : "Commissioned execution universe NOT OBSERVED yet. Market Fabric will populate assets independently as runtime registry and ingress come online."}</div> : null}
         </div>
-        <p className="repairNote">Market Fabric runtime: {text(marketFabric?.runtime_contract?.executable_domain, "NOT OBSERVED")} executable domain · {text(marketFabric?.runtime_contract?.intelligence_domain, "NOT OBSERVED")} evidence domain. Declared economic-source independence is {text(marketFabric?.runtime_contract?.declared_independence_runtime, "NOT OBSERVED")}; empirical correlation collapse remains {text(marketFabric?.runtime_contract?.empirical_independence_runtime, "NOT OBSERVED")} until residual-history persistence is commissioned.</p>
-      </Section>
-
-      <Section eyebrow="EXECUTABLE TAPE" title="Authorized-route observations" className="wide">
-        <div className="eventList">
-          {quotes.slice(0, 80).map((row) => (
-            <div className="eventRow" key={`${row.asset_id}:${row.reference_ts_utc || row.received_ts_utc}`}>
-              <time>{age(row.reference_ts_utc, nowMs)}</time>
-              <div>
-                <strong>{text(row.asset_id).toUpperCase()} · {text(row.venue)} · {num(row.bid, 6)} / {num(row.ask, 6)}</strong>
-                <span>{text(row.source_id)} · last {num(row.last, 6)} · executable-source observation</span>
-              </div>
-            </div>
-          ))}
-          {!quotes.length ? <div className="empty">Executable-route observations NOT OBSERVED.</div> : null}
-        </div>
+        <p className="repairNote">Ranking is not an allowlist and is not rendered here. A commissioned asset remains in this universe even when its current bid/ask is temporarily NOT OBSERVED. Missing witness evidence does not erase executable-route membership.</p>
       </Section>
 
       <Section eyebrow="MARKET INTELLIGENCE" title="Independent witness evidence" className="wide">
         <div className="providerStats">
-          <Metric label="Observed assets" value={num(summary.asset_count)} />
+          <Metric label="Observed evidence assets" value={num(summary.asset_count)} />
           <Metric label="Full evidence" value={num(states.FULL, 0, "0")} state={Number(states.FULL || 0) ? "FULL" : "NOT OBSERVED"} />
           <Metric label="Degraded" value={num(states.DEGRADED, 0, "0")} state={Number(states.DEGRADED || 0) ? "DEGRADED" : "CLEAR"} />
           <Metric label="Contested" value={num(states.CONTESTED, 0, "0")} state={Number(states.CONTESTED || 0) ? "CONTESTED" : "CLEAR"} />
@@ -673,6 +630,7 @@ function Tape({ tape, ingress, marketFabric, nowMs }) {
           <Metric label="Evidence cycles" value={num(runtime?.cycle_count)} sub={text(runtimeProgress.phase, "idle").replaceAll("_", " ")} />
           <Metric label="Heartbeat" value={age(runtimeProgress.last_progress_at_utc || runtime?.last_cycle_finished_at_utc, nowMs)} />
         </div>
+        <p className="repairNote">Witness evidence currently covers only commissioned evidence lanes. It is not the execution-universe definition and cannot substitute for provider-authored bid/ask.</p>
       </Section>
 
       <Section eyebrow="SOURCE REGISTRY" title="Witness and transport dependencies" className="wide">
@@ -709,11 +667,6 @@ function Tape({ tape, ingress, marketFabric, nowMs }) {
       </Section>
     </div>
   );
-}
-
-function floorQueueCount(floor, seat, state) {
-  const row = (floor?.seat_queues || []).find((item) => item.seat === seat && item.state === state);
-  return row && isObservedNumber(row.count) ? Number(row.count) : null;
 }
 
 const PIPELINE_TRUE_PREDICATES = {
@@ -1491,7 +1444,7 @@ function Settings({ ingress, strategy, discovery, tape, floor, maintenance, onTo
 
 function AppPage({ active, data, nowMs, onToggle, onRepair, busy, controlError, endpointHealth }) {
   const { floor, ingress, strategy, discovery, operator, maintenance, tape, marketFabric } = data;
-  if (active === "markets") return <Markets discovery={discovery} ingress={ingress} tape={tape} nowMs={nowMs} />;
+  if (active === "markets") return <Markets discovery={discovery} tape={tape} nowMs={nowMs} />;
   if (active === "tape") return <Tape tape={tape} marketFabric={marketFabric} ingress={ingress} nowMs={nowMs} />;
   if (active === "pipeline") return <Pipeline strategy={strategy} discovery={discovery} ingress={ingress} tape={tape} marketFabric={marketFabric} maintenance={maintenance} floor={floor} operator={operator} nowMs={nowMs} />;
   if (active === "trading") return <TradingFloor strategy={strategy} />;
@@ -1499,7 +1452,7 @@ function AppPage({ active, data, nowMs, onToggle, onRepair, busy, controlError, 
   if (active === "blotter") return <Blotter operator={operator} endpointHealth={endpointHealth} />;
   if (active === "maintenance") return <Maintenance maintenance={maintenance} />;
   if (active === "settings") return <Settings ingress={ingress} strategy={strategy} discovery={discovery} tape={tape} floor={floor} maintenance={maintenance} onToggle={onToggle} onRepair={onRepair} busy={busy} error={controlError} />;
-  return <CommandCenter floor={floor} ingress={ingress} strategy={strategy} discovery={discovery} tape={tape} operator={operator} maintenance={maintenance} nowMs={nowMs} />;
+  return <CommandCenter floor={floor} ingress={ingress} strategy={strategy} discovery={discovery} tape={tape} marketFabric={marketFabric} operator={operator} maintenance={maintenance} nowMs={nowMs} />;
 }
 
 export default function DashboardPage() {

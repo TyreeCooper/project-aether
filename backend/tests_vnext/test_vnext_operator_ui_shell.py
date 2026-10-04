@@ -30,3 +30,21 @@ def test_vnext_ui_uses_professional_multi_page_operations_shell() -> None:
         assert selector in css
 
     assert "@media(max-width:900px)" in css
+
+
+def test_market_fabric_is_visible_execution_universe_and_provider_top100_is_hidden() -> None:
+    root = Path(__file__).resolve().parents[2]
+    page = (root / "frontend" / "app" / "page.js").read_text(encoding="utf-8")
+    css = (root / "frontend" / "app" / "globals.css").read_text(encoding="utf-8")
+
+    assert 'title="Commissioned universe + live bid / ask"' in page
+    assert 'className="marketTable fabricUniverse"' in page
+    assert "Commissioned assets" in page
+    assert "Bid/ask observed" in page
+    assert "Exec state" in page
+    assert "spreadBps" in page
+    assert "Ranking is not an allowlist and is not rendered here." in page
+    assert "row.top100" not in page
+    assert "CATALOG PRIORITY" not in page
+    assert "Priority pool" not in page
+    assert ".fabricUniverse .marketHead" in css
