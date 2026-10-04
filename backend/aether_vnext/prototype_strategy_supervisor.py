@@ -740,28 +740,51 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
     focus_snapshot = current_provider_focus_snapshot()
     store = VNextStore(schema="aether_vnext")
 
-    # Seed history remains independent so dynamic-source faults cannot starve BTC/ETH.
+    # Seed history is isolated per asset. One external provider failure must never
+    # abort the strategy cycle or starve unrelated instruments.
     fetched_hourly: dict[str, tuple[PrototypeMarketBar, ...]] = {}
     fetched_daily: dict[str, tuple[PrototypeMarketBar, ...]] = {}
-    for asset_id in ASSETS:
-        reference_result, direct_hourly, daily = await asyncio.gather(
-            fetch_historical_reference_pool(
-                asset_id=asset_id,
-                asset_symbol=asset_id.upper(),
-                end_at_utc=as_of_utc,
-                minimum_bars=REFERENCE_MINIMUM_BARS,
-            ),
-            fetch_kraken_completed_hourly(
-                asset_id=asset_id,
-                end_at_utc=as_of_utc,
-            ),
-            fetch_kraken_completed_daily(
-                asset_id=asset_id,
-                end_at_utc=as_of_utc,
-            ),
-        )
-        fetched_hourly[asset_id] = (*reference_result.bars, *direct_hourly)
-        fetched_daily[asset_id] = daily
+    seed_history_errors: dict[str, str] = {}
+
+    async def fetch_seed_history(asset_id: str):
+        try:
+            reference_result, direct_hourly, daily = await asyncio.gather(
+                fetch_historical_reference_pool(
+                    asset_id=asset_id,
+                    asset_symbol=asset_id.upper(),
+                    end_at_utc=as_of_utc,
+                    minimum_bars=REFERENCE_MINIMUM_BARS,
+                ),
+                fetch_kraken_completed_hourly(
+                    asset_id=asset_id,
+                    end_at_utc=as_of_utc,
+                ),
+                fetch_kraken_completed_daily(
+                    asset_id=asset_id,
+                    end_at_utc=as_of_utc,
+                ),
+            )
+            return (
+                asset_id,
+                (*reference_result.bars, *direct_hourly),
+                tuple(daily),
+                None,
+            )
+        except Exception as exc:
+            return (
+                asset_id,
+                (),
+                (),
+                f"{type(exc).__name__}:{exc}",
+            )
+
+    for asset_id, hourly_rows, daily_rows, error in await asyncio.gather(
+        *(fetch_seed_history(asset_id) for asset_id in ASSETS)
+    ):
+        fetched_hourly[asset_id] = tuple(hourly_rows)
+        fetched_daily[asset_id] = tuple(daily_rows)
+        if error is not None:
+            seed_history_errors[asset_id] = error
 
     result: dict[str, object] = {
         "paper_only": PAPER_ONLY,
@@ -1030,8 +1053,8 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         bar
                         for asset_id in ASSETS
                         for bar in (
-                            *fetched_hourly[asset_id],
-                            *fetched_daily[asset_id],
+                            *fetched_hourly.get(asset_id, ()),
+                            *fetched_daily.get(asset_id, ()),
                         )
                     ),
                     ingested_at_utc=as_of_utc,
@@ -1240,15 +1263,23 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         continue
                     hourly_rows = hourly_by_asset.get(asset_id, ())
                     latest_bar = hourly_rows[-1] if hourly_rows else None
-                    advanced = advance_prototype_crypto_exit(
-                        sync_conn,
-                        store,
-                        trade_id=str(trade["trade_id"]),
-                        current_observation=observation,
-                        latest_completed_hourly_bar=latest_bar,
-                        as_of_utc=decision_at_utc,
-                    )
-                    exit_results[asset_id] = asdict(advanced)
+                    try:
+                        advanced = advance_prototype_crypto_exit(
+                            sync_conn,
+                            store,
+                            trade_id=str(trade["trade_id"]),
+                            current_observation=observation,
+                            latest_completed_hourly_bar=latest_bar,
+                            as_of_utc=decision_at_utc,
+                        )
+                        exit_results[asset_id] = asdict(advanced)
+                    except Exception as exc:
+                        exit_results[asset_id] = {
+                            "stage": "OPEN",
+                            "reason": f"exit_pipeline_error:{type(exc).__name__}:{exc}",
+                            "trade_id": str(trade["trade_id"]),
+                            "isolated_failure": True,
+                        }
 
                 seed_results: dict[str, object] = {}
                 for asset_id in ASSETS:
@@ -1270,39 +1301,64 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                             ),
                         }
                         continue
+                    if asset_id in seed_history_errors:
+                        seed_results[asset_id] = {
+                            "stage": "HISTORY_SOURCE_UNAVAILABLE",
+                            "reason": seed_history_errors[asset_id],
+                            "isolated_failure": True,
+                        }
+                        continue
 
                     hourly = hourly_by_asset.get(asset_id, ())
                     asset_daily = daily_by_asset.get(asset_id, ())
-                    warmup = assemble_prototype_crypto_warmup(
-                        asset_id=asset_id,
-                        historical_reference_hourly=tuple(
-                            row
-                            for row in hourly
-                            if row.source_id in REFERENCE_SOURCE_IDS
-                        ),
-                        kraken_hourly=tuple(
-                            row
-                            for row in hourly
-                            if row.source_id == KRAKEN_DAILY_SOURCE_ID
-                        ),
-                        asset_kraken_daily=tuple(
-                            row
-                            for row in asset_daily
-                            if row.source_id == KRAKEN_DAILY_SOURCE_ID
-                        ),
-                        btc_kraken_daily=tuple(
-                            row
-                            for row in btc_daily
-                            if row.source_id == KRAKEN_DAILY_SOURCE_ID
-                        ),
-                        as_of_utc=decision_at_utc,
-                    )
+                    try:
+                        warmup = assemble_prototype_crypto_warmup(
+                            asset_id=asset_id,
+                            historical_reference_hourly=tuple(
+                                row
+                                for row in hourly
+                                if row.source_id in REFERENCE_SOURCE_IDS
+                            ),
+                            kraken_hourly=tuple(
+                                row
+                                for row in hourly
+                                if row.source_id == KRAKEN_DAILY_SOURCE_ID
+                            ),
+                            asset_kraken_daily=tuple(
+                                row
+                                for row in asset_daily
+                                if row.source_id == KRAKEN_DAILY_SOURCE_ID
+                            ),
+                            btc_kraken_daily=tuple(
+                                row
+                                for row in btc_daily
+                                if row.source_id == KRAKEN_DAILY_SOURCE_ID
+                            ),
+                            as_of_utc=decision_at_utc,
+                        )
+                    except Exception as exc:
+                        seed_results[asset_id] = {
+                            "stage": "INSUFFICIENT_HISTORY",
+                            "reason": f"warmup:{type(exc).__name__}:{exc}",
+                            "isolated_failure": True,
+                        }
+                        continue
+
                     feature = warmup.feature_snapshot
-                    plan = build_prototype_crypto_entry_plan(
-                        feature=feature,
-                        current_observation=observation,
-                        as_of_utc=decision_at_utc,
-                    )
+                    try:
+                        plan = build_prototype_crypto_entry_plan(
+                            feature=feature,
+                            current_observation=observation,
+                            as_of_utc=decision_at_utc,
+                        )
+                    except Exception as exc:
+                        seed_results[asset_id] = {
+                            "stage": "EVALUATION_ERROR",
+                            "reason": f"plan:{type(exc).__name__}:{exc}",
+                            "isolated_failure": True,
+                        }
+                        continue
+
                     if _setup_already_completed(
                         sync_conn,
                         store,
@@ -1311,62 +1367,57 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         seed_results[asset_id] = {
                             "stage": "NO_REENTRY",
                             "reason": "completed_bar_setup_already_traded",
-                            "trigger_close_utc": (
-                                feature.trigger_close_utc.isoformat()
-                            ),
+                            "trigger_close_utc": feature.trigger_close_utc.isoformat(),
                             "watch_eligible": feature.watch_eligible,
                         }
                         continue
-                    advanced = advance_prototype_crypto_entry(
-                        sync_conn,
-                        store,
-                        plan=plan,
-                        completed_bar=warmup.hourly_bars[-1],
-                        current_observation=observation,
-                        current_observations=observations,
-                        as_of_utc=decision_at_utc,
-                    )
-                    asset_result = {
-                        **asdict(advanced),
-                        "focus_selected": (
-                            None
-                            if focused_asset_ids is None
-                            else asset_id in focused_asset_ids
-                        ),
-                        "watch_eligible": feature.watch_eligible,
-                        "volatility_percentile": (
-                            feature.volatility.percentile
-                        ),
-                    }
-                    if advanced.stage == "NO_SETUP":
-                        observation_new = (
-                            persist_prototype_no_setup_observation(
+
+                    try:
+                        advanced = advance_prototype_crypto_entry(
+                            sync_conn,
+                            store,
+                            plan=plan,
+                            completed_bar=warmup.hourly_bars[-1],
+                            current_observation=observation,
+                            current_observations=observations,
+                            as_of_utc=decision_at_utc,
+                        )
+                        asset_result = {
+                            **asdict(advanced),
+                            "focus_selected": (
+                                None
+                                if focused_asset_ids is None
+                                else asset_id in focused_asset_ids
+                            ),
+                            "watch_eligible": feature.watch_eligible,
+                            "volatility_percentile": feature.volatility.percentile,
+                        }
+                        if advanced.stage == "NO_SETUP":
+                            observation_new = persist_prototype_no_setup_observation(
                                 sync_conn,
                                 store,
                                 paper_epoch_id=SANDBOX_SESSION_ID,
                                 asset_id=asset_id,
                                 trigger_close_utc=feature.trigger_close_utc,
                                 evaluated_at_utc=decision_at_utc,
-                                market_observation_id=(
-                                    observation.observation_id
-                                ),
+                                market_observation_id=observation.observation_id,
                                 reason=advanced.reason,
                                 watch_eligible=feature.watch_eligible,
-                                volatility_percentile=(
-                                    feature.volatility.percentile
-                                ),
+                                volatility_percentile=feature.volatility.percentile,
                                 setup_id=advanced.setup_id,
                                 ticket_id=advanced.ticket_id,
                                 order_intent_id=advanced.order_intent_id,
                             )
-                        )
-                        asset_result[
-                            "forward_paper_observation_recorded"
-                        ] = True
-                        asset_result[
-                            "forward_paper_observation_new"
-                        ] = observation_new
-                    seed_results[asset_id] = asset_result
+                            asset_result["forward_paper_observation_recorded"] = True
+                            asset_result["forward_paper_observation_new"] = observation_new
+                        seed_results[asset_id] = asset_result
+                    except Exception as exc:
+                        seed_results[asset_id] = {
+                            "stage": "PIPELINE_ERROR",
+                            "reason": f"{type(exc).__name__}:{exc}",
+                            "watch_eligible": feature.watch_eligible,
+                            "isolated_failure": True,
+                        }
 
                 dynamic_results: dict[str, object] = {}
                 history_ready_asset_ids: set[str] = set()
@@ -1670,6 +1721,12 @@ async def run_configured_prototype_strategy_cycle() -> dict[str, object]:
                         dynamic_results,
                         "EVALUATION_ERROR",
                         "PIPELINE_ERROR",
+                    ),
+                    "isolated_asset_failures": sum(
+                        1
+                        for row in (*seed_results.values(), *dynamic_results.values())
+                        if isinstance(row, Mapping)
+                        and row.get("isolated_failure") is True
                     ),
                 }
 

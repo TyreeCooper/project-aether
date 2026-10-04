@@ -640,3 +640,15 @@ def test_market_fabric_required_witness_can_gate_but_never_replace_price() -> No
     assert rejections == {}
     assert telemetry["btc"]["executable_observation_preserved"] is True
     assert telemetry["btc"]["consensus_can_replace_executable_price"] is False
+
+
+def test_strategy_supervisor_declares_per_asset_isolation_contract() -> None:
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "aether_vnext"
+        / "prototype_strategy_supervisor.py"
+    ).read_text(encoding="utf-8")
+    assert "seed_history_errors" in source
+    assert '"isolated_failure": True' in source
+    assert "exit_pipeline_error:" in source
+    assert "isolated_asset_failures" in source
